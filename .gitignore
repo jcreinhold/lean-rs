@@ -1,0 +1,31 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Cargo lock for libraries is conventionally committed at the workspace root;
+# leave Cargo.lock tracked for reproducible binaries and CI.
+
+# Lake / Lean build output (for fixtures/lean/ landing in prompt 03)
+build/
+.lake/
+*.olean
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Direnv
+.envrc.local
+
+# Coverage / profiling artifacts
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
