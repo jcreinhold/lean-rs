@@ -25,8 +25,8 @@ use core::slice;
 use lean_rs_sys::object::{lean_is_scalar, lean_is_string, lean_obj_tag};
 use lean_rs_sys::string::{lean_mk_string_from_bytes_unchecked, lean_string_cstr, lean_string_size};
 
-use crate::abi::traits::{IntoLean, TryFromLean};
-use crate::error::ConversionError;
+use crate::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::{Obj, ObjRef};
 
@@ -54,7 +54,7 @@ pub(crate) fn from_str<'lean>(runtime: &'lean LeanRuntime, s: &str) -> Obj<'lean
 }
 
 impl<'lean> TryFromLean<'lean> for String {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         require_string(&obj)?;
         // SAFETY: kind verified; `lean_string_size` returns the byte length
         // including the trailing NUL, `lean_string_cstr` returns a borrowed
@@ -67,7 +67,7 @@ impl<'lean> TryFromLean<'lean> for String {
             let slice = slice::from_raw_parts(data, len);
             slice.to_vec()
         };
-        Self::from_utf8(owned).map_err(|_| ConversionError::InvalidUtf8)
+        Self::from_utf8(owned).map_err(|_| invalid_utf8())
     }
 }
 
@@ -79,26 +79,21 @@ impl<'lean> TryFromLean<'lean> for String {
 ///
 /// # Errors
 ///
-/// Returns [`ConversionError::WrongObjectKind`] if `obj` is not a Lean
-/// `String`, or [`ConversionError::InvalidUtf8`] if the bytes are not
-/// valid UTF-8 (defensive — Lean enforces the invariant).
-pub(crate) fn borrow_str<'a>(obj: &'a ObjRef<'_, '_>) -> Result<&'a str, ConversionError> {
+/// Returns `LeanError::Host { stage: Conversion, .. }` if `obj` is not a
+/// Lean `String`, or if its bytes are not valid UTF-8 (defensive — Lean
+/// enforces the invariant, but we honour it rather than relying on
+/// `from_utf8_unchecked`).
+pub(crate) fn borrow_str<'a>(obj: &'a ObjRef<'_, '_>) -> LeanResult<&'a str> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
-        return Err(ConversionError::WrongObjectKind {
-            expected: "String",
-            found_tag: u32::MAX,
-        });
+        return Err(wrong_kind_scalar());
     }
     // SAFETY: non-scalar branch; tag read on owned-by-source object.
     if !unsafe { lean_is_string(ptr) } {
         // SAFETY: same branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        return Err(ConversionError::WrongObjectKind {
-            expected: "String",
-            found_tag,
-        });
+        return Err(wrong_kind_heap(found_tag));
     }
     // SAFETY: kind verified; the slice borrows the Lean payload for `'a`,
     // which is bounded by the lifetime of the `ObjRef` we received.
@@ -108,17 +103,14 @@ pub(crate) fn borrow_str<'a>(obj: &'a ObjRef<'_, '_>) -> Result<&'a str, Convers
         let data = lean_string_cstr(ptr).cast::<u8>();
         slice::from_raw_parts(data, len)
     };
-    core::str::from_utf8(bytes).map_err(|_| ConversionError::InvalidUtf8)
+    core::str::from_utf8(bytes).map_err(|_| invalid_utf8())
 }
 
-fn require_string(obj: &Obj<'_>) -> Result<(), ConversionError> {
+fn require_string(obj: &Obj<'_>) -> LeanResult<()> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
-        return Err(ConversionError::WrongObjectKind {
-            expected: "String",
-            found_tag: u32::MAX,
-        });
+        return Err(wrong_kind_scalar());
     }
     // SAFETY: non-scalar branch; tag read on the owned object.
     if unsafe { lean_is_string(ptr) } {
@@ -126,9 +118,18 @@ fn require_string(obj: &Obj<'_>) -> Result<(), ConversionError> {
     } else {
         // SAFETY: same branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind {
-            expected: "String",
-            found_tag,
-        })
+        Err(wrong_kind_heap(found_tag))
     }
+}
+
+fn wrong_kind_scalar() -> LeanError {
+    conversion_error("expected Lean String, found scalar-tagged object")
+}
+
+fn wrong_kind_heap(found_tag: u32) -> LeanError {
+    conversion_error(format!("expected Lean String, found object with tag {found_tag}"))
+}
+
+fn invalid_utf8() -> LeanError {
+    conversion_error("Lean string bytes were not valid UTF-8")
 }

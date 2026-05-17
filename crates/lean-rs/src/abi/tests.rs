@@ -38,7 +38,7 @@ fn init() -> &'static LeanRuntime {
 
 use crate::abi::traits::{IntoLean, TryFromLean};
 use crate::abi::{bytearray, int, nat, string};
-use crate::error::ConversionError;
+use crate::error::{HostStage, LeanError};
 use crate::runtime::obj::Obj;
 
 // -- fixture extern declarations -----------------------------------------
@@ -187,10 +187,15 @@ fn nat_succ_of_max_small_returns_bignum_that_does_not_fit_u64() {
     // SAFETY: standard ownership-transfer pattern.
     let echoed = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_nat_succ(input.into_raw())) };
     match nat::try_to_u64(echoed) {
-        Err(ConversionError::WrongObjectKind { expected, .. }) => {
-            assert_eq!(expected, "Nat (scalar-fitting)");
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(
+                host.message().contains("Nat (scalar-fitting)"),
+                "unexpected message: {:?}",
+                host.message()
+            );
         }
-        other => panic!("expected WrongObjectKind for bignum, got {other:?}"),
+        other => panic!("expected Host(Conversion) for bignum, got {other:?}"),
     }
 }
 
@@ -416,8 +421,20 @@ fn trait_round_trip_char_rejects_non_unicode_scalar() {
     let surrogate_u32: u32 = 0xD800;
     let obj: Obj<'_> = surrogate_u32.into_lean(runtime);
     match char::try_from_lean(obj) {
-        Err(ConversionError::InvalidChar { code_point }) => assert_eq!(code_point, surrogate_u32),
-        other => panic!("expected InvalidChar, got {other:?}"),
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(
+                host.message().contains("Unicode scalar value"),
+                "unexpected message: {:?}",
+                host.message()
+            );
+            assert!(
+                host.message().contains(&format!("{surrogate_u32:#x}")),
+                "unexpected message: {:?}",
+                host.message()
+            );
+        }
+        other => panic!("expected Host(Conversion) for surrogate, got {other:?}"),
     }
 }
 
@@ -426,12 +443,19 @@ fn trait_round_trip_char_rejects_non_unicode_scalar() {
 #[test]
 fn try_from_lean_returns_wrong_kind_for_mismatched_object() {
     let runtime = init();
-    // Build a String, then try to decode it as a ByteArray. Expect
-    // `WrongObjectKind`.
+    // Build a String, then try to decode it as a ByteArray. Expect a
+    // conversion-stage host failure naming `ByteArray`.
     let s: Obj<'_> = string::from_str(runtime, "not a byte array");
     match Vec::<u8>::try_from_lean(s) {
-        Err(ConversionError::WrongObjectKind { expected, .. }) => assert_eq!(expected, "ByteArray"),
-        other => panic!("expected WrongObjectKind, got {other:?}"),
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(
+                host.message().contains("ByteArray"),
+                "unexpected message: {:?}",
+                host.message()
+            );
+        }
+        other => panic!("expected Host(Conversion) for kind mismatch, got {other:?}"),
     }
 }
 

@@ -3,16 +3,17 @@
 //! Mirrors [`crate::abi::nat`] for signed values. The writers in
 //! [`lean_rs_sys::scalar`] dispatch between the scalar-tagged fast path
 //! (values fitting `[LEAN_MIN_SMALL_INT, LEAN_MAX_SMALL_INT]`) and the
-//! heap-MPZ slow path. The readers in this module return
-//! [`ConversionError::OutOfRange`] for heap-MPZ values because the safe
-//! API does not link MPZ readers.
+//! heap-MPZ slow path. The readers in this module refuse heap-MPZ values
+//! with a `HostStage::Conversion` failure because the safe API does not
+//! link MPZ readers.
 
 #![allow(unsafe_code)]
 
 use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag};
 use lean_rs_sys::scalar::{lean_int64_to_int, lean_scalar_to_int64};
 
-use crate::error::ConversionError;
+use crate::abi::traits::conversion_error;
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -36,13 +37,14 @@ pub(crate) fn from_isize(runtime: &LeanRuntime, n: isize) -> Obj<'_> {
 ///
 /// # Errors
 ///
-/// Returns [`ConversionError::WrongObjectKind`] if the `Int` is a heap MPZ
-/// (the safe API does not link an MPZ reader for general `i64` decoding).
+/// Returns `LeanError::Host { stage: Conversion, .. }` if the `Int` is a
+/// heap MPZ (the safe API does not link an MPZ reader for general `i64`
+/// decoding).
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Obj is consumed by Drop on return; that releases the refcount"
 )]
-pub(crate) fn try_to_i64(obj: Obj<'_>) -> Result<i64, ConversionError> {
+pub(crate) fn try_to_i64(obj: Obj<'_>) -> LeanResult<i64> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
@@ -52,10 +54,7 @@ pub(crate) fn try_to_i64(obj: Obj<'_>) -> Result<i64, ConversionError> {
     } else {
         // SAFETY: non-scalar branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind {
-            expected: "Int (scalar-fitting)",
-            found_tag,
-        })
+        Err(bignum_int(found_tag))
     }
 }
 
@@ -63,8 +62,19 @@ pub(crate) fn try_to_i64(obj: Obj<'_>) -> Result<i64, ConversionError> {
 ///
 /// # Errors
 ///
-/// See [`try_to_i64`].
-pub(crate) fn try_to_isize(obj: Obj<'_>) -> Result<isize, ConversionError> {
+/// See [`try_to_i64`]; also returns `LeanError::Host { stage: Conversion }`
+/// if the scalar-fitting `i64` does not fit `isize` (32-bit targets only).
+pub(crate) fn try_to_isize(obj: Obj<'_>) -> LeanResult<isize> {
     let value = try_to_i64(obj)?;
-    isize::try_from(value).map_err(|_| ConversionError::OutOfRange { expected: "isize" })
+    isize::try_from(value).map_err(|_| out_of_range_isize())
+}
+
+fn bignum_int(found_tag: u32) -> LeanError {
+    conversion_error(format!(
+        "expected Lean Int (scalar-fitting), found object with tag {found_tag}"
+    ))
+}
+
+fn out_of_range_isize() -> LeanError {
+    conversion_error("Lean Int value does not fit Rust isize")
 }

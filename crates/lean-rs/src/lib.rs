@@ -31,9 +31,14 @@
 //!
 //! ## Module map
 //!
-//! - [`error`] — typed error boundary ([`LeanError`], [`LeanResult`]).
-//!   Prompt 06 lands the [`LeanError::Init`] variant; prompt 08 adds
-//!   [`LeanError::Conversion`]; prompt 10 fills in the rest.
+//! - [`error`] — typed error boundary. Per `RD-2026-05-17-006`, the
+//!   single public enum [`LeanError`] has two variants:
+//!   [`LeanError::LeanException`] for Lean-thrown `IO` errors (the
+//!   `kind` is in [`LeanExceptionKind`], the message bounded to
+//!   [`LEAN_ERROR_MESSAGE_LIMIT`]) and [`LeanError::Host`] for any
+//!   host-stack failure (the `stage` is in [`HostStage`]). Payload
+//!   structs ([`LeanException`], [`HostFailure`]) have private fields,
+//!   so the bounded-message invariant is structural.
 //! - `runtime` (`pub(crate)`) — process-wide [`LeanRuntime`], thread
 //!   attach RAII, and the lifetime-bound owned/borrowed object handles
 //!   (`Obj<'lean>`, `ObjRef<'lean, '_>`) that own every `lean_inc` /
@@ -56,7 +61,9 @@ pub(crate) mod abi;
 pub mod error;
 pub(crate) mod runtime;
 
-pub use crate::error::{LeanError, LeanResult};
+pub use crate::error::{
+    HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
+};
 pub use crate::runtime::LeanRuntime;
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.

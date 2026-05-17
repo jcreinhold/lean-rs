@@ -30,29 +30,32 @@ use lean_rs_sys::ctor::{
 };
 use lean_rs_sys::object::{lean_box, lean_is_scalar, lean_obj_tag, lean_unbox};
 
-use crate::abi::traits::{IntoLean, TryFromLean};
-use crate::error::ConversionError;
+use crate::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
 // -- helpers --------------------------------------------------------------
 
-/// Re-label a [`ConversionError::WrongObjectKind`]'s `expected` string,
-/// leaving every other variant untouched. Used by impls that delegate to a
-/// sibling type's `TryFromLean` (e.g. `i64 → u64`, `char → u32`) so the
-/// diagnostic carries the caller-visible Rust type name.
-fn relabel_kind(err: ConversionError, expected: &'static str) -> ConversionError {
-    if let ConversionError::WrongObjectKind { found_tag, .. } = err {
-        ConversionError::WrongObjectKind { expected, found_tag }
-    } else {
-        err
-    }
+/// Build a "expected Lean X, found …" conversion error for kind mismatches.
+/// The single place this module formats wrong-kind messages, so the wording
+/// stays uniform and grep-stable.
+fn wrong_kind(expected: &str, found_tag: u32) -> LeanError {
+    conversion_error(format!("expected Lean {expected}, found object with tag {found_tag}"))
 }
 
-/// Require that `obj` is scalar-tagged; return [`ConversionError::WrongObjectKind`]
-/// otherwise. Reads only pointer bits.
+fn wrong_kind_scalar(expected: &str) -> LeanError {
+    conversion_error(format!("expected Lean {expected}, found scalar-tagged object"))
+}
+
+fn out_of_range(expected: &str) -> LeanError {
+    conversion_error(format!("Lean value does not fit Rust {expected}"))
+}
+
+/// Require that `obj` is scalar-tagged; build a wrong-kind error otherwise.
+/// `expected` is the Rust type name embedded in the diagnostic.
 #[inline]
-fn require_scalar(obj: &Obj<'_>, expected: &'static str) -> Result<(), ConversionError> {
+fn require_scalar(obj: &Obj<'_>, expected: &str) -> LeanResult<()> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` inspects pointer bits only and is sound for
     // any pointer value (`lean.h:312`).
@@ -62,7 +65,27 @@ fn require_scalar(obj: &Obj<'_>, expected: &'static str) -> Result<(), Conversio
         // SAFETY: non-scalar branch — `obj_tag` reads `m_tag`, which is valid
         // for any non-scalar Lean heap object we hold (`Obj` ownership).
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind { expected, found_tag })
+        Err(wrong_kind(expected, found_tag))
+    }
+}
+
+/// Require that `obj` is a ctor-boxed value; build a wrong-kind error
+/// otherwise. Used by the polymorphic-boxed wide scalars (`u64`, `usize`,
+/// `f64`).
+#[inline]
+fn require_ctor(obj: &Obj<'_>, expected: &str) -> LeanResult<()> {
+    let ptr = obj.as_raw_borrowed();
+    // SAFETY: pure pointer-bit math.
+    if unsafe { lean_is_scalar(ptr) } {
+        return Err(wrong_kind_scalar(expected));
+    }
+    // SAFETY: non-scalar branch; tag read on the owned object.
+    if unsafe { lean_rs_sys::object::lean_is_ctor(ptr) } {
+        Ok(())
+    } else {
+        // SAFETY: same branch.
+        let found_tag = unsafe { lean_obj_tag(ptr) };
+        Err(wrong_kind(expected, found_tag))
     }
 }
 
@@ -77,7 +100,7 @@ impl<'lean> IntoLean<'lean> for () {
 }
 
 impl<'lean> TryFromLean<'lean> for () {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         require_scalar(&obj, "Unit")?;
         // Unit has a single inhabitant; the payload value is `0` by
         // construction. We do not assert on the unbox result because a
@@ -98,7 +121,7 @@ impl<'lean> IntoLean<'lean> for bool {
 }
 
 impl<'lean> TryFromLean<'lean> for bool {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         require_scalar(&obj, "Bool")?;
         // SAFETY: scalar branch verified above; `lean_unbox` returns the
         // payload `usize`.
@@ -106,7 +129,7 @@ impl<'lean> TryFromLean<'lean> for bool {
         match payload {
             0 => Ok(false),
             1 => Ok(true),
-            _ => Err(ConversionError::OutOfRange { expected: "bool" }),
+            _ => Err(out_of_range("bool")),
         }
     }
 }
@@ -119,9 +142,9 @@ impl<'lean> TryFromLean<'lean> for bool {
 /// pattern (e.g. `i32::MIN` becomes `lean_box(0x8000_0000)` rather than
 /// `lean_box(0xFFFF_FFFF_8000_0000)` which sign-extension would produce).
 ///
-/// `$name` is the diagnostic label embedded in
-/// [`ConversionError::OutOfRange`]; `$unsigned` is the bit-pattern
-/// type used for the encoding (`u8` / `u16` / `u32`).
+/// `$name` is the diagnostic label embedded in the conversion error;
+/// `$unsigned` is the bit-pattern type used for the encoding
+/// (`u8` / `u16` / `u32`).
 macro_rules! impl_scalar_abi_small_int {
     ($($ty:ty as $unsigned:ty => $name:literal),* $(,)?) => {
         $(
@@ -138,7 +161,7 @@ macro_rules! impl_scalar_abi_small_int {
             }
 
             impl<'lean> TryFromLean<'lean> for $ty {
-                fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+                fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
                     require_scalar(&obj, $name)?;
                     // SAFETY: scalar branch verified above.
                     let raw = unsafe { lean_unbox(obj.as_raw_borrowed()) };
@@ -147,7 +170,7 @@ macro_rules! impl_scalar_abi_small_int {
                     // round-trips cleanly. Reject anything that doesn't fit
                     // the unsigned counterpart's range.
                     let unsigned = <$unsigned>::try_from(raw)
-                        .map_err(|_| ConversionError::OutOfRange { expected: $name })?;
+                        .map_err(|_| out_of_range($name))?;
                     Ok(unsigned as $ty)
                 }
             }
@@ -175,15 +198,9 @@ impl<'lean> IntoLean<'lean> for u64 {
 }
 
 impl<'lean> TryFromLean<'lean> for u64 {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         // Polymorphic `UInt64` is always ctor-boxed, never scalar-tagged.
-        if !is_ctor(&obj) {
-            return Err(ConversionError::WrongObjectKind {
-                expected: "u64",
-                // SAFETY: non-ctor branch; read the heap tag for the diagnostic.
-                found_tag: unsafe { lean_obj_tag(obj.as_raw_borrowed()) },
-            });
-        }
+        require_ctor(&obj, "u64")?;
         // SAFETY: kind check above gives us a ctor with the expected
         // single-`u64` payload at offset 0.
         Ok(unsafe { lean_unbox_uint64(obj.as_raw_borrowed()) })
@@ -198,14 +215,8 @@ impl<'lean> IntoLean<'lean> for usize {
 }
 
 impl<'lean> TryFromLean<'lean> for usize {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
-        if !is_ctor(&obj) {
-            return Err(ConversionError::WrongObjectKind {
-                expected: "usize",
-                // SAFETY: see `u64`'s impl.
-                found_tag: unsafe { lean_obj_tag(obj.as_raw_borrowed()) },
-            });
-        }
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        require_ctor(&obj, "usize")?;
         // SAFETY: see `u64`'s impl.
         Ok(unsafe { lean_unbox_usize(obj.as_raw_borrowed()) })
     }
@@ -220,8 +231,11 @@ impl<'lean> IntoLean<'lean> for i64 {
 }
 
 impl<'lean> TryFromLean<'lean> for i64 {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
-        let bits = u64::try_from_lean(obj).map_err(|e| relabel_kind(e, "i64"))?;
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        require_ctor(&obj, "i64")?;
+        // SAFETY: kind check above; same single-`u64` ctor as `UInt64`,
+        // reinterpreted as `i64` for the caller.
+        let bits = unsafe { lean_unbox_uint64(obj.as_raw_borrowed()) };
         #[allow(clippy::cast_possible_wrap, reason = "Int64 reuses UInt64's bit pattern")]
         Ok(bits as Self)
     }
@@ -236,8 +250,10 @@ impl<'lean> IntoLean<'lean> for isize {
 }
 
 impl<'lean> TryFromLean<'lean> for isize {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
-        let bits = usize::try_from_lean(obj).map_err(|e| relabel_kind(e, "isize"))?;
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        require_ctor(&obj, "isize")?;
+        // SAFETY: kind check above; same single-`usize` ctor as `USize`.
+        let bits = unsafe { lean_unbox_usize(obj.as_raw_borrowed()) };
         #[allow(clippy::cast_possible_wrap, reason = "ISize reuses USize's bit pattern")]
         Ok(bits as Self)
     }
@@ -256,9 +272,13 @@ impl<'lean> IntoLean<'lean> for char {
 }
 
 impl<'lean> TryFromLean<'lean> for char {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
-        let code_point = u32::try_from_lean(obj).map_err(|e| relabel_kind(e, "char"))?;
-        Self::from_u32(code_point).ok_or(ConversionError::InvalidChar { code_point })
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        require_scalar(&obj, "char")?;
+        // SAFETY: scalar branch verified above.
+        let raw = unsafe { lean_unbox(obj.as_raw_borrowed()) };
+        let code_point = u32::try_from(raw).map_err(|_| out_of_range("char"))?;
+        Self::from_u32(code_point)
+            .ok_or_else(|| conversion_error(format!("Lean char {code_point:#x} is not a Unicode scalar value")))
     }
 }
 
@@ -273,31 +293,10 @@ impl<'lean> IntoLean<'lean> for f64 {
 }
 
 impl<'lean> TryFromLean<'lean> for f64 {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
-        if !is_ctor(&obj) {
-            return Err(ConversionError::WrongObjectKind {
-                expected: "f64",
-                // SAFETY: see `u64`'s impl.
-                found_tag: unsafe { lean_obj_tag(obj.as_raw_borrowed()) },
-            });
-        }
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        require_ctor(&obj, "f64")?;
         // SAFETY: kind check above; the ctor's first scalar payload is the
         // installed `f64` from `lean_box_float`.
         Ok(unsafe { lean_unbox_float(obj.as_raw_borrowed()) })
-    }
-}
-
-/// True if `obj` is a non-scalar heap object whose tag falls in the
-/// constructor range (`tag <= LEAN_MAX_CTOR_TAG`).
-#[inline]
-fn is_ctor(obj: &Obj<'_>) -> bool {
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: `lean_is_scalar` is pure pointer-bit math; the non-scalar
-    // branch reads the header tag of an object we own.
-    unsafe {
-        if lean_is_scalar(ptr) {
-            return false;
-        }
-        lean_rs_sys::object::lean_is_ctor(ptr)
     }
 }

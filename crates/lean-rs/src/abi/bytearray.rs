@@ -14,8 +14,8 @@ use core::slice;
 use lean_rs_sys::array::{lean_alloc_sarray, lean_sarray_cptr, lean_sarray_elem_size, lean_sarray_size};
 use lean_rs_sys::object::{lean_is_sarray, lean_is_scalar, lean_obj_tag};
 
-use crate::abi::traits::{IntoLean, TryFromLean};
-use crate::error::ConversionError;
+use crate::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::{Obj, ObjRef};
 
@@ -45,7 +45,7 @@ pub(crate) fn from_bytes<'lean>(runtime: &'lean LeanRuntime, bytes: &[u8]) -> Ob
 }
 
 impl<'lean> TryFromLean<'lean> for Vec<u8> {
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError> {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         require_byte_array(&obj)?;
         // SAFETY: kind verified above; read the byte payload into a fresh
         // `Vec<u8>` of the recorded `size`.
@@ -67,26 +67,20 @@ impl<'lean> TryFromLean<'lean> for Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns [`ConversionError::WrongObjectKind`] if `obj` is not a Lean
-/// `ByteArray` (a scalar array with `elem_size = 1`).
-pub(crate) fn borrow_bytes<'a>(obj: &'a ObjRef<'_, '_>) -> Result<&'a [u8], ConversionError> {
+/// Returns `LeanError::Host { stage: Conversion, .. }` if `obj` is not a
+/// Lean `ByteArray` (a scalar array with `elem_size = 1`).
+pub(crate) fn borrow_bytes<'a>(obj: &'a ObjRef<'_, '_>) -> LeanResult<&'a [u8]> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
-        return Err(ConversionError::WrongObjectKind {
-            expected: "ByteArray",
-            found_tag: u32::MAX,
-        });
+        return Err(wrong_kind_scalar());
     }
     // SAFETY: non-scalar branch; tag and `m_other` read on the borrowed
     // source object.
     if !unsafe { lean_is_sarray(ptr) } || unsafe { lean_sarray_elem_size(ptr) } != 1 {
         // SAFETY: same branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        return Err(ConversionError::WrongObjectKind {
-            expected: "ByteArray",
-            found_tag,
-        });
+        return Err(wrong_kind_heap(found_tag));
     }
     // SAFETY: kind verified; slice borrows the payload for `'a`, bounded by
     // the `ObjRef`'s lifetime.
@@ -98,14 +92,11 @@ pub(crate) fn borrow_bytes<'a>(obj: &'a ObjRef<'_, '_>) -> Result<&'a [u8], Conv
     Ok(view)
 }
 
-fn require_byte_array(obj: &Obj<'_>) -> Result<(), ConversionError> {
+fn require_byte_array(obj: &Obj<'_>) -> LeanResult<()> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
-        return Err(ConversionError::WrongObjectKind {
-            expected: "ByteArray",
-            found_tag: u32::MAX,
-        });
+        return Err(wrong_kind_scalar());
     }
     // SAFETY: non-scalar branch.
     if unsafe { lean_is_sarray(ptr) } && unsafe { lean_sarray_elem_size(ptr) } == 1 {
@@ -113,9 +104,14 @@ fn require_byte_array(obj: &Obj<'_>) -> Result<(), ConversionError> {
     } else {
         // SAFETY: same branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind {
-            expected: "ByteArray",
-            found_tag,
-        })
+        Err(wrong_kind_heap(found_tag))
     }
+}
+
+fn wrong_kind_scalar() -> LeanError {
+    conversion_error("expected Lean ByteArray, found scalar-tagged object")
+}
+
+fn wrong_kind_heap(found_tag: u32) -> LeanError {
+    conversion_error(format!("expected Lean ByteArray, found object with tag {found_tag}"))
 }

@@ -12,16 +12,17 @@
 //!
 //! `IntoLean::into_lean` is infallible for the first-order types in scope
 //! (a Rust `u64` always boxes; a Rust `String` always allocates). Failures
-//! arrive on the read side: [`TryFromLean::try_from_lean`] returns
-//! [`ConversionError`] for kind mismatches, bignum overflow, malformed
-//! UTF-8, or non-scalar `char` payloads.
+//! arrive on the read side: [`TryFromLean::try_from_lean`] returns a
+//! [`LeanError`] (always `LeanError::Host` with stage
+//! [`HostStage::Conversion`]) for kind mismatches, bignum overflow,
+//! malformed UTF-8, or non-scalar `char` payloads.
 //!
 //! Borrowed conversions (`&str`, `&[u8]`) live as free functions on the
 //! per-type modules rather than as additional traits — keeping the trait
 //! surface minimal until a real second caller earns the abstraction (per
 //! the CLAUDE.md "no speculative traits with one implementor" rule).
 
-use crate::error::ConversionError;
+use crate::error::{HostStage, LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -43,12 +44,22 @@ pub(crate) trait IntoLean<'lean>: Sized {
 /// original `Obj` are rare; if they arise, we will add a `try_from_lean_ref`
 /// variant against an `ObjRef` rather than complicating this trait.
 pub(crate) trait TryFromLean<'lean>: Sized {
-    /// Decode `obj` into `Self`, returning a [`ConversionError`] if the
-    /// object's kind or payload is outside the type's representable range.
+    /// Decode `obj` into `Self`, returning a
+    /// [`LeanError::Host`](LeanError) with stage
+    /// [`HostStage::Conversion`] if the object's kind or payload is
+    /// outside the type's representable range.
     ///
     /// # Errors
     ///
-    /// See the [`ConversionError`] variants. Per-impl behaviours are
-    /// documented at the impl site.
-    fn try_from_lean(obj: Obj<'lean>) -> Result<Self, ConversionError>;
+    /// Per-impl behaviours are documented at the impl site. Helpers in
+    /// the per-type modules use the [`conversion_error`] free
+    /// function to build the bounded diagnostic.
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self>;
+}
+
+/// Build a `LeanError::Host { stage: Conversion, .. }` carrying a
+/// uniform diagnostic. Centralised so per-type impls share the wording
+/// and so a future log/sink can hook one site instead of N.
+pub(crate) fn conversion_error(message: impl Into<String>) -> LeanError {
+    LeanError::host(HostStage::Conversion, message)
 }

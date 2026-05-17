@@ -3,9 +3,9 @@
 //! Lean's `Nat` uses a scalar-tagged fast path for values `≤ LEAN_MAX_SMALL_NAT`
 //! and a heap MPZ bignum for anything larger. The writers in
 //! [`lean_rs_sys::scalar`] handle the dispatch; the readers in this module
-//! return [`ConversionError::OutOfRange`] for bignums because the public
-//! API does not link MPZ readers that could faithfully decode a value
-//! wider than `u64` / `usize`.
+//! refuse heap-MPZ values with a `HostStage::Conversion` failure because
+//! the public API does not link MPZ readers that could faithfully decode
+//! a value wider than `u64` / `usize`.
 //!
 //! The trait impls in [`crate::abi::scalar`] for `u64` / `usize` produce
 //! *polymorphic-boxed* values (ctor-wrapped `UInt64` / `USize`). The
@@ -19,7 +19,8 @@
 use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag, lean_unbox};
 use lean_rs_sys::scalar::{lean_uint64_to_nat, lean_usize_to_nat};
 
-use crate::error::ConversionError;
+use crate::abi::traits::conversion_error;
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -45,15 +46,15 @@ pub(crate) fn from_usize(runtime: &LeanRuntime, n: usize) -> Obj<'_> {
 ///
 /// # Errors
 ///
-/// Returns [`ConversionError::OutOfRange`] if the `Nat` is a heap MPZ
-/// (which always exceeds `LEAN_MAX_SMALL_NAT`, and therefore may exceed
-/// `u64::MAX` on 64-bit platforms — the safe API does not attempt the
-/// bignum read).
+/// Returns `LeanError::Host { stage: Conversion, .. }` if the `Nat` is a
+/// heap MPZ (which always exceeds `LEAN_MAX_SMALL_NAT` and therefore may
+/// exceed `u64::MAX` on 64-bit platforms — the safe API does not attempt
+/// the bignum read).
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Obj is consumed by Drop on return; that releases the refcount"
 )]
-pub(crate) fn try_to_u64(obj: Obj<'_>) -> Result<u64, ConversionError> {
+pub(crate) fn try_to_u64(obj: Obj<'_>) -> LeanResult<u64> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
@@ -63,10 +64,7 @@ pub(crate) fn try_to_u64(obj: Obj<'_>) -> Result<u64, ConversionError> {
     } else {
         // SAFETY: non-scalar branch — heap MPZ. Read the tag for the diagnostic.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind {
-            expected: "Nat (scalar-fitting)",
-            found_tag,
-        })
+        Err(bignum_nat(found_tag))
     }
 }
 
@@ -75,13 +73,12 @@ pub(crate) fn try_to_u64(obj: Obj<'_>) -> Result<u64, ConversionError> {
 /// # Errors
 ///
 /// See [`try_to_u64`]; on 64-bit platforms `Nat` and `usize` share the
-/// scalar encoding, so a heap-MPZ value triggers the same
-/// [`ConversionError::WrongObjectKind`] path.
+/// scalar encoding, so a heap-MPZ value triggers the same failure.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Obj is consumed by Drop on return; that releases the refcount"
 )]
-pub(crate) fn try_to_usize(obj: Obj<'_>) -> Result<usize, ConversionError> {
+pub(crate) fn try_to_usize(obj: Obj<'_>) -> LeanResult<usize> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: pure pointer-bit math.
     if unsafe { lean_is_scalar(ptr) } {
@@ -90,9 +87,12 @@ pub(crate) fn try_to_usize(obj: Obj<'_>) -> Result<usize, ConversionError> {
     } else {
         // SAFETY: non-scalar branch.
         let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(ConversionError::WrongObjectKind {
-            expected: "Nat (scalar-fitting)",
-            found_tag,
-        })
+        Err(bignum_nat(found_tag))
     }
+}
+
+fn bignum_nat(found_tag: u32) -> LeanError {
+    conversion_error(format!(
+        "expected Lean Nat (scalar-fitting), found object with tag {found_tag}"
+    ))
 }

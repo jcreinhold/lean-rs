@@ -13,13 +13,12 @@
 // method, which are the only outward-facing pieces of this layer.
 #![allow(unsafe_code)]
 
-use std::any::Any;
 use std::marker::PhantomData;
 use std::panic::{self, AssertUnwindSafe};
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
-use crate::error::{InitError, LeanError, LeanResult};
+use crate::error::{HostStage, LeanError, LeanResult};
 
 /// Handle for the process-wide Lean runtime.
 ///
@@ -54,15 +53,15 @@ impl LeanRuntime {
     ///
     /// # Errors
     ///
-    /// Returns [`LeanError::Init`] if initialization failed; the wrapped
-    /// [`InitError`] names the failure mode. Today the only reachable
-    /// variant is [`InitError::RuntimePanic`], reported when a Rust panic
-    /// is caught at the boundary so that it cannot unwind into Lean or C
-    /// frames.
+    /// Returns a [`LeanError::Host`] with stage [`HostStage::RuntimeInit`]
+    /// if initialization failed. Today the only reachable failure is a
+    /// caught panic from the Lean `lean_initialize_*` entry points; the
+    /// panic payload is rendered into a bounded message so it cannot
+    /// unwind into Lean or C frames.
     pub fn init() -> LeanResult<&'static Self> {
         match INIT.get_or_init(do_initialize_once) {
             Ok(()) => Ok(static_ref()),
-            Err(err) => Err(LeanError::Init(err.clone())),
+            Err(err) => Err(err.clone()),
         }
     }
 }
@@ -80,14 +79,14 @@ impl std::fmt::Debug for LeanRuntime {
 /// result. Storing the outcome (rather than only a "did it run?" flag) is
 /// what lets `init()` hand back the same typed error on retry without
 /// re-entering the C frames a second time.
-static INIT: OnceLock<Result<(), InitError>> = OnceLock::new();
+static INIT: OnceLock<Result<(), LeanError>> = OnceLock::new();
 
 /// Run the C-level initialization sequence under a panic boundary.
 ///
 /// `OnceLock::get_or_init` guarantees this runs at most once per process,
 /// which discharges the "call exactly once" obligation of the underlying
 /// Lean entry points.
-fn do_initialize_once() -> Result<(), InitError> {
+fn do_initialize_once() -> Result<(), LeanError> {
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: Both calls are valid to invoke once per process before
         // any other Lean code runs; `OnceLock::get_or_init` enforces the
@@ -103,12 +102,8 @@ fn do_initialize_once() -> Result<(), InitError> {
     }));
     match outcome {
         Ok(()) => Ok(()),
-        Err(payload) => Err(panic_payload_to_error(payload.as_ref())),
+        Err(payload) => Err(LeanError::host_panic(HostStage::RuntimeInit, payload.as_ref())),
     }
-}
-
-fn panic_payload_to_error(payload: &(dyn Any + Send)) -> InitError {
-    InitError::runtime_panic(payload)
 }
 
 /// Hand out a `'static` borrow of the zero-sized [`LeanRuntime`] anchor.
