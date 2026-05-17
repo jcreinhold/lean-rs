@@ -93,7 +93,7 @@ The `'lean` lifetime parameter cascades through every type that holds a Lean obj
 ```rust
 LeanRuntime              ::init() -> LeanResult<&'static LeanRuntime>
 LeanHost<'lean>          ::from_lake_project(&'lean LeanRuntime, path) -> ...
-LeanCapabilities<'lean, 'h>  ::load_capabilities(&'h LeanHost<'lean>, name)
+LeanCapabilities<'lean, 'h>  ::load_capabilities(&'h LeanHost<'lean>, package, lib_name)
 LeanSession<'lean, 'c>   ::session(&'c LeanCapabilities<'lean, '_>, imports)
 LeanExpr<'lean>          // (and the other handles)
 ```
@@ -113,7 +113,9 @@ piecewise. Doc comments and `# Errors` / `# Panics` sections are mandatory.
     arity 0..=12). The fn-ptr cast is per-arg `<Ai as LeanAbi>::CRepr → R::CRepr`; for `R = LeanIo<T>`, the return is
     routed through `decode_io` + `T::try_from_lean`.
 - `LeanHost::from_lake_project(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self>`
-- `LeanHost::load_capabilities(&self, module_name: &str) -> LeanResult<LeanCapabilities<'lean, '_>>`
+- `LeanHost::load_capabilities(&self, package: &str, lib_name: &str) -> LeanResult<LeanCapabilities<'lean, '_>>`
+    (two-arg because Lake's compiled dylib basename is `lib{escaped_package}_{lib_name}.{dylib,so}` with `_` →
+    `__` escaping on the package; both pieces are required to resolve the on-disk artifact)
 - `LeanCapabilities::session(&self, imports: &[&str]) -> LeanResult<LeanSession<'lean, '_>>`
 - `LeanSession::query_declaration(&mut self, name: &str) -> LeanResult<LeanDeclaration<'lean>>`
 - `LeanSession::elaborate(&mut self, source: &str) -> LeanResult<LeanExpr<'lean>>`
