@@ -69,6 +69,9 @@ The split between `lean-rs-sys` and `lean-toolchain` is:
   and the `required_symbols()` accessor that returns
   `lean_rs_sys::REQUIRED_SYMBOLS` directly.
 
+See [`04-raw-sys-design.md`](04-raw-sys-design.md) for the per-decision
+rationale behind `lean-rs-sys`'s shape.
+
 ## Header digest
 
 `lean-rs-sys`'s build script (prompt 04) computes a SHA-256 digest over the

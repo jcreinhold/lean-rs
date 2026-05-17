@@ -1,6 +1,6 @@
 //! Lean 4 toolchain discovery, fingerprinting, allowlist re-export, and build-script helpers.
 //!
-//! Sits one layer above the in-tree workspace crate `lean-rs-sys` (`publish = false`). `lean-rs-sys` owns the raw
+//! Sits one layer above the in-tree workspace crate `lean-rs-sys`. `lean-rs-sys` owns the raw
 //! `extern "C"` declarations, the hand-written refcount inline helpers, the signature-checked symbol allowlist,
 //! the header SHA-256 digest, and the link directives. This crate composes on top: the typed
 //! `ToolchainFingerprint`, the Lake fixture digest, the layered `LinkDiagnostics`, and the reusable build helpers

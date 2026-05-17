@@ -6,9 +6,9 @@ The table is the **semver surface** for the published crate. Refactors that
 reshape internal modules are free as long as the curated re-exports below stay
 stable.
 
-The classification is set in advance by the design plan
-(`/Users/jcreinhold/.claude/plans/read-all-of-the-squishy-dewdrop.md`) and
-`RD-2026-05-17-004` so that prompt 18 has a table to verify against, not to
+The classification is set in advance by `RD-2026-05-17-004` (see also
+[`04-raw-sys-design.md`](04-raw-sys-design.md) for the sibling rationale on
+`lean-rs-sys`) so that prompt 18 has a table to verify against, not to
 invent. Implementation prompts 06–17 must land items consistent with this table.
 
 ## Layering recap

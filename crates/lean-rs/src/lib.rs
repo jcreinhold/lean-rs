@@ -9,7 +9,7 @@
 //! Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. This crate
 //! owns linking, runtime initialization, ABI conversion, module loading, error/panic boundaries, scheduling,
 //! diagnostics, batching, and packaging. Raw Lean 4 C ABI symbols enter the workspace via the in-tree
-//! `lean-rs-sys` crate (`publish = false`); this crate consumes them in `pub(crate)` modules and does not
+//! `lean-rs-sys` crate; this crate consumes them in `pub(crate)` modules and does not
 //! re-export them.
 //!
 //! The public surface is empty at the bootstrap stage. Prompts 06 onward fill in the runtime, ABI, module,
