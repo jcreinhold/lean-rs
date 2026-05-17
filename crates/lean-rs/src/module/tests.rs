@@ -142,6 +142,27 @@ fn invalid_package_name_is_link_error() {
 }
 
 #[test]
+fn symbol_table_walk_classifies_functions_and_globals() {
+    let runtime = runtime();
+    let library = open_fixture(runtime);
+    let globals = library.globals();
+    assert!(
+        globals.contains("lean_rs_fixture_option_nat_none"),
+        "Lean nullary-constant `optionNatNone` must be classified as a data-section global; \
+         globals contained: {globals:?}",
+    );
+    assert!(
+        !globals.contains("lean_rs_fixture_string_identity"),
+        "the function export `lean_rs_fixture_string_identity` must NOT be in the globals set; \
+         globals contained: {globals:?}",
+    );
+    assert!(
+        !globals.contains("lean_rs_fixture_u8_identity"),
+        "scalar identity exports are functions, not globals; globals contained: {globals:?}",
+    );
+}
+
+#[test]
 fn mangling_matches_fixture_symbols() {
     let root =
         InitializerName::from_lake_names("lean_rs_fixture", "LeanRsFixture").expect("root module name validates");

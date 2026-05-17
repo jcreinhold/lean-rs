@@ -30,7 +30,7 @@ use lean_rs_sys::ctor::{
 };
 use lean_rs_sys::object::{lean_box, lean_is_scalar, lean_obj_tag, lean_unbox};
 
-use crate::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -298,5 +298,93 @@ impl<'lean> TryFromLean<'lean> for f64 {
         // SAFETY: kind check above; the ctor's first scalar payload is the
         // installed `f64` from `lean_box_float`.
         Ok(unsafe { lean_unbox_float(obj.as_raw_borrowed()) })
+    }
+}
+
+// -- LeanAbi: per-type C-ABI representation matching Lake's emitted ----
+//
+// Lake compiles a Lean parameter of type `T` to a C parameter whose
+// representation depends on `T`:
+//
+//   * `Unit`                       → `lean_object*` (scalar `lean_box(0)`)
+//   * `Bool`                       → `uint8_t`     (unboxed)
+//   * `UInt8/16/32/64`, `USize`    → matching `uintN_t` / `size_t` (unboxed)
+//   * `Int8/16/32/64`, `ISize`     → matching `uintN_t` (unboxed, sign-extended via cast)
+//   * `Char`                       → `uint32_t`     (unboxed Unicode scalar)
+//   * `Float`                      → `double`       (unboxed)
+//
+// The macro-stamped `LeanExported::call` casts the function pointer to
+// match these per-arg CRepr types, then dispatches.
+//
+// `Unit` uses `*mut lean_object` (boxed) because Lake encodes `Unit`
+// arguments as `lean_box(0)` at the C boundary — verified against
+// `fixtures/lean/.lake/build/ir/LeanRsFixture/Scalars.c`
+// (`lean_rs_fixture_unit_id(lean_object*)`).
+
+impl sealed::SealedAbi for () {}
+impl<'lean> LeanAbi<'lean> for () {
+    type CRepr = *mut lean_rs_sys::lean_object;
+    fn into_c(self, _runtime: &'lean LeanRuntime) -> Self::CRepr {
+        // SAFETY: `lean_box(0)` is the scalar sentinel; no refcount.
+        unsafe { lean_box(0) }
+    }
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        // SAFETY: take ownership for Drop; consumes the returned object.
+        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+        <()>::try_from_lean(obj)
+    }
+}
+
+impl sealed::SealedAbi for bool {}
+impl<'lean> LeanAbi<'lean> for bool {
+    type CRepr = u8;
+    fn into_c(self, _runtime: &'lean LeanRuntime) -> u8 {
+        u8::from(self)
+    }
+    fn from_c(c: u8, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        match c {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(out_of_range("bool")),
+        }
+    }
+}
+
+/// Stamp `LeanAbi` for an unboxed-scalar Lean type whose Rust mirror is
+/// directly the C representation Lake emits.
+macro_rules! impl_scalar_abi_passthrough {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl sealed::SealedAbi for $ty {}
+            impl<'lean> LeanAbi<'lean> for $ty {
+                type CRepr = $ty;
+                fn into_c(self, _runtime: &'lean LeanRuntime) -> $ty { self }
+                fn from_c(c: $ty, _runtime: &'lean LeanRuntime) -> LeanResult<$ty> { Ok(c) }
+            }
+        )*
+    };
+}
+
+impl_scalar_abi_passthrough!(u8, u16, u32, u64, usize, f64);
+
+// Signed scalars share the unsigned bit pattern at Lake's C ABI; the
+// CRepr is the signed type itself (rustc casts to/from the same bit
+// pattern at the C boundary).
+impl_scalar_abi_passthrough!(i8, i16, i32, i64, isize);
+
+// Char is a UInt32 at the Lake C ABI. The encode/decode pair uses the
+// `u32::CRepr` shape but validates the Unicode invariant on decode.
+impl sealed::SealedAbi for char {}
+impl<'lean> LeanAbi<'lean> for char {
+    type CRepr = u32;
+    fn into_c(self, _runtime: &'lean LeanRuntime) -> u32 {
+        u32::from(self)
+    }
+    fn from_c(c: u32, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        Self::from_u32(c).ok_or_else(|| conversion_error(format!("Lean char {c:#x} is not a Unicode scalar value")))
     }
 }

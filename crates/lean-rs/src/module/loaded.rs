@@ -51,19 +51,18 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
 
     /// Borrowed reference to the owning library.
     ///
-    /// `pub(crate)` so the typed `LeanExported{N}` machinery landing in
-    /// prompt 12 can resolve exported-function symbols against the
-    /// same library this module was initialized from.
-    #[allow(dead_code, reason = "first non-test caller lands in prompt 12 (LeanExported{N})")]
+    /// `pub(crate)` so the typed [`crate::module::exported`] machinery
+    /// can resolve exported-function symbols against the same library
+    /// this module was initialized from.
     pub(crate) fn library(&self) -> &'lib LeanLibrary<'lean> {
         self.library
     }
 
     /// Initializer name in its mangled C form.
     ///
-    /// `pub(crate)` so prompt 12 can derive related symbol names from
-    /// the same typed handle.
-    #[allow(dead_code, reason = "first non-test caller lands in prompt 12 (LeanExported{N})")]
+    /// `pub(crate)` so internal symbol-derivation code can reach the
+    /// canonical Lake mangling without re-running the validator.
+    #[allow(dead_code, reason = "reserved for symbol-derivation helpers in later prompts")]
     pub(crate) fn initializer(&self) -> &InitializerName {
         &self.initializer
     }

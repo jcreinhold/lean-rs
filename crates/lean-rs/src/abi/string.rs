@@ -133,3 +133,24 @@ fn wrong_kind_heap(found_tag: u32) -> LeanError {
 fn invalid_utf8() -> LeanError {
     conversion_error("Lean string bytes were not valid UTF-8")
 }
+
+// -- LeanAbi: String is boxed at the Lake C ABI (`lean_object*`) ------
+
+impl crate::abi::traits::sealed::SealedAbi for String {}
+impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
+    type CRepr = *mut lean_rs_sys::lean_object;
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        // SAFETY: `c` is a `lean_obj_res` owning one reference per
+        // Lake's contract; wrap in `Obj` then decode through the
+        // polymorphic-boxing path.
+        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+        Self::try_from_lean(obj)
+    }
+}

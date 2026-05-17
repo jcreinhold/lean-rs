@@ -89,3 +89,24 @@ where
         }
     }
 }
+
+// -- LeanAbi: Option<T> is boxed at the Lake C ABI -------------------
+
+impl<T> crate::abi::traits::sealed::SealedAbi for Option<T> {}
+impl<'lean, T> crate::abi::traits::LeanAbi<'lean> for Option<T>
+where
+    T: IntoLean<'lean> + TryFromLean<'lean>,
+{
+    type CRepr = *mut lean_rs_sys::lean_object;
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+        Self::try_from_lean(obj)
+    }
+}

@@ -121,3 +121,54 @@ where
         Except::<E, T>::try_from_lean(obj).map(Self::from)
     }
 }
+
+// -- LeanAbi: Except<E, T> and Result<T, E> are boxed at the Lake C ABI -
+
+#[allow(unsafe_code, reason = "LeanAbi::from_c wraps an owned `lean_obj_res` pointer")]
+mod lean_abi_impls {
+    use super::{Except, IntoLean, LeanResult, LeanRuntime, Obj, TryFromLean};
+
+    impl<E, T> crate::abi::traits::sealed::SealedAbi for Except<E, T> {}
+    impl<'lean, E, T> crate::abi::traits::LeanAbi<'lean> for Except<E, T>
+    where
+        E: IntoLean<'lean> + TryFromLean<'lean>,
+        T: IntoLean<'lean> + TryFromLean<'lean>,
+    {
+        type CRepr = *mut lean_rs_sys::lean_object;
+        fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+            self.into_lean(runtime).into_raw()
+        }
+        #[allow(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        )]
+        fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+            // SAFETY: `c` is a `lean_obj_res` owning one refcount per
+            // Lake's contract.
+            let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+            Self::try_from_lean(obj)
+        }
+    }
+
+    impl<T, E> crate::abi::traits::sealed::SealedAbi for Result<T, E> {}
+    impl<'lean, T, E> crate::abi::traits::LeanAbi<'lean> for Result<T, E>
+    where
+        T: IntoLean<'lean> + TryFromLean<'lean>,
+        E: IntoLean<'lean> + TryFromLean<'lean>,
+    {
+        type CRepr = *mut lean_rs_sys::lean_object;
+        fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+            self.into_lean(runtime).into_raw()
+        }
+        #[allow(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        )]
+        fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+            // SAFETY: `c` is a `lean_obj_res` owning one refcount per
+            // Lake's contract.
+            let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+            Self::try_from_lean(obj)
+        }
+    }
+}

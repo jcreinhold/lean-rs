@@ -22,15 +22,27 @@
 //! Callers do not name raw initializer symbols, choose the Lean
 //! `builtin` flag, decode `IO` results, or maintain idempotency state;
 //! all of that lives in the `pub(crate) module::initializer`
-//! infrastructure. Typed exported-function handles
-//! (`LeanExported{N}`) attach to [`LeanModule`] in prompt 12.
+//! infrastructure. Typed exported-function handles cross the public
+//! boundary as [`LeanExported`] and [`LeanIo`]; see `exported` for
+//! the call shape.
 
+pub(crate) mod exported;
 pub(crate) mod initializer;
 pub(crate) mod library;
 pub(crate) mod loaded;
 
+pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;
+
+// `LeanAbi` lives in `crate::abi::traits` but appears in the public
+// signature of [`LeanModule::exported`] (as a per-arg bound) and in the
+// docstrings for [`LeanExported`]/[`LeanIo`]. Re-export it at the
+// `module` boundary so rustdoc resolves intra-crate links and so a
+// downstream crate that wants to inspect the bound has a single import
+// path. The trait remains sealed; the re-export only widens the doc
+// surface, not the impl surface.
+pub use crate::abi::traits::LeanAbi;
 
 #[cfg(test)]
 mod tests;

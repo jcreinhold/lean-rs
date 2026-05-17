@@ -183,51 +183,82 @@ fn read_last_string_field(ctor: *mut lean_rs_sys::lean_object) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    //! IO-result decoder round trips against the existing
-    //! `Effects.lean` fixtures. The `userError` test pins the
-    //! Lean-4.29.1 constructor index for `userError` (`18`) against
-    //! the live runtime, guarding [`super::KIND_TABLE`].
+    //! Direct `decode_io` round trips. The fixture IO exports are
+    //! reachable through the typed handle landed by prompt 12; these
+    //! tests strip the handle and exercise `decode_io` on the raw
+    //! result `Obj` to keep the decoder under direct test (independent
+    //! of the typed-handle composition).
+    //!
+    //! The `userError` test pins the Lean-4.29.1 constructor index for
+    //! `userError` (`18`) against the live runtime, guarding
+    //! [`super::KIND_TABLE`].
 
     #![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
-    use lean_rs_sys::types::lean_object;
-    use lean_rs_test_support::fixture;
+    use std::path::PathBuf;
 
     use super::decode_io;
     use crate::LeanRuntime;
     use crate::abi::nat;
     use crate::error::{LeanError, LeanExceptionKind};
+    use crate::module::LeanLibrary;
     use crate::runtime::obj::Obj;
 
-    unsafe extern "C" {
-        fn lean_rs_fixture_io_success_nat(world: *mut lean_object) -> *mut lean_object;
-        fn lean_rs_fixture_io_throw(world: *mut lean_object) -> *mut lean_object;
+    fn fixture_dylib_path() -> PathBuf {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace = manifest_dir
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name>/ lives two directories beneath the workspace root");
+        let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        workspace
+            .join("fixtures")
+            .join("lean")
+            .join(".lake")
+            .join("build")
+            .join("lib")
+            .join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"))
     }
 
-    fn init() -> &'static LeanRuntime {
-        let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-        fixture::init_fixture();
-        runtime
+    /// Open the fixture library and initialize its root module so the
+    /// per-test `decode_io` calls can resolve `Effects` exports.
+    fn open_fixture(runtime: &LeanRuntime) -> LeanLibrary<'_> {
+        let path = fixture_dylib_path();
+        assert!(path.exists(), "fixture dylib not found at {}", path.display());
+        let library = LeanLibrary::open(runtime, &path).expect("fixture dylib opens cleanly");
+        // Initializing the root cascades into `Effects` (where the IO
+        // fixtures live); drop the typed handle — these tests reach the
+        // raw entry points via the library directly.
+        drop(
+            library
+                .initialize_module("lean_rs_fixture", "LeanRsFixture")
+                .expect("fixture root module initializes"),
+        );
+        library
     }
 
-    /// IO world token passed to `IO α` exports. Lean treats the world
-    /// as opaque; any non-null scalar-tagged value works at the C
-    /// boundary.
-    fn world_token() -> *mut lean_object {
-        // SAFETY: `lean_box(0)` produces a scalar-tagged sentinel; the
-        // fixture functions ignore the value.
-        unsafe { lean_rs_sys::object::lean_box(0) }
+    /// Resolve the raw entry point for a fixture function and call it
+    /// with the IO world token, returning the owned result `Obj`.
+    fn call_io_raw<'lean>(library: &LeanLibrary<'lean>, runtime: &'lean LeanRuntime, symbol: &str) -> Obj<'lean> {
+        let addr = library.resolve_function_symbol(symbol).expect("symbol resolves");
+        type FnPtr = unsafe extern "C" fn(*mut lean_rs_sys::lean_object) -> *mut lean_rs_sys::lean_object;
+        // SAFETY: every fixture IO export has Lake-emitted signature
+        // `fn(world: *mut lean_object) -> *mut lean_object`.
+        let f: FnPtr = unsafe { core::mem::transmute::<*mut core::ffi::c_void, FnPtr>(addr) };
+        // SAFETY: `lean_box(0)` is the conventional scalar world token.
+        let world = unsafe { lean_rs_sys::object::lean_box(0) };
+        // SAFETY: the function takes ownership of `world` (a scalar — no
+        // refcount transfer) and returns an owned IO result pointer.
+        let raw = unsafe { f(world) };
+        // SAFETY: `raw` is the owned IO result returned by Lake's IO export.
+        unsafe { Obj::from_owned_raw(runtime, raw) }
     }
 
     #[test]
     fn decode_io_ok_returns_value() {
-        let runtime = init();
-        // SAFETY: fixture export is `IO Nat` and returns an owned
-        // result.
-        let result = unsafe {
-            let raw = lean_rs_fixture_io_success_nat(world_token());
-            Obj::from_owned_raw(runtime, raw)
-        };
+        let runtime = LeanRuntime::init().expect("runtime init");
+        let library = open_fixture(runtime);
+        let result = call_io_raw(&library, runtime, "lean_rs_fixture_io_success_nat");
         let value_obj = decode_io(runtime, result).expect("ioSuccessNat decodes");
         // `pure 7 : IO Nat` returns a Lean `Nat`, decoded by the Nat
         // helper rather than by a `TryFromLean` impl for u64 (which
@@ -238,12 +269,9 @@ mod tests {
 
     #[test]
     fn decode_io_error_returns_lean_exception() {
-        let runtime = init();
-        // SAFETY: fixture export is `IO Nat` that throws.
-        let result = unsafe {
-            let raw = lean_rs_fixture_io_throw(world_token());
-            Obj::from_owned_raw(runtime, raw)
-        };
+        let runtime = LeanRuntime::init().expect("runtime init");
+        let library = open_fixture(runtime);
+        let result = call_io_raw(&library, runtime, "lean_rs_fixture_io_throw");
         match decode_io(runtime, result) {
             Err(LeanError::LeanException(exc)) => {
                 assert_eq!(exc.kind(), LeanExceptionKind::UserError);

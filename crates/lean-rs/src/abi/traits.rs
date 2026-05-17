@@ -1,26 +1,32 @@
 //! Conversion traits for first-order Lean values.
 //!
-//! [`IntoLean`] and [`TryFromLean`] are the universal currency of the
-//! `pub(crate) abi` module: every per-type implementation in
-//! [`crate::abi::scalar`], [`crate::abi::string`], and
-//! [`crate::abi::bytearray`] implements one or both, and the typed
-//! [`crate::module::LeanExported{N}`](crate) machinery (prompt 12) drives
-//! its argument marshalling and return decoding through them.
+//! Three sealed traits with distinct roles:
 //!
-//! Both traits are `pub(crate)` per `RD-2026-05-17-004`; they never appear
-//! in public docs and only stamp internal call sites.
+//! - [`IntoLean`] / [`TryFromLean`] (`pub(crate)`) — convert between Rust
+//!   values and polymorphic-boxed [`Obj`]. Used for container elements,
+//!   structure fields, and any Lean position where the value lives behind
+//!   a `lean_object*`. The classic encoding/decoding direction.
+//! - [`LeanAbi`] (`pub`, sealed) — convert between Rust values and the
+//!   *C-ABI representation* Lake emits for a top-level Lean export
+//!   parameter or return. The C representation varies: `uint8_t` for
+//!   `Bool`, `uint32_t` for `Char`, `double` for `Float`, scalar primitive
+//!   for `UIntN`/`UIntN`, and `lean_object*` for everything boxed. This
+//!   trait drives [`crate::module::LeanExported`]'s typed function-pointer
+//!   cast.
 //!
-//! `IntoLean::into_lean` is infallible for the first-order types in scope
-//! (a Rust `u64` always boxes; a Rust `String` always allocates). Failures
-//! arrive on the read side: [`TryFromLean::try_from_lean`] returns a
-//! [`LeanError`] (always `LeanError::Host` with stage
-//! [`HostStage::Conversion`]) for kind mismatches, bignum overflow,
-//! malformed UTF-8, or non-scalar `char` payloads.
+//! Per `RD-2026-05-17-007`, `LeanAbi` is the third (and final) conversion
+//! trait. It coexists with `IntoLean`/`TryFromLean` because they encode
+//! different conventions for the same Rust type — `u8 as IntoLean`
+//! produces a polymorphic-boxed `lean_box(u8 as usize)`, while
+//! `u8 as LeanAbi` produces an unboxed `uint8_t` matching Lake's emitted
+//! signature.
 //!
 //! Borrowed conversions (`&str`, `&[u8]`) live as free functions on the
 //! per-type modules rather than as additional traits — keeping the trait
 //! surface minimal until a real second caller earns the abstraction (per
 //! the CLAUDE.md "no speculative traits with one implementor" rule).
+
+use lean_rs_sys::lean_object;
 
 use crate::error::{HostStage, LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
@@ -62,4 +68,108 @@ pub(crate) trait TryFromLean<'lean>: Sized {
 /// and so a future log/sink can hook one site instead of N.
 pub(crate) fn conversion_error(message: impl Into<String>) -> LeanError {
     LeanError::host(HostStage::Conversion, message)
+}
+
+// -- Sealing for LeanAbi -----------------------------------------------
+
+/// Private supertrait that seals [`LeanAbi`].
+///
+/// Lives in a dedicated `pub(crate)` module so the seal itself is not
+/// nameable from downstream crates (the orphan rule alone is not enough
+/// — downstream could implement `LeanAbi` for a downstream type without
+/// implementing `SealedAbi`, which the sealed bound rejects).
+pub(crate) mod sealed {
+    /// Sealed supertrait for [`super::LeanAbi`].
+    #[allow(unreachable_pub, reason = "sealed trait pattern — pub inside a pub(crate) module")]
+    pub trait SealedAbi {}
+}
+
+/// Per-type C-ABI representation used by [`crate::module::LeanExported`].
+///
+/// Lake emits unboxed C primitives for `UIntN`/`IntN`/`USize`/`ISize`/
+/// `Bool`/`Char`/`Float` exports; boxed `lean_object*` for everything else
+/// (`String`, `ByteArray`, `Nat`, `Int`, structures, IO results, …). The
+/// per-type [`CRepr`](LeanAbi::CRepr) records which convention applies.
+///
+/// `into_c` / `from_c` are paired: a type's `CRepr` is invariant between
+/// the encode and decode directions, so they live on one trait (Ousterhout
+/// ch 9 — combining concerns that share information).
+///
+/// Sealed via `SealedAbi`; the trait appears in
+/// [`crate::module::LeanModule::exported`]'s public signature as a bound
+/// but is not nameable for impl by downstream crates.
+pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
+    /// The C-ABI type Lake emits for this Lean type at function
+    /// signatures.
+    type CRepr: Copy;
+
+    /// Encode `self` into the C-ABI representation. The returned value
+    /// is suitable for passing as a function argument; ownership of any
+    /// allocated Lean object is transferred to the receiver.
+    #[doc(hidden)]
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr;
+
+    /// Decode an owned C-ABI value into [`Self`].
+    ///
+    /// For boxed `CRepr = *mut lean_object`, the pointer carries one
+    /// owned reference count (per Lake's `lean_obj_res` ownership
+    /// contract); `from_c` consumes it.
+    ///
+    /// `clippy::not_unsafe_ptr_arg_deref` is allowed: the function is
+    /// only invoked through the sealed [`crate::module::DecodeCallResult`]
+    /// dispatch, which receives `c` directly from the
+    /// `unsafe extern "C"` call inside [`crate::module::LeanExported`].
+    /// Marking this method `unsafe fn` would cascade through every per-type
+    /// impl without adding safety beyond what sealing already enforces.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::Host`] with stage [`HostStage::Conversion`]
+    /// if the value cannot be decoded into `Self` (kind mismatch,
+    /// out-of-range bignum, malformed UTF-8, non-Unicode `char` payload).
+    #[doc(hidden)]
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — called only by LeanExported"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self>;
+}
+
+// -- LeanAbi for Obj<'lean> -------------------------------------------
+//
+// The identity impl: `Obj<'lean>` already IS the boxed C ABI shape.
+// Lets `LeanExported<(Obj,), Obj>` work for tests that pass Lean values
+// constructed via per-type helpers (`nat::from_u64`, `string::from_str`,
+// …) directly without re-typing.
+
+impl sealed::SealedAbi for Obj<'_> {}
+
+impl<'lean> LeanAbi<'lean> for Obj<'lean> {
+    type CRepr = *mut lean_object;
+    fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
+        self.into_raw()
+    }
+    fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        // SAFETY: `c` carries one owned reference count returned from
+        // an extern Lean function (per Lake's `lean_obj_res` contract).
+        // `runtime` is the witness for `'lean`.
+        #[allow(unsafe_code)]
+        Ok(unsafe { Obj::from_owned_raw(runtime, c) })
+    }
+}
+
+// `Obj<'lean>: TryFromLean<'lean>` is the identity decoder. It lets a
+// caller write `LeanIo<Obj<'lean>>` as the typed handle's return type to
+// get the raw IO payload back as an `Obj`, then decode through a
+// per-type helper (`nat::try_to_u64`, `ctor_tag`, …) when the value
+// shape doesn't fit a polymorphic-boxing `TryFromLean` impl.
+//
+// `Obj<'lean>` deliberately does NOT implement `IntoLean<'lean>` —
+// passing an `Obj` as an argument goes through `LeanAbi::into_c`
+// (identity), not through the polymorphic-boxing path.
+
+impl<'lean> TryFromLean<'lean> for Obj<'lean> {
+    fn try_from_lean(obj: Self) -> LeanResult<Self> {
+        Ok(obj)
+    }
 }
