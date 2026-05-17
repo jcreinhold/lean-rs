@@ -10,5 +10,11 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[dependencies]
+lean-rs-sys = { workspace = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
+
 [lints]
 workspace = true
