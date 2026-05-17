@@ -26,13 +26,10 @@ use std::process::Command;
 /// layout helpers in this crate were authored against this exact header; if
 /// the active toolchain's header digest differs, the build fails with a
 /// message naming both digests so the mirrors can be reviewed.
-const EXPECTED_HEADER_DIGEST: &str =
-    "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc";
+const EXPECTED_HEADER_DIGEST: &str = "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc";
 
 fn main() {
-    if env::var_os("CARGO_FEATURE_STATIC").is_some()
-        && env::var_os("CARGO_FEATURE_DYNAMIC").is_some()
-    {
+    if env::var_os("CARGO_FEATURE_STATIC").is_some() && env::var_os("CARGO_FEATURE_DYNAMIC").is_some() {
         panic!(
             "lean-rs-sys: features `static` and `dynamic` are mutually exclusive; \
              pick one (or rely on the default `static`)."
@@ -82,10 +79,7 @@ fn discover_lean_prefix() -> PathBuf {
         if p.join("include/lean/lean.h").is_file() {
             return p;
         }
-        tried.push(format!(
-            "LEAN_SYSROOT={} (no include/lean/lean.h)",
-            p.display()
-        ));
+        tried.push(format!("LEAN_SYSROOT={} (no include/lean/lean.h)", p.display()));
     } else {
         tried.push("LEAN_SYSROOT unset".into());
     }
@@ -97,9 +91,7 @@ fn discover_lean_prefix() -> PathBuf {
             if p.join("include/lean/lean.h").is_file() {
                 return p;
             }
-            tried.push(format!(
-                "`lean --print-prefix` = {prefix} (no include/lean/lean.h)"
-            ));
+            tried.push(format!("`lean --print-prefix` = {prefix} (no include/lean/lean.h)"));
         }
         Ok(out) => tried.push(format!(
             "`lean --print-prefix` exited {} (stderr: {})",
@@ -111,11 +103,7 @@ fn discover_lean_prefix() -> PathBuf {
 
     if let Some(elan_home) = env::var_os("ELAN_HOME") {
         let elan = PathBuf::from(&elan_home);
-        match Command::new("elan")
-            .arg("show")
-            .arg("active-toolchain")
-            .output()
-        {
+        match Command::new("elan").arg("show").arg("active-toolchain").output() {
             Ok(out) if out.status.success() => {
                 let line = String::from_utf8_lossy(&out.stdout)
                     .lines()
@@ -130,15 +118,10 @@ fn discover_lean_prefix() -> PathBuf {
                     if p.join("include/lean/lean.h").is_file() {
                         return p;
                     }
-                    tried.push(format!(
-                        "$ELAN_HOME/toolchains/{line} (no include/lean/lean.h)"
-                    ));
+                    tried.push(format!("$ELAN_HOME/toolchains/{line} (no include/lean/lean.h)"));
                 }
             }
-            Ok(out) => tried.push(format!(
-                "`elan show active-toolchain` exited {}",
-                out.status
-            )),
+            Ok(out) => tried.push(format!("`elan show active-toolchain` exited {}", out.status)),
             Err(err) => tried.push(format!("`elan show active-toolchain` failed: {err}")),
         }
     } else {
@@ -149,10 +132,7 @@ fn discover_lean_prefix() -> PathBuf {
         if p.join("include/lean/lean.h").is_file() {
             return p;
         }
-        tried.push(format!(
-            "fixture prefix {} (no include/lean/lean.h)",
-            p.display()
-        ));
+        tried.push(format!("fixture prefix {} (no include/lean/lean.h)", p.display()));
     } else {
         tried.push("fixture prefix: `lake env --print-prefix` unavailable".into());
     }
@@ -192,8 +172,7 @@ fn fixture_prefix() -> Option<PathBuf> {
 }
 
 fn sha256_file(path: &Path) -> String {
-    let bytes = fs::read(path)
-        .unwrap_or_else(|err| panic!("lean-rs-sys: cannot read {}: {err}", path.display()));
+    let bytes = fs::read(path).unwrap_or_else(|err| panic!("lean-rs-sys: cannot read {}: {err}", path.display()));
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();
@@ -252,9 +231,7 @@ fn emit_link_directives(prefix: &Path) {
                 println!("cargo:rustc-link-lib=dylib=m");
             }
             other => {
-                println!(
-                    "cargo:warning=lean-rs-sys: no platform-specific link directives for target_os={other}"
-                );
+                println!("cargo:warning=lean-rs-sys: no platform-specific link directives for target_os={other}");
             }
         }
         println!("cargo:rustc-link-lib=dylib=gmp");

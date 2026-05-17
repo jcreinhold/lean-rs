@@ -1,11 +1,11 @@
 [package]
-name = "lean-toolchain"
-description = "Lean 4 toolchain discovery, fingerprinting, symbol allowlist, and build-script helpers reusable by downstream embedders' own build.rs scripts."
 authors.workspace = true
-categories = ["development-tools::build-utils", "api-bindings"]
+categories = ["api-bindings", "development-tools::build-utils"]
+description = "Lean 4 toolchain discovery, fingerprinting, symbol allowlist, and build-script helpers reusable by downstream embedders' own build.rs scripts."
 edition.workspace = true
-keywords = ["lean", "lean4", "toolchain", "fingerprint", "build"]
+keywords = ["build", "fingerprint", "lean", "lean4", "toolchain"]
 license.workspace = true
+name = "lean-toolchain"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

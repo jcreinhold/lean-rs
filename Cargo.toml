@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-authors = ["Jacob Reinhold <jcreinhold@gmail.com>"]
+authors = ["Jacob Reinhold"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"

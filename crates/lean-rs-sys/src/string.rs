@@ -26,11 +26,7 @@ unsafe extern "C" {
     pub fn lean_string_utf8_next(s: b_lean_obj_arg, i: b_lean_obj_arg) -> lean_obj_res;
     pub fn lean_string_utf8_prev(s: b_lean_obj_arg, i: b_lean_obj_arg) -> lean_obj_res;
     pub fn lean_string_utf8_set(s: lean_obj_arg, i: b_lean_obj_arg, c: u32) -> lean_obj_res;
-    pub fn lean_string_utf8_extract(
-        s: b_lean_obj_arg,
-        b: b_lean_obj_arg,
-        e: b_lean_obj_arg,
-    ) -> lean_obj_res;
+    pub fn lean_string_utf8_extract(s: b_lean_obj_arg, b: b_lean_obj_arg, e: b_lean_obj_arg) -> lean_obj_res;
 
     pub fn lean_string_eq_cold(s1: b_lean_obj_arg, s2: b_lean_obj_arg) -> bool;
     pub fn lean_string_lt(s1: b_lean_obj_arg, s2: b_lean_obj_arg) -> bool;

@@ -14,8 +14,5 @@ fn version_and_digest_constants_resolve() {
     assert_eq!(lean_rs_sys::EXPECTED_HEADER_DIGEST.len(), 64);
     // The build only succeeds when the digests match; we re-assert here so
     // anyone reading the test output sees the equality.
-    assert_eq!(
-        lean_rs_sys::LEAN_HEADER_DIGEST,
-        lean_rs_sys::EXPECTED_HEADER_DIGEST,
-    );
+    assert_eq!(lean_rs_sys::LEAN_HEADER_DIGEST, lean_rs_sys::EXPECTED_HEADER_DIGEST,);
 }

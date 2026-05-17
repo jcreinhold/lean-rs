@@ -10,16 +10,11 @@
 #![allow(clippy::inline_always)]
 // The C ABI specifies narrowing conversions like `usize -> u32` and
 // `i64 -> i32`; the lossy-cast lints fire by design here.
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss
-)]
+#![allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 
 use crate::nat_int::{
-    LEAN_MAX_SMALL_INT, LEAN_MAX_SMALL_NAT, LEAN_MIN_SMALL_INT, lean_big_int_to_int,
-    lean_big_int64_to_int, lean_big_size_t_to_int, lean_big_uint64_to_nat, lean_big_usize_to_nat,
-    lean_uint8_of_big_nat,
+    LEAN_MAX_SMALL_INT, LEAN_MAX_SMALL_NAT, LEAN_MIN_SMALL_INT, lean_big_int_to_int, lean_big_int64_to_int,
+    lean_big_size_t_to_int, lean_big_uint64_to_nat, lean_big_usize_to_nat, lean_uint8_of_big_nat,
 };
 use crate::object::{lean_box, lean_is_scalar, lean_unbox};
 use crate::types::{b_lean_obj_arg, lean_obj_res};
@@ -134,8 +129,8 @@ pub unsafe fn lean_int_to_int(n: i32) -> lean_obj_res {
     // On 64-bit hosts every `i32` fits in a scalar Lean `Int`. On 32-bit
     // hosts we additionally have to check against `LEAN_MIN_SMALL_INT ..=
     // LEAN_MAX_SMALL_INT`, since the scalar pointer only spares 31 bits.
-    let fits = core::mem::size_of::<*mut ()>() == 8
-        || (LEAN_MIN_SMALL_INT..=LEAN_MAX_SMALL_INT).contains(&i64::from(n));
+    let fits =
+        core::mem::size_of::<*mut ()>() == 8 || (LEAN_MIN_SMALL_INT..=LEAN_MAX_SMALL_INT).contains(&i64::from(n));
     // SAFETY: extern branch is `LEAN_EXPORT`'d.
     unsafe {
         if fits {

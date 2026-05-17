@@ -52,8 +52,7 @@ fn every_unsafe_fn_has_safety_section() {
         let mut needs_safety: Vec<usize> = Vec::new();
         for (idx, line) in src.lines().enumerate() {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("pub unsafe fn ") || trimmed.starts_with("pub(crate) unsafe fn ")
-            {
+            if trimmed.starts_with("pub unsafe fn ") || trimmed.starts_with("pub(crate) unsafe fn ") {
                 needs_safety.push(idx);
             }
         }

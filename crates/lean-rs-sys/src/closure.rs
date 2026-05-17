@@ -14,11 +14,7 @@ use crate::types::{b_lean_obj_arg, lean_obj_arg, lean_obj_res, lean_object, u_le
 
 unsafe extern "C" {
     pub fn lean_apply_1(f: *mut lean_object, a1: *mut lean_object) -> *mut lean_object;
-    pub fn lean_apply_2(
-        f: *mut lean_object,
-        a1: *mut lean_object,
-        a2: *mut lean_object,
-    ) -> *mut lean_object;
+    pub fn lean_apply_2(f: *mut lean_object, a1: *mut lean_object, a2: *mut lean_object) -> *mut lean_object;
     pub fn lean_apply_3(
         f: *mut lean_object,
         a1: *mut lean_object,
@@ -196,17 +192,9 @@ unsafe extern "C" {
     ) -> *mut lean_object;
 
     /// Apply a closure to `n` arguments, where `n <= 16`.
-    pub fn lean_apply_n(
-        f: *mut lean_object,
-        n: u32,
-        args: *mut *mut lean_object,
-    ) -> *mut lean_object;
+    pub fn lean_apply_n(f: *mut lean_object, n: u32, args: *mut *mut lean_object) -> *mut lean_object;
     /// Apply a closure to `n` arguments, where `n > 16`.
-    pub fn lean_apply_m(
-        f: *mut lean_object,
-        n: u32,
-        args: *mut *mut lean_object,
-    ) -> *mut lean_object;
+    pub fn lean_apply_m(f: *mut lean_object, n: u32, args: *mut *mut lean_object) -> *mut lean_object;
 }
 
 #[inline(always)]

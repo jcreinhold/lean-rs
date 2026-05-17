@@ -14,8 +14,8 @@
 use core::sync::atomic::{AtomicI32, Ordering};
 
 use crate::consts::{
-    LEAN_ARRAY, LEAN_CLOSURE, LEAN_EXTERNAL, LEAN_MAX_CTOR_TAG, LEAN_MPZ, LEAN_PROMISE, LEAN_REF,
-    LEAN_SCALAR_ARRAY, LEAN_STRING, LEAN_TASK, LEAN_THUNK,
+    LEAN_ARRAY, LEAN_CLOSURE, LEAN_EXTERNAL, LEAN_MAX_CTOR_TAG, LEAN_MPZ, LEAN_PROMISE, LEAN_REF, LEAN_SCALAR_ARRAY,
+    LEAN_STRING, LEAN_TASK, LEAN_THUNK,
 };
 use crate::repr::LeanObjectRepr;
 use crate::types::lean_object;
@@ -158,11 +158,7 @@ is_tag!(
     LEAN_SCALAR_ARRAY,
     "True if `o` is a scalar array (`lean.h:568`)."
 );
-is_tag!(
-    lean_is_string,
-    LEAN_STRING,
-    "True if `o` is a string (`lean.h:569`)."
-);
+is_tag!(lean_is_string, LEAN_STRING, "True if `o` is a string (`lean.h:569`).");
 is_tag!(
     lean_is_mpz,
     LEAN_MPZ,
@@ -173,11 +169,7 @@ is_tag!(
     LEAN_THUNK,
     "True if `o` is a thunk object (`lean.h:571`)."
 );
-is_tag!(
-    lean_is_task,
-    LEAN_TASK,
-    "True if `o` is a task object (`lean.h:572`)."
-);
+is_tag!(lean_is_task, LEAN_TASK, "True if `o` is a task object (`lean.h:572`).");
 is_tag!(
     lean_is_promise,
     LEAN_PROMISE,

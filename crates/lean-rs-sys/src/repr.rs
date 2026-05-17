@@ -179,9 +179,7 @@ mod tests {
         // header (8) + fun (pointer, 8 on 64-bit) + arity (2) + num_fixed (2)
         // with tail padding to the pointer alignment for the flexible-array
         // member that follows.
-        let unpadded = size_of::<LeanObjectRepr>()
-            + size_of::<*mut core::ffi::c_void>()
-            + 2 * size_of::<u16>();
+        let unpadded = size_of::<LeanObjectRepr>() + size_of::<*mut core::ffi::c_void>() + 2 * size_of::<u16>();
         let pointer_align = align_of::<*mut core::ffi::c_void>();
         assert_eq!(
             size_of::<LeanClosureObjectRepr>(),

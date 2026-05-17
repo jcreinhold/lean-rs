@@ -1,0 +1,20 @@
+exclude = [
+  "**/target/**/*.toml",
+  "tools/refactor/crates/cli/tests/fixtures/**/*.toml",
+  "tools/refactor/examples/**/*.toml",
+]
+include = [
+  "*.toml",
+  ".config/**/*.toml",
+  "crates/**/*.toml",
+  "docs/**/*.toml",
+  "fuzz/Cargo.toml",
+  "profiling/**/*.toml",
+  "std/**/*.toml",
+  "tools/kan-nano/Cargo.toml",
+]
+
+[formatting]
+column_width = 120
+reorder_arrays = true
+reorder_keys = true

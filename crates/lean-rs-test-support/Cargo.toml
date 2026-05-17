@@ -1,11 +1,11 @@
 [package]
-name = "lean-rs-test-support"
-description = "Workspace-internal test fixtures and helpers for the lean-rs crate. Not part of the public stability surface."
 authors.workspace = true
 categories = ["development-tools::testing"]
+description = "Workspace-internal test fixtures and helpers for the lean-rs crate. Not part of the public stability surface."
 edition.workspace = true
-keywords = ["lean", "lean4", "testing", "fixtures", "internal"]
+keywords = ["fixtures", "internal", "lean", "lean4", "testing"]
 license.workspace = true
+name = "lean-rs-test-support"
 publish = false
 repository.workspace = true
 rust-version.workspace = true

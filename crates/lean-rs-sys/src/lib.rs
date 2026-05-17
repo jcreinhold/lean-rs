@@ -50,9 +50,7 @@ pub mod types;
 pub(crate) mod repr;
 
 pub use consts::{EXPECTED_HEADER_DIGEST, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
-pub use types::{
-    b_lean_obj_arg, b_lean_obj_res, lean_obj_arg, lean_obj_res, lean_object, u_lean_obj_arg,
-};
+pub use types::{b_lean_obj_arg, b_lean_obj_res, lean_obj_arg, lean_obj_res, lean_object, u_lean_obj_arg};
 
 /// Names of `LEAN_EXPORT`'d symbols this crate's `extern "C"` blocks declare.
 ///
