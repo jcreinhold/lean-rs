@@ -17,10 +17,10 @@ CI runs the same commands. If a command fails locally it will fail in CI.
 
 ## Unsafe code
 
-`unsafe-code = "deny"` at the workspace level. Raw Lean 4 C ABI declarations enter the project only through the
-external [`lean-sys`](https://crates.io/crates/lean-sys) crate (digama0/Mario Carneiro); we do not maintain our own
-raw FFI crate. `unsafe` blocks inside `lean-rs` exist only to call into `lean-sys` and to bridge to safe wrappers
-(`LeanRuntime`, `LeanObj`, etc.).
+`unsafe-code = "deny"` at the workspace level. Raw Lean 4 C ABI declarations live in the in-tree `lean-rs-sys`
+crate (`publish = false`), the one crate-wide `#[allow(unsafe_code)]` boundary in the workspace. `unsafe` blocks
+inside `lean-rs` exist only to call into `lean-rs-sys` and to bridge to safe wrappers (`LeanRuntime`, `LeanObj`,
+etc.).
 
 Adding `unsafe` anywhere in the workspace requires:
 

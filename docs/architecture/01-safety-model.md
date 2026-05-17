@@ -8,15 +8,17 @@ be made consistent with this thesis, the right move is a Replanning Delta under
 
 ## Unsafe boundary thesis
 
-Raw `lean_*` symbols enter the workspace only through the external `lean-sys`
-crate. Inside `lean-rs`, every import of a `lean-sys` item lives in a
-`pub(crate)` module and is never re-exported through the public API. Every
-public function of `lean-rs` and `lean-toolchain` is safe Rust.
+Raw `lean_*` symbols enter the workspace only through the in-tree workspace
+crate `lean-rs-sys` (`publish = false`). Inside `lean-rs`, every import of a
+`lean_rs_sys` item lives in a `pub(crate)` module and is never re-exported
+through the public API. Every public function of `lean-rs` and `lean-toolchain`
+is safe Rust.
 
 A consequence: a reader of `lean_rs::*` cannot acquire a raw Lean pointer
-through the public API at all. If they need one, they depend on `lean-sys`
-directly and accept the unsafe contract that implies — they do not get there
-through a `lean-rs` re-export.
+through the public API at all, and because `lean-rs-sys` is `publish = false`
+they cannot reach raw symbols by adding a direct dependency either. An
+application that genuinely needs raw FFI must contribute the missing
+capability to `lean-rs` or fork the workspace.
 
 ## Reference counting
 
@@ -63,9 +65,9 @@ Per-file opt-outs require, in this order:
    a crate — with the PR description naming the reason. A blanket allow at the
    crate root is rejected.
 2. A `// SAFETY:` comment on every `unsafe { ... }` block naming the invariant
-   the caller (or the surrounding context) is relying on. "Calls into lean-sys"
-   is not a safety comment; "the runtime is initialized on this thread and
-   `obj` is the unique owner per `LeanObj`'s `Drop`" is.
+   the caller (or the surrounding context) is relying on. "Calls into
+   `lean-rs-sys`" is not a safety comment; "the runtime is initialized on this
+   thread and `obj` is the unique owner per `LeanObj`'s `Drop`" is.
 3. A test that would fail under a plausible violation of that invariant when
    practical — Miri on the Rust side of the boundary (Miri cannot validate the
    Lean C runtime itself), a sanitizer build, a refcount stress test, or a

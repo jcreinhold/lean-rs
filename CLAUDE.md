@@ -17,17 +17,17 @@ contract state before writing code.
 
 ## Workspace shape
 
-Two published crates, one workspace-internal helper, one external dependency:
+Two published crates plus two workspace-internal helpers:
 
 | Crate                    | Role                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------- |
-| `lean-sys` *(external)*  | Raw Lean 4 C ABI bindings. From `digama0/lean-sys` on crates.io. Not maintained here.   |
-| `lean-toolchain`         | Toolchain discovery, version metadata, fingerprint, symbol allowlist, build helpers.    |
+| `lean-rs-sys`            | In-tree raw Lean 4 C ABI bindings, signature-checked symbol allowlist, header digest, link directives (`publish = false`). |
+| `lean-toolchain`         | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, build helpers. |
 | `lean-rs`                | Single safe front door. Modules: `runtime`, `abi`, `module`, `host`, `batch`, `error`. |
 | `lean-rs-test-support`   | Internal fixtures (`publish = false`).                                                  |
 
-Layering: `lean-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_*` symbols enter only through `lean-sys` and live in
-`pub(crate)` modules of `lean-rs`; safe APIs never re-export them.
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_*` symbols enter only through `lean-rs-sys` and
+live in `pub(crate)` modules of `lean-rs`; safe APIs never re-export them.
 
 ## Build and verify
 
@@ -42,15 +42,19 @@ CI runs the same four commands on `ubuntu-latest` and `macos-latest`, stable Rus
 
 ## Discipline
 
-- **No re-implementing `lean-sys`.** If a raw symbol is missing or wrong, file an issue or PR upstream on
-  `digama0/lean-sys`. Stop with a Replanning Delta if the gap blocks work.
+- **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
+  signature in the active Lean header, extend the extern declarations and the allowlist in `lean-rs-sys` and record
+  the version delta under `VERSION-COMPATIBILITY`. Stop with a Replanning Delta if ownership conventions or
+  layout assumptions shift.
 - **No broad `pub use` facade.** Re-exports at `lean_rs::*` are curated public API, not path-shortening.
 - **No speculative traits with one implementor.** Add a trait when a second concrete type needs it.
 - **No `unwrap()`, `expect()`, or `panic!`** in non-test code unless a comment names a proof obligation.
-- **`unsafe-code = "deny"`** at workspace level. New `unsafe` outside the `lean-sys` boundary needs justification,
-  a `// SAFETY:` comment naming the invariant, and reviewer sign-off.
+- **`unsafe-code = "deny"`** at workspace level. `lean-rs-sys` is the one crate-wide opt-out; new `unsafe`
+  elsewhere needs justification, a `// SAFETY:` comment naming the invariant, and reviewer sign-off.
 - **No legacy `lean4-*` crate names.** They were collapsed into `lean-rs` modules during bootstrap; references in
   prompt files are historical record (see `RD-2026-05-17` in `00-current-state.md`).
+- **No external `lean-sys` dependency.** The original adoption was reverted by `RD-2026-05-17-003`; raw FFI lives
+  in the in-tree `lean-rs-sys` crate.
 - **No `TODO`, `unimplemented!()`, `todo!()`.** Build the intended functionality or stop.
 - **Fix bugs at their root.** If the cause lives in a different module, fix it there.
 - **Update `00-current-state.md`** before finishing any prompt that changes the implementation repo.

@@ -1,6 +1,7 @@
 # lean-toolchain
 
-Lean 4 toolchain discovery, fingerprinting, symbol allowlist, and build-script helpers for the `lean-rs` project.
-Sits above the external [`lean-sys`](https://crates.io/crates/lean-sys) crate and below [`lean-rs`](../lean-rs/). Owns
-everything `lean-sys` doesn't (Lean version constant, header digest, typed fingerprint struct, curated allowlist,
-link diagnostics, reusable build-script helpers). See the [workspace README](../../README.md).
+Lean 4 toolchain discovery, fingerprinting, allowlist re-export, and build-script helpers for the `lean-rs`
+project. Sits above the in-tree `lean-rs-sys` crate (`publish = false`, raw FFI + header digest + signature-checked
+allowlist) and below [`lean-rs`](../lean-rs/). Owns the typed `ToolchainFingerprint`, the Lake fixture digest, the
+layered link diagnostics, and the reusable build-script helpers downstream embedders can call from their own
+`build.rs`. See the [workspace README](../../README.md).
