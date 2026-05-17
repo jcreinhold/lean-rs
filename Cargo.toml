@@ -13,7 +13,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 lean-rs-sys = { version = "0.1.0", path = "crates/lean-rs-sys" }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [workspace.lints.rust]
 future-incompatible = "warn"
