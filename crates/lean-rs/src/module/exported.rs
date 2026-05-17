@@ -246,6 +246,40 @@ impl<Args, R> core::fmt::Debug for LeanExported<'_, '_, Args, R> {
     }
 }
 
+// `'lib` is anchored to the callable target slot in the returned handle;
+// `'_` elides it because it appears only in the impl header.
+impl<'lean, Args, R> LeanExported<'lean, '_, Args, R> {
+    /// Build a function-targeted typed handle from a pre-resolved symbol
+    /// address.
+    ///
+    /// `LeanModule::exported` is the normal lookup path; this constructor
+    /// exists so the crate-internal `host::capabilities` machinery can
+    /// pre-resolve a capability dylib's function symbols once at
+    /// `load_capabilities` time and then dispatch through cached
+    /// addresses without re-`dlsym`-ing per call. It always produces a
+    /// `Function`-targeted handle — global symbols still go through
+    /// `LeanModule::exported`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee all of the following:
+    ///
+    /// - `address` is the entry point of a function in a library that
+    ///   outlives `'lib` (typically a `&'lib LeanLibrary<'lean>`).
+    /// - The function's C ABI matches the requested `Args` / `R` shape
+    ///   under Lake's emission conventions (per-arg `LeanAbi::CRepr`,
+    ///   per-result `DecodeCallResult::CRepr`).
+    /// - `runtime` is the witness for `'lean`.
+    pub(crate) unsafe fn from_function_address(runtime: &'lean LeanRuntime, address: *mut c_void) -> Self {
+        Self {
+            target: CallableTarget::Function(address),
+            runtime,
+            _life: PhantomData,
+            _args: PhantomData,
+        }
+    }
+}
+
 /// Read a Lean nullary-constant global's persistent `*mut lean_object`,
 /// `lean_inc` it, and return the bumped pointer.
 ///

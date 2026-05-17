@@ -52,12 +52,16 @@
 //!   the dylib) and [`module::LeanModule`] (proof that a module's
 //!   initializer succeeded). Typed exported-function handles attach to
 //!   `LeanModule` in prompt 12.
-//! - [`host`] — high-level surface for hosting Lean capabilities. The
-//!   first piece, [`host::handle`], lands the four opaque semantic
-//!   handle types — [`LeanName`], [`LeanLevel`], [`LeanExpr`],
-//!   [`LeanDeclaration`] — re-exported at the crate root with their
-//!   `Lean` prefix. `LeanHost`, `LeanCapabilities`, `LeanSession`, and
-//!   the evidence surface land in prompts 14–17.
+//! - [`host`] — high-level surface for hosting Lean capabilities.
+//!   [`host::handle`] (prompt 13) lands the four opaque semantic handle
+//!   types — [`LeanName`], [`LeanLevel`], [`LeanExpr`],
+//!   [`LeanDeclaration`]. [`LeanHost`], [`LeanCapabilities`], and
+//!   [`LeanSession`] (prompt 14) layer Lake-project entry, capability
+//!   loading with pre-resolved symbol caches, and a long-lived session
+//!   with `query_declaration` / `list_declarations` / `declaration_type`
+//!   / `declaration_kind` / `declaration_name`. The evidence surface
+//!   (`LeanEvidence`, `ProofSummary`, `EvidenceStatus`) and bulk
+//!   session methods land in prompts 17 and 20.
 //!
 //! ## Layering
 //!
@@ -77,6 +81,7 @@ pub use crate::error::{
     HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
+pub use crate::host::{LeanCapabilities, LeanHost, LeanSession};
 pub use crate::runtime::LeanRuntime;
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.

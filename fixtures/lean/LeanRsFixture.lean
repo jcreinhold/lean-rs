@@ -5,6 +5,7 @@ import LeanRsFixture.Effects
 import LeanRsFixture.Evidence
 import LeanRsFixture.Capability
 import LeanRsFixture.Handles
+import LeanRsFixture.Environment
 
 /-! Roll-up module for the `LeanRsFixture` Lake library.
     All `@[export ...]` declarations live in the submodules; this file is
