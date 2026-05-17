@@ -29,3 +29,6 @@ Thumbs.db
 *.profdata
 flamegraph.svg
 perf.data*
+
+# Codex system artifacts
+.system/

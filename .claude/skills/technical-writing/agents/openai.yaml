@@ -1,0 +1,4 @@
+interface:
+  display_name: "Technical Writing"
+  short_description: "Edit prose for clarity and precision"
+  default_prompt: "Use $technical-writing to review and improve this text for clarity, precision, and craft."

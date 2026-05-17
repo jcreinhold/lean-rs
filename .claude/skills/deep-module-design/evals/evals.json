@@ -1,0 +1,41 @@
+{
+  "skill_name": "deep-module-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm about to create a new `kan-pipeline` crate that will hold the compilation pipeline stages (ANF, monadic, defunctionalization, simplify, liveness). Right now these are scattered across `crates/backend/`. How should I structure the public API?",
+      "expected_output": "A design recommendation that identifies volatile decisions to hide, proposes a deep interface (few public entry points serving many pipeline configurations), and avoids complecting pipeline stages with each other or with storage/caching concerns.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "The `DefRegistry` in `crates/kernel/core-world` feels like it's doing too much — it handles storage, lookup, status tracking, and caching all in one type. I want to clean it up but I'm not sure where to start.",
+      "expected_output": "A complecting diagnosis that names the independent concerns braided together, classifies the design pressure, and proposes separation along volatility lines — without just adding thin wrappers.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I've been adding pub methods to `WorldView` in `crates/kernel/core/src/world_view.rs` and it's getting unwieldy — 40+ public methods now. How do I decide what should stay and what should move?",
+      "expected_output": "A surface area analysis that groups methods by concern, identifies methods that could be general-purpose (serving multiple callers), spots shallow delegation, and recommends which groups to extract as separate types or traits.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I'm writing a Lean 4 `structure VirtualEquipment` in a `Shared/` namespace. The current sketch has eight fields exposed — `Obj`, `Tight`, `Loose`, `Cell`, plus four convenience accessors. Should `Cell` be a field of the structure or a separate typeclass parameterised over the equipment? And which fields should be `private`?",
+      "expected_output": "A Lean 4-aware analysis distinguishing data (what defines the structure) from operations (what consumers compute), recommending which fields stay public, which become `private` with accessor lemmas, and whether moving `Cell` to a typeclass would be a useful decomplecting (mechanism vs policy) or premature abstraction.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "A Lean 4 namespace `Shared.Doctrine` has 14 public `abbrev`s that just unfold `Sigma` projections (e.g., `abbrev source := fun e => e.fst`). They were added to make proof scripts read better. Is that bad design, and what would a depth-improving fix look like?",
+      "expected_output": "A diagnosis that flags this as shallow surface area (each abbrev adds a name without hiding complexity), names the depth ratio problem, and proposes either inlining the projections, replacing them with a small set of general accessors, or hiding them as `private` if they're proof-internal — without simply deleting helpful notation.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "I want a Lean file that defines a structure `Foo`, the `Decidable` instance for its equality, the `simp` lemmas for its projections, and the `Repr` instance, all in one place. My colleague says this complects too much. Is the skill OK with this?",
+      "expected_output": "A nuanced answer: data + small instance bundle is normal Lean style and not complecting; the question is whether the file mixes truly independent concerns (e.g., domain logic with serialization, or definitions with a heavy proof development). Recommend keeping the structure + its core instances together, splitting out anything callers wouldn't expect to import as a unit.",
+      "files": []
+    }
+  ]
+}

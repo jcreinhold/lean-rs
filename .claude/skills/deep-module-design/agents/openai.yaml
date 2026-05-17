@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deep Module Design"
+  short_description: "Design deep modules with simple APIs"
+  default_prompt: "Use $deep-module-design to analyze a module or public API for depth, complecting, and surface area, then improve the design."
