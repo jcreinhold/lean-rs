@@ -17,18 +17,18 @@ CI runs the same commands. If a command fails locally it will fail in CI.
 
 ## Unsafe code
 
-`unsafe-code = "deny"` at the workspace level. Raw Lean 4 C ABI declarations live in the in-tree `lean-rs-sys`
-crate (published per `RD-2026-05-17-005`); it is the one crate-wide `#[allow(unsafe_code)]` boundary in the
-workspace. `unsafe` blocks inside `lean-rs` exist only to call into `lean-rs-sys` and to bridge to safe
-wrappers (`LeanRuntime`, `pub(crate) runtime::obj::Obj<'lean>`, etc.).
+`unsafe-code = "deny"` at the workspace level. Raw Lean 4 C ABI declarations live in the in-tree `lean-rs-sys` crate
+(published per `RD-2026-05-17-005`); it is the one crate-wide `#[allow(unsafe_code)]` boundary in the workspace.
+`unsafe` blocks inside `lean-rs` exist only to call into `lean-rs-sys` and to bridge to safe wrappers (`LeanRuntime`,
+`pub(crate) runtime::obj::Obj<'lean>`, etc.).
 
 Adding `unsafe` anywhere in the workspace requires:
 
 1. A `#![allow(unsafe_code)]` (or narrower) attribute on the smallest possible scope, justified in the PR description.
-2. A `// SAFETY:` comment on every `unsafe { ... }` block naming the invariant the caller (or context) is relying on.
-3. Tests that would fail under a plausible violation of that invariant when practical (Miri, sanitizer, refcount
-   stress, or focused unit tests on the unsafe boundary).
-4. Reviewer sign-off from someone other than the author. Self-merging a new `unsafe` block is not allowed.
+1. A `// SAFETY:` comment on every `unsafe { ... }` block naming the invariant the caller (or context) is relying on.
+1. Tests that would fail under a plausible violation of that invariant when practical (Miri, sanitizer, refcount stress,
+    or focused unit tests on the unsafe boundary).
+1. Reviewer sign-off from someone other than the author. Self-merging a new `unsafe` block is not allowed.
 
 The safe APIs in `lean-rs` must not require callers to know Lean reference-counting conventions. Leaking an unsafe
 precondition into a safe function's contract is a contract change, not an implementation detail.
@@ -39,12 +39,12 @@ This project tracks a specific Lean toolchain and ABI. Bumping the supported Lea
 not a build fix:
 
 - Record the supported Lean version range in `/Users/jcreinhold/Code/prompts/lean-rs/00-current-state.md` under the
-  `VERSION-COMPATIBILITY` contract (added in prompt 02; until then, note compatibility in the relevant prompt's
-  current-state entry).
+    `VERSION-COMPATIBILITY` contract (added in prompt 02; until then, note compatibility in the relevant prompt's
+    current-state entry).
 - Add a CI matrix entry or a documented build flag covering the new version before claiming support.
 - A change in Lean's C ABI (object layout, ownership convention, initializer protocol) is a contract change. Follow
-  `/Users/jcreinhold/Code/prompts/lean-rs/00-recovery-protocol.md` and stop with a Replanning Delta rather than
-  papering over the difference with brittle wrappers.
+    `/Users/jcreinhold/Code/prompts/lean-rs/00-recovery-protocol.md` and stop with a Replanning Delta rather than
+    papering over the difference with brittle wrappers.
 
 ## Coding standards
 
@@ -52,10 +52,10 @@ not a build fix:
 - No public re-exports purely to shorten import paths. Canonical import paths only.
 - No speculative traits with a single implementor. Add a trait when a second concrete type needs it.
 - No safe wrapper that forwards a raw C ABI call without hiding ownership, initialization, error, or versioning
-  complexity.
+    complexity.
 - Comments explain caller-visible invariants or non-obvious rationale. They do not narrate code.
-- Prefer editing existing files over creating new ones. Do not add `TODO`, `unimplemented!()`, or `todo!()` to make
-  code compile.
+- Prefer editing existing files over creating new ones. Do not add `TODO`, `unimplemented!()`, or `todo!()` to make code
+    compile.
 
 ## Commits
 
@@ -65,5 +65,5 @@ not a build fix:
 
 ## Reporting issues
 
-Use the GitHub issue tracker. Include the Lean toolchain version, host OS, Rust toolchain version, and the exact
-command that failed.
+Use the GitHub issue tracker. Include the Lean toolchain version, host OS, Rust toolchain version, and the exact command
+that failed.

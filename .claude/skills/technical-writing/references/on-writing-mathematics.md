@@ -29,7 +29,7 @@ have to flip back.
 
 A theorem is a record of understanding, not a route to it. The reader needs the route.
 
-Carter's *Visual Group Theory* opens not with axioms but with a Rubik's cube. Group theory, he writes, is not primarily
+Carter's _Visual Group Theory_ opens not with axioms but with a Rubik's cube. Group theory, he writes, is not primarily
 about numbers; it's about patterns. Then he asks the reader to flip a paper rectangle, building a map of its
 configurations. By the time the word "group" appears formally, the reader has discovered the Klein four-group with their
 hands. The definition feels like a name for something they already know.
@@ -38,7 +38,7 @@ Gowers explains imaginary numbers by attacking the confusion first. Why does √
 numbers as quantities. Once you accept that a number can be defined by what it does rather than what it "is," imaginary
 numbers stop being mystical. The reader's confusion isn't an obstacle to the explanation. It is the explanation.
 
-Azad introduces *e* through continuous compounding interest, not through limits. By the time the formula
+Azad introduces _e_ through continuous compounding interest, not through limits. By the time the formula
 `e = lim(1 + 1/n)^n` arrives, the reader already understands the thing the formula names.
 
 The pattern: start with phenomena, then abstract. Work a concrete example before stating the general theorem. Address
@@ -59,7 +59,7 @@ the alternative "legalistically correct but insufficiently explicit" — technic
 ## Voice Is Allowed
 
 Mathematical writing has a default funeral-parlor tone that nothing in the subject requires. Knuth, Graham, and
-Patashnik's *Concrete Mathematics* rejects it openly. The margins carry "mathematical graffiti" from their students. The
+Patashnik's _Concrete Mathematics_ rejects it openly. The margins carry "mathematical graffiti" from their students. The
 voice is one of working mathematicians thinking aloud — including the false starts. The reader is invited into the
 process rather than handed finished results.
 
@@ -79,7 +79,7 @@ isn't one, the writing will float free of meaning, and the reader will float wit
 
 ## The Test
 
-Tim Gowers borrows a phrase from Timothy Chow: the *open exposition problem*. To solve one is to explain a subject so
+Tim Gowers borrows a phrase from Timothy Chow: the _open exposition problem_. To solve one is to explain a subject so
 completely that every step feels motivated, and the reader senses they could have arrived at the result themselves.
 
 That's the test. Hand the finished piece to your imagined reader. Do they follow it? Do they feel, at the end, that the
