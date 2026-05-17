@@ -89,7 +89,9 @@ pub use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX, LeanDiagnostic, LeanElabFailure, LeanElabOptions, LeanPosition, LeanSeverity,
 };
-pub use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome};
+pub use crate::host::evidence::{
+    EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
+};
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::host::meta::{
     LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,

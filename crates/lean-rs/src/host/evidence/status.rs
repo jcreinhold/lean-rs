@@ -8,6 +8,8 @@
 //! tags are 0..=3 in declaration order; the [`TryFromLean`] impl below
 //! does the dispatch.
 
+use lean_rs_sys::object::{lean_is_scalar, lean_unbox};
+
 use crate::abi::structure::{ctor_tag, take_ctor_objects};
 use crate::abi::traits::{TryFromLean, conversion_error};
 use crate::error::LeanResult;
@@ -78,6 +80,53 @@ impl LeanKernelOutcome<'_> {
             Self::Rejected(_) => EvidenceStatus::Rejected,
             Self::Unavailable(_) => EvidenceStatus::Unavailable,
             Self::Unsupported(_) => EvidenceStatus::Unsupported,
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for EvidenceStatus {
+    /// Decode a nullary-only Lean `EvidenceStatus` inductive. Lean's
+    /// compiler emits a nullary-only inductive as a scalar-tagged
+    /// pointer (`lean_box(tag)`) at the top-level boundary rather
+    /// than a heap-allocated zero-field constructor, so the decoder
+    /// reads through `lean_unbox` on the scalar branch and falls back
+    /// to [`ctor_tag`] only if a future encoding shift starts
+    /// materialising the inductive on the heap.
+    ///
+    /// Tag order is `Checked = 0`, `Rejected = 1`, `Unavailable = 2`,
+    /// `Unsupported = 3`, matching the declaration order in
+    /// `fixtures/lean/LeanRsFixture/Elaboration.lean`'s `EvidenceStatus`
+    /// inductive.
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        let raw = obj.as_raw_borrowed();
+        // SAFETY: `lean_is_scalar` is pure pointer-bit math.
+        #[allow(unsafe_code)]
+        let tag = if unsafe { lean_is_scalar(raw) } {
+            // SAFETY: scalar branch; `lean_unbox` returns the payload
+            // `usize` (the constructor tag for a nullary-only
+            // inductive).
+            #[allow(unsafe_code)]
+            let payload = unsafe { lean_unbox(raw) };
+            // The parent `obj` (a scalar pointer) carries no heap
+            // refcount; drop is a no-op.
+            drop(obj);
+            payload
+        } else {
+            // Future-proofing: if Lean ever heap-allocates this
+            // inductive, the ctor branch decodes through the standard
+            // structure-pattern primitives.
+            let heap_tag = ctor_tag(&obj)?;
+            let _ = take_ctor_objects::<0>(obj, heap_tag, "EvidenceStatus")?;
+            usize::from(heap_tag)
+        };
+        match tag {
+            0 => Ok(Self::Checked),
+            1 => Ok(Self::Rejected),
+            2 => Ok(Self::Unavailable),
+            3 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean EvidenceStatus tag 0..=3, found {other}"
+            ))),
         }
     }
 }

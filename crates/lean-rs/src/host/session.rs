@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export nine **mandatory** `@[export]` symbols and may
+//! loads must export eleven **mandatory** `@[export]` symbols and may
 //! export three **optional** meta-service symbols (matched at
 //! `LeanCapabilities::load_capabilities` time):
 //!
@@ -26,6 +26,8 @@
 //! | `lean_rs_host_env_declaration_name`       | yes        | `Environment -> Name -> IO String`                         |
 //! | `lean_rs_host_elaborate`                  | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
 //! | `lean_rs_host_kernel_check`               | yes        | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome` |
+//! | `lean_rs_host_check_evidence`             | yes        | `Environment -> Evidence -> IO EvidenceStatus`             |
+//! | `lean_rs_host_evidence_summary`           | yes        | `Environment -> Evidence -> IO ProofSummary`               |
 //! | `lean_rs_host_meta_infer_type`            | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
 //! | `lean_rs_host_meta_whnf`                  | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
 //! | `lean_rs_host_meta_heartbeat_burn`        | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
@@ -36,10 +38,17 @@
 //! degrade gracefully: [`LeanSession::run_meta`] returns
 //! [`crate::LeanMetaResponse::Unsupported`] against a service whose
 //! address did not resolve, the rest of the capability stays usable.
+//! The evidence-side pair (`check_evidence`, `evidence_summary`) is
+//! mandatory because any capability that produces a `LeanEvidence`
+//! handle via `kernel_check` must also be able to re-validate and
+//! summarize it: the missing-symbol case defines no recoverable
+//! caller behaviour, so the error is folded into capability load
+//! rather than into every call site.
 //!
 //! The baseline (prompts 13–14) is the first seven symbols; prompt 15
 //! adds the `elaborate` / `kernel_check` pair; prompt 16 adds the three
-//! optional meta-service symbols. Future prompts extend additively.
+//! optional meta-service symbols; prompt 17 adds the `check_evidence` /
+//! `evidence_summary` pair. Future prompts extend additively.
 //!
 //! The Rust side passes the `.olean` search path (resolved by
 //! [`crate::host::lake::LakeProject`]) as the first argument to
@@ -76,7 +85,7 @@ use crate::abi::traits::TryFromLean;
 use crate::error::{HostStage, LeanError, LeanResult};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
-use crate::host::evidence::LeanKernelOutcome;
+use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use crate::module::{LeanExported, LeanIo, LeanLibrary};
 use crate::runtime::obj::Obj;
@@ -106,13 +115,15 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_declaration_name: *mut c_void,
     pub(crate) elaborate: *mut c_void,
     pub(crate) kernel_check: *mut c_void,
+    pub(crate) check_evidence: *mut c_void,
+    pub(crate) evidence_summary: *mut c_void,
     pub(crate) meta_infer_type: Option<*mut c_void>,
     pub(crate) meta_whnf: Option<*mut c_void>,
     pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The nine
+    /// Resolve session function symbols from `library`. The eleven
     /// baseline symbols are mandatory; the three meta-service symbols
     /// are optional.
     ///
@@ -136,6 +147,8 @@ impl SessionSymbols {
             env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
             elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
             kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
+            check_evidence: library.resolve_function_symbol("lean_rs_host_check_evidence")?,
+            evidence_summary: library.resolve_function_symbol("lean_rs_host_evidence_summary")?,
             meta_infer_type: library.resolve_optional_function_symbol("lean_rs_host_meta_infer_type"),
             meta_whnf: library.resolve_optional_function_symbol("lean_rs_host_meta_whnf"),
             meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
@@ -396,6 +409,73 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         )
+    }
+
+    /// Re-validate a previously captured [`LeanEvidence`] against the
+    /// session's imported environment, returning the kernel's current
+    /// verdict.
+    ///
+    /// The handle was produced by an earlier
+    /// [`Self::kernel_check`] call against this same environment and
+    /// carries the kernel-accepted `Lean.Declaration` opaquely. The
+    /// session never installs that declaration into its stored
+    /// environment, so re-checking against the unchanged environment
+    /// is the supported way to ask "is this evidence still valid?" —
+    /// the kernel runs fresh.
+    ///
+    /// The returned [`EvidenceStatus`] mirrors
+    /// [`LeanKernelOutcome::status`]: `Checked` on success, `Rejected`
+    /// if the kernel now refuses the declaration, `Unavailable` if
+    /// the Lean shim caught an `IO` exception. The Lean fixture does
+    /// not currently emit `Unsupported` from this path — `Unsupported`
+    /// only fires during the initial classification in
+    /// `kernel_check`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean shim raises
+    /// through `IO` outside of its own `try` (an unexpected internal
+    /// failure that the shim did not classify). Returns
+    /// [`LeanError::Host`] with stage [`HostStage::Conversion`] if the
+    /// return value does not decode as a four-tag
+    /// [`EvidenceStatus`] inductive.
+    pub fn check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus> {
+        let address = self.capabilities.symbols().check_evidence;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Evidence) -> IO EvidenceStatus`.
+        let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<EvidenceStatus>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        call.call(self.environment.clone(), handle.clone())
+    }
+
+    /// Project a previously captured [`LeanEvidence`] into a bounded
+    /// [`ProofSummary`] for diagnostics or storage.
+    ///
+    /// The Lean shim renders the captured declaration's name, kind,
+    /// and type expression as three byte-bounded `String`s — no
+    /// `Lean.Expr` or proof term crosses the FFI boundary. The
+    /// summary is computed on demand (not at
+    /// [`Self::kernel_check`] time) because most callers only ever
+    /// inspect the [`EvidenceStatus`] tag and would pay the
+    /// pretty-print cost for nothing.
+    ///
+    /// Strings on the returned summary are display text. They are not
+    /// semantic keys; route equality comparisons through a
+    /// Lean-authored equality export.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean shim raises
+    /// through `IO`. Returns [`LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] if the return value does not decode
+    /// as a three-field [`ProofSummary`] structure.
+    pub fn summarize_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<ProofSummary> {
+        let address = self.capabilities.symbols().evidence_summary;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Evidence) -> IO ProofSummary`.
+        let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<ProofSummary>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        call.call(self.environment.clone(), handle.clone())
     }
 
     /// Invoke a registered bounded [`MetaM`](https://leanprover.github.io/theorem_proving_in_lean4/)

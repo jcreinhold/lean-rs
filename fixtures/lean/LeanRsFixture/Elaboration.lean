@@ -212,4 +212,106 @@ def hostKernelCheck (env : Environment) (src : String)
   catch ex =>
     return .unavailable (singleErrorFailure (toString ex) fileLabel)
 
+/-! ## Prompt 17 — proof summaries and evidence re-validation
+
+The next two `@[export]` shims extend the evidence surface without
+changing the prompt-15 `kernel_check` contract:
+
+- `hostCheckEvidence` re-runs the kernel against the captured
+  `Declaration` and reports a fresh `EvidenceStatus`.
+- `hostEvidenceSummary` projects display-only metadata from the same
+  `Declaration` for diagnostics or storage on the Rust side.
+
+`EvidenceStatus` mirrors the Rust-side `crate::EvidenceStatus` enum
+(four nullary constructors, ctor tags 0..=3 in declaration order).
+`ProofSummary` carries three byte-bounded `String`s; Rust decodes it
+through the structure-pattern primitives without inspecting any
+`Lean.Expr` directly. -/
+
+/-- Result of re-validating a `LeanEvidence` against the current
+    environment. Nullary-only so it encodes through `ctor_tag` on the
+    Rust side. Tag order matches `EvidenceStatus` in Rust. -/
+inductive EvidenceStatus where
+  | checked
+  | rejected
+  | unavailable
+  | unsupported
+
+/-- Lean-authored summary of a kernel-checked declaration. Carries only
+    bounded `String`s so the Rust side can hold it without a `LeanObj`.
+    Strings are display-only; they must not be used as semantic keys. -/
+structure ProofSummary where
+  declarationName : String
+  kind            : String
+  typeSignature   : String
+
+/-- Soft byte cap on each `ProofSummary` field, mirroring the Rust
+    `LEAN_PROOF_SUMMARY_BYTE_LIMIT` constant. -/
+private def proofSummaryByteLimit : Nat := 4096
+
+/-- Truncate `s` to at most `proofSummaryByteLimit` UTF-8 bytes, always
+    stopping at a character boundary so the result is valid UTF-8.
+    Iterates one `Char` at a time and accumulates `Char.utf8Size`, so
+    `proofSummaryByteLimit` is a hard upper bound on the returned
+    string's `utf8ByteSize`. -/
+private def boundString (s : String) : String := Id.run do
+  if s.utf8ByteSize ≤ proofSummaryByteLimit then
+    return s
+  let mut acc : String := ""
+  let mut bytes : Nat := 0
+  for c in s.toList do
+    let nextBytes := bytes + c.utf8Size
+    if nextBytes > proofSummaryByteLimit then
+      break
+    acc := acc.push c
+    bytes := nextBytes
+  return acc
+
+/-- Project a `Declaration` into the three display fields the
+    `ProofSummary` exposes: the declared name, a human-readable kind
+    string, and the declared type expression. The two kinds the
+    prompt-15 `kernel_check` classifier produces (`thmDecl`,
+    `defnDecl`) carry user-visible content; the others surface a
+    bounded fallback so the Rust side never sees an empty summary. -/
+private def summarizeDeclaration (decl : Declaration) : Name × String × Expr :=
+  match decl with
+  | .thmDecl    v => (v.name, "theorem",    v.type)
+  | .defnDecl   v => (v.name, "definition", v.type)
+  | .axiomDecl  v => (v.name, "axiom",      v.type)
+  | .opaqueDecl v => (v.name, "opaque",     v.type)
+  | _             => (Name.anonymous, "unsupported", Expr.sort .zero)
+
+/-- Re-validate a captured `LeanEvidence` against the current
+    environment. Re-runs the kernel via `Environment.addDeclCore`. The
+    declaration was accepted once by `hostKernelCheck` against this
+    same environment (the session never installs the new constant),
+    so the expected outcome on a fresh re-check is `Checked`; a
+    `Rejected` result means the kernel now refuses the declaration
+    (for example because a referenced constant changed). `Unavailable`
+    covers exceptions raised through `IO`. -/
+@[export lean_rs_host_check_evidence]
+def hostCheckEvidence (env : Environment) (ev : Evidence) : IO EvidenceStatus := do
+  try
+    match Environment.addDeclCore env 0 ev.decl none with
+    | .ok _    => return .checked
+    | .error _ => return .rejected
+  catch _ =>
+    return .unavailable
+
+/-- Summarize a captured `LeanEvidence` into bounded display strings.
+    The Rust side reads the result through `take_ctor_objects::<3>`
+    plus three `String` decoders; no `Lean.Expr` crosses the FFI
+    boundary, only its `ToString`-rendered form. The renderer is
+    intentionally the default `ToString Expr` instance rather than the
+    delaboration pipeline: it is deterministic, runs without a
+    `CoreM`/`MetaM` context, and is sufficient for diagnostics. -/
+@[export lean_rs_host_evidence_summary]
+def hostEvidenceSummary (_env : Environment) (ev : Evidence) : IO ProofSummary := do
+  let (name, kind, typ) := summarizeDeclaration ev.decl
+  return {
+    declarationName := boundString (toString name)
+    kind            := boundString kind
+    typeSignature   := boundString (toString typ)
+  }
+
 end LeanRsFixture.Elaboration

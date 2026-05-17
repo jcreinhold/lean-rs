@@ -2,11 +2,12 @@
 //! `LeanSession` cascade.
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
-//! loads the `LeanRsFixture` capability dylib (which pre-resolves nine
-//! mandatory session symbols — seven environment queries plus the
-//! prompt-15 `elaborate` and `kernel_check` pair — and the three
-//! optional prompt-16 meta-service symbols), starts a session over an
-//! import list, and exercises the typed query methods.
+//! loads the `LeanRsFixture` capability dylib (which pre-resolves
+//! eleven mandatory session symbols — seven environment queries plus
+//! the prompt-15 `elaborate` and `kernel_check` pair plus the
+//! prompt-17 `check_evidence` and `evidence_summary` pair — and the
+//! three optional prompt-16 meta-service symbols), starts a session
+//! over an import list, and exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -16,8 +17,8 @@ use std::time::Instant;
 use crate::error::{HostStage, LeanError};
 use crate::runtime::LeanRuntime;
 use crate::{
-    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanMetaOptions,
-    LeanMetaResponse, LeanSession, LeanSeverity, MetaCallStatus,
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanElabOptions, LeanHost,
+    LeanKernelOutcome, LeanMetaOptions, LeanMetaResponse, LeanSession, LeanSeverity, MetaCallStatus,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -369,6 +370,167 @@ fn kernel_check_rejects_bad_proof() {
         LeanKernelOutcome::Checked(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
             panic!("expected Rejected variant");
         }
+    }
+}
+
+#[test]
+fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
+    // `Lean.Elab.Frontend.process` is robust: nearly every malformed
+    // source produces error diagnostics in the `MessageLog` (the
+    // shim's `Rejected` path), not an `IO`-level exception (the
+    // shim's `Unavailable` path). The Unavailable branch fires only
+    // when `process` itself raises through `IO` — for example on
+    // resource exhaustion, internal panic, or runtime failure during
+    // task scheduling. Driving any of those from user input alone is
+    // not contract: a given Lean release can move the boundary
+    // between which inputs surface as diagnostics versus exceptions.
+    //
+    // This test pins what the Rust mapping *guarantees*: a deeply
+    // pathological input must classify as either `Rejected` or
+    // `Unavailable` — never `Checked` and never `Unsupported` (those
+    // would mean the shim treated broken input as a valid command).
+    // It also confirms the four-tag `EvidenceStatus` discriminator is
+    // wired correctly for the two failure branches the shim can pick
+    // here. The Lean-side classification logic (which decides between
+    // `Rejected` and `Unavailable`) is exercised by the fixture's own
+    // tests, not by this Rust integration suite.
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .kernel_check("theorem :=", &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    assert!(
+        matches!(outcome.status(), EvidenceStatus::Rejected | EvidenceStatus::Unavailable),
+        "malformed source must classify as Rejected or Unavailable, got {outcome:?}"
+    );
+    match outcome {
+        LeanKernelOutcome::Rejected(failure) | LeanKernelOutcome::Unavailable(failure) => {
+            assert!(
+                !failure.diagnostics().is_empty(),
+                "failure outcome must carry at least one diagnostic"
+            );
+        }
+        LeanKernelOutcome::Checked(_) | LeanKernelOutcome::Unsupported(_) => {
+            panic!("malformed source must not classify as Checked or Unsupported");
+        }
+    }
+}
+
+#[test]
+fn kernel_check_unsupported_on_non_declaration() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // `#check` is a command that elaborates cleanly but adds no
+    // constant to the environment, so the classifier returns
+    // `Unsupported` (no new theorem/definition).
+    let outcome = session
+        .kernel_check("#check Nat", &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        EvidenceStatus::Unsupported,
+        "non-declaration command must classify as Unsupported, got {outcome:?}"
+    );
+}
+
+#[test]
+fn check_evidence_revalidates_checked_evidence() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .kernel_check("theorem lean_rs_recheck : 1 + 1 = 2 := rfl", &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    let evidence = match outcome {
+        LeanKernelOutcome::Checked(evidence) => evidence,
+        LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
+            panic!("expected Checked variant");
+        }
+    };
+
+    // Round-trip the cloned handle: re-validation must read the
+    // bumped refcount cleanly.
+    let cloned = evidence.clone();
+    let status = session
+        .check_evidence(&cloned)
+        .expect("re-validation routes through the host stack cleanly");
+    assert_eq!(
+        status,
+        EvidenceStatus::Checked,
+        "re-validating a fresh evidence handle against the same environment must succeed"
+    );
+
+    // Original handle also re-validates; addDecl does not consume it.
+    let status_again = session.check_evidence(&evidence).expect("re-validation is idempotent");
+    assert_eq!(
+        status_again,
+        EvidenceStatus::Checked,
+        "re-validation is idempotent against an unchanged environment"
+    );
+}
+
+#[test]
+fn summarize_evidence_exposes_declaration_name() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .kernel_check("theorem lean_rs_summary : 1 + 1 = 2 := rfl", &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    let evidence = match outcome {
+        LeanKernelOutcome::Checked(evidence) => evidence,
+        LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
+            panic!("expected Checked variant");
+        }
+    };
+
+    let summary = session
+        .summarize_evidence(&evidence)
+        .expect("summary routes through the host stack cleanly");
+    assert_eq!(
+        summary.declaration_name(),
+        "lean_rs_summary",
+        "summary must expose the declared name verbatim"
+    );
+    assert_eq!(summary.kind(), "theorem", "summary must classify the kind as `theorem`");
+    let signature = summary.type_signature();
+    // The Lean fixture renders types via the default `ToString Expr`
+    // instance, which emits the elaborated `Eq.{...} Nat ...` form
+    // rather than the surface `=` notation. Either spelling proves the
+    // proposition crossed the boundary as text; check for both so the
+    // assertion survives a future switch to a pretty-printer.
+    assert!(
+        signature.contains("Eq") || signature.contains('='),
+        "type signature must mention equality on the proposition, got: {signature:?}",
+    );
+    assert!(
+        signature.contains("Nat"),
+        "type signature must mention the underlying `Nat` carrier, got: {signature:?}",
+    );
+    assert!(
+        !signature.contains("rfl"),
+        "type signature must not leak the proof term `rfl`, got: {signature:?}",
+    );
+    for field in [summary.declaration_name(), summary.kind(), summary.type_signature()] {
+        assert!(
+            field.len() <= LEAN_PROOF_SUMMARY_BYTE_LIMIT,
+            "ProofSummary field exceeds the documented byte bound: {} bytes",
+            field.len()
+        );
     }
 }
 
