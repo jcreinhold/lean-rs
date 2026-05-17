@@ -1,0 +1,29 @@
+[package]
+name = "lean-rs-sys"
+description = "Raw FFI bindings for the Lean 4 C ABI. See `lean-rs` for the safe front door."
+authors.workspace = true
+categories = ["external-ffi-bindings", "api-bindings"]
+edition.workspace = true
+keywords = ["lean", "lean4", "ffi", "bindings", "sys"]
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+links = "leanshared"
+
+[features]
+# Default: dynamic linking against `libleanshared.dylib`. The static feature
+# is also available but selecting it requires extending the link set beyond
+# what `lean.h` requires (notably `libStd.a` and an appropriate link order);
+# see `build.rs` for the details.
+default = ["mimalloc", "dynamic"]
+mimalloc = []
+static = []
+dynamic = []
+
+[build-dependencies]
+sha2 = "0.10"
+
+[lints]
+workspace = true
