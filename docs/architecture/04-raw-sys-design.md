@@ -73,7 +73,7 @@ idiom that `bindgen --blocklist-type` emits.
 ```rust
 #[repr(C)]
 pub(crate) struct LeanObjectRepr {
-    pub(crate) m_rc:    core::sync::atomic::AtomicI32,
+    pub(crate) m_rc:    i32,   // see "as built" note below — stored as i32; atomic ops via `AtomicI32::from_ptr` at call sites
     pub(crate) m_cs_sz: u16,
     pub(crate) m_other: u8,
     pub(crate) m_tag:   u8,
@@ -127,17 +127,20 @@ The Rust mirror wins on three axes:
   against). A mismatch fails the build with bounded diagnostics naming
   both digests and the discovered header path.
 
-The mirrors use `core::sync::atomic::AtomicI32` with `Ordering::Relaxed` on
-loads/stores and `Ordering::Release` on the cold-path `fetch_sub` that
-matches `lean_dec_ref`'s drop semantics. The `static inline` C → Rust
-translation is literal; the mirrors plus the digest check are the entire
-trust boundary for the refcount fast path.
+The mirrors use `core::sync::atomic::AtomicI32` with `Ordering::Relaxed`
+on all loads/stores and on the MT-path `fetch_sub`, matching the
+`memory_order_relaxed` argument the `static inline` C source passes to
+`atomic_fetch_sub_explicit`. The cold path is the externally-exported
+`lean_dec_ref_cold`, which owns the actual deallocation. The mirrors plus
+the digest check are the entire trust boundary for the refcount fast path.
 
-Rust 1.75's `AtomicI32::from_ptr` is the load-bearing primitive: the
-refcount mirrors create a `&AtomicI32` from `*mut lean_object` so the actual
-`load`/`store`/`fetch_sub` happens on a safe reference, not a raw
-atomic-typed pointer. The workspace `rust-version = "1.85"` covers this
-comfortably.
+`AtomicI32::from_ptr` (stable since Rust 1.75) is the load-bearing
+primitive: the refcount mirrors materialize a `&AtomicI32` from a
+`*mut lean_object` so the actual `load`/`store`/`fetch_sub` happens on a
+safe reference. Overflow guards on the single-threaded fast path use
+`i32::strict_add` / `i32::strict_sub` (stable since Rust 1.91) so a
+refcount invariant breach surfaces as a panic in both debug and release;
+that drives the workspace `rust-version = "1.91"`.
 
 ## 4. Why split-by-category module layout (~12 files)
 
@@ -211,7 +214,8 @@ The build script's job is small:
 4. Assert the digest matches `EXPECTED_HEADER_DIGEST` (compile-time
    pinned in `lib.rs`).
 5. Emit `cargo:rustc-link-*` directives based on features (`static` vs
-   `dynamic`, `mimalloc`).
+   `dynamic`, `mimalloc`). The default is `dynamic` — see the "as built"
+   note below for why.
 6. Emit `cargo:rerun-if-{env-changed,changed}=…`.
 
 At ~150 LOC, a single `build.rs` is right — splitting into a `build/`
@@ -237,8 +241,12 @@ Per the user's explicit ask:
 6. `AtomicI32::from_ptr` (stable since Rust 1.75) inside the refcount
    mirrors so the actual `load`/`store`/`fetch_sub` happens on a safe
    `&AtomicI32`.
-7. No `transmute`; all pointer reshaping is `as`-cast with `// SAFETY:`
-   justification.
+7. No `transmute`; all pointer reshaping is `.cast::<T>()` or `&raw mut`
+   with `// SAFETY:` justification.
+8. Refcount and allocation-size arithmetic uses `i32::strict_add` /
+   `usize::strict_add` / `strict_mul` (Rust 1.91+) — overflow panics in
+   debug *and* release, surfacing invariant breaches instead of silently
+   producing a wrong size or wrapped refcount.
 
 ## 9. What this design deliberately does *not* commit to
 
@@ -251,6 +259,75 @@ Per the user's explicit ask:
 - **A proc-macro layer.** `REQUIRED_SYMBOLS` is hand-maintained;
   `tests/symbols_match.rs` codegen is deferred until the allowlist
   reaches ~80 entries.
+
+## 10. As-built notes (deviations from the design above)
+
+The rationale sections above describe the design as it was approved.
+Implementation surfaced a handful of small deviations worth recording
+here so the doc matches what shipped:
+
+- **Default features are `["mimalloc", "dynamic"]`, not `["mimalloc",
+  "static"]`.** The prompt's static link set (`Lean`, `Init`, `leanrt`,
+  `leancpp`, `Lake`) does not actually link a Lean stdlib symbol-using
+  program without at least `libStd.a` and a specific archive order. Rather
+  than expand the static set, the default switched to dynamic so the test
+  binary links against `libleanshared` out of the box. The `static`
+  feature is preserved for embedders who explicitly want it and will
+  extend the link list to suit their target.
+- **The `mimalloc` feature is a no-op marker.** Lean 4.29.1's mimalloc is
+  statically linked into `libleanrt.a` / `libleanshared`; there is no
+  separate `libmimalloc` in the toolchain to link against. The feature
+  stays in the manifest as a marker downstream tooling can read and as a
+  hook for future toolchains that ship mimalloc separately.
+- **`LeanObjectRepr::m_rc` is `i32`, not `AtomicI32`.** `AtomicI32::from_ptr`
+  takes `*mut i32`, so storing the field as a plain `i32` makes the cast
+  ergonomic and keeps the layout byte-exact with `lean.h`. Atomic
+  semantics happen at the call site, not in the struct definition.
+- **`Ordering::Relaxed` everywhere; the cold path is `lean_dec_ref_cold`.**
+  The single-threaded fast path is a plain `Relaxed` load/store and the
+  multi-threaded path is `fetch_sub(_, Relaxed)`, matching the C source's
+  `memory_order_relaxed`. The "Release on cold-path fetch_sub" wording in
+  §3 was incorrect; the cold path is the `LEAN_EXPORT`'d
+  `lean_dec_ref_cold`, which owns its own ordering decisions.
+- **MSRV bumped to 1.91.** Originally `1.85` to clear `AtomicI32::from_ptr`
+  (1.75). Bumped to `1.91` to use `strict_add` / `strict_sub` / `strict_mul`
+  on the overflow guards — a refcount overflow or size-arithmetic
+  overflow panics in both debug and release, instead of producing a
+  silent wrap or under-allocation.
+- **Init symbols live in `init.rs` but not in `lean.h`.**
+  `lean_initialize`, `lean_initialize_runtime_module`,
+  `lean_initialize_thread`, `lean_finalize_thread`, and `lean_setup_args`
+  are exported by `libleanshared` but are not declared in `lean.h`. They
+  appear in `init.rs` as `extern "C"` declarations with the standard
+  runtime signatures. The `LEAN_HEADER_DIGEST` check does *not* gate them
+  (it guards layout, not runtime entry points); they are protected by
+  `REQUIRED_SYMBOLS` plus `tests/linkage.rs` instead.
+- **`REQUIRED_SYMBOLS` has ~75 entries**, not the ~50–80 estimate from §6,
+  and a few items the prompt prefigured as externs are actually `static
+  inline` in 4.29.1 (`lean_alloc_ctor_memory`, `lean_alloc_closure`,
+  `lean_alloc_array`). Those are mirrored in Rust and dropped from the
+  allowlist; `lean_alloc_object` / `lean_free_object` (the real externs)
+  are listed instead.
+- **Layout assertions for `pub(crate) LeanObjectRepr` and friends live in
+  `#[cfg(test)] mod tests` inside `src/repr.rs`**, not in `tests/layout.rs`.
+  Integration tests cannot see `pub(crate)` items; the unit-test module
+  inside `repr.rs` keeps the internal types internal without leaking a
+  `#[doc(hidden)] pub mod __test` accessor.
+- **The digest-mismatch fixture test is documented, not automated.**
+  Verification step 6 in the prompt called for a build-time test that
+  flips a `lean.h` byte and asserts the build fails. Automating it would
+  require either a fixture sysroot in-tree or a noisy subprocess test;
+  the procedure is documented for manual exercise in the crate's
+  `README.md` instead.
+- **Lint discipline as shipped.** Doc-related lints (`doc_markdown`,
+  `missing_safety_doc`, `undocumented_unsafe_blocks`,
+  `too_long_first_doc_paragraph`, `missing_inline_in_public_items`,
+  `missing_panics_doc`) are never silenced; every violation is fixed at
+  the source. Narrow module-level allows for `clippy::inline_always` (on
+  FFI mirror modules where always-inline is the design),
+  `clippy::struct_field_names` (`repr.rs` only — `m_*` mirrors C), and
+  `clippy::cast_possible_*` / `cast_sign_loss` (`scalar.rs` only — C ABI
+  mandates the narrowing shape) are the only persistent exceptions.
 
 ## Cross-references
 
