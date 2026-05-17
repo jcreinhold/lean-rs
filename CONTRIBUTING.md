@@ -1,4 +1,4 @@
-# Contributing to lean4-rs
+# Contributing to lean-rs
 
 Thanks for your interest. This file documents the rules a contribution must satisfy. Read it before opening a PR.
 
@@ -38,12 +38,12 @@ precondition into a safe function's contract is a contract change, not an implem
 This project tracks a specific Lean toolchain and ABI. Bumping the supported Lean version is a compatibility decision,
 not a build fix:
 
-- Record the supported Lean version range in `/Users/jcreinhold/Code/prompts/lean4-rs/00-current-state.md` under the
+- Record the supported Lean version range in `/Users/jcreinhold/Code/prompts/lean-rs/00-current-state.md` under the
   `VERSION-COMPATIBILITY` contract (added in prompt 02; until then, note compatibility in the relevant prompt's
   current-state entry).
 - Add a CI matrix entry or a documented build flag covering the new version before claiming support.
 - A change in Lean's C ABI (object layout, ownership convention, initializer protocol) is a contract change. Follow
-  `/Users/jcreinhold/Code/prompts/lean4-rs/00-recovery-protocol.md` and stop with a Replanning Delta rather than
+  `/Users/jcreinhold/Code/prompts/lean-rs/00-recovery-protocol.md` and stop with a Replanning Delta rather than
   papering over the difference with brittle wrappers.
 
 ## Coding standards

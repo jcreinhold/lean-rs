@@ -1,4 +1,4 @@
-# lean4-rs
+# lean-rs
 
 Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns elaboration, kernel checking, proof
 objects, universes, `MetaM`, and dependent-type meaning; this project owns linking, runtime initialization, ABI

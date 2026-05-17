@@ -1,4 +1,4 @@
-//! Test fixtures and helpers shared across the `lean4-rs` project's tests.
+//! Test fixtures and helpers shared across the `lean-rs` project's tests.
 //!
 //! Workspace-internal (`publish = false`). Anything it exposes is for the project's own tests and is explicitly
 //! excluded from the public stability surface.

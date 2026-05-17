@@ -1,6 +1,6 @@
 //! Safe Rust bindings for hosting Lean 4 capabilities.
 //!
-//! The single safe front door of the `lean4-rs` project. Internally organized into modules that mirror the original
+//! The single safe front door of the `lean-rs` project. Internally organized into modules that mirror the original
 //! prompt-sequence layering — `runtime` (initialization, owned/borrowed object handles, reference counting, thread
 //! guards), `abi` (typed first-order value conversions), `module` (compiled-module loading and exported functions),
 //! `host` (high-level capability API: import sessions, calls into Lean-authored capabilities, bounded

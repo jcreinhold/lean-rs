@@ -7,7 +7,7 @@ authors = ["Jacob Reinhold <jcreinhold@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/jcreinhold/lean4-rs"
+repository = "https://github.com/jcreinhold/lean-rs"
 rust-version = "1.85"
 version = "0.0.0"
 
