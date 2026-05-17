@@ -47,7 +47,12 @@
 //!   (`IntoLean`, `TryFromLean`) for scalars, `Nat`/`Int`, `String`, and
 //!   `ByteArray`. Infrastructure for the `module` and `host` modules
 //!   landing in prompts 09–18.
-//! - Other modules — `module`, `host` — land in prompts 09–18.
+//! - [`module`] — load Lake-built Lean shared objects and initialize
+//!   their modules. Surfaces [`module::LeanLibrary`] (RAII handle over
+//!   the dylib) and [`module::LeanModule`] (proof that a module's
+//!   initializer succeeded). Typed exported-function handles attach to
+//!   `LeanModule` in prompt 12.
+//! - Other modules — `host` — land in prompts 13–18.
 //!
 //! ## Layering
 //!
@@ -59,6 +64,7 @@
 
 pub(crate) mod abi;
 pub mod error;
+pub mod module;
 pub(crate) mod runtime;
 
 pub use crate::error::{

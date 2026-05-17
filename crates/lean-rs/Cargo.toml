@@ -12,6 +12,7 @@ version.workspace = true
 
 [dependencies]
 lean-rs-sys.workspace = true
+libloading = "0.8"
 
 [dev-dependencies]
 # TODO(prompt 13): drop — the throwaway `lean_rs_test_support::fixture`
