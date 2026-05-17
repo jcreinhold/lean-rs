@@ -36,6 +36,8 @@ fn init() -> &'static LeanRuntime {
     runtime
 }
 
+use crate::abi::except::Except;
+use crate::abi::structure::{alloc_ctor_with_objects, ctor_tag, take_ctor_objects};
 use crate::abi::traits::{IntoLean, TryFromLean};
 use crate::abi::{bytearray, int, nat, string};
 use crate::error::{HostStage, LeanError};
@@ -72,6 +74,16 @@ unsafe extern "C" {
 
     fn lean_rs_fixture_bytearray_identity(b: *mut lean_object) -> *mut lean_object;
     fn lean_rs_fixture_bytearray_size(b: *mut lean_object) -> *mut lean_object;
+
+    fn lean_rs_fixture_array_string_identity(xs: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_array_string_push(xs: *mut lean_object, x: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_option_nat_identity(x: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_option_nat_some(n: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_except_string_nat_ok(n: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_except_string_nat_err(s: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_pair_make(n: *mut lean_object, s: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_bundle_make(name: *mut lean_object, items: *mut lean_object) -> *mut lean_object;
+    fn lean_rs_fixture_bundle_identity(b: *mut lean_object) -> *mut lean_object;
 }
 
 // -- scalar (unboxed) round trips ----------------------------------------
@@ -309,7 +321,7 @@ fn bytearray_identity_helper(bytes: &[u8]) {
     let view = echoed.borrow();
     let borrowed = bytearray::borrow_bytes(&view).expect("ByteArray view");
     assert_eq!(borrowed, bytes);
-    let owned = Vec::<u8>::try_from_lean(echoed).expect("ByteArray round-trips");
+    let owned = bytearray::to_vec(echoed).expect("ByteArray round-trips");
     assert_eq!(owned.as_slice(), bytes);
 }
 
@@ -446,7 +458,7 @@ fn try_from_lean_returns_wrong_kind_for_mismatched_object() {
     // Build a String, then try to decode it as a ByteArray. Expect a
     // conversion-stage host failure naming `ByteArray`.
     let s: Obj<'_> = string::from_str(runtime, "not a byte array");
-    match Vec::<u8>::try_from_lean(s) {
+    match bytearray::to_vec(s) {
         Err(LeanError::Host(host)) => {
             assert_eq!(host.stage(), HostStage::Conversion);
             assert!(
@@ -466,8 +478,8 @@ fn try_from_lean_returns_wrong_kind_for_mismatched_object() {
 // helpers return slice views into the Lean payload. The only Rust-side
 // allocation along the borrowed-read path is the `Obj` itself (a single
 // `NonNull<lean_object>`); reading is a `slice::from_raw_parts` over the
-// payload. The owned-read variants (`String::try_from_lean` /
-// `Vec::<u8>::try_from_lean`) additionally allocate one Rust buffer of the
+// payload. The owned-read variants (`String::try_from_lean` and
+// `bytearray::to_vec`) additionally allocate one Rust buffer of the
 // payload's size.
 
 #[test]
@@ -498,4 +510,339 @@ fn _silence_unused() {
         let _ = lean_box(0);
         let _ = lean_unbox(lean_box(0));
     }
+}
+
+// -- Array String round trips (prompt 09) --------------------------------
+
+/// Ship `xs` through the Lean `arrayStringIdentity` fixture and assert
+/// the round-tripped Rust `Vec<String>` matches.
+fn array_string_round_trip(xs: Vec<String>) {
+    let runtime = init();
+    let expected = xs.clone();
+    let input: Obj<'_> = xs.into_lean(runtime);
+    // SAFETY: standard ownership-transfer pattern through the fixture.
+    let echoed = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_array_string_identity(input.into_raw())) };
+    let decoded = Vec::<String>::try_from_lean(echoed).expect("Array String round-trips");
+    assert_eq!(decoded, expected);
+}
+
+#[test]
+fn array_string_empty_round_trips() {
+    array_string_round_trip(Vec::new());
+}
+
+#[test]
+fn array_string_single_element_round_trips() {
+    array_string_round_trip(vec!["solo".to_owned()]);
+}
+
+#[test]
+fn array_string_multi_element_round_trips() {
+    array_string_round_trip(vec!["alpha".to_owned(), "beta".to_owned(), "gamma".to_owned()]);
+}
+
+#[test]
+fn array_string_with_empty_and_non_ascii_elements() {
+    array_string_round_trip(vec![String::new(), "🦀".to_owned(), "naïve".to_owned()]);
+}
+
+#[test]
+fn array_string_push_round_trips_added_element() {
+    let runtime = init();
+    let xs: Vec<String> = vec!["one".to_owned(), "two".to_owned()];
+    let pushed = "three".to_owned();
+    let xs_obj = xs.into_lean(runtime);
+    let push_obj = pushed.clone().into_lean(runtime);
+    // SAFETY: fixture takes ownership of both arguments and returns an
+    // owned array.
+    let echoed = unsafe {
+        Obj::from_owned_raw(
+            runtime,
+            lean_rs_fixture_array_string_push(xs_obj.into_raw(), push_obj.into_raw()),
+        )
+    };
+    let decoded = Vec::<String>::try_from_lean(echoed).expect("Array String push round-trips");
+    assert_eq!(decoded, vec!["one".to_owned(), "two".to_owned(), pushed]);
+}
+
+#[test]
+fn array_returns_wrong_kind_for_non_array() {
+    let runtime = init();
+    // Build a String, try to decode it as an Array String.
+    let s: Obj<'_> = string::from_str(runtime, "not an array");
+    match Vec::<String>::try_from_lean(s) {
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(
+                host.message().contains("Array"),
+                "unexpected message: {:?}",
+                host.message()
+            );
+        }
+        other => panic!("expected Host(Conversion) for non-array, got {other:?}"),
+    }
+}
+
+// -- Option round trips ---------------------------------------------------
+
+#[test]
+fn option_nat_identity_round_trips_none() {
+    let runtime = init();
+    let input: Option<u64> = None;
+    // `Option<u64>` lands as `Option Nat` because the fixture is typed
+    // `Option Nat`. We build the Lean `Option` ctor by hand: outer ctor
+    // wraps a `Nat` field (none has no fields, some wraps a Nat).
+    let input_obj = match input {
+        None => alloc_ctor_with_objects::<0>(runtime, 0, []),
+        Some(n) => alloc_ctor_with_objects(runtime, 1, [nat::from_u64(runtime, n)]),
+    };
+    // SAFETY: standard ownership transfer through the fixture.
+    let echoed = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_option_nat_identity(input_obj.into_raw())) };
+    let tag = ctor_tag(&echoed).expect("Option ctor");
+    assert_eq!(tag, 0, "expected None");
+    let [] = take_ctor_objects::<0>(echoed, 0, "Option::none").expect("none decodes");
+}
+
+#[test]
+fn option_nat_identity_round_trips_some() {
+    let runtime = init();
+    let n: u64 = 42;
+    let input_obj = alloc_ctor_with_objects(runtime, 1, [nat::from_u64(runtime, n)]);
+    // SAFETY: fixture takes ownership of the ctor.
+    let echoed = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_option_nat_identity(input_obj.into_raw())) };
+    let tag = ctor_tag(&echoed).expect("Option ctor");
+    assert_eq!(tag, 1, "expected Some");
+    let [field] = take_ctor_objects::<1>(echoed, 1, "Option::some").expect("some decodes");
+    assert_eq!(nat::try_to_u64(field).expect("Nat decodes"), n);
+}
+
+#[test]
+fn option_nat_some_constructed_lean_side() {
+    let runtime = init();
+    // Lean's `optionNatSome n` builds `some n` directly: tag 1, num_objs 1.
+    // The matching `optionNatNone` constant compiles to a global static
+    // rather than a callable export (Lean shares the persistent value), so
+    // we skip the None side here — `option_nat_identity_round_trips_none`
+    // already covers a Rust-built None going through `optionNatIdentity`.
+    let n: u64 = 7;
+    let arg = nat::from_u64(runtime, n);
+    // SAFETY: fixture consumes the Nat argument and returns `Option Nat`.
+    let some_obj = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_option_nat_some(arg.into_raw())) };
+    let tag = ctor_tag(&some_obj).expect("Option ctor");
+    assert_eq!(tag, 1);
+    let [inner] = take_ctor_objects::<1>(some_obj, 1, "Option::some").expect("some decodes");
+    assert_eq!(nat::try_to_u64(inner).expect("Nat decodes"), n);
+}
+
+#[test]
+fn option_trait_round_trip_u64_some_and_none() {
+    let runtime = init();
+    // Direct IntoLean / TryFromLean round trip (no fixture call). Here
+    // `u64` is the polymorphic-boxed UInt64 ctor; this exercises the
+    // generic Option impl across a non-trivial inner type.
+    for input in [Some(0_u64), Some(1), Some(u64::MAX), None] {
+        let obj = input.into_lean(runtime);
+        let out = Option::<u64>::try_from_lean(obj).expect("Option round-trips");
+        assert_eq!(out, input);
+    }
+}
+
+#[test]
+fn option_nested_round_trips() {
+    let runtime = init();
+    // `Option<Option<u64>>` — exercises that the structure primitives
+    // compose under nesting without ambiguity.
+    let cases: Vec<Option<Option<u64>>> = vec![None, Some(None), Some(Some(0)), Some(Some(u64::MAX))];
+    for input in cases {
+        let obj = input.into_lean(runtime);
+        let out = Option::<Option<u64>>::try_from_lean(obj).expect("nested Option round-trips");
+        assert_eq!(out, input);
+    }
+}
+
+#[test]
+fn option_returns_wrong_tag_for_bogus_ctor() {
+    let runtime = init();
+    // A ctor with tag 5 is neither Option.none (0) nor Option.some (1).
+    let bogus = alloc_ctor_with_objects::<0>(runtime, 5, []);
+    match Option::<u64>::try_from_lean(bogus) {
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(host.message().contains("Option"), "unexpected: {:?}", host.message());
+        }
+        other => panic!("expected Host(Conversion) for bogus tag, got {other:?}"),
+    }
+}
+
+// -- Except / Result round trips ------------------------------------------
+
+#[test]
+fn except_string_nat_ok_round_trips_via_fixture() {
+    let runtime = init();
+    let n: u64 = 99;
+    let arg = nat::from_u64(runtime, n);
+    // SAFETY: fixture takes ownership of `arg` and returns an
+    // `Except String Nat` ctor.
+    let obj = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_except_string_nat_ok(arg.into_raw())) };
+    // The inner `Nat` is scalar-tagged, not polymorphic-boxed UInt64, so we
+    // decode the ctor via the structure primitives and reach for
+    // `nat::try_to_u64` for the field. The generic `Result<u64, String>`
+    // impl would route the field through `u64::try_from_lean`, which
+    // expects the polymorphic-boxed encoding instead — the same Nat-vs-
+    // UInt64 distinction documented under `ERROR-BOUNDARY` and shown in
+    // [`crate::abi::nat`]'s caveat list.
+    let tag = ctor_tag(&obj).expect("Except ctor");
+    assert_eq!(tag, 1, "expected ok");
+    let [field] = take_ctor_objects::<1>(obj, 1, "Except::ok").expect("ok decodes");
+    assert_eq!(nat::try_to_u64(field).expect("Nat decodes"), n);
+}
+
+#[test]
+fn except_string_nat_err_round_trips_via_fixture() {
+    let runtime = init();
+    let s = "boom".to_owned();
+    let arg = string::from_str(runtime, &s);
+    // SAFETY: fixture takes ownership of `arg` and returns an
+    // `Except String Nat` ctor with tag 0.
+    let obj = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_except_string_nat_err(arg.into_raw())) };
+    let tag = ctor_tag(&obj).expect("Except ctor");
+    assert_eq!(tag, 0, "expected error");
+    let [field] = take_ctor_objects::<1>(obj, 0, "Except::error").expect("error decodes");
+    assert_eq!(String::try_from_lean(field).expect("String decodes"), s);
+}
+
+#[test]
+fn except_trait_round_trip_via_lean_constructed_then_rust_decoded() {
+    let runtime = init();
+    // Build Except::Ok / Except::Error directly through IntoLean and
+    // decode via Except's TryFromLean — exercises the named value type
+    // (not just the Result delegate).
+    let cases: Vec<Except<String, u64>> = vec![Except::Ok(0), Except::Ok(123), Except::Error("oops".to_owned())];
+    for input in cases {
+        let obj = input.clone().into_lean(runtime);
+        let out = Except::<String, u64>::try_from_lean(obj).expect("Except round-trips");
+        assert_eq!(out, input);
+    }
+}
+
+#[test]
+fn result_trait_round_trip_through_pure_abi() {
+    let runtime = init();
+    let cases: Vec<Result<u64, String>> = vec![Ok(0), Ok(u64::MAX), Err("nope".to_owned())];
+    for input in cases {
+        let obj = input.clone().into_lean(runtime);
+        let out = Result::<u64, String>::try_from_lean(obj).expect("Result round-trips");
+        assert_eq!(out, input);
+    }
+}
+
+#[test]
+fn except_returns_wrong_tag_for_bogus_ctor() {
+    let runtime = init();
+    let bogus = alloc_ctor_with_objects::<0>(runtime, 7, []);
+    match Except::<String, u64>::try_from_lean(bogus) {
+        Err(LeanError::Host(host)) => {
+            assert_eq!(host.stage(), HostStage::Conversion);
+            assert!(host.message().contains("Except"), "unexpected: {:?}", host.message());
+        }
+        other => panic!("expected Host(Conversion) for bogus tag, got {other:?}"),
+    }
+}
+
+// -- Structure pattern: Pair (Nat, String) -------------------------------
+
+#[test]
+fn pair_make_round_trips_via_fixture() {
+    let runtime = init();
+    let n: u64 = 1234;
+    let s = "pair-field".to_owned();
+    let nat_obj = nat::from_u64(runtime, n);
+    let str_obj = string::from_str(runtime, &s);
+    // SAFETY: fixture consumes both arguments, returns a `Pair` ctor.
+    let pair = unsafe {
+        Obj::from_owned_raw(
+            runtime,
+            lean_rs_fixture_pair_make(nat_obj.into_raw(), str_obj.into_raw()),
+        )
+    };
+    // Pair is a single-constructor structure: tag 0, two object fields.
+    let [first, second] = take_ctor_objects::<2>(pair, 0, "Pair").expect("Pair decodes");
+    assert_eq!(nat::try_to_u64(first).expect("first decodes"), n);
+    assert_eq!(String::try_from_lean(second).expect("second decodes"), s);
+}
+
+// -- Structure pattern: Bundle (String, Array String) --------------------
+
+#[test]
+fn bundle_make_round_trips_via_fixture() {
+    let runtime = init();
+    let name = "release".to_owned();
+    let items: Vec<String> = vec!["x86_64".to_owned(), "aarch64".to_owned()];
+    let name_obj = string::from_str(runtime, &name);
+    let items_obj = items.clone().into_lean(runtime);
+    // SAFETY: fixture consumes both arguments, returns a `Bundle` ctor.
+    let bundle = unsafe {
+        Obj::from_owned_raw(
+            runtime,
+            lean_rs_fixture_bundle_make(name_obj.into_raw(), items_obj.into_raw()),
+        )
+    };
+    let [name_field, items_field] = take_ctor_objects::<2>(bundle, 0, "Bundle").expect("Bundle decodes");
+    assert_eq!(String::try_from_lean(name_field).expect("name decodes"), name);
+    assert_eq!(Vec::<String>::try_from_lean(items_field).expect("items decode"), items);
+}
+
+#[test]
+fn bundle_identity_round_trips_through_lean() {
+    let runtime = init();
+    let name = "alpha".to_owned();
+    let items: Vec<String> = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
+    // Build a Bundle ctor in Rust (the structure pattern in action), ship
+    // it through `bundleIdentity`, and decode the round trip.
+    let bundle = alloc_ctor_with_objects(
+        runtime,
+        0,
+        [string::from_str(runtime, &name), items.clone().into_lean(runtime)],
+    );
+    // SAFETY: fixture takes ownership of the ctor and returns the same
+    // bundle shape.
+    let echoed = unsafe { Obj::from_owned_raw(runtime, lean_rs_fixture_bundle_identity(bundle.into_raw())) };
+    let [name_field, items_field] = take_ctor_objects::<2>(echoed, 0, "Bundle").expect("Bundle decodes");
+    assert_eq!(String::try_from_lean(name_field).expect("name decodes"), name);
+    assert_eq!(Vec::<String>::try_from_lean(items_field).expect("items decode"), items);
+}
+
+// -- Composed nested containers (no fixture) -----------------------------
+
+#[test]
+fn vec_of_option_round_trips_through_pure_abi() {
+    let runtime = init();
+    let input: Vec<Option<u64>> = vec![None, Some(0), Some(42), None, Some(u64::MAX)];
+    let obj = input.clone().into_lean(runtime);
+    let out = Vec::<Option<u64>>::try_from_lean(obj).expect("Vec<Option> round-trips");
+    assert_eq!(out, input);
+}
+
+#[test]
+fn option_of_vec_round_trips_through_pure_abi() {
+    let runtime = init();
+    let cases: Vec<Option<Vec<String>>> = vec![
+        None,
+        Some(Vec::new()),
+        Some(vec!["only-element".to_owned()]),
+        Some(vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]),
+    ];
+    for input in cases {
+        let obj = input.clone().into_lean(runtime);
+        let out = Option::<Vec<String>>::try_from_lean(obj).expect("Option<Vec> round-trips");
+        assert_eq!(out, input);
+    }
+}
+
+// Silence-unused-imports anchor for the int helper, which the prompt-08
+// tests pull in directly. Without this the bytearray-test migration drops
+// the only reference and clippy flags the import.
+#[allow(dead_code)]
+fn _silence_int_helper() {
+    let _ = int::from_i64;
 }

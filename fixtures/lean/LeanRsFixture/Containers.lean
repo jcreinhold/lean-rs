@@ -36,4 +36,17 @@ structure Pair where
 @[export lean_rs_fixture_pair_make]
 def pairMake (n : Nat) (s : String) : Pair := { first := n, second := s }
 
+/-- Mixed-field structure: one string field and one array-of-strings field.
+    Exercises ctor field layout when one slot is itself a nested container. -/
+structure Bundle where
+  name  : String
+  items : Array String
+
+@[export lean_rs_fixture_bundle_make]
+def bundleMake (name : String) (items : Array String) : Bundle :=
+  { name, items }
+
+@[export lean_rs_fixture_bundle_identity]
+def bundleIdentity (b : Bundle) : Bundle := b
+
 end LeanRsFixture.Containers

@@ -9,7 +9,7 @@
 
 use core::mem::size_of;
 
-use crate::consts::LEAN_SCALAR_ARRAY;
+use crate::consts::{LEAN_ARRAY, LEAN_SCALAR_ARRAY};
 use crate::object::lean_alloc_object;
 use crate::repr::{LeanArrayObjectRepr, LeanObjectRepr, LeanSArrayObjectRepr};
 use crate::types::{b_lean_obj_arg, lean_obj_arg, lean_obj_res, lean_object};
@@ -21,6 +21,45 @@ unsafe extern "C" {
     pub fn lean_array_set_panic(a: lean_obj_arg, v: lean_obj_arg) -> lean_obj_res;
     pub fn lean_array_push(a: lean_obj_arg, v: lean_obj_arg) -> *mut lean_object;
     pub fn lean_mk_array(n: lean_obj_arg, v: lean_obj_arg) -> *mut lean_object;
+}
+
+/// Allocate a freshly initialised object array (`lean.h:816–822`).
+///
+/// Returns a `LeanArray`-tagged object with `m_size = size`,
+/// `m_capacity = capacity`, and `capacity` uninitialised `*mut lean_object`
+/// slots. The caller installs each slot via [`lean_array_set_core`] before
+/// the array escapes; the first `size` slots become the visible elements.
+///
+/// # Safety
+///
+/// * `size <= capacity`.
+/// * `size_of::<LeanArrayObjectRepr>() + size_of::<*mut lean_object>() * capacity`
+///   must not overflow `usize`; the helper checks this with `strict_*`
+///   arithmetic and panics on overflow.
+/// * Every one of the first `size` element slots must be initialised with a
+///   live owned `*mut lean_object` (matching the C convention that
+///   `lean_dec` on the array recursively decrements each visible element)
+///   before the array is observed by any other Lean code.
+#[inline(always)]
+pub unsafe fn lean_alloc_array(size: usize, capacity: usize) -> lean_obj_res {
+    let total = size_of::<LeanArrayObjectRepr>().strict_add(size_of::<*mut lean_object>().strict_mul(capacity));
+    // SAFETY: `lean_alloc_object` returns a non-null pointer to `total` bytes
+    // of uninitialised Lean-managed memory; we install the object-array
+    // header before returning so the object is immediately well-formed for
+    // every existing predicate (`lean_is_array`, `lean_array_*`). Element
+    // slots remain uninitialised — the caller's obligation per the docs
+    // above.
+    unsafe {
+        let o = lean_alloc_object(total);
+        let header = o.cast::<LeanObjectRepr>();
+        (*header).m_rc = 1;
+        (*header).m_tag = LEAN_ARRAY;
+        (*header).m_other = 0;
+        let array = o.cast::<LeanArrayObjectRepr>();
+        (*array).size = size;
+        (*array).capacity = capacity;
+        o
+    }
 }
 
 /// Allocate a freshly initialised scalar-array (`lean.h:1004–1010`).

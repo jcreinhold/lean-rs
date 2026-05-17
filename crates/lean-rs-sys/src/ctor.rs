@@ -576,6 +576,54 @@ mod tests {
     }
 
     #[test]
+    fn alloc_array_round_trips_object_slots() {
+        ensure_runtime();
+        use crate::array::{
+            lean_alloc_array, lean_array_capacity, lean_array_get_core, lean_array_set_core, lean_array_size,
+        };
+        use crate::object::{lean_box, lean_is_array, lean_unbox};
+
+        // SAFETY: build an object array of three scalar elements, read each
+        // slot back via `lean_array_get_core`, then release. Scalar
+        // elements skip refcount churn so the test isolates the array
+        // allocator and slot-write path.
+        unsafe {
+            let o = lean_alloc_array(3, 3);
+            assert!(lean_is_array(o));
+            assert_eq!(lean_array_size(o), 3);
+            assert_eq!(lean_array_capacity(o), 3);
+
+            lean_array_set_core(o, 0, lean_box(10));
+            lean_array_set_core(o, 1, lean_box(20));
+            lean_array_set_core(o, 2, lean_box(30));
+
+            assert_eq!(lean_unbox(lean_array_get_core(o, 0)), 10);
+            assert_eq!(lean_unbox(lean_array_get_core(o, 1)), 20);
+            assert_eq!(lean_unbox(lean_array_get_core(o, 2)), 30);
+
+            lean_dec(o);
+        }
+    }
+
+    #[test]
+    fn alloc_array_empty_is_valid() {
+        ensure_runtime();
+        use crate::array::{lean_alloc_array, lean_array_capacity, lean_array_size};
+        use crate::object::lean_is_array;
+
+        // SAFETY: zero-length object array; allocation succeeds and the
+        // size/capacity header reads back as zero. No element slots to
+        // initialise.
+        unsafe {
+            let o = lean_alloc_array(0, 0);
+            assert!(lean_is_array(o));
+            assert_eq!(lean_array_size(o), 0);
+            assert_eq!(lean_array_capacity(o), 0);
+            lean_dec(o);
+        }
+    }
+
+    #[test]
     fn scalar_box_unbox_remains_inline_for_small_nat() {
         // Sanity: the existing scalar `lean_box` / `lean_unbox` from
         // `crate::object` is a distinct path that must not interact with

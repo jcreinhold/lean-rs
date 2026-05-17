@@ -25,9 +25,15 @@
 //! - `ByteArray` ↔ Rust `Vec<u8>`/`&[u8]` (the
 //!   [`borrow_bytes`](bytearray::borrow_bytes) helper avoids the Rust-side
 //!   copy) — see [`bytearray`].
-//!
-//! Prompt 09 adds `Array`, `Option`, `Result`, simple structures, and the
-//! `Except<E, T>` value type used by IO decoding.
+//! - `Array α` ↔ Rust `Vec<T>` (preallocated, single-allocation
+//!   construction) — see [`array`].
+//! - `Option α` ↔ Rust `Option<T>` — see [`option`].
+//! - `Except ε α` ↔ Rust [`Result<T, E>`] **and** the internal value-type
+//!   mirror [`Except`](except::Except) — see [`except`].
+//! - Product/sum structures via the ctor-layout primitives
+//!   [`alloc_ctor_with_objects`](structure::alloc_ctor_with_objects),
+//!   [`take_ctor_objects`](structure::take_ctor_objects), and
+//!   [`ctor_tag`](structure::ctor_tag) — see [`structure`].
 
 // Items here are infrastructure for the typed `LeanExported{N}` family
 // (prompt 12) and the `module`/`host` modules (prompts 09–18). Until the
@@ -35,14 +41,18 @@
 // build`; only `cargo test` instantiates them through `abi::tests`.
 #![allow(
     dead_code,
-    reason = "first non-test caller lands in prompt 09 (containers) / 11–12 (LeanModule + LeanExported{N})"
+    reason = "first non-test caller lands in prompts 11–12 (LeanModule + LeanExported{N})"
 )]
 
+pub(crate) mod array;
 pub(crate) mod bytearray;
+pub(crate) mod except;
 pub(crate) mod int;
 pub(crate) mod nat;
+pub(crate) mod option;
 pub(crate) mod scalar;
 pub(crate) mod string;
+pub(crate) mod structure;
 pub(crate) mod traits;
 
 #[cfg(test)]

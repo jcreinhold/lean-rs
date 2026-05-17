@@ -125,6 +125,28 @@ impl<'lean> Obj<'lean> {
             _life: PhantomData,
         }
     }
+
+    /// Recover the runtime borrow that anchors this handle's `'lean`.
+    ///
+    /// `LeanRuntime` is a ZST whose only construction path goes through
+    /// [`LeanRuntime::init`]; the `'lean` lifetime carried by `self` is
+    /// already a witness that a runtime borrow is live in the caller's
+    /// scope. Container readers (e.g. `Vec<T>::try_from_lean`) use this to
+    /// wrap extracted fields as fresh `Obj<'lean>` values without forcing
+    /// the runtime through every signature in the trait surface.
+    ///
+    /// `&self` rather than an associated function because the borrow
+    /// pins the inferred `'lean` lifetime to this `Obj`'s lifetime —
+    /// callers do not need to spell the parameter out at the call site.
+    #[allow(clippy::unused_self, reason = "`&self` pins the inferred 'lean lifetime parameter")]
+    pub(crate) fn runtime(&self) -> &'lean LeanRuntime {
+        // SAFETY: `LeanRuntime` is zero-sized; `NonNull::dangling()`
+        // produces an aligned non-null pointer suitable for a ZST borrow.
+        // The Lean runtime is alive whenever `'lean` is alive, so the
+        // synthesised reference is indistinguishable from the original
+        // `&LeanRuntime` borrow that witnessed `self`'s construction.
+        unsafe { NonNull::<LeanRuntime>::dangling().as_ref() }
+    }
 }
 
 impl ObjRef<'_, '_> {
