@@ -64,6 +64,9 @@ dependencies = [
 [[package]]
 name = "lean-rs"
 version = "0.1.0"
+dependencies = [
+ "lean-rs-sys",
+]
 
 [[package]]
 name = "lean-rs-sys"

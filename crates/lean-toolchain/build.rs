@@ -12,10 +12,14 @@
 //!    and `cargo:rerun-if-env-changed=*` for every env var `discover.rs`
 //!    consults at runtime.
 //!
-//! This script deliberately does not emit `cargo:rustc-link-*`. The
-//! `lean-rs-sys` crate already does that for the whole dependency graph;
-//! `emit_lean_link_directives()` in `src/build_helpers.rs` is the helper
-//! downstream embedders call from their own `build.rs`.
+//! This script does not emit `cargo:rustc-link-search` or
+//! `cargo:rustc-link-lib` directives — `lean-rs-sys` already does that
+//! for the whole dependency graph, and `emit_lean_link_directives()` in
+//! `src/build_helpers.rs` is the helper downstream embedders call from
+//! their own `build.rs`. It does emit a `cargo:rustc-link-arg=-Wl,-rpath,...`
+//! because `link-arg` directives do not propagate from `lean-rs-sys` to
+//! dependents, so each crate that produces a test/bench/example binary
+//! that loads Lean must bake its own rpath.
 
 // Build scripts use `panic!` as the abort mechanism — same pattern as
 // `lean-rs-sys/build.rs`.
@@ -98,6 +102,37 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LEAN_SYSROOT");
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
+
+    // Bake an rpath into this crate's test binaries so they can load
+    // `libleanshared.{dylib,so}` at run-time. `lean-toolchain` itself
+    // does not call into Lean, but it depends on `lean-rs-sys` whose
+    // build script attaches `libleanshared` to the link line; the test
+    // binary therefore needs to be able to resolve the dylib at load
+    // time. `cargo:rustc-link-arg` directives do not propagate from
+    // `lean-rs-sys` to dependents, so each crate that produces an
+    // executable that loads Lean emits the rpath itself.
+    if matches!(target_os.as_str(), "macos" | "linux")
+        && let Some(prefix) = discover_prefix()
+    {
+        let lib_lean = prefix.join("lib").join("lean");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_lean.display());
+    }
+}
+
+fn discover_prefix() -> Option<PathBuf> {
+    if let Some(p) = env::var_os("LEAN_SYSROOT") {
+        return Some(PathBuf::from(p));
+    }
+    let output = std::process::Command::new("lean").arg("--print-prefix").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let trimmed = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
 }
 
 fn find_fixture_dir(start: &Path) -> PathBuf {

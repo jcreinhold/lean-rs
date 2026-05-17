@@ -238,6 +238,17 @@ fn emit_link_directives(prefix: &Path) {
         println!("cargo:rustc-link-lib=dylib=uv");
     } else {
         println!("cargo:rustc-link-lib=dylib=leanshared");
+        // Bake an rpath into this crate's own binaries (tests, examples,
+        // benches) so they can load `libleanshared.{dylib,so}` at run-time
+        // without `DYLD_FALLBACK_LIBRARY_PATH` / `LD_LIBRARY_PATH` set.
+        // `cargo:rustc-link-arg` only affects the package emitting it, so
+        // dependent crates that produce their own binaries need to emit
+        // the same flag from their own build script (see
+        // `crates/lean-rs/build.rs`).
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if matches!(target_os.as_str(), "macos" | "linux") {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_lean.display());
+        }
     }
 
     // Lean's mimalloc is statically linked into `libleanrt.a` /
