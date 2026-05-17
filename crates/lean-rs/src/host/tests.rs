@@ -2,10 +2,11 @@
 //! `LeanSession` cascade.
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
-//! loads the `LeanRsFixture` capability dylib (which pre-resolves all
-//! nine session symbols — seven environment queries plus the
-//! prompt-15 `elaborate` and `kernel_check` pair), starts a session
-//! over an import list, and exercises the typed query methods.
+//! loads the `LeanRsFixture` capability dylib (which pre-resolves nine
+//! mandatory session symbols — seven environment queries plus the
+//! prompt-15 `elaborate` and `kernel_check` pair — and the three
+//! optional prompt-16 meta-service symbols), starts a session over an
+//! import list, and exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -15,8 +16,8 @@ use std::time::Instant;
 use crate::error::{HostStage, LeanError};
 use crate::runtime::LeanRuntime;
 use crate::{
-    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession,
-    LeanSeverity,
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanMetaOptions,
+    LeanMetaResponse, LeanSession, LeanSeverity, MetaCallStatus,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -451,4 +452,122 @@ fn session_reuse_amortises_import() {
         per_query_elapsed >= reuse_elapsed,
         "per-query reimport ({per_query_elapsed:?}) must not beat session reuse ({reuse_elapsed:?})",
     );
+}
+
+// -- run_meta (prompt 16) -----------------------------------------------
+//
+// Each test imports `LeanRsFixture.Meta` (which also pulls in
+// `LeanRsFixture.Elaboration` via the dependency edge). The fixture
+// dylib exports the three optional meta-service symbols, so the
+// `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
+// dispatches through cached addresses.
+
+fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    caps.session(&["LeanRsFixture.Meta"]).expect("session imports cleanly")
+}
+
+#[test]
+fn meta_infer_type_returns_ok_for_nat_type() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    // The type of `Nat.zero` is `Nat`; inferring its type yields `Type`.
+    // Using a Lean-produced Expr keeps the test honest — Rust never
+    // constructs an Expr directly.
+    let expr = session
+        .declaration_type("Nat.zero")
+        .expect("type query for Nat.zero")
+        .expect("Nat.zero has a type");
+    let outcome = session
+        .run_meta(&crate::infer_type(), expr, &LeanMetaOptions::new())
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::Ok,
+        "Meta.inferType on `Nat` must succeed, got {outcome:?}",
+    );
+    match outcome {
+        LeanMetaResponse::Ok(payload) => {
+            // Opaque LeanExpr; the success path is asserted by status().
+            drop(payload);
+        }
+        LeanMetaResponse::Failed(_) | LeanMetaResponse::TimeoutOrHeartbeat(_) | LeanMetaResponse::Unsupported(_) => {
+            panic!("expected Ok variant");
+        }
+    }
+}
+
+#[test]
+fn meta_whnf_returns_ok_for_nat_type() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let expr = session
+        .declaration_type("Nat.zero")
+        .expect("type query for Nat.zero")
+        .expect("Nat.zero has a type");
+    let outcome = session
+        .run_meta(&crate::whnf(), expr, &LeanMetaOptions::new())
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::Ok,
+        "Meta.whnf on a constant Expr must succeed, got {outcome:?}",
+    );
+    match outcome {
+        LeanMetaResponse::Ok(payload) => drop(payload),
+        LeanMetaResponse::Failed(_) | LeanMetaResponse::TimeoutOrHeartbeat(_) | LeanMetaResponse::Unsupported(_) => {
+            panic!("expected Ok variant");
+        }
+    }
+}
+
+#[test]
+fn meta_heartbeat_burn_yields_timeout_status() {
+    // timing note: with heartbeat_limit(1), Core.checkMaxHeartbeats
+    // trips on the very first iteration; the test completes in well
+    // under a millisecond. No threshold asserted (per the project's
+    // "no performance claim without numbers" rule).
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    // Any Expr will do — heartbeat_burn ignores its argument.
+    let expr = session
+        .declaration_type("Nat.zero")
+        .expect("type query for Nat.zero")
+        .expect("Nat.zero has a type");
+    let opts = LeanMetaOptions::new().heartbeat_limit(1);
+    let outcome = session
+        .run_meta(&crate::heartbeat_burn(), expr, &opts)
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::TimeoutOrHeartbeat,
+        "heartbeat budget = 1 must surface as TimeoutOrHeartbeat, got {outcome:?}",
+    );
+    match outcome {
+        LeanMetaResponse::TimeoutOrHeartbeat(failure) => {
+            let first = failure
+                .diagnostics()
+                .first()
+                .expect("heartbeat failure must carry at least one diagnostic");
+            assert_eq!(first.severity(), LeanSeverity::Error);
+            assert!(
+                !first.message().is_empty(),
+                "heartbeat diagnostic message must be non-empty",
+            );
+        }
+        LeanMetaResponse::Ok(_) | LeanMetaResponse::Failed(_) | LeanMetaResponse::Unsupported(_) => {
+            panic!("expected TimeoutOrHeartbeat variant");
+        }
+    }
 }

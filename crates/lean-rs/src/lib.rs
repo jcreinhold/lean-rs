@@ -59,9 +59,14 @@
 //!   [`LeanSession`] (prompt 14) layer Lake-project entry, capability
 //!   loading with pre-resolved symbol caches, and a long-lived session
 //!   with `query_declaration` / `list_declarations` / `declaration_type`
-//!   / `declaration_kind` / `declaration_name`. The evidence surface
-//!   (`LeanEvidence`, `ProofSummary`, `EvidenceStatus`) and bulk
-//!   session methods land in prompts 17 and 20.
+//!   / `declaration_kind` / `declaration_name`. Prompt 15 adds
+//!   `elaborate` / `kernel_check`; prompt 16 adds the bounded `MetaM`
+//!   surface — [`LeanMetaOptions`], [`LeanMetaService`],
+//!   [`LeanMetaResponse`], [`MetaCallStatus`], [`LeanMetaTransparency`]
+//!   and the three pinned services [`infer_type`] / [`whnf`] /
+//!   [`heartbeat_burn`]. The evidence re-validator (`ProofSummary` +
+//!   `check_evidence`) and bulk session methods land in prompts 17
+//!   and 20.
 //!
 //! ## Layering
 //!
@@ -86,6 +91,10 @@ pub use crate::host::elaboration::{
 };
 pub use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome};
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
+pub use crate::host::meta::{
+    LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
+    infer_type, whnf,
+};
 pub use crate::host::{LeanCapabilities, LeanHost, LeanSession};
 pub use crate::runtime::LeanRuntime;
 

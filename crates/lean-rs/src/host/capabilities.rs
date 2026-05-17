@@ -2,12 +2,17 @@
 //! symbol addresses pre-resolved.
 //!
 //! [`LeanCapabilities`] owns the [`crate::module::LeanLibrary`] and
-//! caches the nine function-symbol addresses that
-//! [`crate::host::LeanSession`] dispatches through (seven baseline
-//! environment-query symbols plus the prompt-15 `elaborate` /
-//! `kernel_check` pair). Pre-resolution at construction means each
-//! later query is one struct-field read and one FFI call — no per-query
-//! `dlsym`.
+//! caches up to twelve function-symbol addresses that
+//! [`crate::host::LeanSession`] dispatches through: nine **mandatory**
+//! baseline symbols (seven environment-query symbols from prompt 14
+//! plus the prompt-15 `elaborate` / `kernel_check` pair) and three
+//! **optional** prompt-16 meta-service symbols (`infer_type`, `whnf`,
+//! `heartbeat_burn`). A missing mandatory symbol fails capability
+//! load; a missing meta-service symbol degrades to a synthesised
+//! [`crate::LeanMetaResponse::Unsupported`] at the
+//! [`crate::LeanSession::run_meta`] call site. Pre-resolution at
+//! construction means each later query is one struct-field read and
+//! one FFI call — no per-query `dlsym`.
 //!
 //! Construction goes through [`crate::host::LeanHost::load_capabilities`];
 //! [`LeanCapabilities::session`] then imports a module list and returns
@@ -47,17 +52,20 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// Build a [`LeanCapabilities`] from an opened library.
     ///
     /// Initializes the root module of the dylib (idempotent through
-    /// Lean's `_G_initialized` short-circuit) and resolves the nine
-    /// session-dispatch symbol addresses from the library. The
-    /// initialized [`crate::module::LeanModule`] is dropped at the end
-    /// of this call — the cached symbol addresses provide everything
-    /// the session needs without re-`dlsym`-ing.
+    /// Lean's `_G_initialized` short-circuit) and resolves the
+    /// session-dispatch symbol addresses from the library: the nine
+    /// mandatory baseline symbols (load failure on miss) and the three
+    /// optional meta-service symbols (missing entries stored as
+    /// `None`). The initialized [`crate::module::LeanModule`] is
+    /// dropped at the end of this call — the cached symbol addresses
+    /// provide everything the session needs without re-`dlsym`-ing.
     ///
     /// # Errors
     ///
     /// Returns [`crate::LeanError::Host`] with stage
     /// [`crate::HostStage::Link`] if the initializer or any of the
-    /// nine required symbols is missing from `library`.
+    /// nine **mandatory** symbols is missing from `library`. Missing
+    /// optional meta-service symbols never fail capability load.
     pub(crate) fn new(
         host: &'h LeanHost<'lean>,
         library: LeanLibrary<'lean>,
@@ -65,7 +73,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         lib_name: &str,
     ) -> LeanResult<Self> {
         // Drive Lean's per-module initializer once so the module's
-        // constants (and the seven `@[export]` functions we're about to
+        // constants (and the `@[export]` functions we're about to
         // resolve) are live. We don't keep the LeanModule: the symbol
         // addresses we cache below outlive any single LeanModule borrow.
         let _module = library.initialize_module(package, lib_name)?;

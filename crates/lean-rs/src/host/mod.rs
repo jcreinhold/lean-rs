@@ -36,6 +36,7 @@
 pub mod elaboration;
 pub mod evidence;
 pub mod handle;
+pub mod meta;
 
 pub(crate) mod lake;
 

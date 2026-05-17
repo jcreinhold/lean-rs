@@ -57,6 +57,19 @@ impl LeanElabFailure {
     pub fn truncated(&self) -> bool {
         self.truncated
     }
+
+    /// Construct a one-message failure carrying a host-synthesised
+    /// error diagnostic (no Lean source). Used by
+    /// [`crate::LeanSession::run_meta`] when a capability dylib does
+    /// not export the requested meta service — there is no Lean shim
+    /// to produce diagnostics, so the host stack builds one itself.
+    /// `truncated` is always `false` for synthesised failures.
+    pub(crate) fn synthetic(message: String, file_label: String) -> Self {
+        Self {
+            diagnostics: vec![LeanDiagnostic::synthetic_error(message, file_label)],
+            truncated: false,
+        }
+    }
 }
 
 impl fmt::Display for LeanElabFailure {

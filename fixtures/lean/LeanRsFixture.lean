@@ -7,6 +7,7 @@ import LeanRsFixture.Capability
 import LeanRsFixture.Handles
 import LeanRsFixture.Environment
 import LeanRsFixture.Elaboration
+import LeanRsFixture.Meta
 
 /-! Roll-up module for the `LeanRsFixture` Lake library.
     All `@[export ...]` declarations live in the submodules; this file is

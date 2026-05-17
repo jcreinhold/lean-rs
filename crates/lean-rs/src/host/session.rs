@@ -11,29 +11,35 @@
 //! ## Capability contract
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export seven `@[export]` symbols with the following
-//! signatures (matched at `LeanCapabilities::load_capabilities` time):
+//! loads must export nine **mandatory** `@[export]` symbols and may
+//! export three **optional** meta-service symbols (matched at
+//! `LeanCapabilities::load_capabilities` time):
 //!
-//! | C symbol                                  | Lean signature                                             |
-//! | ----------------------------------------- | ---------------------------------------------------------- |
-//! | `lean_rs_host_session_import`             | `String -> Array String -> IO Environment`                 |
-//! | `lean_rs_host_name_from_string`           | `String -> Name`                                           |
-//! | `lean_rs_host_env_query_declaration`      | `Environment -> Name -> IO (Option Declaration)`           |
-//! | `lean_rs_host_env_list_declarations`      | `Environment -> IO (Array Name)`                           |
-//! | `lean_rs_host_env_declaration_type`       | `Environment -> Name -> IO (Option Expr)`                  |
-//! | `lean_rs_host_env_declaration_kind`       | `Environment -> Name -> IO String`                         |
-//! | `lean_rs_host_env_declaration_name`       | `Environment -> Name -> IO String`                         |
-//! | `lean_rs_host_elaborate`                  | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
-//! | `lean_rs_host_kernel_check`               | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome` |
+//! | C symbol                                  | Mandatory? | Lean signature                                             |
+//! | ----------------------------------------- | ---------- | ---------------------------------------------------------- |
+//! | `lean_rs_host_session_import`             | yes        | `String -> Array String -> IO Environment`                 |
+//! | `lean_rs_host_name_from_string`           | yes        | `String -> Name`                                           |
+//! | `lean_rs_host_env_query_declaration`      | yes        | `Environment -> Name -> IO (Option Declaration)`           |
+//! | `lean_rs_host_env_list_declarations`      | yes        | `Environment -> IO (Array Name)`                           |
+//! | `lean_rs_host_env_declaration_type`       | yes        | `Environment -> Name -> IO (Option Expr)`                  |
+//! | `lean_rs_host_env_declaration_kind`       | yes        | `Environment -> Name -> IO String`                         |
+//! | `lean_rs_host_env_declaration_name`       | yes        | `Environment -> Name -> IO String`                         |
+//! | `lean_rs_host_elaborate`                  | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
+//! | `lean_rs_host_kernel_check`               | yes        | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome` |
+//! | `lean_rs_host_meta_infer_type`            | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
+//! | `lean_rs_host_meta_whnf`                  | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
+//! | `lean_rs_host_meta_heartbeat_burn`        | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
 //!
-//! Missing symbols surface at `load_capabilities` as
+//! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`crate::HostStage::Link`] — failures bind to the capability's load,
-//! not to the first query.
+//! not to the first query. Missing **optional** meta-service symbols
+//! degrade gracefully: [`LeanSession::run_meta`] returns
+//! [`crate::LeanMetaResponse::Unsupported`] against a service whose
+//! address did not resolve, the rest of the capability stays usable.
 //!
-//! The baseline (prompts 13–14) is the first seven symbols; the last
-//! two land with the prompt-15 elaboration / kernel-check additions.
-//! Future prompts (evidence re-validation, bulk methods) extend the
-//! contract additively.
+//! The baseline (prompts 13–14) is the first seven symbols; prompt 15
+//! adds the `elaborate` / `kernel_check` pair; prompt 16 adds the three
+//! optional meta-service symbols. Future prompts extend additively.
 //!
 //! The Rust side passes the `.olean` search path (resolved by
 //! [`crate::host::lake::LakeProject`]) as the first argument to
@@ -57,6 +63,12 @@
 // scoped to this single dispatch site, per
 // `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
+// `run_meta` is `pub` but bounded on `crate::abi::traits::{LeanAbi, TryFromLean}`.
+// `LeanAbi` is sealed-public; `TryFromLean` is `pub(crate)`. The bound is a
+// crate-internal compatibility requirement, not a downstream extension point
+// (the meta-service registry is closed by `host::meta::service`). Same
+// precedent as `module::exported.rs`.
+#![allow(private_bounds, private_interfaces)]
 
 use core::ffi::c_void;
 
@@ -65,21 +77,25 @@ use crate::error::{HostStage, LeanError, LeanResult};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::LeanKernelOutcome;
+use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use crate::module::{LeanExported, LeanIo, LeanLibrary};
 use crate::runtime::obj::Obj;
 use crate::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionSymbols: pre-resolved C-ABI function addresses ---------------
 
-/// The nine function-symbol addresses [`LeanSession`] dispatches
+/// The session function-symbol addresses [`LeanSession`] dispatches
 /// through.
 ///
 /// Populated once at [`LeanCapabilities::new`] time; read by every
-/// session method without further `dlsym`. Each field is a non-null
-/// `*mut c_void` (raw function entry point); the safety obligation that
-/// these point at Lake-emitted functions with the expected ABI is
-/// discharged by [`resolve`] only resolving symbols whose Lean
-/// signatures are pinned in the module docstring above.
+/// session method without further `dlsym`. Each mandatory field is a
+/// non-null `*mut c_void` (raw function entry point); the safety
+/// obligation that these point at Lake-emitted functions with the
+/// expected ABI is discharged by [`Self::resolve`] only resolving
+/// symbols whose Lean signatures are pinned in the module docstring
+/// above. Meta-service fields are `Option<*mut c_void>`: missing
+/// symbols degrade to [`crate::LeanMetaResponse::Unsupported`] at the
+/// `run_meta` dispatch site instead of failing capability load.
 pub(crate) struct SessionSymbols {
     pub(crate) session_import: *mut c_void,
     pub(crate) name_from_string: *mut c_void,
@@ -90,17 +106,25 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_declaration_name: *mut c_void,
     pub(crate) elaborate: *mut c_void,
     pub(crate) kernel_check: *mut c_void,
+    pub(crate) meta_infer_type: Option<*mut c_void>,
+    pub(crate) meta_whnf: Option<*mut c_void>,
+    pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
-    /// Resolve all nine session function symbols from `library`.
+    /// Resolve session function symbols from `library`. The nine
+    /// baseline symbols are mandatory; the three meta-service symbols
+    /// are optional.
     ///
     /// # Errors
     ///
     /// Returns [`LeanError::Host`] with stage [`HostStage::Link`] on
-    /// the first symbol that fails to resolve; the diagnostic embeds
-    /// the missing symbol name and the library path (via
-    /// [`LeanLibrary::resolve_function_symbol`]).
+    /// the first mandatory symbol that fails to resolve; the
+    /// diagnostic embeds the missing symbol name and the library path
+    /// (via [`LeanLibrary::resolve_function_symbol`]). Missing
+    /// **optional** meta-service symbols never fail capability load —
+    /// the corresponding field is `None` and the `run_meta` dispatch
+    /// site synthesises an `Unsupported` response.
     pub(crate) fn resolve(library: &LeanLibrary<'_>) -> LeanResult<Self> {
         Ok(Self {
             session_import: library.resolve_function_symbol("lean_rs_host_session_import")?,
@@ -112,7 +136,22 @@ impl SessionSymbols {
             env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
             elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
             kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
+            meta_infer_type: library.resolve_optional_function_symbol("lean_rs_host_meta_infer_type"),
+            meta_whnf: library.resolve_optional_function_symbol("lean_rs_host_meta_whnf"),
+            meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
         })
+    }
+
+    /// Look up the cached address for a meta service by name. Returns
+    /// `None` if the service was absent from the loaded capability at
+    /// resolve time.
+    pub(crate) fn meta_address_by_name(&self, name: &str) -> Option<*mut c_void> {
+        match name {
+            "lean_rs_host_meta_infer_type" => self.meta_infer_type,
+            "lean_rs_host_meta_whnf" => self.meta_whnf,
+            "lean_rs_host_meta_heartbeat_burn" => self.meta_heartbeat_burn,
+            _ => None,
+        }
     }
 }
 
@@ -356,6 +395,67 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+        )
+    }
+
+    /// Invoke a registered bounded [`MetaM`](https://leanprover.github.io/theorem_proving_in_lean4/)
+    /// service against the imported environment.
+    ///
+    /// The session looks up the service's cached address; if the
+    /// loaded capability does not export the symbol, the call short-
+    /// circuits to [`LeanMetaResponse::Unsupported`] with a synthetic
+    /// host-side diagnostic naming the missing symbol. Otherwise the
+    /// session constructs a per-call typed [`LeanExported`] handle
+    /// over the meta service's `(Environment, Req, UInt64, USize,
+    /// UInt8) -> IO (MetaResponse Resp)` signature and dispatches.
+    ///
+    /// The outer [`LeanResult`] surfaces host-stack failures (a Lean
+    /// `IO`-level exception from the shim itself, or an undecodable
+    /// return value). The four-way classification — `Ok` / `Failed` /
+    /// `TimeoutOrHeartbeat` / `Unsupported` — lives in the inner
+    /// [`LeanMetaResponse`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean shim raises
+    /// through `IO`. Returns [`LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] if the return value does not decode
+    /// into [`LeanMetaResponse<Resp>`].
+    pub fn run_meta<Req, Resp>(
+        &mut self,
+        service: &LeanMetaService<Req, Resp>,
+        request: Req,
+        options: &LeanMetaOptions,
+    ) -> LeanResult<LeanMetaResponse<Resp>>
+    where
+        Req: crate::abi::traits::LeanAbi<'lean>,
+        Resp: TryFromLean<'lean>,
+    {
+        let Some(address) = self.capabilities.symbols().meta_address_by_name(service.name()) else {
+            let message = format!(
+                "meta service '{}' is not exported by the loaded capability",
+                service.name()
+            );
+            return Ok(LeanMetaResponse::Unsupported(LeanElabFailure::synthetic(
+                message,
+                "<host>".to_owned(),
+            )));
+        };
+        // SAFETY: per the SessionSymbols::resolve invariant — the
+        // address (when present) resolves a Lake-emitted function
+        // whose signature is pinned in the capability contract table
+        // above: `(Environment, Req, UInt64, USize, UInt8) -> IO
+        // (MetaResponse Resp)`. `Req: LeanAbi<'lean>` and `Resp:
+        // TryFromLean<'lean>` line up with the per-arg `CRepr` and the
+        // `LeanIo` decoder.
+        let call: LeanExported<'lean, '_, (Obj<'lean>, Req, u64, usize, u8), LeanIo<LeanMetaResponse<Resp>>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        call.call(
+            self.environment.clone(),
+            request,
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+            options.transparency_byte(),
         )
     }
 

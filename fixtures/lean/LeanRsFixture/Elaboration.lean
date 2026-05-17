@@ -72,8 +72,10 @@ inductive KernelOutcome where
 
 /-- Build a one-message failure carrying `msg` as a free-form error.
     Used for diagnostics that have no Lean-level source position
-    (parser failures, host-side classification, IO exceptions). -/
-private def singleErrorFailure (msg : String) (fileLabel : String) : ElabFailure :=
+    (parser failures, host-side classification, IO exceptions).
+    Also reused by `LeanRsFixture.Meta` for the failure / heartbeat /
+    unsupported branches of `MetaResponse`. -/
+def singleErrorFailure (msg : String) (fileLabel : String) : ElabFailure :=
   let diag : Diagnostic :=
     { severity := .error, message := msg, position := none, fileLabel }
   { diagnostics := #[diag], truncated := .complete }

@@ -160,6 +160,22 @@ impl LeanDiagnostic {
     pub fn file_label(&self) -> &str {
         &self.file_label
     }
+
+    /// Construct a synthetic error-severity diagnostic without a source
+    /// position. Used by the host stack when it must surface a
+    /// diagnostic that did not originate in Lean's `MessageLog` — for
+    /// example, the `LeanMetaResponse::Unsupported` branch built when a
+    /// capability dylib does not export the requested meta service.
+    /// The `message` is bounded at [`crate::LEAN_ERROR_MESSAGE_LIMIT`]
+    /// on a UTF-8 char boundary, mirroring the Lean-decoded path.
+    pub(crate) fn synthetic_error(message: String, file_label: String) -> Self {
+        Self {
+            severity: LeanSeverity::Error,
+            message: bound_message(message),
+            position: None,
+            file_label,
+        }
+    }
 }
 
 impl<'lean> TryFromLean<'lean> for LeanDiagnostic {

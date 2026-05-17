@@ -192,6 +192,29 @@ impl<'lean> LeanLibrary<'lean> {
         Ok(*symbol)
     }
 
+    /// Resolve `name` as a function-pointer symbol, tolerating a missing
+    /// symbol.
+    ///
+    /// Returns `Ok(Some(address))` when the symbol resolves, `Ok(None)`
+    /// when it is absent from this library. Used by the host stack to
+    /// pre-resolve *optional* capability symbols at
+    /// [`crate::host::LeanCapabilities::new`] time without failing
+    /// capability load when an older fixture omits a service.
+    ///
+    /// Symbol resolution at the dlsym level only fails with "symbol not
+    /// present" — the dynamic linker has already accepted the library at
+    /// [`Self::open`], so a per-symbol lookup error is either "missing"
+    /// or a `\0` in the name (which the host stack never passes). Both
+    /// are collapsed into the `Ok(None)` branch by design.
+    pub(crate) fn resolve_optional_function_symbol(&self, name: &str) -> Option<*mut c_void> {
+        // SAFETY: identical to `resolve_function_symbol`; the symbol
+        // borrow does not escape this scope.
+        match unsafe { self.library.get::<*mut c_void>(name.as_bytes()) } {
+            Ok(symbol) => Some(*symbol),
+            Err(_) => None,
+        }
+    }
+
     /// Resolve `name` as a Lean nullary-constant global symbol
     /// (data section). The returned pointer addresses the storage
     /// holding the persistent `lean_object*` value; the caller reads
