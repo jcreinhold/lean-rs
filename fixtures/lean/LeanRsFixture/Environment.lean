@@ -20,7 +20,16 @@ def sessionImport (searchPath : String) (importNames : Array String) : IO Enviro
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot [System.FilePath.mk searchPath]
   let imports := importNames.map fun n => { module := n.toName : Import }
-  Lean.importModules imports Lean.Options.empty 0
+  -- `loadExts := true` activates scoped environment extensions on
+  -- import — including the parser extension. Without it, the
+  -- imported environment has only the bootstrap-level builtin
+  -- parsers (~7 trailing parsers in the `term` category), so
+  -- `Lean.Elab.Frontend.process` / `Parser.runParserCategory`
+  -- cannot parse declarations that use library-defined trailing
+  -- operators like `+`, `=`, `∧`. With it set, the prompt-15
+  -- `elaborate` / `kernel_check` shims see the full operator set
+  -- the prelude defines.
+  Lean.importModules imports Lean.Options.empty 0 (loadExts := true)
 
 /-- Convert a dotted Rust string into a `Lean.Name`. Pure (no IO);
     `Lean.Name.toName` parses the dotted form (`"Foo.Bar"` ⇒

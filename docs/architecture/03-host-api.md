@@ -32,7 +32,12 @@ pub use crate::error::{
 };
 pub use crate::host::{LeanHost, LeanCapabilities, LeanSession};
 pub use crate::host::handle::{LeanName, LeanLevel, LeanExpr, LeanDeclaration};
-pub use crate::host::evidence::{LeanEvidence, ProofSummary, EvidenceStatus};
+pub use crate::host::elaboration::{
+    LeanElabOptions, LeanElabFailure, LeanDiagnostic, LeanSeverity, LeanPosition,
+    LEAN_HEARTBEAT_LIMIT_DEFAULT, LEAN_HEARTBEAT_LIMIT_MAX,
+    LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX,
+};
+pub use crate::host::evidence::{LeanEvidence, EvidenceStatus, LeanKernelOutcome, ProofSummary};
 pub use crate::runtime::LeanRuntime;
 ```
 
@@ -64,9 +69,19 @@ root because the happy path goes through `LeanHost` → `LeanCapabilities` → `
 | `LeanLevel<'lean>`                                | `lean_rs::host::handle::LeanLevel`          | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
 | `LeanExpr<'lean>`                                 | `lean_rs::host::handle::LeanExpr`           | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
 | `LeanDeclaration<'lean>`                          | `lean_rs::host::handle::LeanDeclaration`    | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
-| `LeanEvidence<'lean>`                             | `lean_rs::host::evidence::LeanEvidence`     | yes                          | `pub`        | Opaque checked-evidence handle.                                                                                                                        |
-| `ProofSummary`                                    | `lean_rs::host::evidence::ProofSummary`     | yes                          | `pub`        | Lean-authored display + status; not trusted outside the session.                                                                                       |
-| `EvidenceStatus`                                  | `lean_rs::host::evidence::EvidenceStatus`   | yes                          | `pub`        | Tag enum: `Checked` / `Rejected` / `Unavailable` / `Unsupported`.                                                                                      |
+| `LeanEvidence<'lean>`                             | `lean_rs::host::evidence::LeanEvidence`     | yes                          | `pub`        | Opaque checked-evidence handle. Construct via [`LeanSession::kernel_check`]; no public inherent methods (prompt 17 adds `ProofSummary` / re-validation). |
+| `EvidenceStatus`                                  | `lean_rs::host::evidence::EvidenceStatus`   | yes                          | `pub`        | Tag enum: `Checked` / `Rejected` / `Unavailable` / `Unsupported`. `#[non_exhaustive]`.                                                                  |
+| `LeanKernelOutcome<'lean>`                        | `lean_rs::host::evidence::LeanKernelOutcome`| yes                          | `pub`        | Sum returned by [`LeanSession::kernel_check`]; carries a [`LeanEvidence`] on `Checked` or a [`LeanElabFailure`] on the other three variants.            |
+| `ProofSummary`                                    | `lean_rs::host::evidence::ProofSummary`     | yes                          | `pub`        | Lean-authored display + status; not trusted outside the session. *Pending — prompt 17.*                                                                |
+| `LeanElabOptions`                                 | `lean_rs::host::elaboration::LeanElabOptions` | yes                        | `pub`        | Bounded options bundle for `elaborate` / `kernel_check`: heartbeat limit, diagnostic byte limit, namespace context, file label. Setters saturate.       |
+| `LeanElabFailure`                                 | `lean_rs::host::elaboration::LeanElabFailure` | yes                        | `pub`        | Typed diagnostic payload returned by `elaborate` / non-`Checked` `kernel_check`. Carries an ordered `&[LeanDiagnostic]` and a `truncated()` flag.       |
+| `LeanDiagnostic`                                  | `lean_rs::host::elaboration::LeanDiagnostic`  | yes                        | `pub`        | One Lean-emitted diagnostic: severity, bounded message, optional position, file label.                                                                  |
+| `LeanSeverity`                                    | `lean_rs::host::elaboration::LeanSeverity`    | yes                        | `pub`        | Tag enum mirroring `Lean.MessageSeverity`: `Info` / `Warning` / `Error`. `#[non_exhaustive]`.                                                            |
+| `LeanPosition`                                    | `lean_rs::host::elaboration::LeanPosition`    | yes                        | `pub`        | 1-indexed `line` / `column`, optional end `line` / `column`. Mirrors Lean's `Position` shape.                                                            |
+| `LEAN_HEARTBEAT_LIMIT_DEFAULT`                    | `lean_rs::host::elaboration::LEAN_HEARTBEAT_LIMIT_DEFAULT` | yes           | `pub const`  | 200_000 — matches Lean's own `maxHeartbeats` default at 4.29.1.                                                                                          |
+| `LEAN_HEARTBEAT_LIMIT_MAX`                        | `lean_rs::host::elaboration::LEAN_HEARTBEAT_LIMIT_MAX`     | yes           | `pub const`  | 200_000_000 ceiling for the heartbeat setter; saturating.                                                                                                |
+| `LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT`              | `lean_rs::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT` | yes     | `pub const`  | 64 KiB — default cumulative diagnostic byte budget per call.                                                                                             |
+| `LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`                  | `lean_rs::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`     | yes     | `pub const`  | 1 MiB ceiling for the diagnostic byte budget setter; saturating.                                                                                         |
 | `LakeProject`                                     | `lean_rs::host::lake::LakeProject`          | no                           | `pub(crate)` | Lake discovery helper used by `LeanHost`.                                                                                                              |
 | `LeanError`                                       | `lean_rs::error::LeanError`                 | yes                          | `pub`        | Single public error enum; `#[non_exhaustive]`. Per `RD-2026-05-17-006`, two variants: `LeanException(LeanException)` and `Host(HostFailure)`.          |
 | `LeanResult<T>`                                   | `lean_rs::error::LeanResult`                | yes                          | `pub`        | `Result<T, LeanError>`. The IO-result decoder returns `LeanResult<T>` directly; there is no `IoResult<T>` alias.                                       |
@@ -118,8 +133,9 @@ piecewise. Doc comments and `# Errors` / `# Panics` sections are mandatory.
     `__` escaping on the package; both pieces are required to resolve the on-disk artifact)
 - `LeanCapabilities::session(&self, imports: &[&str]) -> LeanResult<LeanSession<'lean, '_>>`
 - `LeanSession::query_declaration(&mut self, name: &str) -> LeanResult<LeanDeclaration<'lean>>`
-- `LeanSession::elaborate(&mut self, source: &str) -> LeanResult<LeanExpr<'lean>>`
-- `LeanSession::check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus>`
+- `LeanSession::elaborate(&mut self, source: &str, expected_type: Option<&LeanExpr<'lean>>, options: &LeanElabOptions) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>>`
+- `LeanSession::kernel_check(&mut self, source: &str, options: &LeanElabOptions) -> LeanResult<LeanKernelOutcome<'lean>>`
+- `LeanSession::check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus>` (prompt 17)
 - `LeanSession::query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>>` (prompt
     20\)
 - `LeanSession::with_session_pool(...) -> ...` (prompt 20 — exact signature deferred)

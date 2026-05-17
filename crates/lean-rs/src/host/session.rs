@@ -23,13 +23,17 @@
 //! | `lean_rs_host_env_declaration_type`       | `Environment -> Name -> IO (Option Expr)`                  |
 //! | `lean_rs_host_env_declaration_kind`       | `Environment -> Name -> IO String`                         |
 //! | `lean_rs_host_env_declaration_name`       | `Environment -> Name -> IO String`                         |
+//! | `lean_rs_host_elaborate`                  | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
+//! | `lean_rs_host_kernel_check`               | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome` |
 //!
 //! Missing symbols surface at `load_capabilities` as
 //! [`crate::HostStage::Link`] — failures bind to the capability's load,
 //! not to the first query.
 //!
-//! Later prompts (parse/elaborate, evidence) extend this contract
-//! additively; the seven listed here are the baseline.
+//! The baseline (prompts 13–14) is the first seven symbols; the last
+//! two land with the prompt-15 elaboration / kernel-check additions.
+//! Future prompts (evidence re-validation, bulk methods) extend the
+//! contract additively.
 //!
 //! The Rust side passes the `.olean` search path (resolved by
 //! [`crate::host::lake::LakeProject`]) as the first argument to
@@ -59,13 +63,15 @@ use core::ffi::c_void;
 use crate::abi::traits::TryFromLean;
 use crate::error::{HostStage, LeanError, LeanResult};
 use crate::host::capabilities::LeanCapabilities;
+use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
+use crate::host::evidence::LeanKernelOutcome;
 use crate::module::{LeanExported, LeanIo, LeanLibrary};
 use crate::runtime::obj::Obj;
 use crate::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionSymbols: pre-resolved C-ABI function addresses ---------------
 
-/// The seven function-symbol addresses [`LeanSession`] dispatches
+/// The nine function-symbol addresses [`LeanSession`] dispatches
 /// through.
 ///
 /// Populated once at [`LeanCapabilities::new`] time; read by every
@@ -82,10 +88,12 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_declaration_type: *mut c_void,
     pub(crate) env_declaration_kind: *mut c_void,
     pub(crate) env_declaration_name: *mut c_void,
+    pub(crate) elaborate: *mut c_void,
+    pub(crate) kernel_check: *mut c_void,
 }
 
 impl SessionSymbols {
-    /// Resolve all seven session function symbols from `library`.
+    /// Resolve all nine session function symbols from `library`.
     ///
     /// # Errors
     ///
@@ -102,6 +110,8 @@ impl SessionSymbols {
             env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
             env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
             env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
+            elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
+            kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
         })
     }
 }
@@ -256,6 +266,97 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<String>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
         query.call(self.environment.clone(), name_handle)
+    }
+
+    /// Parse and elaborate a single Lean term against the imported
+    /// environment, optionally against an expected type.
+    ///
+    /// The boundary is explicit: Rust supplies the source text, module
+    /// context, and bounded options; Lean parses, elaborates, and
+    /// returns either an opaque [`LeanExpr`] handle or a structured
+    /// [`LeanElabFailure`] carrying typed diagnostics. Rust does not
+    /// inspect elaborator internals or proof terms to decide
+    /// correctness.
+    ///
+    /// The outer [`LeanResult`] surfaces host-stack failures (a Lean
+    /// `IO`-level exception from the shim itself, a malformed Lean
+    /// return value); the inner `Result` distinguishes successful
+    /// elaboration from parse / type / kernel-stage failures the
+    /// elaborator reports through its `MessageLog`. Both error paths
+    /// propagate the [`LeanElabOptions::diagnostic_byte_limit`] bound
+    /// structurally.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean-side shim raises
+    /// through `IO`. Returns [`LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] if the Lean return value does not
+    /// decode into [`LeanElabFailure`] / [`LeanExpr`].
+    pub fn elaborate(
+        &mut self,
+        source: &str,
+        expected_type: Option<&LeanExpr<'lean>>,
+        options: &LeanElabOptions,
+    ) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>> {
+        let address = self.capabilities.symbols().elaborate;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, String, Option Expr, String, String,
+        // UInt64, USize) -> IO (Except ElabFailure Expr)`.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize),
+            LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        call.call(
+            self.environment.clone(),
+            source.to_owned(),
+            expected_type.cloned(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        )
+    }
+
+    /// Parse, elaborate, and kernel-check a Lean declaration source
+    /// (typically a `theorem` or `def`), returning a typed outcome
+    /// that classifies the result and carries either the produced
+    /// [`crate::LeanEvidence`] handle or the diagnostics the elaborator and
+    /// kernel emitted.
+    ///
+    /// The boundary is explicit (mirrors [`Self::elaborate`]): Rust
+    /// supplies source + options; Lean parses, elaborates, runs
+    /// `addDecl` (which kernel-checks), and classifies the outcome.
+    /// Rust never inspects the produced proof term or declaration
+    /// internals.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean-side shim
+    /// raises through `IO` (an unexpected internal failure that is not
+    /// itself a rejection / unavailable diagnostic). Returns
+    /// [`LeanError::Host`] with stage [`HostStage::Conversion`] if the
+    /// Lean return value does not decode into [`LeanKernelOutcome`].
+    pub fn kernel_check(&mut self, source: &str, options: &LeanElabOptions) -> LeanResult<LeanKernelOutcome<'lean>> {
+        let address = self.capabilities.symbols().kernel_check;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, String, String, String, UInt64, USize) ->
+        // IO KernelOutcome`.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (Obj<'lean>, String, String, String, u64, usize),
+            LeanIo<LeanKernelOutcome<'lean>>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        call.call(
+            self.environment.clone(),
+            source.to_owned(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        )
     }
 
     fn runtime(&self) -> &'lean crate::runtime::LeanRuntime {

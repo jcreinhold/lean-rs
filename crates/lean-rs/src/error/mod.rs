@@ -249,7 +249,10 @@ pub enum LeanExceptionKind {
 
 /// Truncate `s` to at most [`LEAN_ERROR_MESSAGE_LIMIT`] bytes on a UTF-8
 /// char boundary. The single place every constructor enforces the bound.
-fn bound_message(mut s: String) -> String {
+///
+/// `pub(crate)` so the elaboration diagnostic decoder can apply the same
+/// bound to per-diagnostic messages it pulls out of Lean.
+pub(crate) fn bound_message(mut s: String) -> String {
     if s.len() <= LEAN_ERROR_MESSAGE_LIMIT {
         return s;
     }

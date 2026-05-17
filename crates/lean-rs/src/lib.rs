@@ -80,6 +80,11 @@ pub(crate) mod runtime;
 pub use crate::error::{
     HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };
+pub use crate::host::elaboration::{
+    LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
+    LEAN_HEARTBEAT_LIMIT_MAX, LeanDiagnostic, LeanElabFailure, LeanElabOptions, LeanPosition, LeanSeverity,
+};
+pub use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome};
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::host::{LeanCapabilities, LeanHost, LeanSession};
 pub use crate::runtime::LeanRuntime;

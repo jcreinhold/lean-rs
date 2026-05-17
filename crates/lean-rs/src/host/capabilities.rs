@@ -2,10 +2,12 @@
 //! symbol addresses pre-resolved.
 //!
 //! [`LeanCapabilities`] owns the [`crate::module::LeanLibrary`] and
-//! caches the seven function-symbol addresses that
-//! [`crate::host::LeanSession`] dispatches through. Pre-resolution at
-//! construction means each later query is one struct-field read and one
-//! FFI call — no per-query `dlsym`.
+//! caches the nine function-symbol addresses that
+//! [`crate::host::LeanSession`] dispatches through (seven baseline
+//! environment-query symbols plus the prompt-15 `elaborate` /
+//! `kernel_check` pair). Pre-resolution at construction means each
+//! later query is one struct-field read and one FFI call — no per-query
+//! `dlsym`.
 //!
 //! Construction goes through [`crate::host::LeanHost::load_capabilities`];
 //! [`LeanCapabilities::session`] then imports a module list and returns
@@ -45,7 +47,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// Build a [`LeanCapabilities`] from an opened library.
     ///
     /// Initializes the root module of the dylib (idempotent through
-    /// Lean's `_G_initialized` short-circuit) and resolves the seven
+    /// Lean's `_G_initialized` short-circuit) and resolves the nine
     /// session-dispatch symbol addresses from the library. The
     /// initialized [`crate::module::LeanModule`] is dropped at the end
     /// of this call — the cached symbol addresses provide everything
@@ -55,7 +57,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// Returns [`crate::LeanError::Host`] with stage
     /// [`crate::HostStage::Link`] if the initializer or any of the
-    /// seven required symbols is missing from `library`.
+    /// nine required symbols is missing from `library`.
     pub(crate) fn new(
         host: &'h LeanHost<'lean>,
         library: LeanLibrary<'lean>,

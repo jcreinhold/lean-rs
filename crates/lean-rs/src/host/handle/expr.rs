@@ -18,7 +18,7 @@ use core::fmt;
 
 use lean_rs_sys::lean_object;
 
-use crate::abi::traits::{LeanAbi, TryFromLean, sealed};
+use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, sealed};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -80,5 +80,16 @@ impl<'lean> LeanAbi<'lean> for LeanExpr<'lean> {
 impl<'lean> TryFromLean<'lean> for LeanExpr<'lean> {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         Ok(Self { obj })
+    }
+}
+
+impl<'lean> IntoLean<'lean> for LeanExpr<'lean> {
+    fn into_lean(self, _runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        // The handle already wraps a fully-owned Lean object reference;
+        // hand it off unchanged. Required so `Option<LeanExpr<'lean>>`
+        // can satisfy [`LeanAbi`] (which is itself bounded on
+        // `IntoLean + TryFromLean`) at the `LeanSession::elaborate`
+        // call site that takes an optional expected type.
+        self.obj
     }
 }

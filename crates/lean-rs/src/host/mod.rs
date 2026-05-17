@@ -11,9 +11,12 @@
 //!   addresses), and a long-lived session with import + environment-query
 //!   methods. **Landed (prompt 14).** Bulk methods on `LeanSession`
 //!   follow in prompt 20.
-//! - `evidence` — opaque kernel-checked evidence and Lean-authored proof
-//!   summaries (`LeanEvidence`, `ProofSummary`, `EvidenceStatus`).
-//!   *Pending — prompt 17.*
+//! - [`elaboration`] — typed options, diagnostics, and the
+//!   `LeanSession::elaborate` / `kernel_check` methods (prompt 15).
+//! - [`evidence`] — opaque kernel-checked evidence handle plus the
+//!   `EvidenceStatus` / `LeanKernelOutcome` taxonomy returned by
+//!   `kernel_check`. The prompt-17 expansion adds `ProofSummary` and a
+//!   re-validation method.
 //!
 //! ## Cascade
 //!
@@ -30,12 +33,17 @@
 //! [`crate::module::LeanModule::exported`] when needed outside of a
 //! session.
 
+pub mod elaboration;
+pub mod evidence;
 pub mod handle;
 
 pub(crate) mod lake;
 
 mod capabilities;
-#[allow(clippy::module_inception, reason = "the LeanHost type is the natural name for this file")]
+#[allow(
+    clippy::module_inception,
+    reason = "the LeanHost type is the natural name for this file"
+)]
 mod host;
 mod session;
 

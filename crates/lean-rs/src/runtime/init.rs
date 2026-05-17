@@ -88,16 +88,25 @@ static INIT: OnceLock<Result<(), LeanError>> = OnceLock::new();
 /// Lean entry points.
 fn do_initialize_once() -> Result<(), LeanError> {
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: Both calls are valid to invoke once per process before
-        // any other Lean code runs; `OnceLock::get_or_init` enforces the
-        // "once" half of the contract. The order
-        // (`runtime_module` before the full `initialize`) follows the
-        // documented Lean embedding sequence captured in
-        // `crates/lean-rs-sys/src/init.rs`. Neither call takes inputs
-        // from Rust state, so there is no aliasing or lifetime hazard.
+        // SAFETY: All three calls are valid to invoke once per process
+        // before any other Lean code runs; `OnceLock::get_or_init`
+        // enforces the "once" half of the contract. The order
+        // (`runtime_module` before the full `initialize`; task manager
+        // last) follows the documented Lean embedding sequence captured
+        // in `crates/lean-rs-sys/src/init.rs`. None of the calls take
+        // inputs from Rust state, so there is no aliasing or lifetime
+        // hazard. The task manager is required for any code path that
+        // spawns Lean tasks — including
+        // `Lean.Elab.Frontend.process` (prompt 15's `kernel_check`),
+        // which would otherwise abort with a
+        // "g_task_manager" assertion on the first
+        // `Language.Lean.processCommands` call. Lean tears the manager
+        // down at process exit; we hold no Drop handle here because
+        // the runtime itself is intentionally process-lifetime.
         unsafe {
             lean_rs_sys::init::lean_initialize_runtime_module();
             lean_rs_sys::init::lean_initialize();
+            lean_rs_sys::init::lean_init_task_manager();
         }
     }));
     match outcome {

@@ -3,8 +3,9 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves all
-//! seven session symbols), starts a session over an import list, and
-//! exercises the typed query methods.
+//! nine session symbols — seven environment queries plus the
+//! prompt-15 `elaborate` and `kernel_check` pair), starts a session
+//! over an import list, and exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -13,7 +14,10 @@ use std::time::Instant;
 
 use crate::error::{HostStage, LeanError};
 use crate::runtime::LeanRuntime;
-use crate::{LeanHost, LeanSession};
+use crate::{
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession,
+    LeanSeverity,
+};
 
 // -- fixture setup -------------------------------------------------------
 
@@ -224,6 +228,169 @@ fn session_list_declarations_includes_prelude_and_fixture() {
     assert!(
         !names.is_empty(),
         "imported environment must contain at least one declaration"
+    );
+}
+
+// -- elaborate + kernel_check (prompt 15) -------------------------------
+
+fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    caps.session(&["LeanRsFixture.Elaboration"])
+        .expect("session imports cleanly")
+}
+
+#[test]
+fn elaborate_success_returns_expr() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    let expr = outcome.expect("elaboration succeeds for a well-typed Nat term");
+    // Returned LeanExpr is opaque; success path is asserted by Ok.
+    drop(expr);
+}
+
+#[test]
+fn elaborate_syntax_failure_reports_diagnostic() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .elaborate("1 +", None, &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    let failure = outcome.expect_err("trailing operator must fail to parse");
+    let first = failure
+        .diagnostics()
+        .first()
+        .expect("parse failure must report at least one diagnostic");
+    assert_eq!(
+        first.severity(),
+        LeanSeverity::Error,
+        "parse failure diagnostic must be error-severity"
+    );
+}
+
+#[test]
+fn elaborate_type_failure_reports_position() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Mixing `String` with arithmetic against `Nat` triggers an
+    // elaborator type error that carries a position.
+    let outcome = session
+        .elaborate("(1 + \"hi\" : Nat)", None, &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    let failure = outcome.expect_err("type-mismatched term must fail to elaborate");
+    let diag = failure
+        .diagnostics()
+        .first()
+        .expect("type failure must report at least one diagnostic");
+    assert_eq!(
+        diag.severity(),
+        LeanSeverity::Error,
+        "first diagnostic must be error-severity"
+    );
+    let pos = diag.position().expect("elaborator attached a position");
+    assert!(
+        pos.line() >= 1 && pos.column() >= 1,
+        "position is 1-indexed: line={} column={}",
+        pos.line(),
+        pos.column(),
+    );
+    assert!(
+        diag.message().len() <= LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
+        "single diagnostic must fit the per-message byte bound"
+    );
+}
+
+#[test]
+fn kernel_check_small_theorem_returns_evidence() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "theorem lean_rs_smoke : 1 + 1 = 2 := rfl";
+    let outcome = session
+        .kernel_check(src, &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        EvidenceStatus::Checked,
+        "well-typed theorem must classify as Checked, got {outcome:?}"
+    );
+    match outcome {
+        LeanKernelOutcome::Checked(evidence) => {
+            let _cloned = evidence.clone();
+            drop(evidence);
+        }
+        LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
+            panic!("expected Checked variant");
+        }
+    }
+}
+
+#[test]
+fn kernel_check_rejects_bad_proof() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "theorem lean_rs_bad : 1 = 2 := rfl";
+    let outcome = session
+        .kernel_check(src, &LeanElabOptions::new())
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        EvidenceStatus::Rejected,
+        "kernel must reject a false proof, got {outcome:?}"
+    );
+    match outcome {
+        LeanKernelOutcome::Rejected(failure) => {
+            assert!(
+                !failure.diagnostics().is_empty(),
+                "rejected proof must carry at least one diagnostic"
+            );
+        }
+        LeanKernelOutcome::Checked(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
+            panic!("expected Rejected variant");
+        }
+    }
+}
+
+#[test]
+fn diagnostic_byte_limit_truncates() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Multiple unbound identifiers produce multiple diagnostics; a
+    // single-byte budget cannot fit them all and must be reported as
+    // truncated.
+    let opts = LeanElabOptions::new().diagnostic_byte_limit(1);
+    let outcome = session
+        .elaborate("(foo + bar + baz : Nat)", None, &opts)
+        .expect("host stack reports no exception");
+    let failure = outcome.expect_err("unbound identifiers must fail to elaborate");
+    assert!(
+        failure.truncated(),
+        "tiny diagnostic budget must surface as truncated; diagnostics returned = {}",
+        failure.diagnostics().len(),
     );
 }
 
