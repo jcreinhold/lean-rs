@@ -1,8 +1,9 @@
 # lean-rs
 
-Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns elaboration, kernel checking, proof
-objects, universes, `MetaM`, and dependent-type meaning; this project owns linking, runtime initialization, ABI
-conversion, module loading, error and panic boundaries, scheduling, diagnostics, batching, and packaging.
+Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns Lean semantics — elaboration,
+kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. This project owns hosting: linking,
+runtime initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics,
+batching, and packaging. Rust does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
 The project is at the workspace-bootstrap stage. Public APIs are deliberately empty until the relevant prompts in the
 implementation sequence land them.
@@ -25,6 +26,20 @@ enter the workspace only via `lean-sys` and are not re-exported by `lean-toolcha
 of `lean-rs` mirrors the original layer story (`lean_rs::runtime`, `lean_rs::abi`, `lean_rs::module`, `lean_rs::host`,
 `lean_rs::batch`) but those boundaries are policed by `pub(crate)` rather than crate splits, so they can be reorganized
 without semver breakage.
+
+## Architecture
+
+Architecture and policy docs live under [`docs/architecture/`](docs/architecture/):
+
+- [`00-charter.md`](docs/architecture/00-charter.md) — design boundary, hidden knowledge, smallest public
+  interface, and the design-it-twice record of rejected alternatives.
+- [`01-safety-model.md`](docs/architecture/01-safety-model.md) — unsafe boundary thesis, reference-counting
+  ownership, proof-object opacity, concurrency stance, and the workspace `unsafe-code = "deny"` lint policy.
+- [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md) — supported Lean
+  toolchain range, pinned `lean-sys` range, header digest policy, crate semver, and supported-platform list.
+
+Later prompts in the implementation sequence read these docs first when deciding whether an API is deep, safe,
+and semantically honest.
 
 ## Build
 
