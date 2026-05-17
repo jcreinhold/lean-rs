@@ -17,17 +17,18 @@ contract state before writing code.
 
 ## Workspace shape
 
-Two published crates plus two workspace-internal helpers:
+Three published crates plus one workspace-internal helper:
 
 | Crate                    | Role                                                                                    |
 | ------------------------ | --------------------------------------------------------------------------------------- |
-| `lean-rs-sys`            | In-tree raw Lean 4 C ABI bindings, signature-checked symbol allowlist, header digest, link directives (`publish = false`). |
-| `lean-toolchain`         | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, build helpers. |
-| `lean-rs`                | Single safe front door. Modules: `runtime`, `abi`, `module`, `host`, `batch`, `error`. |
+| `lean-rs-sys`            | Raw Lean 4 C ABI bindings (published per `RD-2026-05-17-005`). Opaque public types, pure-Rust refcount mirrors, `REQUIRED_SYMBOLS` allowlist, header digest. Opt-in unsafe raw FFI; the safe layers in `lean-rs` are the recommended path. |
+| `lean-toolchain`         | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, build helpers. Re-exports `lean-rs-sys`'s allowlist. |
+| `lean-rs`                | Single safe front door. Three public modules (`module`, `host`, `error`) + two `pub(crate)` (`runtime`, `abi`) per `RD-2026-05-17-004`; bulk/pool methods on `LeanSession`. |
 | `lean-rs-test-support`   | Internal fixtures (`publish = false`).                                                  |
 
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_*` symbols enter only through `lean-rs-sys` and
-live in `pub(crate)` modules of `lean-rs`; safe APIs never re-export them.
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_*` symbols enter only through `lean-rs-sys`
+and live in `pub(crate)` modules of `lean-rs`; `lean-rs`'s safe surface never re-exports them. Advanced users
+who need raw FFI can depend on `lean-rs-sys` directly (opt-in unsafe).
 
 ## Build and verify
 
@@ -43,9 +44,14 @@ CI runs the same four commands on `ubuntu-latest` and `macos-latest`, stable Rus
 ## Discipline
 
 - **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
-  signature in the active Lean header, extend the extern declarations and the allowlist in `lean-rs-sys` and record
-  the version delta under `VERSION-COMPATIBILITY`. Stop with a Replanning Delta if ownership conventions or
-  layout assumptions shift.
+  signature in the active Lean header, extend the extern declarations in the appropriate
+  `crates/lean-rs-sys/src/<category>.rs` file, the `REQUIRED_SYMBOLS` allowlist, and (if layout shifted) the
+  `pub(crate) LeanObjectRepr` plus `EXPECTED_HEADER_DIGEST`. Record the version delta under
+  `VERSION-COMPATIBILITY`. Stop with a Replanning Delta if ownership conventions shift.
+- **`lean-rs-sys` is published with opaque public types.** Per `RD-2026-05-17-005`, downstream users see
+  `lean_object` as `[u8; 0] + PhantomData` and reach state only through `pub unsafe fn` helpers. Never expose
+  `LeanObjectRepr` outside the crate; never add public `pub` fields to FFI types. Every `unsafe { ... }` block
+  carries a `// SAFETY:` comment; every `pub unsafe fn` carries a `# Safety` section.
 - **No broad `pub use` facade.** Re-exports at `lean_rs::*` are curated public API, not path-shortening.
 - **No speculative traits with one implementor.** Add a trait when a second concrete type needs it.
 - **No `unwrap()`, `expect()`, or `panic!`** in non-test code unless a comment names a proof obligation.

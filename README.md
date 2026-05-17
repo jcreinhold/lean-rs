@@ -10,18 +10,18 @@ implementation sequence land them.
 
 ## Workspace layout
 
-Two published crates plus two workspace-internal helpers. Raw Lean 4 C ABI bindings live in the in-tree
-`lean-rs-sys` crate (`publish = false`); the rest of the workspace builds on top of it. See
-`docs/architecture/00-charter.md` and `RD-2026-05-17-003` in
-[`prompts/lean-rs/00-current-state.md`](https://github.com/jcreinhold/lean-rs) for why raw FFI is in-tree rather
-than adopted from an external crate.
+Three published crates plus one workspace-internal helper. Raw Lean 4 C ABI bindings live in the in-tree
+`lean-rs-sys` crate; the rest of the workspace builds on top of it. See `docs/architecture/00-charter.md`,
+`RD-2026-05-17-003` (in-tree raw FFI), and `RD-2026-05-17-005` (`lean-rs-sys` published with opaque public
+types) in [`prompts/lean-rs/00-current-state.md`](https://github.com/jcreinhold/lean-rs) for the design
+rationale.
 
 | Crate                       | Published | Role                                                                                       |
 | --------------------------- | --------- | ------------------------------------------------------------------------------------------ |
-| `lean-rs-sys`               | no        | In-tree raw Lean 4 C ABI bindings: curated `extern "C"` declarations, hand-written refcount inline helpers, signature-checked symbol allowlist, header SHA-256 digest, and link directives. `publish = false`. |
+| `lean-rs-sys`               | yes       | Raw Lean 4 C ABI bindings: curated `extern "C"` declarations split by semantic category, pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, `REQUIRED_SYMBOLS` allowlist, header digest. Public types (`lean_object`) are opaque; layout is `pub(crate)`. Opt-in unsafe raw FFI; the safe layers in `lean-rs` are the recommended path. |
 | `lean-toolchain`            | yes       | Lean toolchain discovery, typed fingerprint, fixture digest, layered link diagnostics, and build-script helpers that downstream embedders can call from their own `build.rs`. |
 | `lean-rs`                   | yes       | The single safe front door: runtime initialization (token-bound `'lean` lifetime), owned/borrowed object handles (internal), typed ABI conversions (internal), module loading, typed exported functions, semantic handles, bounded meta services, and `LeanSession` bulk/pool operations. |
-| `lean-rs-test-support`      | no        | Workspace-internal fixtures and helpers. `publish = false`.                                |
+| `lean-rs-test-support`      | no        | Workspace-internal fixtures and helpers (`publish = false`).                               |
 
 The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_object *` and raw `lean_*` symbols
 enter the workspace only via `lean-rs-sys` and are not re-exported by `lean-toolchain` or `lean-rs`. Internal

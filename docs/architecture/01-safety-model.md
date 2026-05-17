@@ -9,26 +9,34 @@ be made consistent with this thesis, the right move is a Replanning Delta under
 ## Unsafe boundary thesis
 
 Raw `lean_*` symbols enter the workspace only through the in-tree workspace
-crate `lean-rs-sys` (`publish = false`). Inside `lean-rs`, every import of a
-`lean_rs_sys` item lives in a `pub(crate)` module and is never re-exported
-through the public API. Every public function of `lean-rs` and `lean-toolchain`
-is safe Rust.
+crate `lean-rs-sys` (published, per `RD-2026-05-17-005`). `lean-rs-sys`'s
+public types are opaque: `lean_object` is `[u8; 0] + PhantomData<(*mut u8,
+PhantomPinned)>` and downstream code reaches object state only through
+`pub unsafe fn` helpers; Lean's header layout (`LeanObjectRepr`) is
+`pub(crate)`. Inside `lean-rs`, every import of a `lean_rs_sys` item lives
+in a `pub(crate)` module of `runtime` and is never re-exported through the
+public API. Every public function of `lean-rs` and `lean-toolchain` is safe
+Rust.
 
 A consequence: a reader of `lean_rs::*` cannot acquire a raw Lean pointer
-through the public API at all, and because `lean-rs-sys` is `publish = false`
-they cannot reach raw symbols by adding a direct dependency either. An
-application that genuinely needs raw FFI must contribute the missing
-capability to `lean-rs` or fork the workspace.
+through `lean-rs`'s public API. An application that genuinely needs raw FFI
+opts in by depending on `lean-rs-sys` directly, accepting the full `unsafe`
+discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and the opaque
+public types — a friendlier path than forking the workspace, and the same
+trade every peer `*-sys` crate makes.
 
 ## Reference counting
 
 Safe APIs own all `lean_inc` / `lean_dec` calls. The public surface never
 accepts or returns a raw `lean_obj_arg`, `b_lean_obj_arg`, or `lean_obj_res`;
-owned and borrowed obligations are encoded with the safe wrapper types
-`LeanObj` (owned) and `BorrowedLeanObj<'a>` (borrowed), which will be added by
-prompt 07 under the `OBJECT-MEMORY` contract. `LeanObj` releases its
-reference on `Drop`; `Clone` performs `lean_inc`. `BorrowedLeanObj<'a>` is a
-view tied to its source's lifetime and performs no RC adjustments on its own.
+owned and borrowed obligations are encoded with the lifetime-bound wrapper
+types `pub(crate) runtime::obj::Obj<'lean>` (owned) and
+`pub(crate) runtime::obj::ObjRef<'lean, 'a>` (borrowed), which will be added
+by prompt 07 under the `OBJECT-MEMORY` contract per `RD-2026-05-17-004`.
+`Obj<'lean>` releases its reference on `Drop`; `Clone` performs `lean_inc`
+(via the Rust mirror in `lean-rs-sys`). `ObjRef<'lean, 'a>` is a view tied to
+its source's lifetime and the runtime borrow, performing no RC adjustments
+on its own.
 
 A caller of `lean-rs` does not need to know what `lean_inc` and `lean_dec`
 are. If a future API would force the caller to choose a refcount discipline,
@@ -67,7 +75,7 @@ Per-file opt-outs require, in this order:
 2. A `// SAFETY:` comment on every `unsafe { ... }` block naming the invariant
    the caller (or the surrounding context) is relying on. "Calls into
    `lean-rs-sys`" is not a safety comment; "the runtime is initialized on this
-   thread and `obj` is the unique owner per `LeanObj`'s `Drop`" is.
+   thread and `obj` is the unique owner per `Obj<'lean>`'s `Drop`" is.
 3. A test that would fail under a plausible violation of that invariant when
    practical — Miri on the Rust side of the boundary (Miri cannot validate the
    Lean C runtime itself), a sanitizer build, a refcount stress test, or a

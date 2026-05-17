@@ -50,23 +50,29 @@ the public API of `lean-rs`, that is a charter violation.
 
 ## Smallest public interface
 
-Two published crates carry the entire public surface; two workspace-internal
-helpers stay out of it:
+Three published crates carry the public surface; one workspace-internal
+helper stays out of it:
 
+- `lean-rs-sys` (published, per `RD-2026-05-17-005`). Holds the curated
+  `extern "C"` declarations for the subset of `lean.h` the stack uses, the
+  pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, the
+  `REQUIRED_SYMBOLS` allowlist, the build-time `LEAN_HEADER_DIGEST`, and
+  the link directives. Public types (`lean_object`, etc.) are
+  extern-type-equivalent opaque: callers hold pointers only and can only
+  read/modify object state through this crate's `pub unsafe fn` helpers.
+  Layout structs (`LeanObjectRepr`, the subclass headers) are `pub(crate)`
+  only — Lean's header layout is a crate-private invariant pinned by the
+  digest check. Publishing this crate is *opt-in unsafe raw FFI*; the safe
+  layers in `lean-rs` are the recommended path.
 - `lean-toolchain` (published). Owns Lean toolchain discovery, version
-  metadata, typed `ToolchainFingerprint`, fixture digest, the curated `lean_*`
-  symbol allowlist re-exported from `lean-rs-sys`, layered link diagnostics,
-  and the build-script helpers downstream embedders can reuse.
+  metadata, typed `ToolchainFingerprint`, fixture digest, layered link
+  diagnostics, and the build-script helpers downstream embedders can reuse.
+  Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS`
+  from `lean-rs-sys` directly — the allowlist lives in one place.
 - `lean-rs` (published). The single safe front door for hosting Lean
   capabilities from Rust.
 
-`lean-rs-sys` is workspace-internal (`publish = false`). It holds the raw
-`extern "C"` declarations for the curated subset of `lean.h`, the hand-written
-refcount inline helpers, the signature-checked symbol allowlist, the header
-digest, and the link directives. Keeping it `publish = false` means external
-consumers cannot bypass `lean-rs` to reach raw symbols.
-
-`lean-rs-test-support` is also workspace-internal (`publish = false`) and
+`lean-rs-test-support` is workspace-internal (`publish = false`) and
 carries fixtures and helpers; it is not a public surface.
 
 Inside `lean-rs`, the module layout mirrors the original layer story but
@@ -103,18 +109,24 @@ Rust applications using `lean-rs` can call Lean code, ask the elaborator and
 kernel semantic questions through bounded host capabilities, and receive typed
 results. They can also load compiled Lean modules, invoke exported functions,
 batch calls, and reuse sessions. None of this requires the caller to reach
-into `lean-rs-sys` or to know any item in the *hidden knowledge* list above —
-and because `lean-rs-sys` is `publish = false`, they cannot.
+into `lean-rs-sys` or to know any item in the *hidden knowledge* list above.
+Applications that legitimately need raw FFI — for example, to call a Lean
+capability not yet wrapped in `lean-rs` — can opt in by depending on
+`lean-rs-sys` directly, accepting full `unsafe` discipline; per
+`RD-2026-05-17-005`, this is friendlier than forcing a workspace fork.
 
 ## Intentionally discarded behavior
 
 The following are *not* in scope and will not be added:
 
-- Direct application use of raw `lean_*` calls through `lean-rs`. Applications
-  cannot reach `lean-rs-sys` (it is `publish = false`) and cannot reach raw
-  symbols through `lean-rs` (the imports live in `pub(crate)` modules and are
-  never re-exported). An application that genuinely needs the raw C ABI must
-  either contribute the missing capability to `lean-rs` or fork the workspace.
+- Direct application use of raw `lean_*` calls *through `lean-rs`*. The
+  imports live in `pub(crate)` modules and are never re-exported through
+  `lean-rs`'s safe surface. Applications that need raw FFI can depend on
+  `lean-rs-sys` directly (it is published per `RD-2026-05-17-005`), but doing
+  so means opting in to the full `unsafe` discipline and the public types
+  there are opaque pointer-targets: `lean_object` has size 0 and Lean header
+  layout is a `lean-rs-sys`-internal invariant. The recommended path remains
+  to contribute the missing capability to `lean-rs`'s safe layer.
 - Rust-side reconstruction of Lean semantics. Rust does not maintain a parallel
   representation of `Expr`, universes, environments, or proof terms.
 - Unmeasured FFI micro-optimizations. Any performance claim is backed by a named
@@ -180,14 +192,30 @@ target, and parallel-copies-plus-upstream was the only path to deliver our
 contracts on our timeline. See `RD-2026-05-17-003` in
 `prompts/lean-rs/00-current-state.md` for the full reasoning.
 
-### Adopted: in-tree `lean-rs-sys`, `lean-toolchain`, `lean-rs`
+### Adopted: in-tree `lean-rs-sys`, `lean-toolchain`, `lean-rs` (all published)
 
-The shape after `RD-2026-05-17-003`:
+The shape after `RD-2026-05-17-005`:
 
-- `lean-rs-sys` (`publish = false`) for the raw C ABI: extern declarations,
-  hand-written refcount inline helpers, signature-checked symbol allowlist,
-  header digest, and link directives. The one crate-wide `#[allow(unsafe_code)]`
-  boundary in the workspace.
+- `lean-rs-sys` (**published**, per `RD-2026-05-17-005`) for the raw C ABI:
+  curated `extern "C"` declarations split by semantic category (`types`,
+  `consts`, `refcount`, `object`, `scalar`, `string`, `array`, `nat_int`,
+  `closure`, `io`, `init`, `external`), pure-Rust mirrors of `lean.h`'s
+  `static inline` refcount helpers via `AtomicI32::from_ptr`, the
+  `REQUIRED_SYMBOLS` allowlist, the build-time `LEAN_HEADER_DIGEST`, and
+  the link directives. Public types are opaque (`lean_object` is `[u8; 0]
+  + PhantomData<(*mut u8, PhantomPinned)>`); the actual `LeanObjectRepr`
+  layout is `pub(crate)`. The one crate-wide `#[allow(unsafe_code)]`
+  boundary in the workspace; every `unsafe { ... }` block carries a
+  `// SAFETY:` comment naming the invariant.
+
+  `RD-2026-05-17-003` originally chose `publish = false` to encode a
+  "no raw escape hatch" policy. `RD-2026-05-17-005` reversed that:
+  publication matches every peer `*-sys` crate (pyo3-ffi, libgit2-sys,
+  openssl-sys, mlua-sys, libz-sys, …) and is friendlier to users who hit
+  gaps in `lean-rs`'s safe layer (a stable `*-sys` dependency beats a
+  workspace fork). The "no raw escape hatch through `lean-rs`" policy is
+  enforced inside `lean-rs` by `pub(crate)` modules around the raw imports,
+  independent of `lean-rs-sys`'s publication status.
 - `lean-toolchain` (published) for discovery, typed fingerprint, fixture
   digest, layered link diagnostics, and build-script helpers reusable by
   downstream embedders. Composes on top of `lean-rs-sys`'s raw metadata.
@@ -212,10 +240,11 @@ re-exports when bound to `'static`.
 
 This design is deeper than each rejected alternative: fewer caller-facing
 details, less temporal coupling (no "call this first" exposed as a safe API),
-smaller unsafe surface (raw symbols enter only via `lean-rs-sys`, which is
-itself `publish = false`, and live behind `pub(crate)` walls), and a layering
-invariant a reviewer can check in one line — `lean-rs-sys → lean-toolchain →
-lean-rs`. It matches the dominant Rust binding shape (a raw `*-sys` plus a
+a small unsafe surface (raw symbols enter only via `lean-rs-sys`, are
+exposed only through `pub unsafe fn` helpers over opaque public types, and
+live behind `pub(crate)` walls inside `lean-rs`), and a layering invariant
+a reviewer can check in one line — `lean-rs-sys → lean-toolchain → lean-rs`.
+It matches the dominant Rust binding shape (a raw published `*-sys` plus a
 safe front door, plus a build-helper crate where one earns its place), so
 contributors arrive with correct expectations, and it contains no Rust-side
 dependent-type imitation.
