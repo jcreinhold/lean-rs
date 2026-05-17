@@ -83,7 +83,7 @@ const REQUIRED_IMPORTS: &[&str] = &["LeanRsFixture.Meta"];
 ///
 /// Calling [`crate::LeanSession::run_meta`] with the returned
 /// descriptor and a [`LeanExpr`] returns a typed
-/// [`crate::LeanMetaResponse`] carrying the inferred type expression on
+/// [`super::LeanMetaResponse`] carrying the inferred type expression on
 /// `Ok`.
 #[must_use]
 pub fn infer_type<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>> {

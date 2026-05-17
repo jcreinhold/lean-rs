@@ -20,5 +20,11 @@ libloading = "0.8"
 # `LeanModule::exported`.
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 
+[dev-dependencies]
+# Compile-fail tests pinning the curated surface invariants (handles
+# cannot outlive their runtime borrow; runtime / session / handles are
+# !Send + !Sync). Each negative case lives under tests/compile_fail/.
+trybuild = "1"
+
 [lints]
 workspace = true

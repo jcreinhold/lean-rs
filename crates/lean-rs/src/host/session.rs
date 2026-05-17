@@ -36,7 +36,7 @@
 //! [`crate::HostStage::Link`] — failures bind to the capability's load,
 //! not to the first query. Missing **optional** meta-service symbols
 //! degrade gracefully: [`LeanSession::run_meta`] returns
-//! [`crate::LeanMetaResponse::Unsupported`] against a service whose
+//! [`crate::host::meta::LeanMetaResponse::Unsupported`] against a service whose
 //! address did not resolve, the rest of the capability stays usable.
 //! The evidence-side pair (`check_evidence`, `evidence_summary`) is
 //! mandatory because any capability that produces a `LeanEvidence`
@@ -103,7 +103,7 @@ use crate::{LeanDeclaration, LeanExpr, LeanName};
 /// expected ABI is discharged by [`Self::resolve`] only resolving
 /// symbols whose Lean signatures are pinned in the module docstring
 /// above. Meta-service fields are `Option<*mut c_void>`: missing
-/// symbols degrade to [`crate::LeanMetaResponse::Unsupported`] at the
+/// symbols degrade to [`crate::host::meta::LeanMetaResponse::Unsupported`] at the
 /// `run_meta` dispatch site instead of failing capability load.
 pub(crate) struct SessionSymbols {
     pub(crate) session_import: *mut c_void,

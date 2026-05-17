@@ -15,10 +15,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::error::{HostStage, LeanError};
+use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, MetaCallStatus, heartbeat_burn, infer_type, whnf};
 use crate::runtime::LeanRuntime;
 use crate::{
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanElabOptions, LeanHost,
-    LeanKernelOutcome, LeanMetaOptions, LeanMetaResponse, LeanSession, LeanSeverity, MetaCallStatus,
+    LeanKernelOutcome, LeanSession, LeanSeverity,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -644,7 +645,7 @@ fn meta_infer_type_returns_ok_for_nat_type() {
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let outcome = session
-        .run_meta(&crate::infer_type(), expr, &LeanMetaOptions::new())
+        .run_meta(&infer_type(), expr, &LeanMetaOptions::new())
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -675,7 +676,7 @@ fn meta_whnf_returns_ok_for_nat_type() {
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let outcome = session
-        .run_meta(&crate::whnf(), expr, &LeanMetaOptions::new())
+        .run_meta(&whnf(), expr, &LeanMetaOptions::new())
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -709,7 +710,7 @@ fn meta_heartbeat_burn_yields_timeout_status() {
         .expect("Nat.zero has a type");
     let opts = LeanMetaOptions::new().heartbeat_limit(1);
     let outcome = session
-        .run_meta(&crate::heartbeat_burn(), expr, &opts)
+        .run_meta(&heartbeat_burn(), expr, &opts)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),

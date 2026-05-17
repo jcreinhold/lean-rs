@@ -9,7 +9,7 @@
 //! **optional** prompt-16 meta-service symbols (`infer_type`, `whnf`,
 //! `heartbeat_burn`). A missing mandatory symbol fails capability
 //! load; a missing meta-service symbol degrades to a synthesised
-//! [`crate::LeanMetaResponse::Unsupported`] at the
+//! [`crate::host::meta::LeanMetaResponse::Unsupported`] at the
 //! [`crate::LeanSession::run_meta`] call site. Pre-resolution at
 //! construction means each later query is one struct-field read and
 //! one FFI call — no per-query `dlsym`.

@@ -44,6 +44,52 @@ pub use crate::runtime::LeanRuntime;
 `LeanModule` and the `LeanExported{N}` family stay at `lean_rs::module::*` for power users; they are not at the crate
 root because the happy path goes through `LeanHost` → `LeanCapabilities` → `LeanSession`.
 
+## Design it twice — rejected approaches
+
+The curated surface above is one of several shapes considered for prompt 18. Each alternative was rejected for a
+specific reason rooted in *A Philosophy of Software Design* (Ousterhout). Recording them here pins the rationale so
+later refactors do not silently drift back.
+
+**Rejected: re-export every `pub` item from every internal module at the crate root.** This is path-shortening
+dressed up as curation: every `lean_rs::module::*` item would also be `lean_rs::*`, every `host::meta::*` item
+would gain a second name. It teaches no sequence (the `LeanExported` loader sits adjacent to `LeanRuntime::init`,
+which is wrong) and violates ch 17 — consistency requires *dissimilar things to be done differently*, but the
+flat re-export gives mandatory entry points and specialized sub-capabilities equal status. A future capability
+addition would silently expand the root.
+
+**Rejected: a single `Lean` god-type with every operation as a method.** Conjoins runtime, module, session,
+semantic handles, and error policy into one struct. This is the canonical "complect" case (ch 4 + Hickey): two
+or more concerns that change independently — runtime lifetime, module loading, session state, handle lifetimes —
+braided into one mechanism. It kills the `'lean` cascade (`LeanExpr<'lean>` cannot outlive its session, but a god
+type would have to be `'static` to host every method), forces caller code to thread a single mutable handle
+through every layer, and turns simple per-handle borrows into one large `&mut Lean` that serialises every call.
+
+**Rejected: hide `lean_rs::runtime`, `::module`, `::host` entirely behind a top-level façade.** Forces every
+caller through the curated surface, including the minority that legitimately need raw module loading or a custom
+`LeanExported` shape for a capability `lean-rs` does not yet wrap. Ch 6 "somewhat general-purpose, not maximal":
+the façade would over-encapsulate, paying complexity for hypothetical safety wins. Per `RD-2026-05-17-005`,
+advanced users already have a clean escape hatch — depend on `lean-rs-sys` directly — but that drops them all
+the way to raw FFI. Keeping `lean_rs::module` and `lean_rs::host` visible at module paths preserves a middle
+tier: typed handles, no raw `lean_*` symbols.
+
+## Specialized sub-module surfaces
+
+The crate root names mandatory session capabilities and entry points only. Sub-module paths host **specialized
+or optional** capabilities so that the layer difference is visible at the import site (ch 7 — different layer,
+different abstraction).
+
+- **`lean_rs::host::meta`** — the bounded `MetaM` capability. Three of the fourteen `SessionSymbols` (the
+    `meta_infer_type`, `meta_whnf`, `meta_heartbeat_burn` addresses in `host/session.rs`) are optional, and
+    `run_meta` is the only call site that touches the meta types. Surfacing `LeanMetaOptions`,
+    `LeanMetaResponse`, `LeanMetaService`, `LeanMetaTransparency`, `MetaCallStatus`, and the three factory
+    functions (`infer_type`, `whnf`, `heartbeat_burn`) at the crate root would pollute the namespace of every
+    caller for the benefit of the subset that opts in to `MetaM`. Callers that need meta write
+    `use lean_rs::host::meta::{...}`; everyone else is undisturbed.
+- **`lean_rs::module`** — the typed exported-function loader (`LeanLibrary`, `LeanModule`, `LeanExported`,
+    `LeanIo`, `LeanArgs`, `DecodeCallResult`, `LeanAbi`). The happy path runs through `LeanHost` →
+    `LeanCapabilities` → `LeanSession`, which wraps module loading; only embedders calling a not-yet-wrapped
+    capability need the typed loader directly.
+
 ## Classification table
 
 | Item                                              | Module path                                 | Crate-root re-export?        | Visibility   | Notes                                                                                                                                                  |
@@ -138,6 +184,10 @@ piecewise. Doc comments and `# Errors` / `# Panics` sections are mandatory.
 - `LeanSession::kernel_check(&mut self, source: &str, options: &LeanElabOptions) -> LeanResult<LeanKernelOutcome<'lean>>`
 - `LeanSession::check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus>` (prompt 17)
 - `LeanSession::summarize_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<ProofSummary>` (prompt 17)
+- `LeanSession::run_meta<Req, Resp>(&mut self, service: &LeanMetaService<Req, Resp>, request: Req, options: &LeanMetaOptions) -> LeanResult<LeanMetaResponse<Resp>>`
+    where `Req: LeanAbi<'lean>` and `Resp: TryFromLean<'lean>`. The `LeanMetaService`, `LeanMetaResponse`,
+    `LeanMetaOptions`, `LeanMetaTransparency`, `MetaCallStatus`, and the three service constructors `infer_type` /
+    `whnf` / `heartbeat_burn` live at `lean_rs::host::meta::*` — see *Specialized sub-module surfaces*.
 - `LeanSession::query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>>` (prompt
     20\)
 - `LeanSession::with_session_pool(...) -> ...` (prompt 20 — exact signature deferred)

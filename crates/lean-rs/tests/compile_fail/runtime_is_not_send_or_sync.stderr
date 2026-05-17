@@ -1,0 +1,351 @@
+error[E0277]: `*mut ()` cannot be sent between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:14:20
+   |
+14 |     require_send::<LeanRuntime>();
+   |                    ^^^^^^^^^^^ `*mut ()` cannot be sent between threads safely
+   |
+   = help: within `LeanRuntime`, the trait `Send` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `*mut ()` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:15:20
+   |
+15 |     require_sync::<LeanRuntime>();
+   |                    ^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
+   |
+   = help: within `LeanRuntime`, the trait `Sync` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
+error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be sent between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:16:20
+   |
+16 |     require_send::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `NonNull<lean_rs_sys::types::lean_object>` cannot be sent between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Send` is not implemented for `NonNull<lean_rs_sys::types::lean_object>`
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `*mut c_void` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:16:20
+   |
+16 |     require_send::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
+   |
+   = help: within `LeanCapabilities<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
+note: required because it appears within the type `host::session::SessionSymbols`
+  --> src/host/session.rs
+   |
+   | pub(crate) struct SessionSymbols {
+   |                   ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanCapabilities<'static, 'static>`
+  --> src/host/capabilities.rs
+   |
+   | pub struct LeanCapabilities<'lean, 'h> {
+   |            ^^^^^^^^^^^^^^^^
+   = note: required for `&'static LeanCapabilities<'static, 'static>` to implement `Send`
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `*mut ()` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:16:20
+   |
+16 |     require_send::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
+   |
+   = help: within `LeanRuntime`, the trait `Sync` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+   = note: required for `&'static LeanRuntime` to implement `Send`
+note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:17:20
+   |
+17 |     require_sync::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `NonNull<lean_rs_sys::types::lean_object>` cannot be shared between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `NonNull<lean_rs_sys::types::lean_object>`
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
+error[E0277]: `*mut c_void` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:17:20
+   |
+17 |     require_sync::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
+note: required because it appears within the type `host::session::SessionSymbols`
+  --> src/host/session.rs
+   |
+   | pub(crate) struct SessionSymbols {
+   |                   ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanCapabilities<'static, 'static>`
+  --> src/host/capabilities.rs
+   |
+   | pub struct LeanCapabilities<'lean, 'h> {
+   |            ^^^^^^^^^^^^^^^^
+   = note: required because it appears within the type `&'static LeanCapabilities<'static, 'static>`
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
+error[E0277]: `*mut ()` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:17:20
+   |
+17 |     require_sync::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+   = note: required because it appears within the type `&'static LeanRuntime`
+note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
+error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be sent between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:18:20
+   |
+18 |     require_send::<LeanExpr<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^ `NonNull<lean_rs_sys::types::lean_object>` cannot be sent between threads safely
+   |
+   = help: within `LeanExpr<'static>`, the trait `Send` is not implemented for `NonNull<lean_rs_sys::types::lean_object>`
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanExpr<'static>`
+  --> src/host/handle/expr.rs
+   |
+   | pub struct LeanExpr<'lean> {
+   |            ^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `*mut ()` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:18:20
+   |
+18 |     require_send::<LeanExpr<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
+   |
+   = help: within `LeanRuntime`, the trait `Sync` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+   = note: required for `&'static LeanRuntime` to implement `Send`
+note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanExpr<'static>`
+  --> src/host/handle/expr.rs
+   |
+   | pub struct LeanExpr<'lean> {
+   |            ^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:10:20
+   |
+10 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+
+error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:19:20
+   |
+19 |     require_sync::<LeanExpr<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^ `NonNull<lean_rs_sys::types::lean_object>` cannot be shared between threads safely
+   |
+   = help: within `LeanExpr<'static>`, the trait `Sync` is not implemented for `NonNull<lean_rs_sys::types::lean_object>`
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanExpr<'static>`
+  --> src/host/handle/expr.rs
+   |
+   | pub struct LeanExpr<'lean> {
+   |            ^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
+error[E0277]: `*mut ()` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:19:20
+   |
+19 |     require_sync::<LeanExpr<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
+   |
+   = help: within `LeanExpr<'static>`, the trait `Sync` is not implemented for `*mut ()`
+note: required because it appears within the type `PhantomData<*mut ()>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `LeanRuntime`
+  --> src/runtime/init.rs
+   |
+   | pub struct LeanRuntime {
+   |            ^^^^^^^^^^^
+   = note: required because it appears within the type `&'static LeanRuntime`
+note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
+  --> $RUST/core/src/marker.rs
+   |
+   | pub struct PhantomData<T: PointeeSized>;
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `lean_rs::runtime::obj::Obj<'static>`
+  --> src/runtime/obj.rs
+   |
+   | pub(crate) struct Obj<'lean> {
+   |                   ^^^
+note: required because it appears within the type `LeanExpr<'static>`
+  --> src/host/handle/expr.rs
+   |
+   | pub struct LeanExpr<'lean> {
+   |            ^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`

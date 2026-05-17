@@ -60,13 +60,17 @@
 //!   loading with pre-resolved symbol caches, and a long-lived session
 //!   with `query_declaration` / `list_declarations` / `declaration_type`
 //!   / `declaration_kind` / `declaration_name`. Prompt 15 adds
-//!   `elaborate` / `kernel_check`; prompt 16 adds the bounded `MetaM`
-//!   surface — [`LeanMetaOptions`], [`LeanMetaService`],
-//!   [`LeanMetaResponse`], [`MetaCallStatus`], [`LeanMetaTransparency`]
-//!   and the three pinned services [`infer_type`] / [`whnf`] /
-//!   [`heartbeat_burn`]. The evidence re-validator (`ProofSummary` +
-//!   `check_evidence`) and bulk session methods land in prompts 17
-//!   and 20.
+//!   `elaborate` / `kernel_check` and the [`LeanElabOptions`] /
+//!   [`LeanElabFailure`] / [`LeanDiagnostic`] / [`LeanSeverity`] /
+//!   [`LeanPosition`] diagnostic surface. Prompt 17 adds the
+//!   re-validation pair [`LeanSession::check_evidence`] /
+//!   [`LeanSession::summarize_evidence`] and the bounded
+//!   [`ProofSummary`] projection. Prompt 16's bounded `MetaM` surface
+//!   lives at [`host::meta`] — including `LeanMetaOptions`,
+//!   `LeanMetaService`, `LeanMetaResponse`, `MetaCallStatus`,
+//!   `LeanMetaTransparency`, and the three pinned service constructors
+//!   `infer_type` / `whnf` / `heartbeat_burn`. Bulk session methods
+//!   land in prompt 20.
 //!
 //! ## Layering
 //!
@@ -75,6 +79,19 @@
 //! Rust applications should depend on. Embedders that genuinely need the
 //! raw `lean_*` symbols may depend on `lean-rs-sys` directly, accepting
 //! its full `unsafe` discipline.
+//!
+//! ## Curation policy
+//!
+//! The crate root names entry points and mandatory session capabilities
+//! only. Items at `lean_rs::*` are the curated semver surface; refactors
+//! that reshape internal modules are free as long as those re-exports
+//! stay stable. Specialized or optional capabilities live at their
+//! sub-module path: the bounded `MetaM` surface at [`host::meta`], the
+//! typed exported-function loader at [`module`]. Path-shortening
+//! re-exports are not added — every name at the crate root must
+//! correspond to a happy-path entry point or a type that appears in a
+//! crate-root method's signature. The full classification is pinned in
+//! `docs/architecture/03-host-api.md`.
 
 pub(crate) mod abi;
 pub mod error;
@@ -93,10 +110,6 @@ pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
-pub use crate::host::meta::{
-    LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
-    infer_type, whnf,
-};
 pub use crate::host::{LeanCapabilities, LeanHost, LeanSession};
 pub use crate::runtime::LeanRuntime;
 
