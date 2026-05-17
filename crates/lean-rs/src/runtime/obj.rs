@@ -18,12 +18,12 @@
 // the unsafe surface inside the smallest scope that compiles, per
 // `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
-// Items here are the safe RC wrapper that prompt 08 (`ABI-VALUES`) and
-// every later prompt will consume; until that first non-test caller
-// lands they look dead to rustc's library build. The `#[cfg(test)]`
-// tests below are the only consumers in this prompt and they exercise
-// every public method on `Obj` / `ObjRef`.
-#![allow(dead_code, reason = "first non-test caller lands in prompt 08 (ABI-VALUES)")]
+// `Obj` / `ObjRef` and their methods are infrastructure consumed by the
+// `pub(crate) abi` module (prompt 08) and by the typed
+// `LeanExported{N}` / `LeanSession` machinery added in prompts 09–18.
+// The library build sees them as dead until a non-test caller lands;
+// only `cargo test` exercises them (transitively through `abi::tests`).
+#![allow(dead_code, reason = "non-test callers land in prompts 09–18")]
 
 use core::fmt;
 use core::marker::PhantomData;

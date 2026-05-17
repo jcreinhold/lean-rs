@@ -33,12 +33,18 @@ pub enum LeanError {
     /// Lean runtime initialization, toolchain discovery, or argument-setup
     /// failure. See [`InitError`].
     Init(InitError),
+    /// An ABI conversion between a Rust value and a Lean object failed
+    /// because the Lean value was outside the range the requested Rust type
+    /// can faithfully represent, or carried a kind the conversion did not
+    /// expect. See [`ConversionError`].
+    Conversion(ConversionError),
 }
 
 impl fmt::Display for LeanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Init(err) => write!(f, "lean-rs: {err}"),
+            Self::Conversion(err) => write!(f, "lean-rs: {err}"),
         }
     }
 }
@@ -47,6 +53,7 @@ impl std::error::Error for LeanError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Init(err) => Some(err),
+            Self::Conversion(err) => Some(err),
         }
     }
 }
@@ -56,6 +63,68 @@ impl From<InitError> for LeanError {
         Self::Init(err)
     }
 }
+
+impl From<ConversionError> for LeanError {
+    fn from(err: ConversionError) -> Self {
+        Self::Conversion(err)
+    }
+}
+
+/// Failure modes reported by the typed first-order ABI conversions in
+/// `lean_rs::abi`.
+///
+/// `#[non_exhaustive]` so prompt 09 (containers) and later prompts can add
+/// variants without breaking existing matches.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum ConversionError {
+    /// The Lean object's kind did not match the expected Rust type
+    /// (e.g. expected a `String`, found an object with a different tag).
+    WrongObjectKind {
+        /// Short description of the expected Rust type (`"String"`,
+        /// `"ByteArray"`, `"Nat"`, …).
+        expected: &'static str,
+        /// `lean_obj_tag` of the actually-received object — scalar payload
+        /// when the pointer was scalar-tagged, otherwise the heap tag.
+        found_tag: u32,
+    },
+    /// The Lean value did not fit the requested Rust type's range
+    /// (e.g. a bignum `Nat` returned for a `u64` slot).
+    OutOfRange {
+        /// Short description of the requested Rust type that triggered
+        /// the overflow (`"u64"`, `"i64"`, `"bool"`, …).
+        expected: &'static str,
+    },
+    /// A Lean `String`'s bytes were not valid UTF-8. Defensive — Lean
+    /// enforces the invariant, but the conversion surface honours it
+    /// rather than relying on `from_utf8_unchecked`.
+    InvalidUtf8,
+    /// A Lean `Char`'s `u32` payload was not a Unicode scalar value
+    /// (`char::from_u32` returned `None`).
+    InvalidChar {
+        /// The offending code point.
+        code_point: u32,
+    },
+}
+
+impl fmt::Display for ConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongObjectKind { expected, found_tag } => {
+                write!(f, "expected Lean {expected}, found object with tag {found_tag}")
+            }
+            Self::OutOfRange { expected } => {
+                write!(f, "Lean value does not fit Rust {expected}")
+            }
+            Self::InvalidUtf8 => write!(f, "Lean string bytes were not valid UTF-8"),
+            Self::InvalidChar { code_point } => {
+                write!(f, "Lean char {code_point:#x} is not a Unicode scalar value")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConversionError {}
 
 /// Failure modes reported when bringing up the Lean runtime.
 ///
@@ -134,7 +203,7 @@ fn bound_message(s: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{INIT_ERROR_MESSAGE_LIMIT, InitError, LeanError, bound_message};
+    use super::{ConversionError, INIT_ERROR_MESSAGE_LIMIT, InitError, LeanError, bound_message};
 
     #[test]
     fn bound_message_passes_short_strings_through() {
@@ -182,5 +251,46 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("Lean runtime initialization panicked"));
         assert!(rendered.contains("boom"));
+    }
+
+    #[test]
+    fn conversion_error_displays_out_of_range() {
+        let err = ConversionError::OutOfRange { expected: "u64" };
+        let rendered = err.to_string();
+        assert!(rendered.contains("does not fit"));
+        assert!(rendered.contains("u64"));
+    }
+
+    #[test]
+    fn conversion_error_displays_wrong_kind() {
+        let err = ConversionError::WrongObjectKind {
+            expected: "String",
+            found_tag: 248,
+        };
+        let rendered = err.to_string();
+        assert!(rendered.contains("expected Lean String"));
+        assert!(rendered.contains("248"));
+    }
+
+    #[test]
+    fn conversion_error_displays_invalid_char() {
+        let err = ConversionError::InvalidChar { code_point: 0xD800 };
+        let rendered = err.to_string();
+        assert!(rendered.contains("Unicode scalar value"));
+    }
+
+    #[test]
+    fn conversion_error_displays_invalid_utf8() {
+        let err = ConversionError::InvalidUtf8;
+        let rendered = err.to_string();
+        assert!(rendered.contains("UTF-8"));
+    }
+
+    #[test]
+    fn lean_error_wraps_conversion_failure() {
+        let err: LeanError = ConversionError::OutOfRange { expected: "i64" }.into();
+        let rendered = err.to_string();
+        assert!(rendered.starts_with("lean-rs:"));
+        assert!(rendered.contains("i64"));
     }
 }

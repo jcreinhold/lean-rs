@@ -2,8 +2,16 @@
 //! `lean.h:815–1028`.
 
 #![allow(clippy::inline_always)]
+// `lean_alloc_sarray` takes `elem_size: u32` to mirror the C `unsigned`
+// signature but stores the value in `m_other` (u8). The truncation is
+// gated by a documented caller precondition (`elem_size <= u8::MAX`).
+#![allow(clippy::cast_possible_truncation)]
 
-use crate::repr::{LeanArrayObjectRepr, LeanSArrayObjectRepr};
+use core::mem::size_of;
+
+use crate::consts::LEAN_SCALAR_ARRAY;
+use crate::object::lean_alloc_object;
+use crate::repr::{LeanArrayObjectRepr, LeanObjectRepr, LeanSArrayObjectRepr};
 use crate::types::{b_lean_obj_arg, lean_obj_arg, lean_obj_res, lean_object};
 
 unsafe extern "C" {
@@ -13,6 +21,45 @@ unsafe extern "C" {
     pub fn lean_array_set_panic(a: lean_obj_arg, v: lean_obj_arg) -> lean_obj_res;
     pub fn lean_array_push(a: lean_obj_arg, v: lean_obj_arg) -> *mut lean_object;
     pub fn lean_mk_array(n: lean_obj_arg, v: lean_obj_arg) -> *mut lean_object;
+}
+
+/// Allocate a freshly initialised scalar-array (`lean.h:1004–1010`).
+///
+/// Returns a `LeanScalarArray`-tagged object with `m_size = size`,
+/// `m_capacity = capacity`, and `elem_size` bytes per element. The
+/// payload bytes are uninitialised; the caller must write to
+/// [`lean_sarray_cptr`] before the array escapes.
+///
+/// # Safety
+///
+/// * `elem_size` must fit a `u8` (Lean stores it in `m_other`) and must be
+///   one of `{1, 2, 4, 8}` for the existing scalar-array consumers
+///   (`ByteArray` uses `1`).
+/// * `size <= capacity`.
+/// * `size_of::<LeanSArrayObjectRepr>() + elem_size * capacity` must not
+///   overflow `usize`; the helper checks this with `strict_*` arithmetic
+///   and panics on overflow (mirroring `lean_alloc_sarray_would_overflow`).
+#[inline(always)]
+pub unsafe fn lean_alloc_sarray(elem_size: u32, size: usize, capacity: usize) -> lean_obj_res {
+    let elem_size_usize = elem_size as usize;
+    let total = size_of::<LeanSArrayObjectRepr>().strict_add(elem_size_usize.strict_mul(capacity));
+    // SAFETY: `lean_alloc_object` returns a non-null pointer to `total` bytes
+    // of uninitialised Lean-managed memory; we install the scalar-array
+    // header before returning so the object is immediately well-formed for
+    // every existing predicate (`lean_is_sarray`, `lean_sarray_*`).
+    unsafe {
+        let o = lean_alloc_object(total);
+        let header = o.cast::<LeanObjectRepr>();
+        (*header).m_rc = 1;
+        (*header).m_tag = LEAN_SCALAR_ARRAY;
+        // `elem_size` is asserted by the caller to fit a `u8`; cast loss
+        // is impossible inside the documented contract.
+        (*header).m_other = elem_size as u8;
+        let sarray = o.cast::<LeanSArrayObjectRepr>();
+        (*sarray).size = size;
+        (*sarray).capacity = capacity;
+        o
+    }
 }
 
 #[inline(always)]

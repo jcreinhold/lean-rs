@@ -66,6 +66,7 @@ name = "lean-rs"
 version = "0.1.0"
 dependencies = [
  "lean-rs-sys",
+ "lean-rs-test-support",
 ]
 
 [[package]]
@@ -78,6 +79,9 @@ dependencies = [
 [[package]]
 name = "lean-rs-test-support"
 version = "0.1.0"
+dependencies = [
+ "lean-rs-sys",
+]
 
 [[package]]
 name = "lean-toolchain"

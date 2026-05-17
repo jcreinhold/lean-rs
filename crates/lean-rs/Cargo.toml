@@ -13,5 +13,11 @@ version.workspace = true
 [dependencies]
 lean-rs-sys.workspace = true
 
+[dev-dependencies]
+# TODO(prompt 13): drop — the throwaway `lean_rs_test_support::fixture`
+# loader is replaced by the typed `LeanLibrary`/`LeanModule`/`LeanExported{N}`
+# machinery when prompt 13 lands.
+lean-rs-test-support = { path = "../lean-rs-test-support" }
+
 [lints]
 workspace = true

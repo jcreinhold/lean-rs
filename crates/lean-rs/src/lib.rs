@@ -32,13 +32,17 @@
 //! ## Module map
 //!
 //! - [`error`] — typed error boundary ([`LeanError`], [`LeanResult`]).
-//!   Prompt 06 lands the [`LeanError::Init`] variant; prompt 10 fills in
-//!   the rest.
+//!   Prompt 06 lands the [`LeanError::Init`] variant; prompt 08 adds
+//!   [`LeanError::Conversion`]; prompt 10 fills in the rest.
 //! - `runtime` (`pub(crate)`) — process-wide [`LeanRuntime`], thread
 //!   attach RAII, and the lifetime-bound owned/borrowed object handles
 //!   (`Obj<'lean>`, `ObjRef<'lean, '_>`) that own every `lean_inc` /
 //!   `lean_dec` inside the crate.
-//! - Other modules — `module`, `host`, `abi` — land in prompts 08–18.
+//! - `abi` (`pub(crate)`) — typed first-order ABI conversions
+//!   (`IntoLean`, `TryFromLean`) for scalars, `Nat`/`Int`, `String`, and
+//!   `ByteArray`. Infrastructure for the `module` and `host` modules
+//!   landing in prompts 09–18.
+//! - Other modules — `module`, `host` — land in prompts 09–18.
 //!
 //! ## Layering
 //!
@@ -48,6 +52,7 @@
 //! raw `lean_*` symbols may depend on `lean-rs-sys` directly, accepting
 //! its full `unsafe` discipline.
 
+pub(crate) mod abi;
 pub mod error;
 pub(crate) mod runtime;
 

@@ -2,11 +2,11 @@
 //!
 //! Workspace-internal (`publish = false`). Anything it exposes is for the project's own tests and is explicitly
 //! excluded from the public stability surface.
-//!
-//! The public surface is empty at the bootstrap stage. Test helpers land alongside the prompts that need them.
 
 /// Version of the `lean-rs-test-support` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod fixture;
 
 #[cfg(test)]
 mod tests {
