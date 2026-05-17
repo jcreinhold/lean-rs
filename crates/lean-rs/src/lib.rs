@@ -52,7 +52,12 @@
 //!   the dylib) and [`module::LeanModule`] (proof that a module's
 //!   initializer succeeded). Typed exported-function handles attach to
 //!   `LeanModule` in prompt 12.
-//! - Other modules — `host` — land in prompts 13–18.
+//! - [`host`] — high-level surface for hosting Lean capabilities. The
+//!   first piece, [`host::handle`], lands the four opaque semantic
+//!   handle types — [`LeanName`], [`LeanLevel`], [`LeanExpr`],
+//!   [`LeanDeclaration`] — re-exported at the crate root with their
+//!   `Lean` prefix. `LeanHost`, `LeanCapabilities`, `LeanSession`, and
+//!   the evidence surface land in prompts 14–17.
 //!
 //! ## Layering
 //!
@@ -64,12 +69,14 @@
 
 pub(crate) mod abi;
 pub mod error;
+pub mod host;
 pub mod module;
 pub(crate) mod runtime;
 
 pub use crate::error::{
     HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };
+pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::runtime::LeanRuntime;
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.
