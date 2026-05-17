@@ -34,9 +34,11 @@
 //! - [`error`] — typed error boundary ([`LeanError`], [`LeanResult`]).
 //!   Prompt 06 lands the [`LeanError::Init`] variant; prompt 10 fills in
 //!   the rest.
-//! - `runtime` (`pub(crate)`) — process-wide [`LeanRuntime`] and thread
-//!   attach RAII.
-//! - Other modules — `module`, `host`, `abi` — land in prompts 07–18.
+//! - `runtime` (`pub(crate)`) — process-wide [`LeanRuntime`], thread
+//!   attach RAII, and the lifetime-bound owned/borrowed object handles
+//!   (`Obj<'lean>`, `ObjRef<'lean, '_>`) that own every `lean_inc` /
+//!   `lean_dec` inside the crate.
+//! - Other modules — `module`, `host`, `abi` — land in prompts 08–18.
 //!
 //! ## Layering
 //!

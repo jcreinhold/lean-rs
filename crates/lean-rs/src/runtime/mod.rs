@@ -13,9 +13,12 @@
 //! - the order in which those symbols must be called;
 //! - the `OnceLock` cell that makes initialization process-once;
 //! - the `catch_unwind` boundary that keeps Rust panics from unwinding
-//!   into Lean or C frames.
+//!   into Lean or C frames;
+//! - the `lean_inc` / `lean_dec` discipline behind every owned or
+//!   borrowed Lean object handle (see [`obj`]).
 
 pub(crate) mod init;
+pub(crate) mod obj;
 pub(crate) mod thread;
 
 pub use init::LeanRuntime;
