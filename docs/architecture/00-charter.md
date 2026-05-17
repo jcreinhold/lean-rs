@@ -69,12 +69,17 @@ consumers cannot bypass `lean-rs` to reach raw symbols.
 `lean-rs-test-support` is also workspace-internal (`publish = false`) and
 carries fixtures and helpers; it is not a public surface.
 
-Inside `lean-rs`, the module layout mirrors the original layer story —
-`runtime`, `abi`, `module`, `host`, `batch`, `error` — but those boundaries are
-policed by `pub(crate)`, not by Cargo crate splits. Re-exports at the crate root
-are a curated public API, not a path-shortening facade. A reader of
-`lean_rs::*` should see the smallest set of items that lets them call Lean code,
-ask semantic questions, and receive typed results.
+Inside `lean-rs`, the module layout mirrors the original layer story but
+compresses it after a holistic review: **three publicly-visible modules**
+(`module`, `host`, `error`) and **two `pub(crate)` infrastructure modules**
+(`runtime`, `abi`). Bulk and pooling operations live as methods on
+`LeanSession`, not in a sibling `batch` module — a separate `batch` module
+would be a shallow wrapper that always borrows a session. The compression is
+recorded in `RD-2026-05-17-004`. Module boundaries are policed by `pub(crate)`,
+not by Cargo crate splits. Re-exports at the crate root are a curated public
+API, not a path-shortening facade. A reader of `lean_rs::*` should see the
+smallest set of items that lets them call Lean code, ask semantic questions,
+and receive typed results.
 
 ## Decisions that must not leak
 
@@ -186,9 +191,24 @@ The shape after `RD-2026-05-17-003`:
 - `lean-toolchain` (published) for discovery, typed fingerprint, fixture
   digest, layered link diagnostics, and build-script helpers reusable by
   downstream embedders. Composes on top of `lean-rs-sys`'s raw metadata.
-- `lean-rs` (published) as the single safe front door, with internal modules
-  `runtime`, `abi`, `module`, `host`, `batch`, `error`, all `pub(crate)`.
+- `lean-rs` (published) as the single safe front door, with three publicly
+  visible modules (`module`, `host`, `error`) and two `pub(crate)`-only
+  infrastructure modules (`runtime`, `abi`). Per `RD-2026-05-17-004`, batch
+  and session-pool operations are methods on `LeanSession` rather than a
+  separate `batch` module.
 - `lean-rs-test-support` (`publish = false`) for fixtures and helpers.
+
+The universal currency inside `lean-rs` is a token-bound object handle:
+`pub(crate) runtime::Obj<'lean>` carries a phantom lifetime tied to a
+`&'lean LeanRuntime` borrow. Public types built on top — `LeanHost<'lean>`,
+`LeanCapabilities<'lean, 'h>`, `LeanSession<'lean, 'c>`, and the semantic
+handles (`LeanExpr<'lean>`, `LeanName<'lean>`, …) — propagate the lifetime
+so that the type system enforces *init-before-use* and *no value escapes the
+runtime*. The pattern is borrowed from PyO3's `Bound<'py, T>`; `LeanRuntime`
+plays the role `Python<'py>` plays, except creation is process-once rather
+than GIL-scoped. The `'lean` parameter is invisible at typical call sites
+(inferred from the runtime borrow) and disappears from `lean_rs::*`
+re-exports when bound to `'static`.
 
 This design is deeper than each rejected alternative: fewer caller-facing
 details, less temporal coupling (no "call this first" exposed as a safe API),
