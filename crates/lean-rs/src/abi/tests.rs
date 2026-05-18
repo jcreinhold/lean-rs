@@ -346,6 +346,24 @@ fn string_identity_helper(s: &str) {
     assert_eq!(identity.call(s.to_owned()).expect("call"), s);
 }
 
+/// `LeanAbi for &str` round-trips through the same fixture as the
+/// owned-`String` path. Covers the borrowed-encode entry point used by
+/// `LeanSession::elaborate`, `kernel_check`, `elaborate_bulk`, and
+/// `make_name`.
+#[test]
+fn borrowed_str_arg_round_trips_through_string_identity() {
+    let library = fixture_library();
+    let module = library
+        .initialize_module("lean_rs_fixture", "LeanRsFixture")
+        .expect("init");
+    let identity = module
+        .exported::<(&str,), String>("lean_rs_fixture_string_identity")
+        .expect("lookup");
+    for &s in &["", "hello, world", "héllo 🦀", "a\0b\0c"] {
+        assert_eq!(identity.call(s).expect("call"), s);
+    }
+}
+
 #[test]
 fn string_round_trips_empty() {
     string_identity_helper("");

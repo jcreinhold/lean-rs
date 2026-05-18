@@ -21,10 +21,16 @@
 //! `u8 as LeanAbi` produces an unboxed `uint8_t` matching Lake's emitted
 //! signature.
 //!
-//! Borrowed conversions (`&str`, `&[u8]`) live as free functions on the
-//! per-type modules rather than as additional traits — keeping the trait
-//! surface minimal until a real second caller earns the abstraction (per
-//! the CLAUDE.md "no speculative traits with one implementor" rule).
+//! Borrowed conversions do not introduce a new trait. Where a Rust
+//! borrowed type appears in a Lean export's argument tuple, the per-type
+//! module adds an `impl LeanAbi for &T` rather than a new
+//! `BorrowedLeanAbi` trait. The `&str` impl in [`super::string`] is the
+//! earned case: `LeanSession::elaborate`, `kernel_check`, `elaborate_bulk`,
+//! and `make_name` each accepted `&str` from callers and previously paid
+//! a `String::to_owned()` only to reach `LeanAbi<'lean> for String`.
+//! Borrowed-only reads (`borrow_str`) stay as free functions because they
+//! are zero-copy *return*-direction helpers and never need to satisfy the
+//! `LeanAbi` arg-tuple bound.
 
 use lean_rs_sys::lean_object;
 

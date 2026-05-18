@@ -154,3 +154,43 @@ impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
         Self::try_from_lean(obj)
     }
 }
+
+// -- LeanAbi: &str is encode-only at the Lake C ABI -------------------
+//
+// Lake's C ABI for borrowed-string arguments uses the same boxed
+// `lean_object*` representation as owned `String`. A borrowed-encode
+// path avoids the per-call `String::to_owned()` that callers would
+// otherwise perform to satisfy `LeanAbi<'lean> for String`. The
+// elaborate / kernel_check / make_name shims on `LeanSession` each take
+// `&str` from the caller and previously paid an extra `to_owned()`
+// solely to reach the `String` `LeanAbi` impl; with this impl those
+// shims pass the slice straight through.
+//
+// `from_c` is unreachable through any caller-constructible flow: a
+// borrowed-string return position has no lifetime to borrow from, since
+// `LeanAbi::from_c`'s signature does not bind the input pointer to any
+// `'a`. The body releases the inbound owned reference and returns a
+// conversion error so the impl is honest about the limitation rather
+// than panicking. Code that needs to *read* a Lean `String` uses
+// `String` (owned decode) or `borrow_str(&ObjRef)` (zero-copy view).
+impl crate::abi::traits::sealed::SealedAbi for &str {}
+impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
+    type CRepr = *mut lean_rs_sys::lean_object;
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        from_str(runtime, self).into_raw()
+    }
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`
+        // contract; wrap-and-drop releases the count so we do not leak
+        // when this unreachable branch is reached.
+        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        Err(conversion_error(
+            "&str cannot decode a Lean call result; use `String` for an owned copy \
+             or `borrow_str(&ObjRef)` for a zero-copy view",
+        ))
+    }
+}

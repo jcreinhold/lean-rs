@@ -481,16 +481,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let call: LeanExported<
             'lean,
             '_,
-            (Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize),
+            (Obj<'lean>, &str, Option<LeanExpr<'lean>>, &str, &str, u64, usize),
             LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>,
         > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
         let result = call.call(
             self.environment.clone(),
-            source.to_owned(),
+            source,
             expected_type.cloned(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
+            options.namespace_context_str(),
+            options.file_label_str(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -525,15 +525,15 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let call: LeanExported<
             'lean,
             '_,
-            (Obj<'lean>, String, String, String, u64, usize),
+            (Obj<'lean>, &str, &str, &str, u64, usize),
             LeanIo<LeanKernelOutcome<'lean>>,
         > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
         let result = call.call(
             self.environment.clone(),
-            source.to_owned(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
+            source,
+            options.namespace_context_str(),
+            options.file_label_str(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -778,7 +778,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let call: LeanExported<
             'lean,
             '_,
-            (Obj<'lean>, Vec<String>, String, String, u64, usize),
+            (Obj<'lean>, Vec<String>, &str, &str, u64, usize),
             LeanIo<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>,
         > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let sources_owned: Vec<String> = sources.iter().map(|&s| s.to_owned()).collect();
@@ -786,8 +786,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let result = call.call(
             self.environment.clone(),
             sources_owned,
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
+            options.namespace_context_str(),
+            options.file_label_str(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -856,10 +856,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let address = self.capabilities.symbols().name_from_string;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `String -> Name` (pure, not IO).
-        let to_name: LeanExported<'lean, '_, (String,), LeanName<'lean>> =
+        let to_name: LeanExported<'lean, '_, (&str,), LeanName<'lean>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = to_name.call(name.to_owned());
+        let result = to_name.call(name);
         self.record_call(0, t.elapsed());
         result
     }
