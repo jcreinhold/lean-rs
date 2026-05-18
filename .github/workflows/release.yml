@@ -99,10 +99,12 @@ jobs:
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      # See `ci.yml` for the rationale on `RUST_BACKTRACE=0` here.
+      # See `ci.yml` for the rationale on `RUST_BACKTRACE=0` and
+      # `LD_PRELOAD=libgcc_s.so.1` here.
       - name: cargo nextest run
         env:
           RUST_BACKTRACE: '0'
+          LD_PRELOAD: ${{ matrix.os == 'ubuntu-latest' && '/usr/lib/x86_64-linux-gnu/libgcc_s.so.1' || '' }}
         run: cargo nextest run --workspace --profile ci
 
       - name: cargo test --doc

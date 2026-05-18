@@ -117,16 +117,25 @@ jobs:
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      # `RUST_BACKTRACE=0` here is load-bearing: see the comment on the
-      # top-level `env:` block. The panic-handling tests in
-      # `error::tests` and `runtime::*::tests` intentionally panic; if
-      # the default panic hook tries to capture a backtrace, the
-      # backtrace walker crosses `libleanshared.so` frames whose DWARF
-      # the glibc unwinder mis-decodes, and the test SEGVs before
-      # `catch_unwind` can return.
+      # Two Linux-specific overrides for the panic-handling tests in
+      # `error::tests` and `runtime::*::tests`:
+      #
+      # 1. `RUST_BACKTRACE=0` — the default panic hook's backtrace
+      #    capture walks the stack through `libleanshared.so` frames
+      #    whose DWARF the glibc unwinder mis-decodes.
+      #
+      # 2. `LD_PRELOAD=libgcc_s.so.1` — `libleanshared.so` is a C++
+      #    binary that statically links its own libstdc++ + `_Unwind_*`
+      #    symbols. When dynamically loaded into the test binary,
+      #    those symbols shadow glibc's libgcc_s unwinder; Rust panic
+      #    unwinding then can't find catch_unwind's landing pads and
+      #    aborts. Preloading the system libgcc_s forces it to win
+      #    symbol resolution. macOS doesn't reproduce because Mach-O
+      #    two-level namespaces scope symbol lookup per-image.
       - name: cargo nextest run
         env:
           RUST_BACKTRACE: '0'
+          LD_PRELOAD: ${{ matrix.os == 'ubuntu-latest' && '/usr/lib/x86_64-linux-gnu/libgcc_s.so.1' || '' }}
         run: cargo nextest run --workspace --profile ci
 
       - name: cargo test --doc
