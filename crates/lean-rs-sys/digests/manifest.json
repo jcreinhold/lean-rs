@@ -1,0 +1,31 @@
+{
+  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.26.0 — multi-toolchain sweep on 2026-05-18 surfaced an L2 refcount-path divergence on 4.25.x and earlier.",
+  "captured_on": "aarch64-apple-darwin",
+  "captured_date": "2026-05-18",
+  "entries": [
+    {
+      "versions": ["4.26.0"],
+      "header_digest": "e0ea3efaccceb5b75c7e9e1ab92952c8aa85c3faee28ee949dfeb8ab428ad218"
+    },
+    {
+      "versions": ["4.27.0"],
+      "header_digest": "42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13"
+    },
+    {
+      "versions": ["4.28.0"],
+      "header_digest": "624726e5f1f10fd77cd95b8fe8f30389312e57c8fc98e6c2f1989289bdb5fb0e"
+    },
+    {
+      "versions": ["4.28.1"],
+      "header_digest": "648ecfb615ef0222cd63b5f1bbbc379a06749bc0f5f4c2eb16ffca26fd18fe81"
+    },
+    {
+      "versions": ["4.29.0"],
+      "header_digest": "671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c"
+    },
+    {
+      "versions": ["4.29.1"],
+      "header_digest": "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc"
+    }
+  ]
+}

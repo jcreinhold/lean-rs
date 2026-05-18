@@ -13,8 +13,11 @@
 //! [`lean_object`] is intentionally opaque: it is zero-sized and `!Send +
 //! !Sync + !Unpin`. Downstream code reaches refcount, tag, and payload state
 //! only through this crate's `pub unsafe fn` helpers, never by reading
-//! fields. The crate's layout assumptions are pinned at build time by the
-//! `LEAN_HEADER_DIGEST` check in `build.rs`.
+//! fields. The crate's layout assumptions are pinned at build time: `build.rs`
+//! computes the SHA-256 of the active toolchain's `include/lean/lean.h` and
+//! requires it to match one entry in [`SUPPORTED_TOOLCHAINS`]. The matched
+//! entry's first `versions` field is then exposed at runtime via
+//! [`consts::LEAN_RESOLVED_VERSION`].
 //!
 //! Layering:
 //! - Inline mirrors of `lean.h`'s `static inline` helpers live alongside the
@@ -25,9 +28,8 @@
 //!   (`LeanObjectRepr` and friends). These types are intentionally not
 //!   re-exported.
 //!
-//! See `crates/lean-rs-sys/README.md` for the supported Lean version range,
-//! discovery rules followed by `build.rs`, and how to refresh
-//! `EXPECTED_HEADER_DIGEST` when bumping Lean.
+//! See `crates/lean-rs-sys/README.md` for the supported Lean version window
+//! and `docs/bump-toolchain.md` for the procedure to extend it.
 
 #![allow(unsafe_code)]
 #![allow(non_camel_case_types)]
@@ -46,12 +48,28 @@ pub mod object;
 pub mod refcount;
 pub mod scalar;
 pub mod string;
+pub mod supported;
 pub mod types;
 
 pub(crate) mod repr;
 
-pub use consts::{EXPECTED_HEADER_DIGEST, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
+pub use consts::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION};
+pub use supported::{
+    SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for, symbol_present_in_window,
+};
 pub use types::{b_lean_obj_arg, b_lean_obj_res, lean_obj_arg, lean_obj_res, lean_object, u_lean_obj_arg};
+
+/// Return `true` iff `symbol` is required and present across the window.
+///
+/// More precisely: `symbol` is one of the names in [`REQUIRED_SYMBOLS`]
+/// **and** no entry in [`SUPPORTED_TOOLCHAINS`] lists it under
+/// `missing_symbols`. The thin convenience over
+/// [`symbol_present_in_window`] that adds the [`REQUIRED_SYMBOLS`]
+/// membership check.
+#[must_use]
+pub fn symbol_in_all(symbol: &str) -> bool {
+    REQUIRED_SYMBOLS.contains(&symbol) && symbol_present_in_window(symbol)
+}
 
 /// Names of `LEAN_EXPORT`'d symbols this crate's `extern "C"` blocks declare.
 ///

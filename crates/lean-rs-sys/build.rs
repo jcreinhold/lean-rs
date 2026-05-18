@@ -1,11 +1,12 @@
 //! Build script for `lean-rs-sys`.
 //!
 //! 1. Discover a Lean 4 toolchain prefix.
-//! 2. Read `<prefix>/include/lean/lean.h`, compute its SHA-256 digest, and assert
-//!    it matches `EXPECTED_HEADER_DIGEST` — the digest the inline mirrors in
-//!    `src/refcount.rs`, `src/object.rs`, etc. were authored against.
+//! 2. Read `<prefix>/include/lean/lean.h`, compute its SHA-256 digest, and
+//!    look up the matching [`SupportedToolchain`](crate::SupportedToolchain)
+//!    entry. The build fails if no entry matches.
 //! 3. Emit `cargo:rustc-env=…` so `src/consts.rs` can `env!("…")` the resolved
-//!    version, header path, and digests.
+//!    version, header path, and digest, plus a `cargo:rustc-cfg=lean_v_X_Y_Z`
+//!    so downstream code can `#[cfg]`-gate per-version divergences.
 //! 4. Emit `cargo:rustc-link-search` / `rustc-link-lib` directives for the
 //!    selected feature combination (`static` vs `dynamic`, with or without
 //!    `mimalloc`).
@@ -22,11 +23,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Digest of `lean.h` from the Lean 4.29.1 toolchain. The inline refcount /
-/// layout helpers in this crate were authored against this exact header; if
-/// the active toolchain's header digest differs, the build fails with a
-/// message naming both digests so the mirrors can be reviewed.
-const EXPECTED_HEADER_DIGEST: &str = "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc";
+// `src/supported.rs` is `include!`-ed below so the build script can read
+// `SUPPORTED_TOOLCHAINS` without depending on the crate itself. The included
+// file references `crate::REQUIRED_SYMBOLS` only inside `#[cfg(test)]`
+// helpers, so a build-script include works.
+#[path = "src/supported.rs"]
+#[allow(dead_code, unreachable_pub)]
+mod supported;
+
+use supported::{SUPPORTED_TOOLCHAINS, SupportedToolchain};
 
 fn main() {
     if env::var_os("CARGO_FEATURE_STATIC").is_some() && env::var_os("CARGO_FEATURE_DYNAMIC").is_some() {
@@ -44,23 +49,29 @@ fn main() {
 
     let header_path = prefix.join("include").join("lean").join("lean.h");
     let actual_digest = sha256_file(&header_path);
-    if actual_digest != EXPECTED_HEADER_DIGEST {
-        panic!(
-            "lean-rs-sys: lean.h at {} has digest {}, but the refcount mirrors were \
-             authored against {}. Either pin the supported Lean range or update the \
-             mirrors and bump EXPECTED_HEADER_DIGEST.",
-            header_path.display(),
-            actual_digest,
-            EXPECTED_HEADER_DIGEST,
-        );
-    }
+    let entry = SUPPORTED_TOOLCHAINS
+        .iter()
+        .find(|t| t.header_digest == actual_digest)
+        .unwrap_or_else(|| {
+            panic!(
+                "lean-rs-sys: lean.h at {} has digest {} but no entry in \
+                 SUPPORTED_TOOLCHAINS matches. The supported window is:\n  - {}\n\
+                 Either install a supported Lean toolchain, or follow \
+                 docs/bump-toolchain.md to add this one.",
+                header_path.display(),
+                actual_digest,
+                window_summary(),
+            )
+        });
 
-    let version = read_lean_version(&prefix);
+    let discovered_version = read_lean_version(&prefix);
+    let resolved_version = pick_resolved_version(entry, &discovered_version);
 
-    println!("cargo:rustc-env=LEAN_VERSION={version}");
+    println!("cargo:rustc-env=LEAN_VERSION={discovered_version}");
+    println!("cargo:rustc-env=LEAN_RESOLVED_VERSION={resolved_version}");
     println!("cargo:rustc-env=LEAN_HEADER_PATH={}", header_path.display());
     println!("cargo:rustc-env=LEAN_HEADER_DIGEST={actual_digest}");
-    println!("cargo:rustc-env=LEAN_EXPECTED_HEADER_DIGEST={EXPECTED_HEADER_DIGEST}");
+    println!("cargo:rustc-cfg=lean_v_{}", cfg_token(resolved_version));
 
     emit_link_directives(&prefix);
 
@@ -68,7 +79,42 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-changed={}", header_path.display());
+    println!("cargo:rerun-if-changed=src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+/// Choose which version string from `entry.versions` to record as the
+/// "resolved" version. Prefers an exact match with the discovered version;
+/// falls back to the entry's first listed version (a still-supported alias
+/// for the same `lean.h` digest).
+fn pick_resolved_version<'a>(entry: &'a SupportedToolchain, discovered: &'a str) -> &'a str {
+    if entry.versions.contains(&discovered) {
+        return discovered;
+    }
+    // The `unwrap_or` fallback guards against an empty `versions` array,
+    // which is structurally rejected by `supported.rs`'s
+    // `every_entry_lists_at_least_one_version` test but cannot be asserted
+    // at build-script compile time.
+    entry.versions.first().copied().unwrap_or("unknown")
+}
+
+/// Convert a version string like `"4.29.1"` to the `cfg` token `4_29_1` so
+/// downstream code can write `#[cfg(lean_v_4_29_1)]`.
+fn cfg_token(version: &str) -> String {
+    version.replace('.', "_")
+}
+
+/// Render the supported window as a multi-line bulleted summary, suitable
+/// for inclusion in a panic message.
+fn window_summary() -> String {
+    let mut out = String::new();
+    for (i, t) in SUPPORTED_TOOLCHAINS.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n  - ");
+        }
+        let _ = write!(out, "{:?} (digest {})", t.versions, t.header_digest);
+    }
+    out
 }
 
 fn discover_lean_prefix() -> PathBuf {

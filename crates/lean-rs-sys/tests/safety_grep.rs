@@ -4,10 +4,12 @@
 //!    `# Safety` comment in the surrounding source. The check is purely
 //!    lexical — it scans for the keyword and looks for the documentation
 //!    marker in the file. Cheap, no new dev-deps.
-//! 2. No `pub fn` exists in `src/` without `unsafe`. The crate's public
-//!    surface is intrinsically unsafe; a stray safe `pub fn` would slip
-//!    past the workspace `unsafe-code = "deny"` lint without the
-//!    discipline this test enforces.
+//! 2. No `pub fn` exists in `src/` without `unsafe`, except for explicit
+//!    safe-by-construction metadata helpers listed in [`KNOWN_SAFE_FNS`].
+//!    The crate's FFI surface is intrinsically unsafe; a stray safe `pub
+//!    fn` (e.g. accidentally exposing what should be `pub(crate)`) would
+//!    slip past the workspace `unsafe-code = "deny"` lint without this
+//!    discipline.
 
 // Tests panic on setup failures (unreadable source files etc.); that is
 // the right behaviour for a hygiene test, not a smell.
@@ -31,6 +33,21 @@ const SOURCE_FILES: &[&str] = &[
     "src/io.rs",
     "src/init.rs",
     "src/external.rs",
+    "src/supported.rs",
+];
+
+/// Safe-by-construction `pub fn` items that are allowed in `src/`. Each
+/// entry is the literal text following `pub fn ` up to the opening `(`.
+/// These do not touch raw FFI: they are compile-time queries over the
+/// crate's metadata tables.
+const KNOWN_SAFE_FNS: &[&str] = &[
+    // src/lib.rs — convenience over REQUIRED_SYMBOLS + SUPPORTED_TOOLCHAINS.
+    "symbol_in_all",
+    // src/supported.rs — pure queries over SUPPORTED_TOOLCHAINS.
+    "supported_for",
+    "supported_by_digest",
+    "symbol_present_in_window",
+    "includes",
 ];
 
 fn read(path: &str) -> String {
@@ -186,11 +203,14 @@ fn no_safe_public_functions_in_public_surface() {
                 }
                 continue;
             }
-            if trimmed.starts_with("pub fn ") {
-                violations.push(format!(
-                    "{path}:{}: `pub fn` found outside `extern \"C\"` — public surface must be `pub unsafe fn`",
-                    idx + 1,
-                ));
+            if let Some(rest) = trimmed.strip_prefix("pub fn ") {
+                let name = rest.split(['(', '<', ' ', ':']).next().unwrap_or("").trim();
+                if !KNOWN_SAFE_FNS.contains(&name) {
+                    violations.push(format!(
+                        "{path}:{}: `pub fn {name}` found outside `extern \"C\"` — public surface must be `pub unsafe fn`, or add `{name}` to KNOWN_SAFE_FNS",
+                        idx + 1,
+                    ));
+                }
             }
         }
     }
