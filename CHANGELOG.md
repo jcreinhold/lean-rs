@@ -92,6 +92,12 @@ pooling.
   `.code()`. The crate emits `tracing` spans against the `lean_rs` target; in-process tests can
   capture them via `DiagnosticCapture`. No subscriber is installed by the crate; downstream
   consumers attach their own. See `docs/diagnostics.md`.
+- `LEAN_RS_NUM_THREADS` environment variable: when set to a positive integer before the first
+  `LeanRuntime::init` call, pins the Lean task manager worker count for the lifetime of the
+  process. Unset or invalid values fall back to Lean's compiled-in default (typically one worker
+  per core) with a `tracing::warn!` for invalid values. Set this when several Lean-using
+  processes run side by side to avoid oversubscribing cores. See `docs/architecture/04-concurrency.md`
+  and `docs/testing.md`.
 
 Known gaps:
 

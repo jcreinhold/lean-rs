@@ -99,11 +99,30 @@ behaves identically to the underlying Lean assertion.
 The Lean task manager is required for any capability that runs
 `Language.Lean.processCommands` (notably `LeanSession::kernel_check`),
 which asserts `g_task_manager` on entry. `LeanRuntime::init` therefore
-calls `lean_init_task_manager()` unconditionally as part of its
-process-once initialization sequence, after
-`lean_initialize_runtime_module` and `lean_initialize`. Worker counts
-default to Lean's own heuristic; this crate exposes no `with_workers`
-knob in the current surface.
+starts the task manager as part of its process-once initialization
+sequence, after `lean_initialize_runtime_module` and `lean_initialize`.
+
+Worker count is Lean's compiled-in default (typically one worker per
+hardware core) unless the `LEAN_RS_NUM_THREADS` environment variable is
+set to a positive integer **before** the first call to
+`LeanRuntime::init`. The first call captures the value; later changes
+to the variable have no effect, because the task manager is
+process-lived and `init` is idempotent. Invalid values fall back to
+Lean's default with a `tracing::warn!` against the `lean_rs` target.
+
+Set `LEAN_RS_NUM_THREADS` when several Lean-using processes run side by
+side (CI test matrices, batch workers, multi-tenant services) so the
+sum of their worker pools does not oversubscribe cores. The workspace
+ships `LEAN_RS_NUM_THREADS = "1"` as a cargo `[env]` default for this
+reason; tests run under `cargo nextest run` with a 4-process cap, so
+the product is at most 4 Lean workers across the whole suite. See
+[`docs/testing.md`](../testing.md) for the test-runner side of this
+contract.
+
+The crate does not currently expose a programmatic `with_workers(n)`
+constructor; the env var is the single supported override. Adding a
+programmatic API later is a strict refinement (env var stays as the
+operator/ops escape hatch); no breaking change to plan around.
 
 The task manager is process-lived. `lean-rs` does not call
 `lean_finalize_task_manager`; Lean tears the manager down at process
