@@ -2,10 +2,21 @@
 authors.workspace = true
 categories = ["api-bindings", "development-tools::build-utils"]
 description = "Lean 4 toolchain discovery, fingerprinting, symbol allowlist, and build-script helpers reusable by downstream embedders' own build.rs scripts."
+documentation = "https://docs.rs/lean-toolchain"
 edition.workspace = true
+include = [
+  "src/**/*.rs",
+  "build.rs",
+  "tests/**/*.rs",
+  "Cargo.toml",
+  "README.md",
+  "LICENSE-MIT",
+  "LICENSE-APACHE",
+]
 keywords = ["build", "fingerprint", "lean", "lean4", "toolchain"]
 license.workspace = true
 name = "lean-toolchain"
+readme = "README.md"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

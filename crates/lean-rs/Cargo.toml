@@ -2,10 +2,24 @@
 authors.workspace = true
 categories = ["api-bindings", "external-ffi-bindings"]
 description = "Safe Rust bindings for hosting Lean 4 capabilities: runtime initialization, owned and borrowed object handles, typed first-order ABI conversions, compiled module loading, exported function calls, semantic handles, bounded meta services, batching, and session pooling."
+documentation = "https://docs.rs/lean-rs"
 edition.workspace = true
+include = [
+  "src/**/*.rs",
+  "build.rs",
+  "tests/**/*.rs",
+  "tests/compile_fail/**",
+  "examples/**/*.rs",
+  "benches/**/*.rs",
+  "Cargo.toml",
+  "README.md",
+  "LICENSE-MIT",
+  "LICENSE-APACHE",
+]
 keywords = ["bindings", "embedding", "host", "lean", "lean4"]
 license.workspace = true
 name = "lean-rs"
+readme = "README.md"
 repository.workspace = true
 rust-version.workspace = true
 version.workspace = true

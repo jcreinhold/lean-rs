@@ -11,7 +11,7 @@
 //! [`crate::error::bound_message`]; tracing fields that carry it pass
 //! the already-bounded string through.
 
-use std::path::Path;
+use std::path::{Component, Path};
 
 use crate::error::bound_message;
 
@@ -28,11 +28,19 @@ use crate::error::bound_message;
 /// Full-path emission is left to a `trace`-level event the call site
 /// can add when it genuinely needs the absolute path.
 pub(crate) fn short_path(path: &Path) -> String {
+    // Keep only Normal components so the root prefix on absolute paths
+    // (`/`, `C:\`, …) does not surface as an empty join token like
+    // `//tmp/lib.dylib`. `CurDir` / `ParentDir` are dropped for the
+    // same reason: they would render as `.` / `..` tokens, which add
+    // no identifying value to a span field.
     let mut tail: Vec<String> = path
         .components()
         .rev()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => None,
+        })
         .take(3)
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect();
     if tail.is_empty() {
         return "<unknown>".to_owned();
