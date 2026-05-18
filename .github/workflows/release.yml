@@ -52,8 +52,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Release-gate matrix: head Lean × both supported OSes (2 cells).
+        # The full SUPPORTED_TOOLCHAINS sweep runs on demand via
+        # `ci.yml`'s `workflow_dispatch` with `full_matrix: true`.
+        # Rationale: runner cost; trailing-edge breakages tend to
+        # surface in the docs/release.md known-issues list rather
+        # than as silent regressions, and the version-window
+        # SUPPORTED_TOOLCHAINS table is the source of truth.
         os: [ubuntu-latest, macos-latest]
-        lean_version: ['4.26.0', '4.27.0', '4.28.0', '4.28.1', '4.29.0', '4.29.1']
+        lean_version: ['4.29.1']
     steps:
       - uses: actions/checkout@v4
 
