@@ -1,6 +1,3 @@
-warning: lean-rs-sys@0.1.0: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.29.1
- Documenting lean-rs-sys v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
 pub mod lean_rs_sys
 pub mod lean_rs_sys::array
 pub unsafe fn lean_rs_sys::array::lean_alloc_array(size: usize, capacity: usize) -> lean_rs_sys::types::lean_obj_res

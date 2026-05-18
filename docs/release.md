@@ -1,9 +1,14 @@
 # Release Checklist
 
-Human-runnable procedure for publishing a new version of the four `lean-rs` workspace crates to
-crates.io. The supported Lean toolchain range, MSRV, and tested platforms for each release are
-recorded in [`docs/version-matrix.md`](version-matrix.md). The narrative changelog is at the
-repository root, [`CHANGELOG.md`](../CHANGELOG.md).
+The `lean-rs` workspace publishes via a single GitHub Actions workflow,
+[`.github/workflows/release.yml`](../.github/workflows/release.yml). Pushing a `v<semver>` git
+tag fires the workflow, which runs the full pre-flight gate set, the public-API diff, the
+workspace publish dry-run, and the four-crate live publish in dependency order, then opens a
+GitHub Release whose body is the matching `## [<version>]` section of
+[`CHANGELOG.md`](../CHANGELOG.md).
+
+This document is the **human checklist** for the steps before the tag push. The mechanical
+steps after the tag push are owned by the workflow.
 
 **Supported Lean window for v0.1.0:** Lean 4.26.0 through 4.29.1, with every release in the
 window CI-tested on `{ubuntu-latest, macos-latest}`. Adding the next release follows the
@@ -18,107 +23,132 @@ release.
 3. `lean-rs` (depends on `lean-rs-sys`)
 4. `lean-rs-host` (depends on `lean-rs` and `lean-rs-sys`)
 
-`cargo publish` enforces the dependency direction via the crates.io index — the downstream
-publishes will fail with a "no matching package" error until the upstream package is indexed.
-Sequencing manually keeps the failure window short and the human in the loop.
+`cargo publish` enforces the dependency direction via the crates.io index — downstream
+publishes will fail with a "no matching package" error until the upstream is indexed. The
+release workflow sleeps 90s between each publish step to let the index catch up.
 
-## Step 1 — Pre-flight
+## One-time setup
 
-The workspace gates must be clean before any packaging work:
+1. Create a [scoped publish token](https://crates.io/settings/tokens) on crates.io with
+   `publish-new`, `publish-update`, and `yank` scopes. Token format: `cio…`.
+2. In the GitHub repo settings (Settings → Secrets and variables → Actions), add the token as
+   `CARGO_REGISTRY_TOKEN`. The release workflow consumes it via
+   `${{ secrets.CARGO_REGISTRY_TOKEN }}`.
+3. If you sign git tags (recommended), make sure your GPG / SSH signing key is set in your local
+   git config — the workflow does not verify signatures, but a signed tag is the audit trail
+   the GitHub Release UI surfaces.
+
+## Step 1 — Pre-flight (local)
+
+These are the gates the release workflow will run; running them locally is the fast feedback
+loop before a tag push.
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo nextest run --workspace
+cargo nextest run --workspace --profile ci
 cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
-These are the same commands CI runs on `ubuntu-latest` and `macos-latest`. If any fails, stop; do
-not attempt to package.
+If any fails, stop; do not attempt to package. `cargo test` (single-process) is **not** the
+gate — cumulative Lean state OOMs the binary after ~150 tests. See
+[`docs/testing.md`](testing.md) for the rationale, the single-test debug escape hatch, and the
+local override knobs.
 
-`cargo test` (single-process) is unsupported as the workspace gate — cumulative Lean state OOMs
-the binary after ~150 tests. See [`docs/testing.md`](testing.md) for the rationale, the single-test
-debug escape hatch, and the local override knobs.
+## Step 2 — CHANGELOG + version bump
 
-## Step 2 — Public-API diff
+1. Move the previous `## [Unreleased]` entries into a new `## [vX.Y.Z]` section (or compose a
+   fresh section). The release workflow extracts the section body whose heading matches the
+   pushed tag and uses it as the GitHub Release body — make sure the heading text matches
+   exactly (e.g., `## [0.1.0]` for tag `v0.1.0`).
+2. Bump `[workspace.package].version` and `[workspace.dependencies]` constraints in the root
+   `Cargo.toml` if the new version differs from what is already there. The release workflow
+   asserts `"v${workspace.package.version}" == "${GITHUB_REF_NAME}"` before any publish and
+   bails out with a clear error if they disagree.
+3. If the public API changed intentionally, regenerate the baselines under
+   [`docs/api-review/`](api-review/) in the same commit:
 
-For each of the four published crates, diff the current public surface against the committed
-baseline at [`docs/api-review/`](api-review/):
+   ```sh
+   cargo public-api -p lean-rs-sys    --simplified > docs/api-review/lean-rs-sys-public.txt
+   cargo public-api -p lean-toolchain --simplified > docs/api-review/lean-toolchain-public.txt
+   cargo public-api -p lean-rs        --simplified > docs/api-review/lean-rs-public.txt
+   cargo public-api -p lean-rs-host   --simplified > docs/api-review/lean-rs-host-public.txt
+   ```
 
-```sh
-cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs-sys
-cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-toolchain
-cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs
-cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs-host
-```
+   The release workflow re-runs `cargo public-api --simplified` for each of the four crates and
+   `diff`s against these baselines. A drift fails the workflow before any publish.
 
-The result must be a subset of the baseline (additions only) **or** the release is intentionally
-breaking and a major version bump is part of this release. `cargo-public-api` is a developer
-install (`cargo install cargo-public-api`) and not yet wired into CI; see the audit at
-[`docs/api-review.md`](api-review.md) for the caveat.
+## Step 3 — PR and merge
 
-If the diff is non-empty and intentional, regenerate the baselines in the same commit:
+Open a PR with the CHANGELOG + version + (if needed) baseline changes. Merge after CI is green
+on the existing matrix workflow (`ci.yml`). The release workflow does not run until the tag is
+pushed; the regular CI run on the PR is the final correctness gate.
 
-```sh
-cargo public-api -p lean-rs-sys    --simplified > docs/api-review/lean-rs-sys-public.txt
-cargo public-api -p lean-toolchain --simplified > docs/api-review/lean-toolchain-public.txt
-cargo public-api -p lean-rs        --simplified > docs/api-review/lean-rs-public.txt
-cargo public-api -p lean-rs-host   --simplified > docs/api-review/lean-rs-host-public.txt
-```
+## Step 4 — (Optional) Workflow dry-run
 
-## Step 3 — Packaging gate (`cargo package`)
+Before tagging, manually trigger the release workflow with `dry_run: true` from the Actions UI:
 
-Produce the tarballs without uploading. Order matches the publish order:
+> Actions → Release → "Run workflow" → check **dry_run** → Run.
 
-```sh
-cargo package -p lean-rs-sys
-cargo package -p lean-toolchain
-cargo package -p lean-rs
-```
+This runs every gate including `cargo publish --workspace --dry-run` and the public-API diff,
+but skips the live publish and the GitHub Release. Useful when the CHANGELOG section extraction
+or the public-API diff needs a sanity check that doesn't show up in the regular CI run.
 
-Each produces `target/package/<crate>-<version>.crate`. Inspect the contents:
+## Step 5 — Cut the tag
 
-```sh
-for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host; do
-  printf '\n== %s ==\n' "$c"
-  tar tzf "target/package/${c}-$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$c" '.packages[]|select(.name==$c).version')".crate | sort
-done
-```
-
-Each tarball must contain `Cargo.toml`, `Cargo.toml.orig`, `LICENSE-MIT`, `LICENSE-APACHE`,
-`README.md`, the crate `src/`, `build.rs`, and the in-tree `tests/` sources. Must **not** contain
-`target/`, `.lake/`, `*.olean`, editor swap files, or (for `lean-rs`) the `fuzz/` sub-crate.
-
-## Step 4 — Dry-run gate (`cargo publish --dry-run`)
-
-Use the workspace form — Cargo (≥ 1.90) builds a temporary local registry to satisfy intra-workspace
-dependencies, so all three dry-runs verify cleanly without anything having to be on crates.io
-first:
+Only after the merge commit is on `main`:
 
 ```sh
-cargo publish --workspace --dry-run
+git tag -s v0.1.0 -m "lean-rs v0.1.0"
+git push origin v0.1.0
 ```
 
-The per-crate form is also available, but the two downstream crates will fail until the upstream
-is actually published:
+Use `-s` for a signed tag (recommended) or `-a` for an unsigned annotated tag. Plain
+lightweight tags work but lose the message. The tag fires the release workflow.
+
+## Step 6 — Watch the workflow
 
 ```sh
-cargo publish -p lean-rs-sys    --dry-run    # always works in isolation
-cargo publish -p lean-toolchain --dry-run    # fails until lean-rs-sys is on crates.io
-cargo publish -p lean-rs        --dry-run    # fails until lean-rs-sys is on crates.io
-cargo publish -p lean-rs-host   --dry-run    # fails until lean-rs and lean-rs-sys are on crates.io
+gh run watch --workflow=release.yml
 ```
 
-The per-crate failure is the expected pre-publish state — `no matching package named lean-rs-sys
-found … location searched: crates.io index`. Do not treat it as a regression.
+The workflow:
 
-### Recorded dry-run status — v0.1.0 (2026-05-18, four-crate set)
+1. Installs elan + Lean (head of the supported window).
+2. Asserts the tag matches the workspace version.
+3. Runs `fmt`, `clippy`, `nextest`, doctests, `doc` build.
+4. Runs the public-API diff against the committed baselines.
+5. Runs `cargo publish --workspace --dry-run`.
+6. Publishes the four crates in order, with 90s sleeps between each step.
+7. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
+8. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are
+   marked as prereleases automatically.
+
+**If the workflow fails after one crate has published**, crates.io versions are immutable —
+do not retry with the same version number. Bump the failed crate's patch version, repeat
+Steps 1–3, and re-tag at the new merge commit. The release workflow's tag-vs-version assertion
+prevents you from re-tagging against the wrong workspace version.
+
+## Step 7 — Post-publish
+
+- Verify the release on crates.io: `cargo search lean-rs` (the four crates should appear with
+  the new version).
+- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the
+  same for `lean-rs-sys`, `lean-toolchain`, `lean-rs-host`) within ~10 minutes. A docs.rs
+  failure is recoverable only by a patch publish with the doc fix.
+- Update the `RELEASE-READINESS` and `VERSION-COMPATIBILITY` contracts in
+  `prompts/lean-rs/00-current-state.md` with the published versions and tag SHA.
+- Open PRs against the downstream proof repos (`lean-rs-downstream`,
+  `lean-rs-host-downstream`) to bump their dependencies to the new version. The L2 proof's
+  `lakefile.lean` also bumps its `from git "…" @ "vX.Y.Z" / "lake/lean-rs-host-shims"` tag.
+- Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
+
+## Recorded dry-run status — v0.1.0 (2026-05-18, four-crate set)
 
 Captured on `aarch64-apple-darwin` against Lean 4.29.1 (head of the supported window),
-Rust 1.95.0 stable, `cargo 1.95.0`.
-Refreshed after `RD-2026-05-18-001` split `lean-rs::host` into the published sibling crate
-`lean-rs-host` (publish set grew from 3 → 4).
+Rust 1.95.0 stable, `cargo 1.95.0`. Refreshed after `RD-2026-05-18-001` split `lean-rs::host`
+into the published sibling crate `lean-rs-host` (publish set grew from 3 → 4).
 
 | Crate            | `cargo package` (workspace)        | `cargo publish --dry-run` (workspace)                            | `cargo publish --dry-run` (per-crate)                                                                                       |
 | ---------------- | ---------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -127,55 +157,34 @@ Refreshed after `RD-2026-05-18-001` split `lean-rs::host` into the published sib
 | `lean-rs`        | OK — `Packaged 49 files, 370.9KiB` | OK — `Uploading lean-rs v0.1.0` (aborted due to dry run)         | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs-sys found`        |
 | `lean-rs-host`   | OK — `Packaged 45 files, 355.2KiB` | OK — `Uploading lean-rs-host v0.1.0` (aborted due to dry run)    | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs found`            |
 
-The workspace dry-run is the recommended local gate; the per-crate failures above are the
-documented pre-publish state, not a regression. When credentials are absent and the upstream
-registry refuses any network call, `cargo package --workspace` remains the load-bearing local
-gate. The `lean-rs` package shrank (84 → 49 files, 678.2 KiB → 370.9 KiB) when `host` and the
-host-stack tests/examples/benches moved into `lean-rs-host`.
+The workspace dry-run is the recommended local gate (`cargo publish --workspace --dry-run`);
+the per-crate failures above are the documented pre-publish state, not a regression.
 
-## Step 5 — Live publish
+## Fallback — local publish when CI is unavailable
 
-Only after the pre-flight, diff, and packaging gates are clean. The live publish runs per-crate
-(not `--workspace`) so that a single-crate failure does not leave a partial release. Wait between
-steps for the registry to index the previous publish (typically <60s):
+If the GitHub Actions workflow is unavailable (account suspension, runner outage, secret loss),
+the publish can be driven from a laptop. Use this only when CI is genuinely blocked.
+
+Local prerequisites: `cargo login` once with the same scoped publish token, then run the four
+publishes in order with index-propagation waits between:
 
 ```sh
 cargo publish -p lean-rs-sys
-# wait for index
-cargo publish -p lean-toolchain
-# wait for index
-cargo publish -p lean-rs
-# wait for index
-cargo publish -p lean-rs-host
+sleep 90 && cargo publish -p lean-toolchain
+sleep 90 && cargo publish -p lean-rs
+sleep 90 && cargo publish -p lean-rs-host
 ```
 
-If any `cargo publish` fails:
-
-- Stop. Do **not** re-run with `--allow-dirty` or attempt to overwrite the published version.
-- crates.io versions are immutable. A failed publish that did upload but failed to index requires
-  bumping the patch version and re-running from step 1.
-
-## Step 6 — Tag and push
-
-Only after all three `cargo publish` calls succeed:
+After all four succeed, push the tag and create the GitHub Release manually:
 
 ```sh
 git tag -s v0.1.0 -m "lean-rs v0.1.0"
 git push origin v0.1.0
+gh release create v0.1.0 --notes-file <(awk '/^## \[0\.1\.0\]/{f=1;next}f&&/^## \[/{exit}f' CHANGELOG.md)
 ```
 
-Do not tag earlier; a tag points at an immutable claim about what was published.
+If any `cargo publish` fails — **stop**. Do not re-run with `--allow-dirty` or attempt to
+overwrite the published version. crates.io versions are immutable; a failed publish that did
+upload but failed to index requires bumping the patch version.
 
-## Step 7 — Post-publish
-
-- Update [`CHANGELOG.md`](../CHANGELOG.md) with the next `## [Unreleased]` section.
-- Update the `RELEASE-READINESS` and `VERSION-COMPATIBILITY` contracts in
-  `prompts/lean-rs/00-current-state.md` with the published versions and the tag SHA.
-- Open the GitHub Release UI for the tag and paste the relevant `CHANGELOG.md` subsection.
-
-## Authentication
-
-`cargo publish` (without `--dry-run`) requires a crates.io token. The recommended setup is
-`cargo login` once per machine using a scoped publish token from
-<https://crates.io/settings/tokens>. The token is stored under `~/.cargo/credentials.toml`; do not
-commit it. `cargo publish --dry-run` does not need credentials.
+`cargo publish --dry-run` does not need credentials and is safe to run anytime.

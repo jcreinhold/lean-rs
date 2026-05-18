@@ -1,8 +1,3 @@
-   Compiling lean-toolchain v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
-warning: lean-rs-sys@0.1.0: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.29.1
-    Checking lean-rs-sys v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
- Documenting lean-toolchain v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
 pub mod lean_toolchain
 pub use lean_toolchain::LEAN_HEADER_DIGEST
 pub use lean_toolchain::LEAN_HEADER_PATH
