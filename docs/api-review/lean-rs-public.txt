@@ -10,32 +10,6 @@ pub fn lean_rs::abi::structure::alloc_ctor_with_objects<'lean, const N: usize>(r
 pub fn lean_rs::abi::structure::ctor_tag(obj: &lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u8>
 pub fn lean_rs::abi::structure::take_ctor_objects<'lean, const N: usize>(obj: lean_rs::runtime::obj::Obj<'lean>, expected_tag: u8, label: &str) -> lean_rs::error::LeanResult<[lean_rs::runtime::obj::Obj<'lean>; N]>
 pub mod lean_rs::abi::traits
-pub mod lean_rs::abi::traits::sealed
-pub trait lean_rs::abi::traits::sealed::SealedAbi
-impl lean_rs::abi::traits::sealed::SealedAbi for &str
-impl lean_rs::abi::traits::sealed::SealedAbi for ()
-impl lean_rs::abi::traits::sealed::SealedAbi for alloc::string::String
-impl lean_rs::abi::traits::sealed::SealedAbi for bool
-impl lean_rs::abi::traits::sealed::SealedAbi for char
-impl lean_rs::abi::traits::sealed::SealedAbi for f64
-impl lean_rs::abi::traits::sealed::SealedAbi for i16
-impl lean_rs::abi::traits::sealed::SealedAbi for i32
-impl lean_rs::abi::traits::sealed::SealedAbi for i64
-impl lean_rs::abi::traits::sealed::SealedAbi for i8
-impl lean_rs::abi::traits::sealed::SealedAbi for isize
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
-impl lean_rs::abi::traits::sealed::SealedAbi for u16
-impl lean_rs::abi::traits::sealed::SealedAbi for u32
-impl lean_rs::abi::traits::sealed::SealedAbi for u64
-impl lean_rs::abi::traits::sealed::SealedAbi for u8
-impl lean_rs::abi::traits::sealed::SealedAbi for usize
-impl<T, E> lean_rs::abi::traits::sealed::SealedAbi for core::result::Result<T, E>
-impl<T> lean_rs::abi::traits::sealed::SealedAbi for alloc::vec::Vec<T>
-impl<T> lean_rs::abi::traits::sealed::SealedAbi for core::option::Option<T>
 pub trait lean_rs::abi::traits::IntoLean<'lean>: core::marker::Sized
 pub fn lean_rs::abi::traits::IntoLean::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean, T, E> lean_rs::abi::traits::IntoLean<'lean> for core::result::Result<T, E> where E: lean_rs::abi::traits::IntoLean<'lean>, T: lean_rs::abi::traits::IntoLean<'lean>
@@ -78,7 +52,7 @@ impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for u8
 pub fn u8::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for usize
 pub fn usize::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
-pub trait lean_rs::abi::traits::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
+pub trait lean_rs::abi::traits::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::abi::traits::LeanAbi::CRepr: core::marker::Copy
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
@@ -373,7 +347,6 @@ impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
 pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanDeclaration<'lean>
@@ -390,7 +363,6 @@ impl core::clone::Clone for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanExpr<'lean>
 pub fn lean_rs::LeanExpr<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
@@ -409,7 +381,6 @@ impl core::clone::Clone for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
 pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanLevel<'lean>
@@ -426,7 +397,6 @@ impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanName<'lean>
 pub fn lean_rs::LeanName<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
@@ -494,6 +464,7 @@ pub struct lean_rs::module::LeanLibrary<'lean>
 impl<'lean> lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
 pub fn lean_rs::LeanLibrary<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibrary<'lean>::open_globally(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, name: &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
 pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, name: &str) -> core::option::Option<*mut core::ffi::c_void>
 impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
@@ -528,7 +499,7 @@ pub type T::Output = T
 impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
 pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
-pub trait lean_rs::module::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
+pub trait lean_rs::module::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::module::LeanAbi::CRepr: core::marker::Copy
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
@@ -621,7 +592,6 @@ impl core::fmt::Debug for lean_rs::runtime::obj::Obj<'_>
 pub fn lean_rs::runtime::obj::Obj<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for lean_rs::runtime::obj::Obj<'_>
 pub fn lean_rs::runtime::obj::Obj<'_>::drop(&mut self)
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
 pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::runtime::obj::Obj<'lean>
@@ -843,7 +813,6 @@ impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
 pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanDeclaration<'lean>
@@ -915,7 +884,6 @@ impl core::clone::Clone for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanExpr<'lean>
 pub fn lean_rs::LeanExpr<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
@@ -945,7 +913,6 @@ impl core::clone::Clone for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
 pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanLevel<'lean>
@@ -961,6 +928,7 @@ pub struct lean_rs::LeanLibrary<'lean>
 impl<'lean> lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
 pub fn lean_rs::LeanLibrary<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibrary<'lean>::open_globally(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, name: &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
 pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, name: &str) -> core::option::Option<*mut core::ffi::c_void>
 impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
@@ -991,7 +959,6 @@ impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanName<'lean>
 pub fn lean_rs::LeanName<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
@@ -1042,7 +1009,6 @@ impl core::fmt::Debug for lean_rs::runtime::obj::Obj<'_>
 pub fn lean_rs::runtime::obj::Obj<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for lean_rs::runtime::obj::Obj<'_>
 pub fn lean_rs::runtime::obj::Obj<'_>::drop(&mut self)
-impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
 pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::runtime::obj::Obj<'lean>
@@ -1078,7 +1044,7 @@ pub type T::Output = T
 impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
 pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
-pub trait lean_rs::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
+pub trait lean_rs::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::LeanAbi::CRepr: core::marker::Copy
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object

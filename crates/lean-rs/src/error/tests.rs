@@ -13,12 +13,16 @@ use super::{HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanDiagnosticCode, LeanError, 
 #[test]
 fn host_constructor_bounds_oversize_message() {
     let oversize = "x".repeat(LEAN_ERROR_MESSAGE_LIMIT + 1024);
-    let LeanError::Host(host) = LeanError::internal(oversize) else {
+    // Any live `LeanError::Host(...)` constructor goes through the
+    // shared bounding helper; this test asserts the bound, not the
+    // stage, so use a constructor with real production callers
+    // (`abi_conversion` is on the every-FFI-decode path).
+    let LeanError::Host(host) = LeanError::abi_conversion(oversize) else {
         panic!("expected Host variant");
     };
     assert!(host.message().len() <= LEAN_ERROR_MESSAGE_LIMIT);
-    assert_eq!(host.stage(), HostStage::Internal);
-    assert_eq!(host.code(), LeanDiagnosticCode::Internal);
+    assert_eq!(host.stage(), HostStage::Conversion);
+    assert_eq!(host.code(), LeanDiagnosticCode::AbiConversion);
 }
 
 #[test]
@@ -105,12 +109,12 @@ fn catch_callback_panic_returns_ok_when_closure_returns_ok() {
 
 #[test]
 fn catch_callback_panic_propagates_explicit_lean_error() {
-    let err = catch_callback_panic(|| Err::<(), _>(LeanError::internal("explicit")))
+    let err = catch_callback_panic(|| Err::<(), _>(LeanError::abi_conversion("explicit")))
         .expect_err("closure returned Err; helper should pass it through");
     let LeanError::Host(host) = err else {
         panic!("expected Host");
     };
-    assert_eq!(host.stage(), HostStage::Internal);
+    assert_eq!(host.stage(), HostStage::Conversion);
     assert_eq!(host.message(), "explicit");
 }
 

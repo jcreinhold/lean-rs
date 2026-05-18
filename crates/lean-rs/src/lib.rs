@@ -85,17 +85,19 @@ pub mod module;
 pub mod runtime;
 
 /// **Internal extension point.** Not part of the public API; not covered
-/// by semver. Exists so the sibling `lean-rs-host` crate can implement
-/// the sealed `LeanAbi` / `TryFromLean` / `IntoLean` traits for its
-/// host-defined types and reach the small set of error helpers it needs.
+/// by semver. Exists so the sibling `lean-rs-host` crate can construct
+/// `LeanError::Host(...)` values via the one constructor wrapper it
+/// uses without bypassing the structural bounding invariant
+/// (`RD-2026-05-17-006`: external callers cannot mint `LeanError`
+/// values with unbounded messages). The seam stays narrow on purpose:
+/// every extra re-export here is interface surface external readers
+/// might mistake for a stable API. Add a wrapper back only when a real
+/// call site needs it.
+///
 /// External crates must not depend on anything under this path.
 #[doc(hidden)]
-#[allow(unused_imports, reason = "L1→L2 boundary re-exports consumed by lean-rs-host")]
 pub mod __host_internals {
-    pub use crate::error::{
-        bound_message, host_callback_panic, host_internal, host_linking, host_module_init, host_module_init_panic,
-        host_symbol_lookup, lean_exception,
-    };
+    pub use crate::error::host_module_init;
 }
 
 #[cfg(feature = "fuzzing")]

@@ -82,14 +82,29 @@ pub fn conversion_error(message: impl Into<String>) -> LeanError {
 
 // -- Sealing for LeanAbi -----------------------------------------------
 
-/// Private supertrait that seals [`LeanAbi`].
+/// Supertrait that seals [`LeanAbi`] against external implementations.
 ///
-/// Lives in a dedicated `pub(crate)` module so the seal itself is not
-/// nameable from downstream crates (the orphan rule alone is not enough
-/// — downstream could implement `LeanAbi` for a downstream type without
-/// implementing `SealedAbi`, which the sealed bound rejects).
+/// The module is `pub` (not `pub(crate)`) because Cargo has no "friend
+/// crate" visibility and the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
+/// crate genuinely needs to implement `LeanAbi` for its own
+/// host-defined types (`LeanEvidence` etc.) — that's exactly what the
+/// L1 → L2 seam is for. The pattern that holds is:
+///
+/// - **External crates** (anyone other than `lean-rs-host`) cannot
+///   implement `LeanAbi` for their own types: the orphan rule blocks
+///   `impl LeanAbi for MyType` directly, and writing
+///   `impl SealedAbi for MyType` is a transparent intent-to-bypass
+///   that any honest reviewer should reject — combined with the
+///   `#[doc(hidden)]` module marker on the parent module's seam
+///   re-exports, the signal is unambiguous.
+/// - **The sibling `lean-rs-host` crate** reaches `SealedAbi` directly
+///   and implements both `SealedAbi` and `LeanAbi` for its host types.
+///   This is intentional; the sealing is against accidental external
+///   impls, not the same-team L2 stack.
+#[doc(hidden)]
 pub mod sealed {
-    /// Sealed supertrait for [`super::LeanAbi`].
+    /// Sealed supertrait for [`super::LeanAbi`]. See module-level docs
+    /// for the L1 → L2 sibling-crate seam discipline.
     pub trait SealedAbi {}
 }
 
@@ -104,9 +119,12 @@ pub mod sealed {
 /// the encode and decode directions, so they live on one trait (Ousterhout
 /// ch 9 — combining concerns that share information).
 ///
-/// Sealed via `SealedAbi`; the trait appears in
-/// [`crate::module::LeanModule::exported`]'s public signature as a bound
-/// but is not nameable for impl by downstream crates.
+/// Sealed via [`sealed::SealedAbi`]. External crates cannot implement
+/// this trait for their own types (orphan rule + sealed supertrait
+/// rejection). The sibling `lean-rs-host` crate reaches the seam
+/// intentionally and implements `LeanAbi` for its host-defined
+/// types — that's the documented L1 → L2 extension point, not a
+/// stability violation.
 pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     /// The C-ABI type Lake emits for this Lean type at function
     /// signatures.

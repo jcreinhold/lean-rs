@@ -126,12 +126,6 @@ impl LeanError {
         Self::host(HostStage::Conversion, LeanDiagnosticCode::AbiConversion, message)
     }
 
-    /// Build an `Internal` host failure: a `pub(crate)` invariant
-    /// tripped. Indicates a bug in `lean-rs`.
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
-        Self::host(HostStage::Internal, LeanDiagnosticCode::Internal, message)
-    }
-
     /// Build a Lean-thrown-exception report with a bounded message.
     pub(crate) fn lean_exception(kind: LeanExceptionKind, message: impl Into<String>) -> Self {
         Self::LeanException(LeanException {
@@ -483,52 +477,23 @@ pub fn bound_message(mut s: String) -> String {
 // bounding invariant: external crates cannot mint `LeanError` values
 // directly (per RD-2026-05-17-006). The sibling `lean-rs-host` crate
 // needs to construct host failures when it dispatches capability shims;
-// it reaches the constructors through these `#[doc(hidden)] pub fn`
-// wrappers, re-exported at [`crate::__host_internals`].
-
-/// Construct a `Linking` host failure. See [`LeanError::linking`].
-#[doc(hidden)]
-pub fn host_linking(message: impl Into<String>) -> LeanError {
-    LeanError::linking(message)
-}
+// it reaches the one constructor it actually uses through this
+// `#[doc(hidden)] pub fn` wrapper, re-exported at
+// [`crate::__host_internals`].
+//
+// The original boundary exposed eight constructor wrappers
+// (`host_linking`, `host_module_init_panic`, `host_symbol_lookup`,
+// `host_callback_panic`, `host_internal`, `lean_exception`, plus
+// `bound_message`); the post-RD-2026-05-18-001 audit confirmed only
+// `host_module_init` (called from `lake.rs`) was wired up. Carrying
+// the dead seven was 87% speculative surface; they were removed. Add
+// them back the same way (single-call wrapper + re-export in
+// `crate::__host_internals`) if a future call site needs one.
 
 /// Construct a `ModuleInit` host failure. See [`LeanError::module_init`].
 #[doc(hidden)]
 pub fn host_module_init(message: impl Into<String>) -> LeanError {
     LeanError::module_init(message)
-}
-
-/// Construct a `ModuleInit` host failure from a caught panic payload.
-/// See [`LeanError::module_init_panic`].
-#[doc(hidden)]
-pub fn host_module_init_panic(payload: &(dyn Any + Send)) -> LeanError {
-    LeanError::module_init_panic(payload)
-}
-
-/// Construct a `SymbolLookup` host failure. See [`LeanError::symbol_lookup`].
-#[doc(hidden)]
-pub fn host_symbol_lookup(message: impl Into<String>) -> LeanError {
-    LeanError::symbol_lookup(message)
-}
-
-/// Construct an `Internal` host failure. See [`LeanError::internal`].
-#[doc(hidden)]
-pub fn host_internal(message: impl Into<String>) -> LeanError {
-    LeanError::internal(message)
-}
-
-/// Construct a host-stack failure from a caught callback panic payload.
-/// See [`LeanError::callback_panic`].
-#[doc(hidden)]
-pub fn host_callback_panic(payload: &(dyn Any + Send)) -> LeanError {
-    LeanError::callback_panic(payload)
-}
-
-/// Construct a Lean-thrown-exception report with a bounded message.
-/// See [`LeanError::lean_exception`].
-#[doc(hidden)]
-pub fn lean_exception(kind: LeanExceptionKind, message: impl Into<String>) -> LeanError {
-    LeanError::lean_exception(kind, message)
 }
 
 /// Render an arbitrary panic payload as a human-readable string. Strings

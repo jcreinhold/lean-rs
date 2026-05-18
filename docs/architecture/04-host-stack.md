@@ -45,13 +45,26 @@ graph is visible at a glance:
 | `lean_rs::LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi` | Bounds + markers for the typed dispatch generics. |
 | `lean_rs::{LeanName, LeanLevel, LeanExpr, LeanDeclaration}`  | Opaque handles re-used as L2 method return shapes. |
 | `lean_rs::error::*` (`LeanError`, `LeanResult`, `LeanException`, `HostFailure`, `HostStage`, `LeanExceptionKind`, `LeanDiagnosticCode`, `LEAN_ERROR_MESSAGE_LIMIT`, `DiagnosticCapture`, `CapturedEvent`, `DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY`) | The single error model both crates share; new failure variants land here. |
-| `lean_rs::__host_internals::*` (`#[doc(hidden)]`) | Sibling-only seam: `bound_message`, `host_linking`, `host_module_init`, `host_module_init_panic`, `host_symbol_lookup`, `host_callback_panic`, `host_internal`, `lean_exception` — the wrappers that let this crate mint `LeanError::Host(...)` values while preserving the `RD-2026-05-17-006` bounding invariant for true external callers. |
+| `lean_rs::__host_internals::host_module_init` (`#[doc(hidden)]`) | Sibling-only seam: the one `LeanError::Host(...)` constructor wrapper this crate calls from `host/lake.rs`. The wrapper preserves the `RD-2026-05-17-006` bounding invariant (external callers receive `LeanError` values but cannot mint them with unbounded messages) without forcing this crate to re-implement the same `bound_message` policy. |
+| `lean_rs::error::bound_message` (`#[doc(hidden)] pub`) | UTF-8-boundary truncation helper consumed at 6 sites in `host/{elaboration,meta}/options.rs` and `host/elaboration/diagnostic.rs` to bound Lean-authored strings before they flow into `LeanError::Host(...)` payloads. Lives on the L1 surface (not at `__host_internals`) because it's a string-utility, not a constructor wrapper. |
 
-The sealed-trait + `__host_internals` seam (per `RD-2026-05-18-001`)
-is `#[doc(hidden)] pub` rather than `pub(crate)` because Cargo does
-not have a "friend crate" visibility. External consumers that follow
-the obvious `#[doc(hidden)]` signal stay out of the seam; the only
-in-tree consumer is this crate.
+The two seams above (`__host_internals::host_module_init` and the
+direct `error::bound_message` import) are `#[doc(hidden)] pub` rather
+than `pub(crate)` because Cargo has no "friend crate" visibility.
+External consumers that follow the obvious `#[doc(hidden)]` signal
+stay out; the only in-tree consumer is this crate. The same applies
+to `lean_rs::abi::traits::sealed::SealedAbi` — the supertrait that
+seals `LeanAbi` against external impls is `pub` so this crate can
+implement `LeanAbi` for its own host-defined types (`LeanEvidence`
+etc.). External crates are blocked by the orphan rule plus the
+visible `#[doc(hidden)]` marker on the parent module.
+
+The original `__host_internals` re-exported eight wrappers
+(`host_linking`, `host_module_init_panic`, `host_symbol_lookup`,
+`host_callback_panic`, `host_internal`, `lean_exception`, plus
+`bound_message`); the 2026-05-18 audit found seven unused and they
+were removed. Re-add the same way (single-call `#[doc(hidden)] pub fn`
+wrapper + re-export) if a future call site needs one.
 
 ## Curated crate-root surface
 

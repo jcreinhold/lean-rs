@@ -1,5 +1,5 @@
 import Lean
-import LeanRsFixture.Elaboration
+import LeanRsHostShims.Elaboration
 
 /-! Capability category: bounded `MetaM` services. Three `@[export]`
     shims run pre-registered MetaM actions (`Meta.inferType`,
