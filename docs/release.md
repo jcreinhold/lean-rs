@@ -1,6 +1,6 @@
 # Release Checklist
 
-Human-runnable procedure for publishing a new version of the three `lean-rs` workspace crates to
+Human-runnable procedure for publishing a new version of the four `lean-rs` workspace crates to
 crates.io. The supported Lean toolchain range, MSRV, and tested platforms for each release are
 recorded in [`docs/version-matrix.md`](version-matrix.md). The narrative changelog is at the
 repository root, [`CHANGELOG.md`](../CHANGELOG.md).
@@ -8,11 +8,12 @@ repository root, [`CHANGELOG.md`](../CHANGELOG.md).
 **Supported Lean range for v0.1.0:** Lean 4.29.1 (single point release). Re-confirm against the
 version matrix before any release.
 
-**Crate publish order is load-bearing:**
+**Crate publish order is load-bearing** (per `RD-2026-05-18-001`):
 
 1. `lean-rs-sys`
 2. `lean-toolchain` (depends on `lean-rs-sys`)
-3. `lean-rs` (depends on `lean-rs-sys` and `lean-toolchain`)
+3. `lean-rs` (depends on `lean-rs-sys`)
+4. `lean-rs-host` (depends on `lean-rs` and `lean-rs-sys`)
 
 `cargo publish` enforces the dependency direction via the crates.io index — the downstream
 publishes will fail with a "no matching package" error until the upstream package is indexed.
@@ -39,13 +40,14 @@ debug escape hatch, and the local override knobs.
 
 ## Step 2 — Public-API diff
 
-For each of the three published crates, diff the current public surface against the committed
+For each of the four published crates, diff the current public surface against the committed
 baseline at [`docs/api-review/`](api-review/):
 
 ```sh
 cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs-sys
 cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-toolchain
 cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs
+cargo public-api --diff-git-checkouts <baseline-sha>..HEAD -p lean-rs-host
 ```
 
 The result must be a subset of the baseline (additions only) **or** the release is intentionally
@@ -59,6 +61,7 @@ If the diff is non-empty and intentional, regenerate the baselines in the same c
 cargo public-api -p lean-rs-sys    --simplified > docs/api-review/lean-rs-sys-public.txt
 cargo public-api -p lean-toolchain --simplified > docs/api-review/lean-toolchain-public.txt
 cargo public-api -p lean-rs        --simplified > docs/api-review/lean-rs-public.txt
+cargo public-api -p lean-rs-host   --simplified > docs/api-review/lean-rs-host-public.txt
 ```
 
 ## Step 3 — Packaging gate (`cargo package`)
@@ -74,7 +77,7 @@ cargo package -p lean-rs
 Each produces `target/package/<crate>-<version>.crate`. Inspect the contents:
 
 ```sh
-for c in lean-rs-sys lean-toolchain lean-rs; do
+for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host; do
   printf '\n== %s ==\n' "$c"
   tar tzf "target/package/${c}-$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$c" '.packages[]|select(.name==$c).version')".crate | sort
 done
@@ -101,25 +104,30 @@ is actually published:
 cargo publish -p lean-rs-sys    --dry-run    # always works in isolation
 cargo publish -p lean-toolchain --dry-run    # fails until lean-rs-sys is on crates.io
 cargo publish -p lean-rs        --dry-run    # fails until lean-rs-sys is on crates.io
+cargo publish -p lean-rs-host   --dry-run    # fails until lean-rs and lean-rs-sys are on crates.io
 ```
 
 The per-crate failure is the expected pre-publish state — `no matching package named lean-rs-sys
 found … location searched: crates.io index`. Do not treat it as a regression.
 
-### Recorded dry-run status — v0.1.0 (2026-05-18)
+### Recorded dry-run status — v0.1.0 (2026-05-18, four-crate set)
 
 Captured on `aarch64-apple-darwin` against Lean 4.29.1, Rust 1.95.0 stable, `cargo 1.95.0`.
+Refreshed after `RD-2026-05-18-001` split `lean-rs::host` into the published sibling crate
+`lean-rs-host` (publish set grew from 3 → 4).
 
-| Crate            | `cargo package` (workspace)                 | `cargo publish --dry-run` (workspace)       | `cargo publish --dry-run` (per-crate)                                                                       |
-| ---------------- | ------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `lean-rs-sys`    | OK — `Packaged 26 files, 138.1KiB`          | OK — `Uploading lean-rs-sys v0.1.0` (aborted due to dry run) | OK — same as workspace                                                                                       |
-| `lean-toolchain` | OK — `Packaged 16 files, 65.0KiB`           | OK — `Uploading lean-toolchain v0.1.0` (aborted due to dry run) | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs-sys found` |
-| `lean-rs`        | OK — `Packaged 84 files, 678.2KiB`          | OK — `Uploading lean-rs v0.1.0` (aborted due to dry run) | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs-sys found` |
+| Crate            | `cargo package` (workspace)        | `cargo publish --dry-run` (workspace)                            | `cargo publish --dry-run` (per-crate)                                                                                       |
+| ---------------- | ---------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `lean-rs-sys`    | OK — `Packaged 26 files, 138.1KiB` | OK — `Uploading lean-rs-sys v0.1.0` (aborted due to dry run)     | OK — same as workspace                                                                                                       |
+| `lean-toolchain` | OK — `Packaged 16 files, 65.0KiB`  | OK — `Uploading lean-toolchain v0.1.0` (aborted due to dry run)  | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs-sys found`        |
+| `lean-rs`        | OK — `Packaged 49 files, 370.9KiB` | OK — `Uploading lean-rs v0.1.0` (aborted due to dry run)         | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs-sys found`        |
+| `lean-rs-host`   | OK — `Packaged 45 files, 355.2KiB` | OK — `Uploading lean-rs-host v0.1.0` (aborted due to dry run)    | expected failure: `error: failed to prepare local package for uploading … no matching package named lean-rs found`            |
 
 The workspace dry-run is the recommended local gate; the per-crate failures above are the
 documented pre-publish state, not a regression. When credentials are absent and the upstream
 registry refuses any network call, `cargo package --workspace` remains the load-bearing local
-gate.
+gate. The `lean-rs` package shrank (84 → 49 files, 678.2 KiB → 370.9 KiB) when `host` and the
+host-stack tests/examples/benches moved into `lean-rs-host`.
 
 ## Step 5 — Live publish
 
@@ -133,6 +141,8 @@ cargo publish -p lean-rs-sys
 cargo publish -p lean-toolchain
 # wait for index
 cargo publish -p lean-rs
+# wait for index
+cargo publish -p lean-rs-host
 ```
 
 If any `cargo publish` fails:

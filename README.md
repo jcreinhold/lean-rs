@@ -5,49 +5,52 @@ checking, proof objects, universes, `MetaM`, and dependent-type meaning. This pr
 initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics, batching, and
 packaging. Rust does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
-The published surface centres on three crates. `lean-rs` is the single safe front door, with curated entry points at
-`lean_rs::*` and specialized sub-modules for advanced consumers; `lean-toolchain` and `lean-rs-sys` exist for
-build-script and raw-FFI escape hatches respectively.
+The published surface is **four crates**. `lean-rs` is the typed-FFI primitive — the (β)-binding minimum every embedder
+needs to call any `@[export]` Lean function from Rust. `lean-rs-host` is an opinionated theorem-prover-host application
+framework built on top of `lean-rs`; it ships its own 13+3 Lean shim contract. `lean-toolchain` and `lean-rs-sys` exist
+for build-script and raw-FFI escape hatches respectively. Per `RD-2026-05-18-001`, the L1 (`lean-rs`) / L2 (`lean-rs-host`)
+split is the project's structural recognition that Lean is an OCaml-shaped (β) FFI target — no mainstream Rust-binding
+crate to such a language ships pre-compiled target-language helper code, and the opinionated host stack is one example
+of how to use the L1 primitive, not the only way.
 
 ## Workspace layout
 
-Three published crates. Raw Lean 4 C ABI bindings live in the in-tree `lean-rs-sys` crate; the rest of the workspace
-builds on top of it. See `docs/architecture/00-charter.md` for the layering charter and
-`docs/architecture/05-raw-sys-design.md` for the `lean-rs-sys` design rationale.
+| Crate            | Published | Role                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lean-rs-sys`    | yes       | Raw Lean 4 C ABI bindings: curated `extern "C"` declarations split by semantic category, pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, `REQUIRED_SYMBOLS` allowlist, header digest. Public types (`lean_object`) are opaque; layout is `pub(crate)`. Opt-in unsafe raw FFI; the safe layers in `lean-rs` are the recommended path.                                  |
+| `lean-toolchain` | yes       | Lean toolchain discovery, typed fingerprint, fixture digest, layered link diagnostics, and build-script helpers that downstream embedders can call from their own `build.rs`.                                                                                                                                                                                                          |
+| `lean-rs`        | yes       | **L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime), owned/borrowed object handles, typed ABI conversions, module loading, typed exported functions, semantic handles (`LeanName`/`LeanLevel`/`LeanExpr`/`LeanDeclaration`), structured error/diagnostic boundary. Ships zero Lean-side code; the (β)-binding analog of `ocaml-rs`.                              |
+| `lean-rs-host`   | yes       | **L2 opinionated host stack.** `LeanHost` / `LeanCapabilities` / `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, bounded `MetaM` service registry, `SessionPool` / `PooledSession`. Requires a 13+3 `lean_rs_host_*` Lean shim contract in the capability dylib it loads.                                                                                          |
 
-| Crate            | Published | Role                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lean-rs-sys`    | yes       | Raw Lean 4 C ABI bindings: curated `extern "C"` declarations split by semantic category, pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, `REQUIRED_SYMBOLS` allowlist, header digest. Public types (`lean_object`) are opaque; layout is `pub(crate)`. Opt-in unsafe raw FFI; the safe layers in `lean-rs` are the recommended path. |
-| `lean-toolchain` | yes       | Lean toolchain discovery, typed fingerprint, fixture digest, layered link diagnostics, and build-script helpers that downstream embedders can call from their own `build.rs`.                                                                                                                                                                          |
-| `lean-rs`        | yes       | The single safe front door: runtime initialization (token-bound `'lean` lifetime), owned/borrowed object handles (internal), typed ABI conversions (internal), module loading, typed exported functions, semantic handles, bounded meta services, and `LeanSession` bulk/pool operations.                                                              |
-
-The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs`. Raw `lean_object *` and raw `lean_*` symbols
-enter the workspace only via `lean-rs-sys` and are not re-exported by `lean-toolchain` or `lean-rs`. Internal
-organization of `lean-rs` is three publicly visible modules (`lean_rs::module`, `lean_rs::host`, `lean_rs::error`) plus
-two `pub(crate)` infrastructure modules (`runtime`, `abi`); batch and pool operations are methods on `LeanSession`
-rather than a sibling module. Boundaries are policed by `pub(crate)` rather than crate splits, so they can be
-reorganized without semver breakage. See `docs/architecture/03-host-api.md` for the curated public surface.
+The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. Raw `lean_object *` and raw
+`lean_*` symbols enter the workspace only via `lean-rs-sys` and are not re-exported by `lean-toolchain` or `lean-rs`.
+The L1 (`lean-rs`) curated surface is the typed FFI primitive plus the four core semantic handle types and the error
+boundary; the L2 (`lean-rs-host`) curated surface is the opinionated theorem-prover-host capability stack. See
+`docs/architecture/04-host-stack.md` for the L2 classification table.
 
 ## Layering and common path
 
 Most embedders should follow this order from outermost to innermost:
 
-1. **Depend on `lean-rs`** (`lean-rs = "0.1"` in your `Cargo.toml`) and use items at `lean_rs::*` — the curated entry
-    points (`LeanRuntime`, `LeanHost`, `LeanCapabilities`, `LeanSession`, `LeanError`, `LeanResult`, the four semantic
-    handle types, `LeanDiagnosticCode`, `DiagnosticCapture`, `SessionPool`, etc.) cover the happy path end to end.
-1. **Drop into `lean_rs::module::*`** if you need to load a Lake-built dynamic library or call a typed Lean export
-    that `lean-rs`'s session API does not yet wrap. The `LeanLibrary`, `LeanModule`, and
-    `LeanExported<'lean, 'lib, Args, R>` types are escape hatches still inside the safe surface.
-1. **Drop into `lean_rs::host::meta::*`** for the bounded `MetaM` capability (`LeanMetaService`, `LeanMetaResponse`,
-    `LeanMetaOptions`, the three pinned service constructors `infer_type` / `whnf` / `heartbeat_burn`). This surface is
-    intentionally not at the crate root: it is an optional capability — only callers that opt in to `LeanSession::run_meta`
-    pay the namespace cost.
+1. **Depend on `lean-rs`** (`lean-rs = "0.1"` in your `Cargo.toml`) for the typed-FFI primitive. Items at `lean_rs::*` —
+    `LeanRuntime`, `LeanLibrary`, `LeanModule`, `LeanExported`, the four handle types, `LeanError`, `LeanResult`,
+    `LeanDiagnosticCode`, `DiagnosticCapture` — cover any downstream that wants to call `@[export]` Lean functions
+    from Rust. No Lean-side shim contract; you write your own `@[export]` declarations for the operations you need.
+1. **Drop into `lean_rs::module::*`** or `lean_rs::abi::*` for the typed exported-function dispatch primitives
+    (`LeanExported`, `LeanArgs`, `DecodeCallResult`, `LeanIo`) and the sealed `LeanAbi` trait that drives them.
+1. **Add `lean-rs-host`** (`lean-rs-host = "0.1"`) if you want the curated theorem-prover-host capability stack
+    (`LeanHost`, `LeanCapabilities`, `LeanSession`, `SessionPool`, `LeanEvidence`, `ProofSummary`, the elaboration
+    /`MetaM` surfaces). This crate requires a 13+3 `lean_rs_host_*` `@[export]` Lean shim contract in your capability
+    dylib; the shim sources live in `fixtures/lean/LeanRsFixture/{Environment,Elaboration,Meta}.lean` today
+    (their packaging as a shipping artifact for external consumers is prompt-30 hardening work).
+1. **Drop into `lean_rs_host::meta::*`** for the bounded `MetaM` capability (`LeanMetaService`, `LeanMetaResponse`,
+    `LeanMetaOptions`, the three pinned service constructors `infer_type` / `whnf` / `heartbeat_burn`). Sub-module-only
+    because the optional `MetaM` capability would pollute the crate root for callers who never use `LeanSession::run_meta`.
 1. **Depend on `lean-toolchain` directly** only if your own `build.rs` needs Lean discovery, fingerprint, or link
     diagnostics without pulling in the safe runtime. Most application code never touches this crate.
 1. **Depend on `lean-rs-sys` directly** only as a last-resort raw-FFI escape hatch. It is published per
     `RD-2026-05-17-005` with opaque public types and full `unsafe` discipline (every `pub unsafe fn` carries a
-    `# Safety` section naming the invariant). The safe layers in `lean-rs` are strongly preferred; if the safe
-    surface is missing a capability you need, contributing it upstream is preferable to reaching for raw FFI.
+    `# Safety` section naming the invariant). The safe layers in `lean-rs` and `lean-rs-host` are strongly preferred.
 
 ## Architecture
 
@@ -59,8 +62,10 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
     proof-object opacity, concurrency stance, and the workspace `unsafe-code = "deny"` lint policy.
 - [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md) — supported Lean
     toolchain range, in-tree raw-FFI policy, header digest policy, crate semver, and supported-platform list.
-- [`03-host-api.md`](docs/architecture/03-host-api.md) — curated public surface of `lean-rs`, classification table for
-    the semver boundary, and the design-it-twice record for the surface shape.
+- [`04-host-stack.md`](docs/architecture/04-host-stack.md) — curated public surface of `lean-rs-host` (the L2
+    opinionated theorem-prover-host stack), classification table for its semver boundary, and the design-it-twice
+    record for the surface shape. The L1 `lean-rs` curated surface is recorded in
+    `docs/api-review/lean-rs-public.txt`.
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md) — the `!Send + !Sync` contract and worker-thread attach
     discipline.
 - [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md) — per-decision rationale behind `lean-rs-sys`

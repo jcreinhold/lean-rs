@@ -1,9 +1,11 @@
 # Version Matrix
 
-Tested and supported configuration matrix for the three published `lean-rs` crates as of
+Tested and supported configuration matrix for the four published `lean-rs` crates as of
 **v0.1.0** (2026-05-18). The policy source is
 [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md);
-release procedure is in [`docs/release.md`](release.md).
+release procedure is in [`docs/release.md`](release.md). The split into four crates is
+recorded under `RD-2026-05-18-001` in
+[`prompts/lean-rs/00-current-state.md`](../../prompts/lean-rs/00-current-state.md).
 
 **Tested support is not aspirational support.** The tables below list configurations that have
 actually been built and verified locally and/or in CI. Configurations outside these tables are

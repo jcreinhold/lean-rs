@@ -1,17 +1,28 @@
 # Changelog
 
-All notable changes to the three published `lean-rs` workspace crates are recorded here. The
+All notable changes to the four published `lean-rs` workspace crates are recorded here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each crate version is
-governed by Cargo's `0.x` semver. Items inside `pub(crate)` modules of `lean-rs` are not part of
-the public API and are excluded from this log.
+governed by Cargo's `0.x` semver. Items inside `pub(crate)` modules are not part of the public
+API and are excluded from this log.
 
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded
 in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in
 [`docs/release.md`](docs/release.md).
 
+## [Unreleased] — RD-2026-05-18-001 split
+
+The opinionated theorem-prover-host stack (`LeanHost` / `LeanCapabilities` / `LeanSession` and
+their elaboration / evidence / meta / pool surfaces) split out of `lean-rs` into the new sibling
+crate **`lean-rs-host`** per `RD-2026-05-18-001`. The L1 FFI primitive crate `lean-rs` no longer
+ships those types; it now matches the (β)-binding norm (the OCaml-shaped pattern every
+mainstream Rust ↔ GC-language binding follows). Downstream consumers that want only the typed
+FFI surface depend on `lean-rs` and write their own `@[export]` Lean shims; consumers that want
+the curated theorem-prover-host capability stack add `lean-rs-host`. The four-crate publish
+order is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`.
+
 ## [0.1.0] — 2026-05-18
 
-First public release of the three crates. Crate-publish order is load-bearing: `lean-rs-sys`
+First public release of the three crates. Crate-publish order was load-bearing: `lean-rs-sys`
 first, then `lean-toolchain`, then `lean-rs`.
 
 ### `lean-rs-sys` 0.1.0
