@@ -206,7 +206,8 @@ fn build_info(prefix: PathBuf, source: DiscoverySource, opts: &DiscoverOptions) 
 
 fn parse_toolchain_file(path: &Path) -> Option<String> {
     let text = fs::read_to_string(path).ok()?;
-    // Expected shape: `leanprover/lean4:v4.29.1` (single line).
+    // Expected shape: `leanprover/lean4:v4.X.Y` (single line). Any version
+    // string is accepted; the caller validates against the supported window.
     let line = text.lines().next()?.trim();
     let (_channel, tag) = line.split_once(':')?;
     Some(tag.trim_start_matches('v').to_string())

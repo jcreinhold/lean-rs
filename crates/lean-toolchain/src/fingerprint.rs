@@ -20,6 +20,12 @@ include!(concat!(env!("OUT_DIR"), "/metadata.rs"));
 pub struct ToolchainFingerprint {
     /// `LEAN_VERSION_STRING` from the active `lean.h`.
     pub lean_version: &'static str,
+    /// The version string from the matched
+    /// [`SupportedToolchain`](lean_rs_sys::SupportedToolchain) entry. Equal
+    /// to [`Self::lean_version`] except when several releases share one
+    /// `lean.h` digest, in which case it is the first version listed for
+    /// that entry.
+    pub resolved_version: &'static str,
     /// SHA-256 of the `lean.h` this build was resolved against.
     pub header_sha256: &'static str,
     /// SHA-256 of the bundled Lake fixture artifacts.
@@ -34,10 +40,23 @@ impl ToolchainFingerprint {
     pub const fn current() -> Self {
         Self {
             lean_version: lean_rs_sys::LEAN_VERSION,
+            resolved_version: lean_rs_sys::LEAN_RESOLVED_VERSION,
             header_sha256: lean_rs_sys::LEAN_HEADER_DIGEST,
             fixture_sha256: LAKE_FIXTURE_DIGEST,
             host_triple: HOST_TRIPLE,
         }
+    }
+
+    /// Return `true` iff [`Self::lean_version`] is included in the
+    /// [`SUPPORTED_TOOLCHAINS`](lean_rs_sys::SUPPORTED_TOOLCHAINS) window.
+    ///
+    /// The build script already filters at compile time, so this method
+    /// returns `true` for any binary that compiled successfully. It is
+    /// exposed for tooling that constructs a fingerprint from an external
+    /// source (e.g. a remote-worker handshake).
+    #[must_use]
+    pub fn is_supported(&self) -> bool {
+        lean_rs_sys::supported_for(self.lean_version).is_some()
     }
 }
 
@@ -79,5 +98,17 @@ mod tests {
             ..a
         };
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn current_is_in_supported_window() {
+        assert!(ToolchainFingerprint::current().is_supported());
+    }
+
+    #[test]
+    fn synthetic_unknown_version_is_not_supported() {
+        let mut fp = ToolchainFingerprint::current();
+        fp.lean_version = "0.0.0-test";
+        assert!(!fp.is_supported());
     }
 }

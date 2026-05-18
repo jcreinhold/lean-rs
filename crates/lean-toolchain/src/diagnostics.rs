@@ -50,6 +50,16 @@ pub enum LinkDiagnostics {
         /// One-liner recovery command for the embedder.
         recovery: &'static str,
     },
+    /// The active Lean toolchain is outside the supported window
+    /// declared by [`lean_rs_sys::SUPPORTED_TOOLCHAINS`].
+    UnsupportedToolchain {
+        /// `LEAN_VERSION_STRING` of the active toolchain.
+        active: String,
+        /// Comma-joined `versions` arrays from each
+        /// [`SupportedToolchain`](lean_rs_sys::SupportedToolchain) entry,
+        /// rendered as `["4.23.0", "4.24.0", "4.24.1"], ["4.25.0", ...], ...`.
+        supported_window: String,
+    },
 }
 
 impl fmt::Display for LinkDiagnostics {
@@ -86,6 +96,15 @@ impl fmt::Display for LinkDiagnostics {
                     f,
                     "lean-toolchain: missing fixture artifact {} (recovery: {recovery})",
                     path.display()
+                )
+            }
+            Self::UnsupportedToolchain {
+                active,
+                supported_window,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: active Lean toolchain {active} is not in the supported window: {supported_window}"
                 )
             }
         }

@@ -77,6 +77,31 @@ impl LeanRuntime {
         let _span = tracing::info_span!(target: "lean_rs", "lean_rs.runtime.init").entered();
         match INIT.get_or_init(do_initialize_once) {
             Ok(()) => {
+                // The build script already accepts only `lean.h` digests in
+                // the [`SUPPORTED_TOOLCHAINS`](lean_rs_sys::SUPPORTED_TOOLCHAINS)
+                // window, so this probe is a belt over the buckle: it catches
+                // a hand-edited `consts.rs` or a stale build artifact, and it
+                // emits the resolved version into the trace span on every
+                // initialization so operators can see which toolchain is
+                // actually live. Lean's C ABI exposes no runtime version
+                // query (`lean::get_short_version_string` is a C++ symbol
+                // not part of the documented surface), so a live-library
+                // substitution after build cannot be detected here.
+                if lean_rs_sys::supported_for(lean_rs_sys::LEAN_VERSION).is_none() {
+                    tracing::error!(
+                        target: "lean_rs",
+                        code = crate::error::LeanDiagnosticCode::RuntimeInit.as_str(),
+                        version = lean_rs_sys::LEAN_VERSION,
+                        "active Lean toolchain not in the supported window",
+                    );
+                    return Err(LeanError::runtime_init_unsupported_toolchain(lean_rs_sys::LEAN_VERSION));
+                }
+                tracing::debug!(
+                    target: "lean_rs",
+                    resolved_version = lean_rs_sys::LEAN_RESOLVED_VERSION,
+                    discovered_version = lean_rs_sys::LEAN_VERSION,
+                    "Lean runtime initialized",
+                );
                 // Every successful `init()` mints the caller's permission
                 // to invoke Lean from the calling thread. The first call
                 // also runs the C-level `lean_initialize*` sequence inside

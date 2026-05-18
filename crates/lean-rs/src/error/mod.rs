@@ -97,6 +97,24 @@ impl LeanError {
         Self::runtime_init(render_panic_payload(payload))
     }
 
+    /// Build a `RuntimeInit` host failure for an active Lean toolchain that
+    /// is not in [`lean_rs_sys::SUPPORTED_TOOLCHAINS`]. The build script
+    /// already filters at compile time; this constructor exists for the
+    /// runtime backstop in [`crate::runtime::LeanRuntime::init`].
+    pub(crate) fn runtime_init_unsupported_toolchain(active_version: &str) -> Self {
+        use std::fmt::Write as _;
+        let mut window = String::new();
+        for (i, t) in lean_rs_sys::SUPPORTED_TOOLCHAINS.iter().enumerate() {
+            if i > 0 {
+                window.push_str(", ");
+            }
+            let _ = write!(window, "{:?}", t.versions);
+        }
+        Self::runtime_init(format!(
+            "active Lean toolchain {active_version} is not in the supported window: {window}",
+        ))
+    }
+
     /// Build a `Linking` host failure (missing/invalid Lake names,
     /// missing initializer symbol, header-digest mismatch).
     pub(crate) fn linking(message: impl Into<String>) -> Self {
