@@ -32,10 +32,10 @@ custom allocator on the Rust side except where dhat is explicitly enabled.
 | `lean_rs::module` | `module::scalar_dispatch_u32_add` | `benches/hot_paths.rs` | `LeanExported<(u32,u32),u32>::call` on `lean_rs_fixture_u32_add` |
 | `lean_rs::abi` (string) | `abi::string_roundtrip/{16,256,4096}` | `benches/hot_paths.rs` | `LeanExported<(String,),String>::call` on `lean_rs_fixture_string_identity` |
 | `lean_rs::abi` (array) | `abi::array_string_roundtrip/{1,16,256}` | `benches/hot_paths.rs` | `LeanExported<(Vec<String>,),Vec<String>>::call` on `lean_rs_fixture_array_string_identity` |
-| `lean_rs::host::session` | `host::session::query_declarations_bulk/{1,4,8,16}` | `benches/session.rs` | `LeanSession::query_declarations_bulk` |
-| `lean_rs::host::session` | `host::session::elaborate_small` | `benches/session.rs` | `LeanSession::elaborate("(1+1 : Nat)", None, &opts)` |
-| `lean_rs::host::meta` | `host::meta::run_meta_whnf` | `benches/session.rs` | `LeanSession::run_meta(&whnf(), <Nat.zero type>, &opts)` |
-| `lean_rs::host::pool` | `host::pool::session_reuse_hit` | `benches/session.rs` | `SessionPool::acquire` on a warm 1-slot pool |
+| `lean_rs_host::host::session` | `host::session::query_declarations_bulk/{1,4,8,16}` | `crates/lean-rs-host/benches/session.rs` | `LeanSession::query_declarations_bulk` |
+| `lean_rs_host::host::session` | `host::session::elaborate_small` | `crates/lean-rs-host/benches/session.rs` | `LeanSession::elaborate("(1+1 : Nat)", None, &opts)` |
+| `lean_rs_host::meta` | `host::meta::run_meta_whnf` | `crates/lean-rs-host/benches/session.rs` | `LeanSession::run_meta(&whnf(), <Nat.zero type>, &opts)` |
+| `lean_rs_host::host::pool` | `host::pool::session_reuse_hit` | `crates/lean-rs-host/benches/session.rs` | `SessionPool::acquire` on a warm 1-slot pool |
 
 ## Cold paths
 
@@ -82,7 +82,7 @@ load-bearing number):
 
 **Command:** `cargo bench -p lean-rs --bench hot_paths`
 
-## Session paths — `lean_rs::host::*`
+## Session paths — `lean_rs_host::*`
 
 | Workload | Parameter | Mean | 95% CI |
 | --- | --- | ---: | --- |
@@ -94,7 +94,7 @@ load-bearing number):
 | `host::meta::run_meta_whnf` | type-of-`Nat.zero` | 1.93 µs | 1.92 µs – 1.96 µs |
 | `host::pool::session_reuse_hit` | warm cache | 81 ns | 77 ns – 86 ns |
 
-**Command:** `cargo bench -p lean-rs --bench session`
+**Command:** `cargo bench -p lean-rs-host --bench session`
 
 Notes:
 

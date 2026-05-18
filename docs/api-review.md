@@ -1,9 +1,22 @@
 # lean-rs public-API audit (prompt 27)
 
-This document records the pre-release public-API audit for the three published
-crates (`lean-rs-sys`, `lean-toolchain`, `lean-rs`) carried out under prompt 27
-of the implementation sequence. The audit predates the v0.1 publish/tag work
-that happens in prompt 28.
+> **Superseded for shape by RD-2026-05-18-001 (2026-05-18).** This document is
+> the historical record of the prompt-27 pre-publish audit, captured when the
+> workspace had three published crates. RD-2026-05-18-001 split
+> `lean-rs::host` into the sibling crate `lean-rs-host`; the publish set is
+> now four crates (`lean-rs-sys`, `lean-toolchain`, `lean-rs`, `lean-rs-host`)
+> and the classification table for the L2 host stack lives at
+> `docs/architecture/04-host-stack.md`. The five-category framework and the
+> demotions / pass-through / smell verdicts below remain accurate per-item;
+> only the per-crate placement narrative shifted (items previously under
+> `lean_rs::host::*` now live at `lean_rs_host::*` and
+> `lean_rs_host::host::*`). Inline call-outs flag the most-misleading
+> per-crate statements; see the live baselines in `docs/api-review/` and
+> the four-crate dry-run table in `docs/release.md` for current state.
+
+This document records the pre-release public-API audit for the published
+crates carried out under prompt 27. The audit predates the v0.1 publish/tag
+work in prompt 28 and the RD-2026-05-18-001 L1/L2 split.
 
 ## Scope
 
@@ -12,8 +25,10 @@ The audit covered every public item in:
 - `lean-rs-sys` 0.1.0 — raw Lean 4 C ABI bindings.
 - `lean-toolchain` 0.1.0 — toolchain discovery, fingerprint, link diagnostics,
   build-script helpers.
-- `lean-rs` 0.1.0 — the safe front door (`error`, `module`, `host` public
-  modules plus the curated `lean_rs::*` re-export set).
+- `lean-rs` 0.1.0 — at audit time, the safe front door with `error`, `module`,
+  `host` public modules. Per RD-2026-05-18-001, `host` (and its sub-modules)
+  moved to the sibling crate `lean-rs-host` 0.1.0; `lean-rs` now exposes
+  `error`, `module`, `handle`, `runtime`, `abi` as the L1 typed-FFI primitive.
 
 Out of scope: extern declarations and the `REQUIRED_SYMBOLS` allowlist of
 `lean-rs-sys` (changes there go through a separate replanning delta);
@@ -27,7 +42,10 @@ by the audit.
 
 - [`lean-rs-sys-public.txt`](api-review/lean-rs-sys-public.txt) — 259 lines.
 - [`lean-toolchain-public.txt`](api-review/lean-toolchain-public.txt) — 124 lines.
-- [`lean-rs-public.txt`](api-review/lean-rs-public.txt) — 1441 lines.
+- [`lean-rs-public.txt`](api-review/lean-rs-public.txt) — 1159 lines (after
+  the RD-2026-05-18-001 split, down from 1441 lines pre-split).
+- [`lean-rs-host-public.txt`](api-review/lean-rs-host-public.txt) — 899 lines
+  (added by RD-2026-05-18-001).
 
 Later prompts and PRs that touch the public surface diff against these files;
 intentional surface changes regenerate the baseline as part of the same
@@ -40,6 +58,7 @@ Regenerate with:
 cargo public-api -p lean-rs-sys    --simplified > docs/api-review/lean-rs-sys-public.txt
 cargo public-api -p lean-toolchain --simplified > docs/api-review/lean-toolchain-public.txt
 cargo public-api -p lean-rs        --simplified > docs/api-review/lean-rs-public.txt
+cargo public-api -p lean-rs-host   --simplified > docs/api-review/lean-rs-host-public.txt
 ```
 
 ## Classification
@@ -74,7 +93,7 @@ Per-crate placement:
   - **Module-path escape hatches (category 4)** —
     `lean_rs::module::{LeanLibrary, LeanModule, LeanExported, LeanIo,
     LeanArgs, DecodeCallResult, LeanAbi}` for the typed exported-function
-    loader; `lean_rs::host::meta::{LeanMetaService, LeanMetaResponse,
+    loader; `lean_rs_host::meta::{LeanMetaService, LeanMetaResponse,
     LeanMetaOptions, LeanMetaTransparency, MetaCallStatus, infer_type,
     whnf, heartbeat_burn}` for the optional bounded `MetaM` capability.
     These intentionally stay at sub-module paths per the prompt-18
@@ -167,8 +186,8 @@ The bounded `MetaM` capability is the test case. Three of the fourteen
 `LeanSession::run_meta`. Promoting the meta surface to the crate root
 would mix one optional capability with thirteen mandatory ones in the
 same namespace. The prompt-18 Decision 1 keeps the meta types at
-`lean_rs::host::meta::*` instead — callers opt in via
-`use lean_rs::host::meta::{...}` only when they need it. Rationale is
+`lean_rs_host::meta::*` instead — callers opt in via
+`use lean_rs_host::meta::{...}` only when they need it. Rationale is
 recorded in `docs/architecture/04-host-stack.md` ("Specialized sub-module
 surfaces").
 

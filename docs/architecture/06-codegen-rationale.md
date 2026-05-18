@@ -2,7 +2,7 @@
 
 This document records the prompt-19 decision: `lean-rs` does **not** ship a declarative macro for
 constructing typed [`LeanExported`](../../crates/lean-rs/src/module/exported.rs) handles. The manual
-per-site dispatch shape in `crates/lean-rs/src/host/session.rs` stays. The recovery protocol
+per-site dispatch shape in `crates/lean-rs-host/src/host/session.rs` stays. The recovery protocol
 (`prompts/lean-rs/00-recovery-protocol.md` — "Code Generation Is Not Earned") explicitly anticipates
 this outcome as a local adaptation rather than a contract change.
 
@@ -28,16 +28,17 @@ at every call site. The arity-stamping macro that already lives inside
 
 Production call sites that match the prompt's "module, symbol, arity, conversion" boilerplate:
 
-| Crate / module          | Sites | Notes                                                                 |
-| ----------------------- | ----- | --------------------------------------------------------------------- |
-| `lean_rs::module`       | 0     | `module` is the loader being wrapped elsewhere; no self-wrapping.     |
-| `lean_rs::host::session`| 12    | All construct typed handles via `unsafe { LeanExported::from_function_address(...) }`. |
+| Crate / module               | Sites | Notes                                                                 |
+| ---------------------------- | ----- | --------------------------------------------------------------------- |
+| `lean_rs::module`            | 0     | `module` is the loader being wrapped elsewhere; no self-wrapping.     |
+| `lean_rs_host::host::session`| 12    | All construct typed handles via `unsafe { LeanExported::from_function_address(...) }`. |
 
-The twelve `host/session.rs` sites cover `import`, `query_declaration`, `list_declarations`,
-`declaration_type`, `declaration_kind`, `declaration_name`, `elaborate`, `kernel_check`,
-`check_evidence`, `summarize_evidence`, `run_meta`, and `make_name`.
+The twelve `crates/lean-rs-host/src/host/session.rs` sites cover `import`,
+`query_declaration`, `list_declarations`, `declaration_type`, `declaration_kind`,
+`declaration_name`, `elaborate`, `kernel_check`, `check_evidence`,
+`summarize_evidence`, `run_meta`, and `make_name`.
 
-Test sites (24 in `host/handle/tests.rs`, 43 in `abi/tests.rs`) use the public
+Test sites (24 in `crates/lean-rs/src/handle/tests.rs`, 43 in `crates/lean-rs/src/abi/tests.rs`) use the public
 `LeanModule::exported::<Args, R>("symbol")` API and are deliberately excluded from the pool:
 each test exists to spell out a single `(symbol, Args, R)` triple that is under test. Collapsing
 the spelling-out would hide the contract being exercised.
@@ -122,7 +123,7 @@ sub-one-line-per-site cosmetic gain.
 ## 5. Real duplication this decision does *not* address
 
 The boilerplate that *is* genuinely repeated lives in
-`crates/lean-rs/src/host/capabilities.rs` and `crates/lean-rs/src/host/session.rs`'s
+`crates/lean-rs-host/src/host/capabilities.rs` and `crates/lean-rs-host/src/host/session.rs`'s
 `SessionSymbols` struct: the field name, the literal symbol string in
 `SessionSymbols::resolve()`, and the docstring table at the top of `session.rs` are three
 hand-synchronised views of the same fourteen-entry contract. A change to the contract requires

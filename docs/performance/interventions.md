@@ -29,10 +29,10 @@ owned `String` solely to satisfy `LeanAbi<'lean> for String`:
 
 | Site | `to_owned()` calls eliminated |
 | --- | ---: |
-| `LeanSession::elaborate` (`host/session.rs:471`) | 3 |
-| `LeanSession::kernel_check` (`host/session.rs:520`) | 3 |
-| `LeanSession::elaborate_bulk` (`host/session.rs:761`) | 2 |
-| `LeanSession::make_name` (`host/session.rs:853`) | 1 per name |
+| `LeanSession::elaborate` (`crates/lean-rs-host/src/host/session.rs:503`) | 3 |
+| `LeanSession::kernel_check` (`crates/lean-rs-host/src/host/session.rs:560`) | 3 |
+| `LeanSession::elaborate_bulk` (`crates/lean-rs-host/src/host/session.rs:837`) | 2 |
+| `LeanSession::make_name` (`crates/lean-rs-host/src/host/session.rs:941`) | 1 per name |
 | (Total per `query_declarations_bulk` of N names) | `N + … ` |
 
 **Measured impact** (`cargo bench -p lean-rs --bench session -- --baseline pre-22`,
@@ -89,8 +89,8 @@ cargo bench -p lean-rs --bench hot_paths -- --baseline pre-22         # regressi
 **Status:** considered, not pursued.
 
 The plan reserved a second intervention to eliminate the intermediate
-`Vec<LeanName>` allocation at `host/session.rs:708`. Reasoning after
-Intervention A measured out:
+`Vec<LeanName>` allocation at `crates/lean-rs-host/src/host/session.rs:780`.
+Reasoning after Intervention A measured out:
 
 - The residual saving is one ~16–128-byte Rust `Vec` allocation per call
   (one per query, regardless of element type — the per-element cost is
@@ -146,10 +146,12 @@ exploration each was ruled out:
   bench harnesses surfaced no gratuitous clone→inc→drop patterns.
   Every transfer boundary uses `Obj::into_raw()` (`runtime/obj.rs:105–109`)
   to move ownership without refcount traffic. The `expr.clone()` inside
-  `benches/session.rs:133` is intentional — the bench measures the cost
-  users pay when reusing an expression across `run_meta` calls.
-- **Repeated import/session setup in `lean_rs::host`.** `SessionPool`
-  (`host/pool.rs`) already amortises imports across acquires. The
+  `crates/lean-rs-host/benches/session.rs:133` is intentional — the bench
+  measures the cost users pay when reusing an expression across `run_meta`
+  calls.
+- **Repeated import/session setup in `lean_rs_host`.** `SessionPool`
+  (`crates/lean-rs-host/src/host/pool.rs`) already amortises imports across
+  acquires. The
   baseline `host::pool::session_reuse_hit` at 65–81 ns covers
   `RefCell::borrow_mut` + LIFO pop + shallow session re-wrap; the only
   remaining surface is the linear-scan `take_matching` on the free
