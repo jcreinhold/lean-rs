@@ -30,6 +30,11 @@ Thumbs.db
 flamegraph.svg
 perf.data*
 
+# cargo-fuzz artifacts (per-run, regenerated; not source of truth)
+crates/*/fuzz/corpus/
+crates/*/fuzz/artifacts/
+crates/*/fuzz/target/
+
 # Codex system artifacts
 .system/
 

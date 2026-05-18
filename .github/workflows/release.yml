@@ -1,21 +1,18 @@
 name: Release
 
 # Tag-triggered release. Pushing a `v<semver>` tag (e.g. `v0.1.0`, `v0.1.0-rc.1`)
-# runs the full pre-flight gate set, the public-API diff, the workspace publish
-# dry-run, then the four-crate live publish in dependency order, and finally
-# creates a GitHub Release whose body is the matching `## [<version>]` section
-# of `CHANGELOG.md`.
+# runs the full compatibility matrix (`verify` job), then the four-crate live
+# publish in dependency order (`publish` job, depends on `verify`), then creates
+# a GitHub Release whose body is the matching `## [<version>]` section of
+# `CHANGELOG.md`.
 #
 # Manual re-runs use `workflow_dispatch` with `dry_run: true` to exercise the
 # gates without uploading or creating a release.
 #
 # `CARGO_REGISTRY_TOKEN` must be set in the repository secrets before the first
 # tag push (see `docs/release.md`). The token is a scoped publish token from
-# <https://crates.io/settings/tokens>. The publish steps fail with a clear
+# <https://crates.io/settings/tokens>. The publish step fails with a clear
 # "no token configured" message if the secret is absent.
-#
-# Per-toolchain compatibility is the job of `ci.yml`; this workflow runs once
-# against the head of the supported window (set by `LEAN_VERSION` below).
 
 on:
   push:
@@ -30,55 +27,35 @@ on:
         default: false
 
 concurrency:
-  # One release at a time per tag. `cancel-in-progress: false` matters here:
-  # a half-finished publish that gets cancelled mid-run wastes a published
-  # crate version (crates.io versions are immutable, so the next attempt
-  # would have to bump the patch number).
+  # One release at a time per tag. `cancel-in-progress: false`: a
+  # half-finished publish that gets cancelled mid-run wastes a published
+  # crate version (crates.io versions are immutable).
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write   # softprops/action-gh-release needs this to create the release.
+  contents: write   # softprops/action-gh-release needs this for the release.
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Lean toolchain to publish against — the head of the supported window
-  # (mirror of the last entry in `lean_rs_sys::SUPPORTED_TOOLCHAINS`).
-  # Bumping the window: update this AND ci.yml's matrix AND
-  # `crates/lean-rs-sys/src/supported.rs` in the same PR. See
-  # `docs/bump-toolchain.md`.
-  LEAN_VERSION: '4.29.1'
+  # Head of the supported Lean window. The publish job runs once
+  # against this version (the matrix in `verify` covers the rest).
+  # Bumping the window: update this AND the matrix in `verify` AND
+  # `crates/lean-rs-sys/src/supported.rs`. See `docs/bump-toolchain.md`.
+  LEAN_VERSION_HEAD: '4.29.1'
 
 jobs:
-  release:
-    name: Release ${{ github.ref_name }}
-    runs-on: ubuntu-latest
+  verify:
+    name: Verify ${{ matrix.os }} / Lean ${{ matrix.lean_version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        lean_version: ['4.26.0', '4.27.0', '4.28.0', '4.28.1', '4.29.0', '4.29.1']
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install elan + Lean ${{ env.LEAN_VERSION }}
-        run: |
-          set -euo pipefail
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION }}
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-
-      # `env.HOME` evaluates to an empty string at workflow-eval time,
-      # so we can't compose `LEAN_SYSROOT` in a YAML `env:` block. Export
-      # it via `$GITHUB_ENV` from a shell step where `$HOME` is real.
-      # `lean-rs-sys/build.rs` uses `LEAN_SYSROOT` to bake an rpath into
-      # the compiled artifacts; a bogus value silently produces an rpath
-      # that fails at dyld load time.
-      - name: Export LEAN_SYSROOT (shell-expanded)
-        run: |
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}" >> "$GITHUB_ENV"
-
-      - name: Pin workspace to Lean ${{ env.LEAN_VERSION }}
-        run: |
-          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION }}" > lean-toolchain
-          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION }}" > lake/lean-rs-host-shims/lean-toolchain
-          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION }}" > fixtures/lean/lean-toolchain
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -87,12 +64,92 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ env.LEAN_VERSION }}
+          key: release-verify-${{ matrix.lean_version }}-${{ matrix.os }}
 
       - name: Install cargo-nextest + cargo-public-api
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest,cargo-public-api
+
+      - name: Install elan + Lean ${{ matrix.lean_version }}
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT (shell-expanded)
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}" >> "$GITHUB_ENV"
+
+      - name: Pin workspace to Lean ${{ matrix.lean_version }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
+
+      - name: Build Lake packages
+        run: |
+          (cd lake/lean-rs-host-shims && lake build)
+          (cd fixtures/lean && lake build)
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+      # See `ci.yml` for the rationale on `RUST_BACKTRACE=0` here.
+      - name: cargo nextest run
+        env:
+          RUST_BACKTRACE: '0'
+        run: cargo nextest run --workspace --profile ci
+
+      - name: cargo test --doc
+        run: cargo test --doc --workspace
+
+      - name: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: '-D warnings'
+        run: cargo doc --no-deps --workspace
+
+  publish:
+    name: Publish ${{ github.ref_name }}
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-publish-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install cargo-public-api
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT (shell-expanded)
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Pin workspace to Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > fixtures/lean/lean-toolchain
 
       - name: Build Lake packages
         run: |
@@ -112,23 +169,6 @@ jobs:
             exit 1
           fi
           echo "Tag $tag matches workspace version $version"
-
-      - name: Pre-flight — cargo fmt
-        run: cargo fmt --check
-
-      - name: Pre-flight — cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Pre-flight — cargo nextest
-        run: cargo nextest run --workspace --profile ci
-
-      - name: Pre-flight — cargo test --doc
-        run: cargo test --doc --workspace
-
-      - name: Pre-flight — cargo doc
-        env:
-          RUSTDOCFLAGS: '-D warnings'
-        run: cargo doc --no-deps --workspace
 
       - name: Public-API diff vs committed baselines
         run: |

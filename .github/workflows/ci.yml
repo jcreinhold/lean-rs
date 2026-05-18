@@ -1,9 +1,42 @@
 name: CI
 
+# Per-push CI: a single ubuntu cell pinned to the head of the supported
+# Lean window (mirror of the last entry in `lean_rs_sys::SUPPORTED_TOOLCHAINS`).
+#
+# The full {6 Lean toolchain} × {ubuntu, macos} compatibility matrix runs
+# in `release.yml`'s `verify` job on tag push, and on demand via this
+# workflow's `workflow_dispatch` matrix input. Per-push burn is kept low
+# by design.
+#
+# Doc-only commits skip CI via the `paths-ignore` filter — none of the
+# Rust gates can break when only Markdown / api-review baselines change.
+
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'prompts/**'
+      - 'CHANGELOG.md'
+      - 'CLAUDE.md'
+      - '.gitignore'
+      - 'LICENSE-*'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'prompts/**'
+      - 'CHANGELOG.md'
+      - 'CLAUDE.md'
+      - '.gitignore'
+      - 'LICENSE-*'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: 'Run the full {6 Lean toolchain} × {ubuntu, macos} matrix instead of the single head cell.'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,27 +44,32 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Default: 1 (full backtrace on real failures). The nextest step
+  # overrides to 0 because RUST_BACKTRACE=1 triggers libstd to walk the
+  # stack on every panic, and Lean's `libleanshared.so` frames break
+  # the glibc unwinder on Linux (the panic tests in `error::tests::*`
+  # SEGV during backtrace capture, not during the panic itself).
   RUST_BACKTRACE: 1
 
 jobs:
   check:
-    # Matrix over (OS, Lean toolchain). The Lean entries name every
-    # release in lean_rs_sys::SUPPORTED_TOOLCHAINS; bumping the window
-    # requires (a) adding a row to that table and (b) adding the
-    # corresponding lean_version entry here. See docs/bump-toolchain.md.
     name: ${{ matrix.os }} / Lean ${{ matrix.lean_version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        lean_version:
-          - "4.26.0"
-          - "4.27.0"
-          - "4.28.0"
-          - "4.28.1"
-          - "4.29.0"
-          - "4.29.1"
+        # Default per-push: a single ubuntu cell on head Lean. The full
+        # matrix only runs when `workflow_dispatch` is triggered with
+        # `full_matrix: true`. Bumping the supported window:
+        #
+        #   1. Update `crates/lean-rs-sys/src/supported.rs`.
+        #   2. Update the `lean_version` default below to the new head.
+        #   3. Update the `include`/`full_matrix` lists below.
+        #
+        # See `docs/bump-toolchain.md`.
+        os: [ubuntu-latest]
+        lean_version: ['4.29.1']
+        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.full_matrix) && '[{"os":"ubuntu-latest","lean_version":"4.26.0"},{"os":"ubuntu-latest","lean_version":"4.27.0"},{"os":"ubuntu-latest","lean_version":"4.28.0"},{"os":"ubuntu-latest","lean_version":"4.28.1"},{"os":"ubuntu-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.26.0"},{"os":"macos-latest","lean_version":"4.27.0"},{"os":"macos-latest","lean_version":"4.28.0"},{"os":"macos-latest","lean_version":"4.28.1"},{"os":"macos-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.29.1"}]' || '[]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +80,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: lean-${{ matrix.lean_version }}
+          key: lean-${{ matrix.lean_version }}-${{ matrix.os }}
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
@@ -55,13 +93,9 @@ jobs:
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      # `LEAN_SYSROOT` is consumed by `lean-rs-sys/build.rs` to bake an
-      # rpath into the compiled artifacts. The runner sets `$HOME` in
-      # shell context only — the GH Actions `env.HOME` expression
-      # evaluates to an empty string, which would silently produce a
-      # bogus `LEAN_SYSROOT=/.elan/...` rpath that fails at dyld time.
-      # Export via `$GITHUB_ENV` so every subsequent step sees the
-      # correct absolute path.
+      # `LEAN_SYSROOT` is consumed by `lean-rs-sys/build.rs`. Export via
+      # `$GITHUB_ENV` so `$HOME` is shell-expanded — a YAML `env:` block
+      # using `${{ env.HOME }}` evaluates to an empty string.
       - name: Export LEAN_SYSROOT (shell-expanded)
         run: |
           echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}" >> "$GITHUB_ENV"
@@ -78,21 +112,23 @@ jobs:
           (cd fixtures/lean && lake build)
 
       - name: cargo fmt --check
-        # Format check only needs to run once per branch, but it's
-        # cheap so it stays in every matrix cell rather than getting
-        # split into a separate single-cell job.
         run: cargo fmt --check
 
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      # Tests run under nextest (one process per test) because the
-      # default single-process `cargo test` accumulates Lean runtime
-      # state across tests and exhausts memory. See docs/testing.md.
+      # `RUST_BACKTRACE=0` here is load-bearing: see the comment on the
+      # top-level `env:` block. The panic-handling tests in
+      # `error::tests` and `runtime::*::tests` intentionally panic; if
+      # the default panic hook tries to capture a backtrace, the
+      # backtrace walker crosses `libleanshared.so` frames whose DWARF
+      # the glibc unwinder mis-decodes, and the test SEGVs before
+      # `catch_unwind` can return.
       - name: cargo nextest run
+        env:
+          RUST_BACKTRACE: '0'
         run: cargo nextest run --workspace --profile ci
 
-      # Doctests are not picked up by nextest; run separately.
       - name: cargo test --doc
         run: cargo test --doc --workspace
 
