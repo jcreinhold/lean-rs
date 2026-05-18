@@ -64,6 +64,16 @@ jobs:
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      # `env.HOME` evaluates to an empty string at workflow-eval time,
+      # so we can't compose `LEAN_SYSROOT` in a YAML `env:` block. Export
+      # it via `$GITHUB_ENV` from a shell step where `$HOME` is real.
+      # `lean-rs-sys/build.rs` uses `LEAN_SYSROOT` to bake an rpath into
+      # the compiled artifacts; a bogus value silently produces an rpath
+      # that fails at dyld load time.
+      - name: Export LEAN_SYSROOT (shell-expanded)
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}" >> "$GITHUB_ENV"
+
       - name: Pin workspace to Lean ${{ env.LEAN_VERSION }}
         run: |
           printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION }}" > lean-toolchain
@@ -107,29 +117,20 @@ jobs:
         run: cargo fmt --check
 
       - name: Pre-flight — cargo clippy
-        env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Pre-flight — cargo nextest
-        env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
         run: cargo nextest run --workspace --profile ci
 
       - name: Pre-flight — cargo test --doc
-        env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
         run: cargo test --doc --workspace
 
       - name: Pre-flight — cargo doc
         env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
           RUSTDOCFLAGS: '-D warnings'
         run: cargo doc --no-deps --workspace
 
       - name: Public-API diff vs committed baselines
-        env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
         run: |
           set -euo pipefail
           fail=0
@@ -150,14 +151,11 @@ jobs:
           exit "$fail"
 
       - name: Workspace publish dry-run
-        env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
         run: cargo publish --workspace --dry-run
 
       - name: Publish lean-rs-sys
         if: inputs.dry_run != true
         env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p lean-rs-sys
 
@@ -168,7 +166,6 @@ jobs:
       - name: Publish lean-toolchain
         if: inputs.dry_run != true
         env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p lean-toolchain
 
@@ -179,7 +176,6 @@ jobs:
       - name: Publish lean-rs
         if: inputs.dry_run != true
         env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p lean-rs
 
@@ -190,7 +186,6 @@ jobs:
       - name: Publish lean-rs-host
         if: inputs.dry_run != true
         env:
-          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p lean-rs-host
 

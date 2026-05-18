@@ -56,6 +56,14 @@ jobs:
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      # `lean-rs-sys/build.rs` reads `LEAN_SYSROOT` to bake an rpath into
+      # compiled artifacts. Exporting through `$GITHUB_ENV` so `$HOME`
+      # gets expanded by the shell — a YAML `env:` block with
+      # `${{ env.HOME }}` evaluates to an empty string.
+      - name: Export LEAN_SYSROOT (shell-expanded)
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}" >> "$GITHUB_ENV"
+
       - name: Pin workspace to Lean ${{ matrix.lean_version }}
         run: |
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
@@ -117,6 +125,19 @@ jobs:
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      # `LEAN_SYSROOT` for the build; `LD_LIBRARY_PATH` so the cargo-fuzz
+      # binary can dlopen `libleanshared.so` at runtime — cargo-fuzz
+      # emits its harness binary into `target/.../release/` without
+      # inheriting `lean-rs-sys`'s `cargo:rustc-link-arg=-Wl,-rpath` (the
+      # directive only applies to the package emitting it). Exporting via
+      # `$GITHUB_ENV` so `$HOME` is shell-expanded (a YAML `env:` block
+      # using `${{ env.HOME }}` would resolve to an empty string).
+      - name: Export LEAN_SYSROOT + LD_LIBRARY_PATH (shell-expanded)
+        run: |
+          lean_lib="$HOME/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}/lib/lean"
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$lean_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - name: Pin workspace to Lean ${{ matrix.lean_version }}
         run: |
