@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::error::{HostStage, LeanError, LeanResult};
+use crate::error::{LeanError, LeanResult};
 
 /// A validated Lake project root.
 ///
@@ -25,19 +25,17 @@ impl LakeProject {
     ///
     /// # Errors
     ///
-    /// Returns [`LeanError::Host`] with stage [`HostStage::Load`] if the
-    /// path does not exist or is not a directory. Diagnostic embeds the
-    /// requested path.
+    /// Returns [`LeanError::Host`] with code
+    /// [`crate::LeanDiagnosticCode::ModuleInit`] if the path does not
+    /// exist or is not a directory. Diagnostic embeds the requested
+    /// path.
     pub(crate) fn new(root: impl AsRef<Path>) -> LeanResult<Self> {
         let root = root.as_ref();
         if !root.is_dir() {
-            return Err(LeanError::host(
-                HostStage::Load,
-                format!(
-                    "Lake project root '{}' does not exist or is not a directory",
-                    root.display()
-                ),
-            ));
+            return Err(LeanError::module_init(format!(
+                "Lake project root '{}' does not exist or is not a directory",
+                root.display()
+            )));
         }
         Ok(Self {
             root: root.to_path_buf(),

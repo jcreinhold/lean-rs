@@ -39,8 +39,10 @@ use std::ptr::NonNull;
 
 use lean_rs_sys::lean_object;
 
+#[cfg(doc)]
+use crate::error::HostStage;
 use crate::error::io::decode_io;
-use crate::error::{HostStage, LeanError, LeanResult};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -91,12 +93,8 @@ impl InitializerName {
         }
         // `CString::new` rejects interior NULs; the validator above
         // already excluded `'\0'`, so this only fails on bug-level input.
-        let symbol = CString::new(mangled).map_err(|_| {
-            LeanError::host(
-                HostStage::Link,
-                "internal: mangled initializer symbol contained NUL byte",
-            )
-        })?;
+        let symbol = CString::new(mangled)
+            .map_err(|_| LeanError::linking("internal: mangled initializer symbol contained NUL byte"))?;
         Ok(Self { symbol, display })
     }
 
@@ -138,25 +136,20 @@ fn push_mangled(out: &mut String, component: &str) {
 /// `[A-Za-z_][A-Za-z0-9_]*` per-component alphabet.
 fn validate_component(component: &str, kind: &str) -> LeanResult<()> {
     if component.is_empty() {
-        return Err(LeanError::host(
-            HostStage::Link,
-            format!("invalid {kind}: empty component"),
-        ));
+        return Err(LeanError::linking(format!("invalid {kind}: empty component")));
     }
     let mut chars = component.chars();
     let first = chars.next().unwrap_or('\0');
     if !is_ident_start(first) {
-        return Err(LeanError::host(
-            HostStage::Link,
-            format!("invalid {kind} '{component}': first character must be ASCII letter or underscore"),
-        ));
+        return Err(LeanError::linking(format!(
+            "invalid {kind} '{component}': first character must be ASCII letter or underscore"
+        )));
     }
     for ch in chars {
         if !is_ident_continue(ch) {
-            return Err(LeanError::host(
-                HostStage::Link,
-                format!("invalid {kind} '{component}': character {ch:?} is not in [A-Za-z0-9_]"),
-            ));
+            return Err(LeanError::linking(format!(
+                "invalid {kind} '{component}': character {ch:?} is not in [A-Za-z0-9_]"
+            )));
         }
     }
     Ok(())
@@ -189,6 +182,12 @@ pub(crate) type RawInitializer = unsafe extern "C" fn(u8) -> *mut lean_object;
 /// for the same module a cheap `IO.ok(())` return; this function is
 /// safe to call repeatedly without bookkeeping on the Rust side.
 pub(crate) fn call_initializer(runtime: &LeanRuntime, init: RawInitializer, name: &InitializerName) -> LeanResult<()> {
+    let _span = tracing::debug_span!(
+        target: "lean_rs",
+        "lean_rs.module.initializer.call",
+        initializer = name.display(),
+    )
+    .entered();
     // SAFETY: `init` is the function pointer freshly resolved from the
     // owning `LeanLibrary`'s `dlsym`; the library is borrowed for the
     // duration of this call, so the pointer is valid. Lean module
@@ -199,17 +198,14 @@ pub(crate) fn call_initializer(runtime: &LeanRuntime, init: RawInitializer, name
     let raw_result = match outcome {
         Ok(ptr) => ptr,
         Err(payload) => {
-            return Err(LeanError::host_panic(HostStage::Load, payload.as_ref()));
+            return Err(LeanError::module_init_panic(payload.as_ref()));
         }
     };
     let Some(non_null) = NonNull::new(raw_result) else {
-        return Err(LeanError::host(
-            HostStage::Load,
-            format!(
-                "module '{}' initializer returned a null IO result pointer",
-                name.display()
-            ),
-        ));
+        return Err(LeanError::module_init(format!(
+            "module '{}' initializer returned a null IO result pointer",
+            name.display()
+        )));
     };
     // SAFETY: `init` returns an owned `lean_obj_res` (an `IO α` value)
     // per Lake's codegen contract. We just witnessed it is non-null;
@@ -224,10 +220,11 @@ pub(crate) fn call_initializer(runtime: &LeanRuntime, init: RawInitializer, name
             drop(unit_obj);
             Ok(())
         }
-        Err(LeanError::LeanException(exc)) => Err(LeanError::host(
-            HostStage::Load,
-            format!("module '{}' initializer raised: {}", name.display(), exc.message()),
-        )),
+        Err(LeanError::LeanException(exc)) => Err(LeanError::module_init(format!(
+            "module '{}' initializer raised: {}",
+            name.display(),
+            exc.message()
+        ))),
         Err(other) => Err(other),
     }
 }

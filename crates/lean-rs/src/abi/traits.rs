@@ -34,7 +34,9 @@
 
 use lean_rs_sys::lean_object;
 
-use crate::error::{HostStage, LeanError, LeanResult};
+#[cfg(doc)]
+use crate::error::{HostStage, LeanDiagnosticCode};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -69,11 +71,11 @@ pub(crate) trait TryFromLean<'lean>: Sized {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self>;
 }
 
-/// Build a `LeanError::Host { stage: Conversion, .. }` carrying a
-/// uniform diagnostic. Centralised so per-type impls share the wording
-/// and so a future log/sink can hook one site instead of N.
+/// Build a `LeanError::Host { stage: Conversion, code: AbiConversion, .. }`
+/// carrying a uniform diagnostic. Centralised so per-type impls share
+/// the wording and so a future log/sink can hook one site instead of N.
 pub(crate) fn conversion_error(message: impl Into<String>) -> LeanError {
-    LeanError::host(HostStage::Conversion, message)
+    LeanError::abi_conversion(message)
 }
 
 // -- Sealing for LeanAbi -----------------------------------------------

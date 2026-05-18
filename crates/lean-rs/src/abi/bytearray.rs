@@ -77,6 +77,12 @@ pub(crate) fn to_vec(obj: Obj<'_>) -> LeanResult<Vec<u8>> {
         let slice = slice::from_raw_parts(data, len);
         slice.to_vec()
     };
+    tracing::trace!(
+        target: "lean_rs",
+        shape = "bytes",
+        len = owned.len(),
+        "lean_rs.abi.decode",
+    );
     Ok(owned)
 }
 

@@ -74,8 +74,10 @@ use lean_rs_sys::refcount::lean_inc;
 use super::library::LeanLibrary;
 use super::loaded::LeanModule;
 use crate::abi::traits::{LeanAbi, TryFromLean};
+#[cfg(doc)]
+use crate::error::HostStage;
 use crate::error::io::decode_io;
-use crate::error::{HostStage, LeanError, LeanResult};
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
@@ -350,27 +352,21 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
         let library = self.library();
         let target = if library.globals().contains(name) {
             if Args::ARITY > 0 {
-                return Err(LeanError::host(
-                    HostStage::Link,
-                    format!(
-                        "exported symbol '{}' in '{}' is a Lean nullary-constant global, not a function; \
-                         look it up with `exported::<(), R>(name)` instead (lookup arity is {})",
-                        name,
-                        library.path().display(),
-                        Args::ARITY,
-                    ),
-                ));
+                return Err(LeanError::symbol_lookup(format!(
+                    "exported symbol '{}' in '{}' is a Lean nullary-constant global, not a function; \
+                     look it up with `exported::<(), R>(name)` instead (lookup arity is {})",
+                    name,
+                    library.path().display(),
+                    Args::ARITY,
+                )));
             }
             if R::EXPECTS_IO_RESULT {
-                return Err(LeanError::host(
-                    HostStage::Link,
-                    format!(
-                        "exported symbol '{}' in '{}' is a Lean nullary-constant global; \
-                         `LeanIo<_>` does not apply (Lean does not compile globals as IO-returning)",
-                        name,
-                        library.path().display(),
-                    ),
-                ));
+                return Err(LeanError::symbol_lookup(format!(
+                    "exported symbol '{}' in '{}' is a Lean nullary-constant global; \
+                     `LeanIo<_>` does not apply (Lean does not compile globals as IO-returning)",
+                    name,
+                    library.path().display(),
+                )));
             }
             let ptr = library.resolve_global_symbol(name)?;
             CallableTarget::Global(ptr)
@@ -460,6 +456,12 @@ macro_rules! impl_arity {
                 // to a no-op in release. See
                 // `docs/architecture/04-concurrency.md`.
                 crate::runtime::thread::debug_assert_attached("LeanExported::call");
+                let _span = tracing::trace_span!(
+                    target: "lean_rs",
+                    "lean_rs.module.exported.call",
+                    arity = $arity,
+                )
+                .entered();
                 let runtime = self.runtime;
                 let raw_out: R::CRepr = match self.target {
                     CallableTarget::Function(addr) => {

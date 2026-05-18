@@ -40,7 +40,9 @@ use object::{Object, ObjectSection, ObjectSymbol, SectionKind, SymbolSection};
 
 use super::initializer::{InitializerName, RawInitializer, call_initializer};
 use super::loaded::LeanModule;
-use crate::error::{HostStage, LeanError, LeanResult};
+#[cfg(doc)]
+use crate::error::HostStage;
+use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 
 /// A loaded native Lean shared object.
@@ -102,6 +104,12 @@ impl<'lean> LeanLibrary<'lean> {
     /// The diagnostic embeds the path and the underlying error message.
     pub fn open(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
         let path = path.as_ref();
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.module.library.open",
+            path = %crate::error::redact::short_path(path),
+        )
+        .entered();
         let globals = classify_globals(path)?;
         // SAFETY: `Library::new` runs the platform dynamic loader. Lake
         // does not emit constructor-style initializers for Lean
@@ -110,10 +118,7 @@ impl<'lean> LeanLibrary<'lean> {
         // from Rust's perspective; the resulting handle releases the
         // library on drop.
         let library = unsafe { libloading::Library::new(path) }.map_err(|err| {
-            LeanError::host(
-                HostStage::Load,
-                format!("failed to open Lean library '{}': {err}", path.display()),
-            )
+            LeanError::module_init(format!("failed to open Lean library '{}': {err}", path.display()))
         })?;
         Ok(Self {
             library,
@@ -142,6 +147,13 @@ impl<'lean> LeanLibrary<'lean> {
     /// - [`HostStage::Load`] if the initializer panics or returns
     ///   `IO.error`.
     pub fn initialize_module<'lib>(&'lib self, package: &str, module: &str) -> LeanResult<LeanModule<'lean, 'lib>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.module.library.initialize",
+            package = package,
+            module = module,
+        )
+        .entered();
         let name = InitializerName::from_lake_names(package, module)?;
         let init = self.lookup_initializer(&name)?;
         call_initializer(self.runtime, init, &name)?;
@@ -184,10 +196,11 @@ impl<'lean> LeanLibrary<'lean> {
         // `lookup_initializer` uses.
         let symbol: libloading::Symbol<'_, *mut c_void> =
             unsafe { self.library.get(name.as_bytes()) }.map_err(|err| {
-                LeanError::host(
-                    HostStage::Link,
-                    format!("unknown exported symbol '{}' in '{}': {err}", name, self.path.display()),
-                )
+                LeanError::symbol_lookup(format!(
+                    "unknown exported symbol '{}' in '{}': {err}",
+                    name,
+                    self.path.display()
+                ))
             })?;
         Ok(*symbol)
     }
@@ -232,10 +245,11 @@ impl<'lean> LeanLibrary<'lean> {
         // when this function returns; we copy the address out.
         let symbol: libloading::Symbol<'_, *mut *mut lean_object> = unsafe { self.library.get(name.as_bytes()) }
             .map_err(|err| {
-                LeanError::host(
-                    HostStage::Link,
-                    format!("unknown global symbol '{}' in '{}': {err}", name, self.path.display()),
-                )
+                LeanError::symbol_lookup(format!(
+                    "unknown global symbol '{}' in '{}': {err}",
+                    name,
+                    self.path.display()
+                ))
             })?;
         Ok(*symbol)
     }
@@ -251,14 +265,11 @@ impl<'lean> LeanLibrary<'lean> {
         // caller does not need to retain the borrow.
         let symbol: libloading::Symbol<'_, RawInitializer> =
             unsafe { self.library.get(name.symbol_bytes()) }.map_err(|err| {
-                LeanError::host(
-                    HostStage::Link,
-                    format!(
-                        "missing initializer symbol '{}' in '{}': {err}",
-                        name.symbol_str(),
-                        self.path.display(),
-                    ),
-                )
+                LeanError::linking(format!(
+                    "missing initializer symbol '{}' in '{}': {err}",
+                    name.symbol_str(),
+                    self.path.display(),
+                ))
             })?;
         Ok(*symbol)
     }
@@ -286,18 +297,10 @@ impl std::fmt::Debug for LeanLibrary<'_> {
 /// common) are skipped: they cannot be the Lean-compiled persistent
 /// globals we care about.
 fn classify_globals(path: &Path) -> LeanResult<HashSet<String>> {
-    let bytes = std::fs::read(path).map_err(|err| {
-        LeanError::host(
-            HostStage::Load,
-            format!("failed to read Lean library '{}': {err}", path.display()),
-        )
-    })?;
-    let file = object::File::parse(&*bytes).map_err(|err| {
-        LeanError::host(
-            HostStage::Load,
-            format!("failed to parse object file '{}': {err}", path.display()),
-        )
-    })?;
+    let bytes = std::fs::read(path)
+        .map_err(|err| LeanError::module_init(format!("failed to read Lean library '{}': {err}", path.display())))?;
+    let file = object::File::parse(&*bytes)
+        .map_err(|err| LeanError::module_init(format!("failed to parse object file '{}': {err}", path.display())))?;
 
     let strip_underscore = matches!(file.format(), object::BinaryFormat::MachO | object::BinaryFormat::Wasm);
 

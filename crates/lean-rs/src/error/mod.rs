@@ -25,15 +25,29 @@
 //! `IO (Except E T)` decodes as `LeanResult<Result<T, E>>` — outer `IO`
 //! failure becomes a [`LeanError::LeanException`], inner `Except`
 //! becomes a Rust [`Result`].
+//!
+//! ## Diagnostic codes
+//!
+//! Every error-bearing type on the public surface projects to a stable
+//! [`LeanDiagnosticCode`] via `.code()`. The code names the failure
+//! family a downstream caller must react to — `Linking`, `Elaboration`,
+//! `Unsupported`, and so on — independent of the internal [`HostStage`]
+//! tag. The `as_str()` form of each code is the identifier used by the
+//! tracing spans and the published `docs/diagnostics.md` catalogue;
+//! variant names and string ids are stable across patch releases.
 
 use std::any::Any;
 use std::fmt;
 
+pub(crate) mod capture;
 pub(crate) mod io;
 pub(crate) mod panic;
+pub(crate) mod redact;
 
 #[cfg(test)]
 mod tests;
+
+pub use self::capture::{CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture};
 
 /// Hard cap on the byte length of any [`LeanError`] message.
 ///
@@ -61,22 +75,65 @@ pub enum LeanError {
 }
 
 impl LeanError {
-    /// Build a host-stack failure with a bounded message.
+    /// Project to the stable [`LeanDiagnosticCode`] taxonomy.
     ///
-    /// `pub(crate)` so downstream callers cannot mint `LeanError` values
-    /// directly — they receive them from the safe API.
-    pub(crate) fn host(stage: HostStage, message: impl Into<String>) -> Self {
-        Self::Host(HostFailure {
-            stage,
-            message: bound_message(message.into()),
-        })
+    /// `LeanException` always maps to [`LeanDiagnosticCode::LeanException`];
+    /// `Host` returns the code recorded by the construction site.
+    #[must_use]
+    pub fn code(&self) -> LeanDiagnosticCode {
+        match self {
+            Self::LeanException(_) => LeanDiagnosticCode::LeanException,
+            Self::Host(failure) => failure.code,
+        }
+    }
+
+    /// Build a `RuntimeInit` host failure.
+    pub(crate) fn runtime_init(message: impl Into<String>) -> Self {
+        Self::host(HostStage::RuntimeInit, LeanDiagnosticCode::RuntimeInit, message)
+    }
+
+    /// Build a `RuntimeInit` host failure from a caught panic payload.
+    pub(crate) fn runtime_init_panic(payload: &(dyn Any + Send)) -> Self {
+        Self::runtime_init(render_panic_payload(payload))
+    }
+
+    /// Build a `Linking` host failure (missing/invalid Lake names,
+    /// missing initializer symbol, header-digest mismatch).
+    pub(crate) fn linking(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Link, LeanDiagnosticCode::Linking, message)
+    }
+
+    /// Build a `ModuleInit` host failure (dylib could not be opened,
+    /// initializer raised, Lake project path bad).
+    pub(crate) fn module_init(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Load, LeanDiagnosticCode::ModuleInit, message)
+    }
+
+    /// Build a `ModuleInit` host failure from a caught panic payload.
+    pub(crate) fn module_init_panic(payload: &(dyn Any + Send)) -> Self {
+        Self::module_init(render_panic_payload(payload))
+    }
+
+    /// Build a `SymbolLookup` host failure (dlsym miss, signature
+    /// mismatch — function symbol expected but global found, etc.).
+    pub(crate) fn symbol_lookup(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Link, LeanDiagnosticCode::SymbolLookup, message)
+    }
+
+    /// Build an `AbiConversion` host failure (wrong Lean kind, integer
+    /// out of range, invalid UTF-8, missing declaration).
+    pub(crate) fn abi_conversion(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Conversion, LeanDiagnosticCode::AbiConversion, message)
+    }
+
+    /// Build an `Internal` host failure: a `pub(crate)` invariant
+    /// tripped. Indicates a bug in `lean-rs`.
+    #[allow(dead_code, reason = "reserved for invariant-violation reports")]
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Internal, LeanDiagnosticCode::Internal, message)
     }
 
     /// Build a Lean-thrown-exception report with a bounded message.
-    #[allow(
-        dead_code,
-        reason = "first non-test caller lands in prompts 11–12 (LeanModule + LeanExported{N})"
-    )]
     pub(crate) fn lean_exception(kind: LeanExceptionKind, message: impl Into<String>) -> Self {
         Self::LeanException(LeanException {
             kind,
@@ -85,10 +142,26 @@ impl LeanError {
     }
 
     /// Build a host-stack failure from a caught `std::panic::catch_unwind`
-    /// payload. The payload is rendered into a string before bounding so
-    /// the panic value never escapes the error boundary.
-    pub(crate) fn host_panic(stage: HostStage, payload: &(dyn Any + Send)) -> Self {
-        Self::host(stage, render_panic_payload(payload))
+    /// payload at a Lean → Rust callback boundary. The payload is
+    /// rendered into a string before bounding so the panic value never
+    /// escapes the error boundary.
+    pub(crate) fn callback_panic(payload: &(dyn Any + Send)) -> Self {
+        Self::host(
+            HostStage::CallbackPanic,
+            LeanDiagnosticCode::Internal,
+            render_panic_payload(payload),
+        )
+    }
+
+    /// Shared host-failure constructor. Private — every call site uses
+    /// the typed wrappers above so the [`HostStage`] / [`LeanDiagnosticCode`]
+    /// pair cannot drift.
+    fn host(stage: HostStage, code: LeanDiagnosticCode, message: impl Into<String>) -> Self {
+        Self::Host(HostFailure {
+            stage,
+            code,
+            message: bound_message(message.into()),
+        })
     }
 }
 
@@ -142,6 +215,7 @@ impl fmt::Display for LeanException {
 #[derive(Clone, Debug)]
 pub struct HostFailure {
     stage: HostStage,
+    code: LeanDiagnosticCode,
     message: String,
 }
 
@@ -150,6 +224,12 @@ impl HostFailure {
     #[must_use]
     pub fn stage(&self) -> HostStage {
         self.stage
+    }
+
+    /// The stable diagnostic code matching this failure.
+    #[must_use]
+    pub fn code(&self) -> LeanDiagnosticCode {
+        self.code
     }
 
     /// Developer-facing diagnostic, truncated to at most
@@ -162,14 +242,23 @@ impl HostFailure {
 
 impl fmt::Display for HostFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "host stage {:?}: {}", self.stage, self.message)
+        write!(
+            f,
+            "host stage {:?} [{}]: {}",
+            self.stage,
+            self.code.as_str(),
+            self.message
+        )
     }
 }
 
 /// What the host stack was doing when it failed.
 ///
 /// A flat tag enum; callers rarely match on it and read
-/// [`HostFailure::message`] instead. Marked `#[non_exhaustive]` so later
+/// [`HostFailure::message`] instead. Use [`LeanDiagnosticCode`] for the
+/// stable, caller-facing failure taxonomy — `HostStage` is the
+/// host-stack's internal classification and may grow new variants when
+/// new internal paths are added. Marked `#[non_exhaustive]` so later
 /// prompts can add variants without breaking exhaustive matches.
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -182,13 +271,115 @@ pub enum HostStage {
     /// A Rust panic was contained at a Lean → Rust callback boundary.
     CallbackPanic,
     /// Link-time failure (missing symbol, header-digest mismatch).
-    /// Reserved for prompt 11+.
     Link,
-    /// Load-time failure (`dlopen`, per-module initializer). Reserved
-    /// for prompt 11+.
+    /// Load-time failure (`dlopen`, per-module initializer).
     Load,
     /// A `pub(crate)` invariant tripped. Indicates a bug in `lean-rs`.
     Internal,
+}
+
+/// Stable, caller-facing classification of a `lean-rs` failure.
+///
+/// Every error-bearing public type projects to one of these via
+/// `.code()`:
+///
+/// - [`LeanError::code`] — `LeanException` → [`LeanDiagnosticCode::LeanException`],
+///   `Host` → the code recorded by the construction site.
+/// - [`crate::LeanElabFailure::code`] — always [`LeanDiagnosticCode::Elaboration`].
+/// - [`LeanMetaResponse::code`](crate::host::meta::LeanMetaResponse::code)
+///   — `Ok` → `None`, `Failed` / `TimeoutOrHeartbeat` → `Elaboration`,
+///   `Unsupported` → `Unsupported`.
+///
+/// Use `match err.code() { Linking => ..., ModuleInit => ..., _ => ... }`
+/// to react by family; reach for [`HostStage`] only when you need the
+/// host-stack's internal classification (and accept that it may grow new
+/// variants). The string form returned by [`Self::as_str`] is also the
+/// identifier emitted in tracing fields and listed in
+/// `docs/diagnostics.md`.
+///
+/// `#[non_exhaustive]` so later prompts may add new families. The
+/// variant names and `as_str()` ids are stable across patch releases.
+#[non_exhaustive]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanDiagnosticCode {
+    /// Lean runtime initialization failed (panic in `lean_initialize`,
+    /// thread-attach floor failure, task-manager init failure).
+    RuntimeInit,
+    /// A linkable artefact was missing or did not match: a Lake
+    /// package/module name was invalid, the initializer symbol was
+    /// absent, or the header digest did not match the active toolchain.
+    Linking,
+    /// A capability dylib could not be opened, parsed, or its root
+    /// module initializer raised. Also: the Lake project root did not
+    /// exist or was not a directory.
+    ModuleInit,
+    /// A function or global symbol was not present in the loaded dylib
+    /// when a session call tried to resolve it.
+    SymbolLookup,
+    /// An ABI conversion failed: wrong Lean kind for the requested
+    /// Rust type, integer out of range, invalid UTF-8, or a queried
+    /// declaration was missing from the imported environment.
+    AbiConversion,
+    /// Lean raised through its `IO` error channel. Inspect
+    /// [`LeanException::kind`] for the `IO.Error` constructor.
+    LeanException,
+    /// Term parsing or elaboration produced one or more diagnostics.
+    /// The payload is a [`crate::LeanElabFailure`] with the typed
+    /// diagnostic list.
+    Elaboration,
+    /// The loaded capability does not expose the requested service —
+    /// either the Lean shim returned `unsupported` for the request
+    /// shape, or the optional capability symbol was absent at load
+    /// time.
+    Unsupported,
+    /// A `pub(crate)` invariant tripped, or a callback panicked inside
+    /// the safe boundary. Indicates a bug in `lean-rs`.
+    Internal,
+}
+
+impl LeanDiagnosticCode {
+    /// Stable identifier used in tracing fields and `docs/diagnostics.md`.
+    ///
+    /// The returned string is part of the published API; the value for
+    /// an existing variant is fixed across patch releases. New variants
+    /// may add new ids.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RuntimeInit => "lean_rs.runtime_init",
+            Self::Linking => "lean_rs.linking",
+            Self::ModuleInit => "lean_rs.module_init",
+            Self::SymbolLookup => "lean_rs.symbol_lookup",
+            Self::AbiConversion => "lean_rs.abi_conversion",
+            Self::LeanException => "lean_rs.lean_exception",
+            Self::Elaboration => "lean_rs.elaboration",
+            Self::Unsupported => "lean_rs.unsupported",
+            Self::Internal => "lean_rs.internal",
+        }
+    }
+
+    /// One-line prose description used in `docs/diagnostics.md` and as
+    /// the default fallback when a span needs human-readable context.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::RuntimeInit => "Lean runtime initialization failed",
+            Self::Linking => "a linkable artefact was missing or mismatched",
+            Self::ModuleInit => "a capability dylib could not be opened or initialized",
+            Self::SymbolLookup => "a symbol was not present in the loaded dylib",
+            Self::AbiConversion => "an ABI conversion failed",
+            Self::LeanException => "Lean raised through its IO error channel",
+            Self::Elaboration => "term parsing or elaboration produced diagnostics",
+            Self::Unsupported => "the loaded capability does not expose the requested service",
+            Self::Internal => "a pub(crate) invariant tripped — likely a bug in lean-rs",
+        }
+    }
+}
+
+impl fmt::Display for LeanDiagnosticCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Constructor tag for Lean's `IO.Error`.
@@ -250,8 +441,9 @@ pub enum LeanExceptionKind {
 /// Truncate `s` to at most [`LEAN_ERROR_MESSAGE_LIMIT`] bytes on a UTF-8
 /// char boundary. The single place every constructor enforces the bound.
 ///
-/// `pub(crate)` so the elaboration diagnostic decoder can apply the same
-/// bound to per-diagnostic messages it pulls out of Lean.
+/// `pub(crate)` so the elaboration diagnostic decoder and the
+/// [`crate::error::redact`] helpers can apply the same bound to text
+/// they pull out of Lean or pass into tracing fields.
 pub(crate) fn bound_message(mut s: String) -> String {
     if s.len() <= LEAN_ERROR_MESSAGE_LIMIT {
         return s;

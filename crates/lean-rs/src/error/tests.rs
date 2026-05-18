@@ -8,25 +8,52 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use super::panic::catch_callback_panic;
-use super::{HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanExceptionKind};
+use super::{HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanDiagnosticCode, LeanError, LeanExceptionKind};
 
 #[test]
 fn host_constructor_bounds_oversize_message() {
     let oversize = "x".repeat(LEAN_ERROR_MESSAGE_LIMIT + 1024);
-    let LeanError::Host(host) = LeanError::host(HostStage::Internal, oversize) else {
+    let LeanError::Host(host) = LeanError::internal(oversize) else {
         panic!("expected Host variant");
     };
     assert!(host.message().len() <= LEAN_ERROR_MESSAGE_LIMIT);
     assert_eq!(host.stage(), HostStage::Internal);
+    assert_eq!(host.code(), LeanDiagnosticCode::Internal);
 }
 
 #[test]
 fn host_constructor_passes_short_message_through() {
-    let LeanError::Host(host) = LeanError::host(HostStage::Conversion, "ok") else {
+    let LeanError::Host(host) = LeanError::abi_conversion("ok") else {
         panic!("expected Host variant");
     };
     assert_eq!(host.message(), "ok");
     assert_eq!(host.stage(), HostStage::Conversion);
+    assert_eq!(host.code(), LeanDiagnosticCode::AbiConversion);
+}
+
+#[test]
+fn lean_error_code_projects_from_variant() {
+    assert_eq!(LeanError::linking("x").code(), LeanDiagnosticCode::Linking);
+    assert_eq!(LeanError::module_init("x").code(), LeanDiagnosticCode::ModuleInit);
+    assert_eq!(LeanError::symbol_lookup("x").code(), LeanDiagnosticCode::SymbolLookup);
+    assert_eq!(LeanError::runtime_init("x").code(), LeanDiagnosticCode::RuntimeInit);
+    assert_eq!(
+        LeanError::lean_exception(LeanExceptionKind::UserError, "x").code(),
+        LeanDiagnosticCode::LeanException,
+    );
+}
+
+#[test]
+fn diagnostic_code_as_str_is_stable() {
+    assert_eq!(LeanDiagnosticCode::RuntimeInit.as_str(), "lean_rs.runtime_init");
+    assert_eq!(LeanDiagnosticCode::Linking.as_str(), "lean_rs.linking");
+    assert_eq!(LeanDiagnosticCode::ModuleInit.as_str(), "lean_rs.module_init");
+    assert_eq!(LeanDiagnosticCode::SymbolLookup.as_str(), "lean_rs.symbol_lookup");
+    assert_eq!(LeanDiagnosticCode::AbiConversion.as_str(), "lean_rs.abi_conversion");
+    assert_eq!(LeanDiagnosticCode::LeanException.as_str(), "lean_rs.lean_exception");
+    assert_eq!(LeanDiagnosticCode::Elaboration.as_str(), "lean_rs.elaboration");
+    assert_eq!(LeanDiagnosticCode::Unsupported.as_str(), "lean_rs.unsupported");
+    assert_eq!(LeanDiagnosticCode::Internal.as_str(), "lean_rs.internal");
 }
 
 #[test]
@@ -44,11 +71,15 @@ fn lean_exception_constructor_bounds_oversize_message() {
 
 #[test]
 fn lean_error_display_includes_stage_and_message() {
-    let err = LeanError::host(HostStage::RuntimeInit, "boom");
+    let err = LeanError::runtime_init("boom");
     let rendered = err.to_string();
     assert!(rendered.starts_with("lean-rs:"), "got {rendered:?}");
     assert!(rendered.contains("RuntimeInit"), "got {rendered:?}");
     assert!(rendered.contains("boom"), "got {rendered:?}");
+    assert!(
+        rendered.contains("lean_rs.runtime_init"),
+        "expected diagnostic code in render, got {rendered:?}"
+    );
 }
 
 #[test]
@@ -74,7 +105,7 @@ fn catch_callback_panic_returns_ok_when_closure_returns_ok() {
 
 #[test]
 fn catch_callback_panic_propagates_explicit_lean_error() {
-    let err = catch_callback_panic(|| Err::<(), _>(LeanError::host(HostStage::Internal, "explicit")))
+    let err = catch_callback_panic(|| Err::<(), _>(LeanError::internal("explicit")))
         .expect_err("closure returned Err; helper should pass it through");
     let LeanError::Host(host) = err else {
         panic!("expected Host");

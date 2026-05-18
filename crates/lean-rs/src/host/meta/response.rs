@@ -15,7 +15,7 @@
 
 use crate::abi::structure::{ctor_tag, take_ctor_objects};
 use crate::abi::traits::{TryFromLean, conversion_error};
-use crate::error::LeanResult;
+use crate::error::{LeanDiagnosticCode, LeanResult};
 use crate::host::elaboration::LeanElabFailure;
 use crate::runtime::obj::Obj;
 
@@ -77,6 +77,22 @@ impl<Resp> LeanMetaResponse<Resp> {
             Self::Failed(_) => MetaCallStatus::Failed,
             Self::TimeoutOrHeartbeat(_) => MetaCallStatus::TimeoutOrHeartbeat,
             Self::Unsupported(_) => MetaCallStatus::Unsupported,
+        }
+    }
+
+    /// Project to the stable [`LeanDiagnosticCode`] taxonomy.
+    ///
+    /// `Ok` returns `None` — the response carries a typed payload, not
+    /// a diagnostic. The three failure variants map to
+    /// [`LeanDiagnosticCode::Elaboration`] (the failure carries a
+    /// [`LeanElabFailure`] in every case except `Unsupported`, which
+    /// projects to [`LeanDiagnosticCode::Unsupported`]).
+    #[must_use]
+    pub const fn code(&self) -> Option<LeanDiagnosticCode> {
+        match self {
+            Self::Ok(_) => None,
+            Self::Failed(_) | Self::TimeoutOrHeartbeat(_) => Some(LeanDiagnosticCode::Elaboration),
+            Self::Unsupported(_) => Some(LeanDiagnosticCode::Unsupported),
         }
     }
 }

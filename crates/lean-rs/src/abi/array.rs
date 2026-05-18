@@ -85,6 +85,12 @@ where
         // slots.
         let size = unsafe { lean_array_size(ptr) };
         let slots = unsafe { lean_array_cptr(ptr) };
+        tracing::trace!(
+            target: "lean_rs",
+            shape = "array",
+            len = size,
+            "lean_rs.abi.decode",
+        );
         let mut out: Self = Self::with_capacity(size);
         for i in 0..size {
             // SAFETY: `i < size` keeps the slot index in bounds; each

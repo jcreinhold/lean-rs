@@ -19,7 +19,7 @@ use lean_rs_sys::ctor::lean_ctor_get_uint8;
 
 use crate::abi::structure::{ctor_tag, take_ctor_objects};
 use crate::abi::traits::{TryFromLean, conversion_error};
-use crate::error::LeanResult;
+use crate::error::{LeanDiagnosticCode, LeanResult};
 use crate::host::elaboration::diagnostic::{LeanDiagnostic, LeanSeverity};
 use crate::runtime::obj::Obj;
 
@@ -56,6 +56,16 @@ impl LeanElabFailure {
     #[must_use]
     pub fn truncated(&self) -> bool {
         self.truncated
+    }
+
+    /// Project to the stable [`LeanDiagnosticCode`] taxonomy.
+    ///
+    /// Always [`LeanDiagnosticCode::Elaboration`] — the variant is here
+    /// for uniformity with [`crate::LeanError::code`] and
+    /// [`LeanMetaResponse::code`](crate::host::meta::LeanMetaResponse::code).
+    #[must_use]
+    pub const fn code(&self) -> LeanDiagnosticCode {
+        LeanDiagnosticCode::Elaboration
     }
 
     /// Construct a one-message failure carrying a host-synthesised

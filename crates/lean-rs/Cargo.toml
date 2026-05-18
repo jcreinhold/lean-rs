@@ -19,6 +19,17 @@ libloading = "0.8"
 # function-vs-global distinction stays invisible to callers of
 # `LeanModule::exported`.
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+# Structured spans + events around runtime init, module load + dispatch,
+# host session calls, and bulk/pool paths. No subscriber is installed by
+# the crate; downstream consumers attach their own (or `DiagnosticCapture`
+# for in-process tests). Cost is one atomic load per span entry when no
+# subscriber is attached.
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+# `tracing-subscriber` powers `DiagnosticCapture` (always present, no
+# feature gate). Only the `registry` plumbing is needed; the `fmt`
+# stack is intentionally absent so downstream applications choose their
+# own formatter.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 # Optional heap profiler for `examples/alloc_probe.rs`. Gated behind the
 # `dhat-heap` feature so the default build, `cargo test`, and `cargo bench`
 # do not pull dhat in. Installs `dhat::Alloc` as the *Rust* global

@@ -103,7 +103,8 @@ pub(crate) mod runtime;
 pub mod fuzz_entry;
 
 pub use crate::error::{
-    HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
+    CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
+    LEAN_ERROR_MESSAGE_LIMIT, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };
 pub use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,

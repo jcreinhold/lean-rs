@@ -46,6 +46,16 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 Later prompts in the implementation sequence read these docs first when deciding whether an API is deep, safe, and
 semantically honest.
 
+## Diagnostics
+
+Every error-bearing public type projects to the stable
+[`LeanDiagnosticCode`](crates/lean-rs/src/error/mod.rs) taxonomy via
+`.code()`, and the crate emits structured `tracing` spans against the
+`lean_rs` target. See [`docs/diagnostics.md`](docs/diagnostics.md) for
+the code catalogue, the span catalogue, the recommended `RUST_LOG`
+scopes, and recipes for the in-process `DiagnosticCapture` test
+affordance.
+
 ## Build
 
 ```sh

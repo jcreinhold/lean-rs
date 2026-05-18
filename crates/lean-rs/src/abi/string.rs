@@ -67,6 +67,12 @@ impl<'lean> TryFromLean<'lean> for String {
             let slice = slice::from_raw_parts(data, len);
             slice.to_vec()
         };
+        tracing::trace!(
+            target: "lean_rs",
+            shape = "string",
+            len = owned.len(),
+            "lean_rs.abi.decode",
+        );
         Self::from_utf8(owned).map_err(|_| invalid_utf8())
     }
 }

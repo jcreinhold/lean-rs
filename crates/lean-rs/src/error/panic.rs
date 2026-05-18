@@ -4,7 +4,8 @@
 //! `docs/architecture/01-safety-model.md`, "Panic discipline"). The
 //! [`catch_callback_panic`] helper wraps a closure that may be called by
 //! Lean, contains any panic via [`std::panic::catch_unwind`], and renders
-//! the payload as a [`LeanError::Host`] with [`HostStage::CallbackPanic`].
+//! the payload as a [`LeanError::Host`] with [`super::HostStage::CallbackPanic`]
+//! and code [`super::LeanDiagnosticCode::Internal`].
 //!
 //! Prompt 10 adds this seam and exercises it from
 //! [`crate::error::tests`]; later prompts adopt it for every host-callback
@@ -19,10 +20,12 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
-use super::{HostStage, LeanError, LeanResult};
+use super::{LeanError, LeanResult};
 
 /// Run `f` and return its result; if `f` panics, contain the panic and
-/// return [`LeanError::host_panic`] with [`HostStage::CallbackPanic`].
+/// return [`LeanError::callback_panic`] (code
+/// [`super::LeanDiagnosticCode::Internal`], stage
+/// [`super::HostStage::CallbackPanic`]).
 ///
 /// `AssertUnwindSafe` is required because [`LeanResult`] does not
 /// implement [`UnwindSafe`] (it can carry interior types that do not).
@@ -38,6 +41,6 @@ where
 {
     match panic::catch_unwind(AssertUnwindSafe(f)) {
         Ok(result) => result,
-        Err(payload) => Err(LeanError::host_panic(HostStage::CallbackPanic, payload.as_ref())),
+        Err(payload) => Err(LeanError::callback_panic(payload.as_ref())),
     }
 }

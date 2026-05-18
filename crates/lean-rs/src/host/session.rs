@@ -99,7 +99,9 @@ use core::ffi::c_void;
 use std::time::Instant;
 
 use crate::abi::traits::TryFromLean;
-use crate::error::{HostStage, LeanError, LeanResult};
+#[cfg(doc)]
+use crate::error::HostStage;
+use crate::error::{LeanError, LeanResult};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
@@ -253,6 +255,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// environment. Failures surface as
     /// [`LeanError::LeanException`] with the message Lean produced.
     pub(crate) fn import(capabilities: &'c LeanCapabilities<'lean, 'c>, imports: &[&str]) -> LeanResult<Self> {
+        let _span = tracing::info_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.import",
+            imports_len = imports.len(),
+        )
+        .entered();
         let runtime = capabilities.host().runtime();
         let address = capabilities.symbols().session_import;
         // SAFETY: `address` was resolved by `SessionSymbols::resolve`
@@ -335,6 +343,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// if the name is not present in the imported environment. Returns
     /// [`LeanError::LeanException`] if the Lean-side query raises.
     pub fn query_declaration(&mut self, name: &str) -> LeanResult<LeanDeclaration<'lean>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.query_declaration",
+            name = name,
+        )
+        .entered();
         let name_handle = self.make_name(name)?;
         let address = self.capabilities.symbols().env_query_declaration;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
@@ -346,10 +360,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         self.record_call(0, t.elapsed());
         match result? {
             Some(decl) => Ok(decl),
-            None => Err(LeanError::host(
-                HostStage::Conversion,
-                format!("declaration '{name}' not found in imported environment"),
-            )),
+            None => Err(LeanError::abi_conversion(format!(
+                "declaration '{name}' not found in imported environment"
+            ))),
         }
     }
 
@@ -365,6 +378,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns [`LeanError::LeanException`] if the Lean-side query
     /// raises.
     pub fn list_declarations(&mut self) -> LeanResult<Vec<LeanName<'lean>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.list_declarations",
+        )
+        .entered();
         let address = self.capabilities.symbols().env_list_declarations;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `Environment -> IO (Array Name)`.
@@ -385,6 +403,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns [`LeanError::LeanException`] if the Lean-side query
     /// raises.
     pub fn declaration_type(&mut self, name: &str) -> LeanResult<Option<LeanExpr<'lean>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_type",
+            name = name,
+        )
+        .entered();
         let name_handle = self.make_name(name)?;
         let address = self.capabilities.symbols().env_declaration_type;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
@@ -407,6 +431,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns [`LeanError::LeanException`] if the Lean-side query
     /// raises.
     pub fn declaration_kind(&mut self, name: &str) -> LeanResult<String> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_kind",
+            name = name,
+        )
+        .entered();
         let name_handle = self.make_name(name)?;
         let address = self.capabilities.symbols().env_declaration_kind;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
@@ -432,6 +462,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns [`LeanError::LeanException`] if the Lean-side query
     /// raises.
     pub fn declaration_name(&mut self, name: &str) -> LeanResult<String> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_name",
+            name = name,
+        )
+        .entered();
         let name_handle = self.make_name(name)?;
         let address = self.capabilities.symbols().env_declaration_name;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
@@ -474,6 +510,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         expected_type: Option<&LeanExpr<'lean>>,
         options: &LeanElabOptions,
     ) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.elaborate",
+            source_len = source.len(),
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
         let address = self.capabilities.symbols().elaborate;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, String, Option Expr, String, String,
@@ -518,6 +562,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`LeanError::Host`] with stage [`HostStage::Conversion`] if the
     /// Lean return value does not decode into [`LeanKernelOutcome`].
     pub fn kernel_check(&mut self, source: &str, options: &LeanElabOptions) -> LeanResult<LeanKernelOutcome<'lean>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.kernel_check",
+            source_len = source.len(),
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
         let address = self.capabilities.symbols().kernel_check;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, String, String, String, UInt64, USize) ->
@@ -570,6 +622,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// return value does not decode as a four-tag
     /// [`EvidenceStatus`] inductive.
     pub fn check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.check_evidence",
+        )
+        .entered();
         let address = self.capabilities.symbols().check_evidence;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Evidence) -> IO EvidenceStatus`.
@@ -603,6 +660,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`HostStage::Conversion`] if the return value does not decode
     /// as a three-field [`ProofSummary`] structure.
     pub fn summarize_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<ProofSummary> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.summarize_evidence",
+        )
+        .entered();
         let address = self.capabilities.symbols().evidence_summary;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Evidence) -> IO ProofSummary`.
@@ -647,6 +709,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         Req: crate::abi::traits::LeanAbi<'lean>,
         Resp: TryFromLean<'lean>,
     {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.run_meta",
+            service = service.name(),
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
         let Some(address) = self.capabilities.symbols().meta_address_by_name(service.name()) else {
             let message = format!(
                 "meta service '{}' is not exported by the loaded capability",
@@ -702,6 +772,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`LeanError::LeanException`] if the Lean-side bulk shim raises
     /// through `IO`.
     pub fn query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.query_declarations_bulk",
+            batch_size = names.len(),
+        )
+        .entered();
         if names.is_empty() {
             return Ok(Vec::new());
         }
@@ -725,10 +801,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             match slot {
                 Some(decl) => out.push(decl),
                 None => {
-                    return Err(LeanError::host(
-                        HostStage::Conversion,
-                        format!("declaration '{name}' not found in imported environment"),
-                    ));
+                    return Err(LeanError::abi_conversion(format!(
+                        "declaration '{name}' not found in imported environment"
+                    )));
                 }
             }
         }
@@ -768,6 +843,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         sources: &[&str],
         options: &LeanElabOptions,
     ) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.elaborate_bulk",
+            batch_size = sources.len(),
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
         if sources.is_empty() {
             return Ok(Vec::new());
         }
@@ -831,6 +914,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         Args: LeanArgs<'lean>,
         R: DecodeCallResult<'lean>,
     {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.call_capability",
+            symbol = name,
+            arity = Args::ARITY,
+        )
+        .entered();
         let address = self.capabilities.library().resolve_function_symbol(name)?;
         // SAFETY: `resolve_function_symbol` resolved an address inside
         // the capability's `LeanLibrary<'lean>` (the dylib outlives the

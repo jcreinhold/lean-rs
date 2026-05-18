@@ -196,23 +196,31 @@ impl<'lean> SessionPool<'lean> {
         caps: &'c LeanCapabilities<'lean, 'c>,
         imports: &[&str],
     ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.pool.acquire",
+            imports_len = imports.len(),
+            imports_first = imports.first().copied().unwrap_or("<empty>"),
+        )
+        .entered();
         debug_assert!(
             core::ptr::eq(self.runtime, caps.host().runtime()),
             "pool runtime and capability runtime must agree; the shared 'lean parameter normally enforces this",
         );
         let key = ImportsKey::from_slice(imports);
-        let session = {
+        let (session, hit) = {
             let mut inner = self.inner.borrow_mut();
             if let Some(env) = inner.take_matching(&key) {
                 self.bump_reused();
-                LeanSession::from_environment(caps, env)
+                (LeanSession::from_environment(caps, env), true)
             } else {
                 drop(inner);
                 let session = caps.session(imports)?;
                 self.bump_imported();
-                session
+                (session, false)
             }
         };
+        tracing::debug!(target: "lean_rs", hit = hit, "lean_rs.host.pool.acquire.result");
         Ok(PooledSession {
             pool: self,
             imports_key: key,
@@ -262,7 +270,8 @@ impl<'lean> SessionPool<'lean> {
     fn release(&self, key: ImportsKey, env: Obj<'lean>) {
         let mut inner = self.inner.borrow_mut();
         let mut s = self.stats.get();
-        if inner.free.len() < self.capacity {
+        let kept = inner.free.len() < self.capacity;
+        if kept {
             inner.free.push(PooledEntry {
                 imports_key: key,
                 environment: env,
@@ -275,6 +284,11 @@ impl<'lean> SessionPool<'lean> {
             s.released_dropped = s.released_dropped.saturating_add(1);
         }
         self.stats.set(s);
+        tracing::trace!(
+            target: "lean_rs",
+            kept = kept,
+            "lean_rs.host.pool.release",
+        );
     }
 }
 

@@ -18,7 +18,9 @@ use std::panic::{self, AssertUnwindSafe};
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
-use crate::error::{HostStage, LeanError, LeanResult};
+#[cfg(doc)]
+use crate::error::HostStage;
+use crate::error::{LeanError, LeanResult};
 
 /// Handle for the process-wide Lean runtime.
 ///
@@ -59,6 +61,7 @@ impl LeanRuntime {
     /// panic payload is rendered into a bounded message so it cannot
     /// unwind into Lean or C frames.
     pub fn init() -> LeanResult<&'static Self> {
+        let _span = tracing::info_span!(target: "lean_rs", "lean_rs.runtime.init").entered();
         match INIT.get_or_init(do_initialize_once) {
             Ok(()) => {
                 // Every successful `init()` mints the caller's permission
@@ -73,7 +76,14 @@ impl LeanRuntime {
                 super::thread::mark_calling_thread_permitted();
                 Ok(static_ref())
             }
-            Err(err) => Err(err.clone()),
+            Err(err) => {
+                tracing::error!(
+                    target: "lean_rs",
+                    code = crate::error::LeanDiagnosticCode::RuntimeInit.as_str(),
+                    "Lean runtime initialization failed",
+                );
+                Err(err.clone())
+            }
         }
     }
 }
@@ -123,7 +133,7 @@ fn do_initialize_once() -> Result<(), LeanError> {
     }));
     match outcome {
         Ok(()) => Ok(()),
-        Err(payload) => Err(LeanError::host_panic(HostStage::RuntimeInit, payload.as_ref())),
+        Err(payload) => Err(LeanError::runtime_init_panic(payload.as_ref())),
     }
 }
 
