@@ -296,24 +296,36 @@ impl<'lean> LeanLibrary<'lean> {
         Ok(*symbol)
     }
 
-    /// `libloading` symbol lookup, mapped to a typed host error.
+    /// Resolve the module initializer by `dlsym`, trying both the modern
+    /// (Lean ≥ 4.27) and legacy (Lean ≤ 4.26) Lake symbol shapes. The
+    /// diagnostic on failure names both candidates so the operator can
+    /// see what was searched.
     fn lookup_initializer(&self, name: &InitializerName) -> LeanResult<RawInitializer> {
         // SAFETY: the type parameter spells the canonical Lake
-        // initializer signature (`(u8) -> *mut lean_object`) verified
-        // against the Lake-emitted C in
-        // `fixtures/lean/.lake/build/ir/`. `libloading::Library::get`
+        // initializer signature (`(u8) -> *mut lean_object`), verified
+        // against the Lake-emitted C in `fixtures/lean/.lake/build/ir/`
+        // for every supported Lean version. `libloading::Library::get`
         // returns a borrowed `Symbol<'_, T>`; copying the raw function
         // pointer out of it via deref is the standard pattern when the
         // caller does not need to retain the borrow.
-        let symbol: libloading::Symbol<'_, RawInitializer> =
-            unsafe { self.library.get(name.symbol_bytes()) }.map_err(|err| {
-                LeanError::linking(format!(
-                    "missing initializer symbol '{}' in '{}': {err}",
-                    name.symbol_str(),
-                    self.path.display(),
-                ))
-            })?;
-        Ok(*symbol)
+        let modern: Result<libloading::Symbol<'_, RawInitializer>, _> =
+            unsafe { self.library.get(name.symbol_bytes()) };
+        if let Ok(symbol) = modern {
+            return Ok(*symbol);
+        }
+        // SAFETY: same as above; the legacy symbol shape is the only
+        // exported form for Lean ≤ 4.26 dylibs.
+        let legacy: Result<libloading::Symbol<'_, RawInitializer>, _> =
+            unsafe { self.library.get(name.legacy_symbol_bytes()) };
+        match legacy {
+            Ok(symbol) => Ok(*symbol),
+            Err(err) => Err(LeanError::linking(format!(
+                "missing initializer symbol in '{}': tried '{}' and '{}': {err}",
+                self.path.display(),
+                name.symbol_str(),
+                name.legacy_symbol_str(),
+            ))),
+        }
     }
 }
 

@@ -57,22 +57,33 @@ impl LakeProject {
     /// On-disk path to the compiled capability dylib for the
     /// `(package, lean_lib_name)` pair.
     ///
-    /// Mirrors Lake's `.lake/build/lib/lib{escaped_package}_{lib_name}.{dylib,so}`
-    /// layout. Lake escapes underscores in the package name by doubling
-    /// them so the boundary between the package and the library name is
-    /// unambiguous (verified against
-    /// `fixtures/lean/.lake/build/lib/liblean__rs__fixture_LeanRsFixture.dylib`
-    /// for `package="lean_rs_fixture"`, `lib_name="LeanRsFixture"`). The
-    /// platform suffix selection mirrors
-    /// `module::tests::fixture_dylib_path` (verified for macOS + Linux).
+    /// The on-disk path Lake materialises the consumer's `lean_lib` to,
+    /// resolved by probing both supported naming conventions.
+    ///
+    /// Lake's shared-library filename changed between Lean 4.26 and 4.27:
+    /// older versions emit `.lake/build/lib/lib{lib_name}.{dylib,so}` (just
+    /// the library name); 4.27+ emit
+    /// `.lake/build/lib/lib{escaped_package}_{lib_name}.{dylib,so}` where
+    /// `escaped_package` doubles every underscore. Both conventions are
+    /// part of the supported window (see
+    /// [`lean_rs_sys::SUPPORTED_TOOLCHAINS`]); this method returns
+    /// whichever candidate exists so the Rust loader is naming-convention-
+    /// agnostic. Returns the new-style path as a fallback for diagnostics
+    /// when neither candidate exists on disk; the caller surfaces the
+    /// failure as an [`crate::error::ModuleInit`] error.
     pub(crate) fn capability_dylib(&self, package: &str, lib_name: &str) -> PathBuf {
         let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        let lib_dir = self.root.join(".lake").join("build").join("lib");
         let escaped_package = package.replace('_', "__");
-        self.root
-            .join(".lake")
-            .join("build")
-            .join("lib")
-            .join(format!("lib{escaped_package}_{lib_name}.{dylib_extension}"))
+        let new_style = lib_dir.join(format!("lib{escaped_package}_{lib_name}.{dylib_extension}"));
+        let old_style = lib_dir.join(format!("lib{lib_name}.{dylib_extension}"));
+        if new_style.is_file() {
+            new_style
+        } else if old_style.is_file() {
+            old_style
+        } else {
+            new_style
+        }
     }
 
     /// Search path the Lean side passes to `Lean.initSearchPath` so
@@ -148,12 +159,17 @@ impl LakeProject {
         })?;
         let package_dir = shim_package_dir_from_manifest(&self.root, &manifest, &manifest_path)?;
         let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+        let lib_dir = package_dir.join(".lake").join("build").join("lib");
         let escaped_shim_package = SHIM_PACKAGE_NAME.replace('_', "__");
-        Ok(package_dir
-            .join(".lake")
-            .join("build")
-            .join("lib")
-            .join(format!("lib{escaped_shim_package}_{SHIM_LIB_NAME}.{dylib_extension}")))
+        let new_style = lib_dir.join(format!("lib{escaped_shim_package}_{SHIM_LIB_NAME}.{dylib_extension}"));
+        let old_style = lib_dir.join(format!("lib{SHIM_LIB_NAME}.{dylib_extension}"));
+        if new_style.is_file() {
+            Ok(new_style)
+        } else if old_style.is_file() {
+            Ok(old_style)
+        } else {
+            Ok(new_style)
+        }
     }
 }
 

@@ -17,6 +17,8 @@ use crate::error::{HostStage, LeanError};
 use crate::runtime::LeanRuntime;
 
 /// Resolve the fixture dylib path from the crate's manifest directory.
+/// Probes both Lake naming conventions (Lean ≤ 4.26 vs ≥ 4.27) so the
+/// tests work across the supported window.
 fn fixture_dylib_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest_dir
@@ -24,13 +26,19 @@ fn fixture_dylib_path() -> PathBuf {
         .and_then(std::path::Path::parent)
         .expect("crates/<name>/ lives two directories beneath the workspace root");
     let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    workspace
+    let lib_dir = workspace
         .join("fixtures")
         .join("lean")
         .join(".lake")
         .join("build")
-        .join("lib")
-        .join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"))
+        .join("lib");
+    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
+    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
+    if old_style.is_file() && !new_style.is_file() {
+        old_style
+    } else {
+        new_style
+    }
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -81,9 +89,13 @@ fn missing_symbol_is_link_error() {
         LeanError::Host(failure) => {
             assert_eq!(failure.stage(), HostStage::Link);
             let message = failure.message();
+            // The diagnostic enumerates both candidates (modern + legacy)
+            // so the operator can see which symbol shapes the loader
+            // looked for. Pin only the modern form to avoid coupling
+            // tests to the exact phrasing of the error.
             assert!(
                 message.contains("initialize_lean__rs__fixture_NoSuchModule"),
-                "diagnostic must name the missing symbol, got: {message:?}",
+                "diagnostic must name the modern initializer symbol, got: {message:?}",
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),

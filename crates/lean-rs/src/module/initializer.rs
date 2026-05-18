@@ -10,12 +10,22 @@
 //!
 //! ## Mangling
 //!
-//! Lake mangles each component of `<package>.<module-path>` by replacing
-//! every literal `_` with `__`, joins the components with single `_`, and
-//! prefixes with `initialize_`. The Lake-emitted C in
-//! `fixtures/lean/.lake/build/ir/LeanRsFixture.c` is the anchoring
-//! example: package `lean_rs_fixture`, module `LeanRsFixture` gives the
-//! symbol `initialize_lean__rs__fixture_LeanRsFixture`.
+//! Lean ≤ 4.26 and Lean ≥ 4.27 emit different initializer-symbol shapes:
+//!
+//! - **Lean ≥ 4.27** (the modern convention): Lake mangles each component
+//!   of `<package>.<module-path>` by replacing every literal `_` with
+//!   `__`, joins the components with single `_`, and prefixes with
+//!   `initialize_`. Package `lean_rs_fixture`, module `LeanRsFixture`
+//!   gives the symbol `initialize_lean__rs__fixture_LeanRsFixture`.
+//! - **Lean ≤ 4.26** (the legacy convention): only the module path is
+//!   mangled; the package prefix is omitted. The same example gives
+//!   `initialize_LeanRsFixture`.
+//!
+//! [`InitializerName::from_lake_names`] records both symbols; the
+//! `dlsym` site tries the modern symbol first and falls back to the
+//! legacy form if it is not present. This keeps the loader naming-
+//! convention-agnostic across the supported Lean window
+//! ([`lean_rs_sys::SUPPORTED_TOOLCHAINS`]).
 //!
 //! ## Idempotency
 //!
@@ -55,20 +65,24 @@ use crate::runtime::obj::Obj;
 /// reach them through [`symbol_bytes`](Self::symbol_bytes) for `dlsym`.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InitializerName {
-    /// C-string-ready bytes (with the trailing NUL) for libloading's
-    /// symbol lookup.
+    /// Modern (Lean ≥ 4.27) C-string symbol bytes with trailing NUL.
     symbol: CString,
+    /// Legacy (Lean ≤ 4.26) C-string symbol bytes with trailing NUL —
+    /// the same module mangled without the package prefix.
+    legacy_symbol: CString,
     /// Human-readable form, e.g. `lean_rs_fixture::LeanRsFixture.Scalars`.
     display: String,
 }
 
 impl InitializerName {
-    /// Validate and mangle a `(package, module)` pair into the C symbol
+    /// Validate and mangle a `(package, module)` pair into the C symbols
     /// Lake exports for that module's initializer.
     ///
     /// `package` is a single Lake package identifier (e.g.
     /// `lean_rs_fixture`); `module` is the dotted Lean module name (e.g.
-    /// `LeanRsFixture.Scalars`).
+    /// `LeanRsFixture.Scalars`). Both Lake naming conventions are
+    /// recorded (see the module-level docstring for the convention
+    /// split); the loader picks whichever the active dylib exports.
     ///
     /// # Errors
     ///
@@ -83,6 +97,7 @@ impl InitializerName {
         display.push_str("::");
         display.push_str(module);
 
+        // Modern (≥ 4.27): `initialize_<mangled_package>_<mangled_module>`.
         let mut mangled = String::new();
         mangled.push_str("initialize_");
         push_mangled(&mut mangled, package);
@@ -91,27 +106,53 @@ impl InitializerName {
             mangled.push('_');
             push_mangled(&mut mangled, component);
         }
-        // `CString::new` rejects interior NULs; the validator above
-        // already excluded `'\0'`, so this only fails on bug-level input.
+        // Legacy (≤ 4.26): `initialize_<mangled_module>` (no package
+        // prefix). Module components are still mangled and joined by
+        // single `_`. Each component was already validated above.
+        let mut legacy = String::new();
+        legacy.push_str("initialize_");
+        let mut first = true;
+        for component in module.split('.') {
+            if !first {
+                legacy.push('_');
+            }
+            first = false;
+            push_mangled(&mut legacy, component);
+        }
         let symbol = CString::new(mangled)
             .map_err(|_| LeanError::linking("internal: mangled initializer symbol contained NUL byte"))?;
-        Ok(Self { symbol, display })
+        let legacy_symbol = CString::new(legacy)
+            .map_err(|_| LeanError::linking("internal: legacy initializer symbol contained NUL byte"))?;
+        Ok(Self {
+            symbol,
+            legacy_symbol,
+            display,
+        })
     }
 
-    /// C-string-ready symbol bytes (with the trailing NUL) for
-    /// `libloading::Library::get`.
+    /// Modern symbol bytes (with trailing NUL) for `libloading`.
     pub(crate) fn symbol_bytes(&self) -> &[u8] {
         self.symbol.as_bytes_with_nul()
     }
 
-    /// Symbol bytes without the trailing NUL — for diagnostics that
-    /// embed the raw C name in a message.
+    /// Legacy symbol bytes (with trailing NUL) for `libloading`.
+    pub(crate) fn legacy_symbol_bytes(&self) -> &[u8] {
+        self.legacy_symbol.as_bytes_with_nul()
+    }
+
+    /// Modern symbol bytes without the trailing NUL — for diagnostics.
     pub(crate) fn symbol_str(&self) -> &str {
         // SAFETY: `from_lake_names` only constructs symbols from ASCII
         // bytes (the validator restricts components to ASCII), and
         // `CString::as_bytes()` excludes the NUL; the result is valid
         // UTF-8 by construction.
         unsafe { std::str::from_utf8_unchecked(self.symbol.as_bytes()) }
+    }
+
+    /// Legacy symbol bytes without the trailing NUL — for diagnostics.
+    pub(crate) fn legacy_symbol_str(&self) -> &str {
+        // SAFETY: same construction as `symbol_str` above.
+        unsafe { std::str::from_utf8_unchecked(self.legacy_symbol.as_bytes()) }
     }
 
     /// Human-readable `package::Module.Path` form for diagnostics.
