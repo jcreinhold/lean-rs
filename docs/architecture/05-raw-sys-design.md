@@ -100,9 +100,11 @@ The Rust mirror wins on three axes:
 - **Faster.** A Rust mirror inlines into `lean-rs`'s `Drop`/`Clone` directly. A C shim defeats inlining across the FFI
     boundary unless cross-LTO is enabled (fragile, environment-dependent).
 - **Fewer build dependencies.** No `cc` build-dep, no `.c` files in the tree, no per-platform compiler shenanigans.
-- **Drift is structurally caught.** The build script reads the discovered `lean.h`, computes SHA-256, and compares
-    against `EXPECTED_HEADER_DIGEST` (hard-coded in `lib.rs`, the digest the refcount mirrors were authored against). A
-    mismatch fails the build with bounded diagnostics naming both digests and the discovered header path.
+- **Drift is structurally caught.** The build script reads the discovered `lean.h`, computes SHA-256, and looks it up
+    in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) — the table of `(versions, header_digest,
+    missing_symbols)` entries that names the v0.1.0 compatibility window. A miss fails the build with bounded
+    diagnostics naming the discovered digest and the full window. The mirrors are byte-identical across every entry in
+    the window (verified empirically; the table commentary records the layout-stability proof).
 
 The mirrors use `core::sync::atomic::AtomicI32` with `Ordering::Relaxed` on all loads/stores and on the MT-path
 `fetch_sub`, matching the `memory_order_relaxed` argument the `static inline` C source passes to
@@ -171,8 +173,10 @@ The build script's job is small:
 
 1. Discover Lean (env vars → `lean --print-prefix` → fixture Lake env, in order, with bounded diagnostics on each miss).
 1. Read `<prefix>/include/lean/lean.h` and compute SHA-256.
-1. Emit `cargo:rustc-env=LEAN_{VERSION,HEADER_PATH,HEADER_DIGEST}=…`.
-1. Assert the digest matches `EXPECTED_HEADER_DIGEST` (compile-time pinned in `lib.rs`).
+1. Look up the digest in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs). On a hit, record the
+    matched entry's resolved version; on a miss, fail the build with the discovered digest and the supported window.
+1. Emit `cargo:rustc-env=LEAN_{VERSION,RESOLVED_VERSION,HEADER_PATH,HEADER_DIGEST}=…` plus
+    `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry.
 1. Emit `cargo:rustc-link-*` directives based on features (`static` vs `dynamic`, `mimalloc`). The default is `dynamic`
     — see the "as built" note below for why.
 1. Emit `cargo:rerun-if-{env-changed,changed}=…`.

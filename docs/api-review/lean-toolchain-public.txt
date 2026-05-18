@@ -1,3 +1,8 @@
+   Compiling lean-toolchain v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+warning: lean-rs-sys@0.1.0: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.29.1
+    Checking lean-rs-sys v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+ Documenting lean-toolchain v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
 pub mod lean_toolchain
 pub use lean_toolchain::LEAN_HEADER_DIGEST
 pub use lean_toolchain::LEAN_HEADER_PATH
@@ -37,6 +42,9 @@ pub lean_toolchain::LinkDiagnostics::MissingLean::tried: alloc::vec::Vec<alloc::
 pub lean_toolchain::LinkDiagnostics::MissingLib
 pub lean_toolchain::LinkDiagnostics::MissingLib::name: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::MissingLib::search_dirs: alloc::vec::Vec<std::path::PathBuf>
+pub lean_toolchain::LinkDiagnostics::UnsupportedToolchain
+pub lean_toolchain::LinkDiagnostics::UnsupportedToolchain::active: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::UnsupportedToolchain::supported_window: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::VersionMismatch
 pub lean_toolchain::LinkDiagnostics::VersionMismatch::actual: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::VersionMismatch::expected: alloc::string::String
@@ -76,8 +84,10 @@ pub lean_toolchain::ToolchainFingerprint::fixture_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::header_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::host_triple: &'static str
 pub lean_toolchain::ToolchainFingerprint::lean_version: &'static str
+pub lean_toolchain::ToolchainFingerprint::resolved_version: &'static str
 impl lean_toolchain::ToolchainFingerprint
 pub const fn lean_toolchain::ToolchainFingerprint::current() -> Self
+pub fn lean_toolchain::ToolchainFingerprint::is_supported(&self) -> bool
 impl core::clone::Clone for lean_toolchain::ToolchainFingerprint
 pub fn lean_toolchain::ToolchainFingerprint::clone(&self) -> lean_toolchain::ToolchainFingerprint
 impl core::cmp::Eq for lean_toolchain::ToolchainFingerprint

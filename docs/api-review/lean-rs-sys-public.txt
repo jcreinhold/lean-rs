@@ -1,3 +1,6 @@
+warning: lean-rs-sys@0.1.0: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.29.1
+ Documenting lean-rs-sys v0.1.0 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
 pub mod lean_rs_sys
 pub mod lean_rs_sys::array
 pub unsafe fn lean_rs_sys::array::lean_alloc_array(size: usize, capacity: usize) -> lean_rs_sys::types::lean_obj_res
@@ -44,7 +47,6 @@ pub unsafe fn lean_rs_sys::closure::lean_closure_get(o: lean_rs_sys::types::b_le
 pub unsafe fn lean_rs_sys::closure::lean_closure_num_fixed(o: *mut lean_rs_sys::types::lean_object) -> u16
 pub unsafe fn lean_rs_sys::closure::lean_closure_set(o: lean_rs_sys::types::u_lean_obj_arg, i: u32, a: lean_rs_sys::types::lean_obj_arg)
 pub mod lean_rs_sys::consts
-pub const lean_rs_sys::consts::EXPECTED_HEADER_DIGEST: &str
 pub const lean_rs_sys::consts::LEAN_ARRAY: u8
 pub const lean_rs_sys::consts::LEAN_CLOSURE: u8
 pub const lean_rs_sys::consts::LEAN_CLOSURE_MAX_ARGS: usize
@@ -60,6 +62,7 @@ pub const lean_rs_sys::consts::LEAN_OBJECT_SIZE_DELTA: usize
 pub const lean_rs_sys::consts::LEAN_PROMISE: u8
 pub const lean_rs_sys::consts::LEAN_REF: u8
 pub const lean_rs_sys::consts::LEAN_RESERVED: u8
+pub const lean_rs_sys::consts::LEAN_RESOLVED_VERSION: &str
 pub const lean_rs_sys::consts::LEAN_SCALAR_ARRAY: u8
 pub const lean_rs_sys::consts::LEAN_STRING: u8
 pub const lean_rs_sys::consts::LEAN_STRUCT_ARRAY: u8
@@ -225,6 +228,33 @@ pub unsafe c fn lean_rs_sys::string::lean_string_utf8_prev(s: lean_rs_sys::types
 pub unsafe c fn lean_rs_sys::string::lean_string_utf8_set(s: lean_rs_sys::types::lean_obj_arg, i: lean_rs_sys::types::b_lean_obj_arg, c: u32) -> lean_rs_sys::types::lean_obj_res
 pub unsafe c fn lean_rs_sys::string::lean_utf8_n_strlen(s: *const core::ffi::primitives::c_char, n: usize) -> usize
 pub unsafe c fn lean_rs_sys::string::lean_utf8_strlen(s: *const core::ffi::primitives::c_char) -> usize
+pub mod lean_rs_sys::supported
+pub struct lean_rs_sys::supported::SupportedToolchain
+pub lean_rs_sys::supported::SupportedToolchain::header_digest: &'static str
+pub lean_rs_sys::supported::SupportedToolchain::missing_symbols: &'static [&'static str]
+pub lean_rs_sys::supported::SupportedToolchain::versions: &'static [&'static str]
+impl lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, version: &str) -> bool
+impl core::clone::Clone for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::clone(&self) -> lean_rs_sys::supported::SupportedToolchain
+impl core::cmp::Eq for lean_rs_sys::supported::SupportedToolchain
+impl core::cmp::PartialEq for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, other: &lean_rs_sys::supported::SupportedToolchain) -> bool
+impl core::fmt::Debug for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::StructuralPartialEq for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Freeze for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Send for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Sync for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Unpin for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::UnsafeUnpin for lean_rs_sys::supported::SupportedToolchain
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_sys::supported::SupportedToolchain
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_sys::supported::SupportedToolchain
+pub const lean_rs_sys::supported::SUPPORTED_TOOLCHAINS: &[lean_rs_sys::supported::SupportedToolchain]
+pub fn lean_rs_sys::supported::supported_by_digest(digest: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported::supported_for(version: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported::symbol_present_in_window(symbol: &str) -> bool
 pub mod lean_rs_sys::types
 #[repr(C)] pub struct lean_rs_sys::types::lean_object
 impl core::marker::Freeze for lean_rs_sys::types::lean_object
@@ -239,6 +269,28 @@ pub type lean_rs_sys::types::b_lean_obj_res = *mut lean_rs_sys::types::lean_obje
 pub type lean_rs_sys::types::lean_obj_arg = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::types::lean_obj_res = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::types::u_lean_obj_arg = *mut lean_rs_sys::types::lean_object
+pub struct lean_rs_sys::SupportedToolchain
+pub lean_rs_sys::SupportedToolchain::header_digest: &'static str
+pub lean_rs_sys::SupportedToolchain::missing_symbols: &'static [&'static str]
+pub lean_rs_sys::SupportedToolchain::versions: &'static [&'static str]
+impl lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, version: &str) -> bool
+impl core::clone::Clone for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::clone(&self) -> lean_rs_sys::supported::SupportedToolchain
+impl core::cmp::Eq for lean_rs_sys::supported::SupportedToolchain
+impl core::cmp::PartialEq for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, other: &lean_rs_sys::supported::SupportedToolchain) -> bool
+impl core::fmt::Debug for lean_rs_sys::supported::SupportedToolchain
+pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::StructuralPartialEq for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Freeze for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Send for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Sync for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::Unpin for lean_rs_sys::supported::SupportedToolchain
+impl core::marker::UnsafeUnpin for lean_rs_sys::supported::SupportedToolchain
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_sys::supported::SupportedToolchain
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_sys::supported::SupportedToolchain
 #[repr(C)] pub struct lean_rs_sys::lean_object
 impl core::marker::Freeze for lean_rs_sys::types::lean_object
 impl !core::marker::Send for lean_rs_sys::types::lean_object
@@ -247,11 +299,16 @@ impl !core::marker::Unpin for lean_rs_sys::types::lean_object
 impl core::marker::UnsafeUnpin for lean_rs_sys::types::lean_object
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_sys::types::lean_object
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_sys::types::lean_object
-pub const lean_rs_sys::EXPECTED_HEADER_DIGEST: &str
 pub const lean_rs_sys::LEAN_HEADER_DIGEST: &str
 pub const lean_rs_sys::LEAN_HEADER_PATH: &str
+pub const lean_rs_sys::LEAN_RESOLVED_VERSION: &str
 pub const lean_rs_sys::LEAN_VERSION: &str
 pub const lean_rs_sys::REQUIRED_SYMBOLS: &[&str]
+pub const lean_rs_sys::SUPPORTED_TOOLCHAINS: &[lean_rs_sys::supported::SupportedToolchain]
+pub fn lean_rs_sys::supported_by_digest(digest: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported_for(version: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::symbol_in_all(symbol: &str) -> bool
+pub fn lean_rs_sys::symbol_present_in_window(symbol: &str) -> bool
 pub type lean_rs_sys::b_lean_obj_arg = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::b_lean_obj_res = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::lean_obj_arg = *mut lean_rs_sys::types::lean_object

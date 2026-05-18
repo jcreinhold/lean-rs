@@ -26,8 +26,9 @@ ABI/layout invariant it relies on.
 
 The crate's blanket allow is intentional: every helper is `unsafe` because Lean's ABI
 ownership/borrow rules cannot be enforced by Rust types alone. The boundary is justified by the
-build-time `EXPECTED_HEADER_DIGEST` check (header bytes pinned) and the `REQUIRED_SYMBOLS`
-link-time test (every symbol the inline helpers cast through is exported by `libleanshared`).
+build-time `SUPPORTED_TOOLCHAINS` digest check (header bytes pinned across every release in the
+supported window) and the `REQUIRED_SYMBOLS` link-time test (every symbol the inline helpers
+cast through is exported by `libleanshared` for every entry in the window).
 
 Entries below group blocks by `pub unsafe fn` — the function-level `# Safety` doc is the
 authoritative statement of the invariant, and the in-body blocks rely on the same caller
@@ -42,7 +43,7 @@ Object inspection, tagging, and runtime-mode reads. Mirrors `lean.h:312–630`.
 | `lean_is_scalar` (51) | pointer-bit math, no deref | `o` is any Lean object pointer; scalar encoding is pure pointer arithmetic. |
 | `lean_box` (63) | pointer-bit math | `n` fits in the scalar payload width; result is a scalar-tagged non-null pointer. |
 | `lean_unbox` (74) | pointer-bit math | `o` is a scalar-tagged pointer (`lean_is_scalar(o)` would return `true`). |
-| `header` (82) | layout cast `*o.cast::<LeanObjectRepr>()` | `o` is a non-scalar live Lean object; layout pinned by `EXPECTED_HEADER_DIGEST`. |
+| `header` (82) | layout cast `*o.cast::<LeanObjectRepr>()` | `o` is a non-scalar live Lean object; layout pinned by the `SUPPORTED_TOOLCHAINS` digest table. |
 | `lean_alloc_object` extern wrapper (91) | `lean_alloc_object` | size is non-zero; result is owned or null on OOM (Lean aborts internally). |
 | `lean_ptr_tag` (103) | `header(o).m_tag` | `o` is a live non-scalar object. |
 | `lean_ptr_other` (114) | `header(o).m_other` | `o` is a live non-scalar object whose `m_other` byte is defined for its tag. |
@@ -176,9 +177,9 @@ arithmetic helpers). Externs only.
 ### `crates/lean-rs-sys/src/repr.rs` — 1 block (in a `#[cfg(test)]` layout assertion)
 
 Crate-private layout structs mirroring `lean.h:131–310`. The one `unsafe` block lives in a test
-that asserts the in-memory layout matches the `EXPECTED_HEADER_DIGEST`-pinned bytes; the
-production paths never touch `repr` directly except through layout casts in the inline
-accessors of the sibling modules.
+that asserts the in-memory layout matches the bytes pinned by every entry in the
+`SUPPORTED_TOOLCHAINS` table; the production paths never touch `repr` directly except through
+layout casts in the inline accessors of the sibling modules.
 
 ### `crates/lean-rs-sys/src/lib.rs` — 1 block (`pub unsafe fn` re-export bridge), 2 `pub unsafe fn`
 

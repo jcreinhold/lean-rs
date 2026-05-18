@@ -48,9 +48,10 @@ See [`docs/testing.md`](docs/testing.md) for the rationale and the per-test debu
 
 - **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
     signature in the active Lean header, extend the extern declarations in the appropriate
-    `crates/lean-rs-sys/src/<category>.rs` file, the `REQUIRED_SYMBOLS` allowlist, and (if layout shifted) the
-    `pub(crate) LeanObjectRepr` plus `EXPECTED_HEADER_DIGEST`. Record the version delta under `VERSION-COMPATIBILITY`.
-    Stop with a Replanning Delta if ownership conventions shift.
+    `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist. To extend the supported Lean
+    toolchain window, follow `docs/bump-toolchain.md`: add a row to `crates/lean-rs-sys/src/supported.rs`
+    (`SUPPORTED_TOOLCHAINS`), a CI matrix cell, and (if layout shifted) the `pub(crate) LeanObjectRepr`. Record the
+    version delta under `VERSION-COMPATIBILITY`. Stop with a Replanning Delta if ownership conventions shift.
 - **`lean-rs-sys` is published with opaque public types.** Per `RD-2026-05-17-005`, downstream users see `lean_object`
     as `[u8; 0] + PhantomData` and reach state only through `pub unsafe fn` helpers. Never expose `LeanObjectRepr`
     outside the crate; never add public `pub` fields to FFI types. Every `unsafe { ... }` block carries a `// SAFETY:`

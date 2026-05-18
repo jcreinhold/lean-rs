@@ -10,17 +10,27 @@ markers, `!Send + !Sync + !Unpin`); downstream code reaches refcount, tag, and p
 the safe layers in `lean-rs` for almost every use case; reach for this crate only when the safe surface is missing a
 capability you need.
 
-## Supported Lean range
+## Supported Lean window
 
-The supported Lean toolchain range is pinned in code and recorded in the workspace's
-[`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)
-and [`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md). The build
-script computes a SHA-256 digest over the discovered `lean.h` and compares it against `EXPECTED_HEADER_DIGEST`; a
-mismatch fails the build with bounded diagnostics naming both digests and the discovered header path. Extending the
-range means updating `EXPECTED_HEADER_DIGEST`, the `REQUIRED_SYMBOLS` allowlist, and (if layout shifted) the
-crate-private `LeanObjectRepr`, then re-running the linkage tests.
+`lean-rs-sys` supports a contiguous window of Lean 4 stable releases — currently **4.26.0 through
+4.29.1** (see [`crates/lean-rs-sys/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/src/supported.rs)
+for the authoritative list). The build script computes a SHA-256 digest over the discovered
+`lean.h` and accepts any digest that matches an entry in the
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/src/supported.rs) table.
+Releases that ship a byte-identical `lean.h` share one entry. A miss fails the build with a
+bounded diagnostic naming the discovered digest and the full window.
 
-Lean's header layout is **not** part of this crate's public semver. The opaque types and `pub unsafe fn` surface are.
+The build script also emits `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry's resolved
+version, so downstream code can `#[cfg]`-gate per-version divergences. As of v0.1.0 no
+divergence requires gating: layout structs are byte-identical and all 87 `REQUIRED_SYMBOLS`
+entries are present across the entire window.
+
+Lean's header layout is **not** part of this crate's public semver. The opaque types, the
+`pub unsafe fn` surface, and the `SUPPORTED_TOOLCHAINS` table are.
+
+Bumping the window is the [bump procedure](https://github.com/jcreinhold/lean-rs/blob/main/docs/bump-toolchain.md):
+add a row to `SUPPORTED_TOOLCHAINS`, add a CI matrix entry, run the local sweep
+(`scripts/test-all-toolchains.sh`), open a PR.
 
 ## Build environment
 

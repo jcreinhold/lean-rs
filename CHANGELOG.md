@@ -41,9 +41,13 @@ Initial release. Raw FFI bindings for the Lean 4 C ABI, published per `RD-2026-0
   for the matching category (refcount, string, array, …).
 - `REQUIRED_SYMBOLS` allowlist — 87 `LEAN_EXPORT`'d symbol names this crate's `extern "C"` blocks
   declare; `tests/linkage.rs` resolves every entry against `libleanshared` at link time.
-- `EXPECTED_HEADER_DIGEST` (SHA-256 of `lean.h` the crate was authored against) checked by
-  `build.rs` against the discovered header at build time. Mismatch fails the build with bounded
-  diagnostics naming both digests and the discovered header path.
+- `SUPPORTED_TOOLCHAINS` window table — every Lean release in the supported window with its
+  `lean.h` SHA-256 and `missing_symbols` set. `build.rs` accepts any matching digest and emits
+  `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry; a non-match fails the build with the
+  discovered digest and the full window. As of v0.1.0 the window is 4.26.0 through 4.29.1
+  (six entries). Lower bound 4.26.0 was set empirically: a multi-toolchain sweep showed
+  releases ≤ 4.25.x crash inside `lean_dec_ref_cold` from the L2 host stack — a refcount
+  divergence between 4.25 and 4.26 the current mirrors don't cover.
 - Features: `dynamic` + `mimalloc` (default), `static` (opt-in; selecting it requires extending the
   link set beyond what `lean.h` alone demands — see `build.rs`).
 

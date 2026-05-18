@@ -3,6 +3,15 @@
 Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability.
 Built on top of the [`lean-rs`](https://docs.rs/lean-rs) FFI primitive.
 
+Supports the same Lean toolchain window as
+[`lean-rs-sys`](https://docs.rs/lean-rs-sys) — currently **Lean 4.26.0
+through 4.29.1**; see
+[`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md).
+The capability loader transparently handles the Lake naming-convention
+change between Lean 4.26 and 4.27 (dylib filename and module-initializer
+symbol shape), so consumer `lakefile.lean`s do not need version-conditional
+logic.
+
 This crate provides the high-level `LeanHost` / `LeanCapabilities` / `LeanSession`
 trio, the kernel-check evidence types (`LeanEvidence`, `LeanKernelOutcome`,
 `ProofSummary`), the typed elaboration diagnostics (`LeanElabOptions`,

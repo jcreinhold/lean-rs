@@ -5,8 +5,11 @@ crates.io. The supported Lean toolchain range, MSRV, and tested platforms for ea
 recorded in [`docs/version-matrix.md`](version-matrix.md). The narrative changelog is at the
 repository root, [`CHANGELOG.md`](../CHANGELOG.md).
 
-**Supported Lean range for v0.1.0:** Lean 4.29.1 (single point release). Re-confirm against the
-version matrix before any release.
+**Supported Lean window for v0.1.0:** Lean 4.26.0 through 4.29.1, with every release in the
+window CI-tested on `{ubuntu-latest, macos-latest}`. Adding the next release follows the
+[bump procedure](bump-toolchain.md). Re-confirm against the
+[version matrix](version-matrix.md) and `crates/lean-rs-sys/src/supported.rs` before any
+release.
 
 **Crate publish order is load-bearing** (per `RD-2026-05-18-001`):
 
@@ -112,7 +115,8 @@ found … location searched: crates.io index`. Do not treat it as a regression.
 
 ### Recorded dry-run status — v0.1.0 (2026-05-18, four-crate set)
 
-Captured on `aarch64-apple-darwin` against Lean 4.29.1, Rust 1.95.0 stable, `cargo 1.95.0`.
+Captured on `aarch64-apple-darwin` against Lean 4.29.1 (head of the supported window),
+Rust 1.95.0 stable, `cargo 1.95.0`.
 Refreshed after `RD-2026-05-18-001` split `lean-rs::host` into the published sibling crate
 `lean-rs-host` (publish set grew from 3 → 4).
 
