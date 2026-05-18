@@ -1,0 +1,116 @@
+# `lean-rs-host` capability contract
+
+Single source of truth for the 13 mandatory + 3 optional `@[export]
+lean_rs_host_*` symbols the [`lean-rs-host`](https://docs.rs/lean-rs-host)
+crate's `LeanCapabilities::load_capabilities` resolves at runtime. The
+shim package [`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
+ships an implementation that satisfies the entire contract; external
+consumers add `require lean_rs_host_shims from "…"` to their
+`lakefile.lean` to pull it in. The expected on-disk dylib name is
+`liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
+
+This document covers the **wire-level contract**: each Lean signature,
+how it maps to the Rust call site, and the typed Rust shape
+`LeanSession::*` exposes on top. The architectural rationale (why two
+dylibs, why `RTLD_GLOBAL`, why the consumer's `lakefile.lean` looks the
+way it does) lives in [`downstream-integration.md`](downstream-integration.md)
+and [`architecture/04-host-stack.md`](architecture/04-host-stack.md).
+
+## Resolution
+
+`LeanCapabilities::new` performs:
+
+1. `LakeProject::shim_dylib()` — reads the consumer's
+   `lake-manifest.json` for the entry whose `name` is
+   `lean_rs_host_shims`. Handles `type: "path"` (`<dir>` resolved
+   relative to the project root) and `type: "git"` (`.lake/packages/lean_rs_host_shims/`)
+   require types.
+2. `LeanLibrary::open_globally(runtime, shim_dylib_path)` — opens the
+   shim dylib first, with `RTLD_LAZY | RTLD_GLOBAL` on Unix so the
+   subsequently opened consumer dylib can resolve its transitive
+   reference to `_initialize_lean__rs__host__shims_LeanRsHostShims`.
+3. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")`
+   — runs the shim's root initializer, which transitively initializes
+   `Lean.*` (idempotent via Lean's `_G_initialized` flag).
+4. `user_library.initialize_module(<package>, <lib_name>)` — runs the
+   consumer's root initializer; reaches the now-global shim symbols
+   through the dynamic linker.
+5. `SessionSymbols::resolve(&shim_library)` — every `lean_rs_host_*`
+   address comes from the shim dylib. The consumer dylib's
+   `LeanSession::call_capability` route stays open for user-authored
+   `@[export]` symbols.
+
+A missing mandatory symbol fails capability load with
+`LeanError::Host(stage = Link)`. A missing optional meta-service symbol
+stores `None` in `SessionSymbols`; `LeanSession::run_meta` returns
+`LeanMetaResponse::Unsupported` for that service at dispatch time.
+
+## Mandatory contract (13 symbols)
+
+### Environment / declaration queries (8)
+
+| Lean symbol | Lean signature | Rust method on `LeanSession` |
+| --- | --- | --- |
+| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports)` |
+| `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
+| `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name)` |
+| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names)` |
+| `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations()` |
+| `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name)` |
+| `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name)` |
+| `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name)` |
+
+### Elaboration / kernel check / evidence (5)
+
+| Lean symbol | Lean signature (return type abbreviated where the structure is fully defined in `LeanRsHostShims.Elaboration`) | Rust method on `LeanSession` |
+| --- | --- | --- |
+| `lean_rs_host_elaborate` | `(env : Environment) (src : String) (expectedType : Option Expr) (opts : ElabOpts) : IO ElabResult` | `elaborate(source, expected_type, options)` |
+| `lean_rs_host_elaborate_bulk` | `(env : Environment) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options)` |
+| `lean_rs_host_kernel_check` | `(env : Environment) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options)` |
+| `lean_rs_host_check_evidence` | `(env : Environment) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence)` |
+| `lean_rs_host_evidence_summary` | `(_env : Environment) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence)` |
+
+## Optional contract (3 symbols — bounded `MetaM`)
+
+If absent at load time, `SessionSymbols::resolve_optional_function_symbol`
+returns `None` for that slot; `LeanSession::run_meta` then synthesises a
+`LeanMetaResponse::Unsupported` for any service mapped to the missing
+address.
+
+| Lean symbol | Lean signature | Rust method on `LeanSession` |
+| --- | --- | --- |
+| `lean_rs_host_meta_infer_type` | `(env : Environment) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::infer_type(), expr, options)` |
+| `lean_rs_host_meta_whnf` | `(env : Environment) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options)` |
+| `lean_rs_host_meta_heartbeat_burn` | `(env : Environment) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options)` |
+
+## Lean-side structure types
+
+The full inductive / structure definitions for `ElabOpts`,
+`ElabResult`, `Evidence`, `EvidenceStatus`, `KernelOutcome`,
+`MetaOpts`, `MetaResponse`, and `ProofSummary` live in
+[`lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
+and [`Meta.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Meta.lean).
+Their Rust counterparts (and the `TryFromLean` / `IntoLean` impls
+crossing the ABI) live in `crates/lean-rs-host/src/host/{elaboration,
+evidence,meta}/`. The layouts are deliberately object-slot-only for
+the boxed fields (no scalar-tail mixing except for severity / bool
+flags Lean packs into the tail unconditionally).
+
+## Forking the shim package
+
+The shim package is small (≈557 LOC across three files) and consumers
+who need to customise behaviour (e.g., a different heartbeat policy,
+extra logging on the kernel-check path) can fork it. The minimum
+requirements for a fork:
+
+- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name
+  (`LeanRsHostShims`) so `LeanCapabilities` finds the dylib at the
+  conventional path.
+- Same 13 mandatory `@[export]` symbol names with compatible
+  signatures (the Rust side casts function pointers to fixed shapes).
+- The 3 optional meta-service symbols are truly optional; omitting any
+  collapses the corresponding `run_meta` service to `Unsupported`.
+
+A fork that changes the Lean structure layouts also needs corresponding
+Rust changes — this is why the shim package isn't framed as
+"compatibility shims" but as the *implementation* of the wire contract.

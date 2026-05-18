@@ -41,6 +41,23 @@ regression — for example, an accidental `impl Send` introduced by a
 refactor — is caught by the `.stderr` snapshot before the change can
 merge.
 
+### `'lean` cascade: belt-and-braces atop `OnceLock`
+
+The `'lean` lifetime parameter that cascades through every handle type
+(`Obj<'lean>`, `LeanExpr<'lean>`, `LeanSession<'lean, 'c>`, …) is a
+structural belt-and-braces atop the `OnceLock`-backed
+`LeanRuntime::init`. In practice the runtime always resolves to
+`&'static LeanRuntime` — no caller in `lean-rs`, `lean-rs-host`, the
+workspace fixture, or either downstream proof binds `'lean` to a
+non-static lifetime; `OnceLock` makes the runtime a process-once
+singleton. The lifetime parameter still pays for itself by preventing
+one bug class — a handle outliving the runtime borrow it was
+constructed against — that `OnceLock` alone wouldn't catch in the rare
+embedder that wraps a scoped runtime view (e.g., a future per-task
+LeanRuntime). The cost is lifetime noise at signatures; the benefit is
+structural rejection of an entire shape of misuse. The decision is to
+keep it.
+
 ## What can cross threads
 
 The crate's data types — types that carry information *about* a Lean

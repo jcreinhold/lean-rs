@@ -21,15 +21,51 @@ contract.
 
 ## Capability contract
 
-The `LeanCapabilities::load_capabilities` entry point resolves 13 mandatory +
-3 optional `lean_rs_host_*` symbols from the user's compiled Lake dylib.
-Today those shims ship as test scaffolding inside the in-tree workspace
-fixture at `fixtures/lean/LeanRsFixture/` (visible in the [project
-repository](https://github.com/jcreinhold/lean-rs)). An external-consumer
-packaging story for the shims (Lake-require from git tag vs.
-`build.rs`-bundled `liblean_rs_host.{so,dylib}`) is the prompt-30
-deliverable per `RD-2026-05-18-001`; until that lands, building a capability
-against this crate requires copying or re-implementing the shim contract.
+`LeanCapabilities::load_capabilities` opens two dylibs and resolves a
+fixed contract of 13 mandatory + 3 optional `@[export] lean_rs_host_*`
+symbols. The contract is satisfied by a separately-distributed Lake
+package, **`lean-rs-host-shims`**, that ships from the same repository
+as this crate. Your `lakefile.lean` adds:
+
+```lean
+import Lake
+open System Lake DSL
+
+package «my_app»
+
+-- Pre-publish: path-require against a sibling checkout.
+require «lean_rs_host_shims» from "../lean-rs/lake/lean-rs-host-shims"
+-- Post-publish (planned, prompt 30): git-require by tag.
+-- require «lean_rs_host_shims» from git "https://github.com/jcreinhold/lean-rs" @ "v0.1.0" / "lake/lean-rs-host-shims"
+
+@[default_target]
+lean_lib «MyCapability» where
+  defaultFacets := #[LeanLib.sharedFacet]
+```
+
+Lake builds two dylibs (yours + the shim package's). At runtime
+`LeanCapabilities::load_capabilities` opens the shim dylib first
+with `RTLD_GLOBAL` (so your dylib's transitive references resolve)
+and then opens your dylib. Both dylibs share one Lean runtime;
+per-module `initialize_*` functions are idempotent.
+
+The full per-symbol contract is documented at
+[`docs/lean-rs-host-capability-contract.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/lean-rs-host-capability-contract.md)
+— each Lean signature, the Rust call site it maps to, and the typed
+`LeanSession::*` method on top. Your `lean_lib` does **not** need to
+`import LeanRsHostShims`; Lake's two-package build handles the
+dylib-level wiring and the Rust side does the runtime dispatch.
+
+### Worked external-consumer proof
+
+A standalone repo demonstrating the full setup against an
+out-of-workspace Lake project:
+[`/Users/jcreinhold/Code/lean-rs-host-downstream/`](https://github.com/jcreinhold/lean-rs-host-downstream)
+(if/when published). It mirrors `lean-rs-downstream` (the L1 proof)
+but exercises `LeanHost` → `LeanCapabilities` → `LeanSession` end to
+end, including `query_declaration`, `kernel_check`,
+`summarize_evidence`, and `LeanSession::call_capability` for a
+user-authored `@[export]` symbol.
 
 ## License
 
