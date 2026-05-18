@@ -31,13 +31,19 @@ fn fixture_dylib_path() -> PathBuf {
         .and_then(std::path::Path::parent)
         .expect("crates/<name>/ lives two directories beneath the workspace root");
     let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    workspace
+    let lib_dir = workspace
         .join("fixtures")
         .join("lean")
         .join(".lake")
         .join("build")
-        .join("lib")
-        .join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"))
+        .join("lib");
+    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
+    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
+    if old_style.is_file() && !new_style.is_file() {
+        old_style
+    } else {
+        new_style
+    }
 }
 
 fn report(name: &str, elapsed_us: u128) {

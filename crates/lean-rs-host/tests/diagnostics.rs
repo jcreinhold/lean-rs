@@ -34,11 +34,14 @@ fn fixture_lake_root() -> PathBuf {
 
 fn fixture_dylib_path() -> PathBuf {
     let dylib_ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    fixture_lake_root()
-        .join(".lake")
-        .join("build")
-        .join("lib")
-        .join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"))
+    let lib_dir = fixture_lake_root().join(".lake").join("build").join("lib");
+    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
+    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
+    if old_style.is_file() && !new_style.is_file() {
+        old_style
+    } else {
+        new_style
+    }
 }
 
 fn runtime() -> &'static LeanRuntime {

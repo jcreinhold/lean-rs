@@ -42,6 +42,19 @@ fn main() {
         other => panic!("lean-toolchain: unsupported target_os `{other}`; only macos and linux are tested"),
     };
 
+    // Lake's shared-library filename changed between Lean 4.26 and 4.27:
+    // older versions emit `liblean_rs_fixture.{dylib,so}` (just the lib
+    // name); 4.27+ emit `liblean__rs__fixture_LeanRsFixture.{dylib,so}`
+    // (package-escaped + lib name). Probe both candidates so the build
+    // works across the supported window.
+    let lib_dir = fixture_dir.join(".lake/build/lib");
+    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
+    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
+    let fixture_dylib = if new_style.is_file() {
+        (new_style, "liblean__rs__fixture_LeanRsFixture")
+    } else {
+        (old_style, "libLeanRsFixture")
+    };
     let inputs: Vec<(PathBuf, &str)> = vec![
         (fixture_dir.join("lakefile.lean"), "lakefile.lean"),
         (fixture_dir.join("lake-manifest.json"), "lake-manifest.json"),
@@ -49,12 +62,7 @@ fn main() {
             fixture_dir.join(".lake/build/lib/lean/LeanRsFixture.olean"),
             "LeanRsFixture.olean",
         ),
-        (
-            fixture_dir.join(format!(
-                ".lake/build/lib/liblean__rs__fixture_LeanRsFixture.{dylib_ext}"
-            )),
-            "liblean__rs__fixture_LeanRsFixture",
-        ),
+        fixture_dylib,
     ];
 
     let mut hasher = Sha256::new();
