@@ -19,12 +19,43 @@ libloading = "0.8"
 # function-vs-global distinction stays invisible to callers of
 # `LeanModule::exported`.
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+# Optional heap profiler for `examples/alloc_probe.rs`. Gated behind the
+# `dhat-heap` feature so the default build, `cargo test`, and `cargo bench`
+# do not pull dhat in. Installs `dhat::Alloc` as the *Rust* global
+# allocator; Lean's internal mimalloc (statically linked into
+# `libleanrt.a`) is a separate allocator and unaffected.
+dhat = { version = "0.3", optional = true }
+
+[features]
+# Enables the dhat-instrumented `alloc_probe` example. Not consumed by
+# any library code path — purely a build switch for the profiling binary.
+dhat-heap = ["dep:dhat"]
 
 [dev-dependencies]
 # Compile-fail tests pinning the curated surface invariants (handles
 # cannot outlive their runtime borrow; runtime / session / handles are
 # !Send + !Sync). Each negative case lives under tests/compile_fail/.
 trybuild = "1"
+# Criterion drives the steady-state hot-path and session-path baselines
+# under `benches/`. Cold paths (runtime init, library open, module init)
+# are once-per-process and live in `examples/cold_probe.rs` instead —
+# see `docs/performance/baseline.md` for the rationale.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "hot_paths"
+harness = false
+
+[[bench]]
+name = "session"
+harness = false
+
+[[example]]
+name = "cold_probe"
+
+[[example]]
+name = "alloc_probe"
+required-features = ["dhat-heap"]
 
 [lints]
 workspace = true
