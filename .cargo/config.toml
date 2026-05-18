@@ -1,0 +1,20 @@
+# Workspace-level cargo config. Sets env vars that should apply to
+# every cargo invocation: `cargo test`, `cargo nextest run`,
+# `cargo run --example`, etc.
+#
+# See `docs/testing.md` for the rationale behind each variable.
+
+[env]
+# Pin the Lean task manager to a single worker thread per process.
+# Combined with the `test-threads = 4` cap in `.config/nextest.toml`
+# this bounds total Lean worker threads at 4 across the whole test
+# run. `LeanRuntime::init` reads this once at first init; later
+# changes are ignored. Override locally (e.g. for a benchmark run
+# that legitimately wants Lean parallelism) with `LEAN_RS_NUM_THREADS=8
+# cargo bench ...`; `[env]` defaults are overridden by the process
+# environment unless they are marked `force = true`.
+LEAN_RS_NUM_THREADS = "1"
+
+# Quieter `tracing` output by default; override per-invocation with
+# `RUST_LOG=lean_rs=debug cargo ...`.
+RUST_LOG = "warn"

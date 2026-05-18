@@ -20,17 +20,22 @@ Sequencing manually keeps the failure window short and the human in the loop.
 
 ## Step 1 — Pre-flight
 
-The four workspace gates must be clean before any packaging work:
+The workspace gates must be clean before any packaging work:
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo nextest run --workspace
+cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
-These are the same four commands CI runs on `ubuntu-latest` and `macos-latest`. If any fails,
-stop; do not attempt to package.
+These are the same commands CI runs on `ubuntu-latest` and `macos-latest`. If any fails, stop; do
+not attempt to package.
+
+`cargo test` (single-process) is unsupported as the workspace gate — cumulative Lean state OOMs
+the binary after ~150 tests. See [`docs/testing.md`](testing.md) for the rationale, the single-test
+debug escape hatch, and the local override knobs.
 
 ## Step 2 — Public-API diff
 

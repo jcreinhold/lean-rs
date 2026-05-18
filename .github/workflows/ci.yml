@@ -31,14 +31,26 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
       - name: cargo fmt --check
         run: cargo fmt --check
 
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: cargo test
-        run: cargo test --all-targets
+      # Tests run under nextest (one process per test) because the
+      # default single-process `cargo test` accumulates Lean runtime
+      # state across tests and exhausts memory. See docs/testing.md.
+      - name: cargo nextest run
+        run: cargo nextest run --workspace --profile ci
+
+      # Doctests are not picked up by nextest; run separately.
+      - name: cargo test --doc
+        run: cargo test --doc --workspace
 
       - name: cargo doc --no-deps
         run: cargo doc --no-deps --workspace

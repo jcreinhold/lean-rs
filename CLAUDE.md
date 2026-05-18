@@ -35,11 +35,14 @@ can depend on `lean-rs-sys` directly (opt-in unsafe).
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo nextest run --workspace
+cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
-CI runs the same four commands on `ubuntu-latest` and `macos-latest`, stable Rust only.
+CI runs the same commands on `ubuntu-latest` and `macos-latest`, stable Rust only. `cargo test`
+(single-process) is **not** the gate: cumulative Lean state OOMs the binary after ~150 tests.
+See [`docs/testing.md`](docs/testing.md) for the rationale and the per-test debugging escape hatch.
 
 ## Discipline
 

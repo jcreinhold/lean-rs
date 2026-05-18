@@ -53,6 +53,19 @@ impl LeanRuntime {
     /// same borrow, or replay the cached failure if the first attempt
     /// failed.
     ///
+    /// # Worker threads
+    ///
+    /// `init` starts a process-wide Lean task manager. The worker thread
+    /// count is Lean's compiled-in default — typically one worker per
+    /// hardware core — unless the `LEAN_RS_NUM_THREADS` environment
+    /// variable is set to a positive integer before the first call to
+    /// `init`. The first call captures the value; later changes to the
+    /// variable have no effect. Set `LEAN_RS_NUM_THREADS` when several
+    /// Lean-using processes run side by side (CI test matrices, batch
+    /// jobs, multi-tenant workers) to avoid oversubscribing cores. The
+    /// pool is process-lifetime; there is no `set_num_threads`-style
+    /// reconfiguration once `init` has run.
+    ///
     /// # Errors
     ///
     /// Returns a [`LeanError::Host`] with stage [`HostStage::RuntimeInit`]
@@ -110,15 +123,17 @@ static INIT: OnceLock<Result<(), LeanError>> = OnceLock::new();
 /// Lean entry points.
 fn do_initialize_once() -> Result<(), LeanError> {
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+        let workers = read_num_threads_env();
         // SAFETY: All three calls are valid to invoke once per process
         // before any other Lean code runs; `OnceLock::get_or_init`
         // enforces the "once" half of the contract. The order
         // (`runtime_module` before the full `initialize`; task manager
         // last) follows the documented Lean embedding sequence captured
         // in `crates/lean-rs-sys/src/init.rs`. None of the calls take
-        // inputs from Rust state, so there is no aliasing or lifetime
-        // hazard. The task manager is required for any code path that
-        // spawns Lean tasks — including
+        // inputs from Rust state (the `workers` count is a plain `u32`
+        // read from the environment above), so there is no aliasing or
+        // lifetime hazard. The task manager is required for any code
+        // path that spawns Lean tasks — including
         // `Lean.Elab.Frontend.process` (driven by `kernel_check`),
         // which would otherwise abort with a
         // "g_task_manager" assertion on the first
@@ -128,12 +143,38 @@ fn do_initialize_once() -> Result<(), LeanError> {
         unsafe {
             lean_rs_sys::init::lean_initialize_runtime_module();
             lean_rs_sys::init::lean_initialize();
-            lean_rs_sys::init::lean_init_task_manager();
+            match workers {
+                Some(n) => lean_rs_sys::init::lean_init_task_manager_using(n),
+                None => lean_rs_sys::init::lean_init_task_manager(),
+            }
         }
     }));
     match outcome {
         Ok(()) => Ok(()),
         Err(payload) => Err(LeanError::runtime_init_panic(payload.as_ref())),
+    }
+}
+
+/// Parse the `LEAN_RS_NUM_THREADS` environment variable for the worker
+/// count to hand to `lean_init_task_manager_using`.
+///
+/// Returns `Some(n)` for any positive integer; returns `None` (Lean's
+/// compiled-in default) if the variable is unset or holds a value that
+/// is not a positive integer. Invalid values emit a single `warn!`
+/// against the `lean_rs` target so the operator notices the typo without
+/// breaking the run.
+fn read_num_threads_env() -> Option<u32> {
+    let raw = std::env::var("LEAN_RS_NUM_THREADS").ok()?;
+    match raw.trim().parse::<u32>() {
+        Ok(n) if n >= 1 => Some(n),
+        _ => {
+            tracing::warn!(
+                target: "lean_rs",
+                value = %raw,
+                "LEAN_RS_NUM_THREADS must be a positive integer; falling back to the Lean default",
+            );
+            None
+        }
     }
 }
 
