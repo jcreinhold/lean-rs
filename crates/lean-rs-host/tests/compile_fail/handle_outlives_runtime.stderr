@@ -1,0 +1,13 @@
+error[E0597]: `local` does not live long enough
+  --> tests/compile_fail/handle_outlives_runtime.rs:24:33
+   |
+13 |         let local = ();
+   |             ----- binding `local` declared here
+...
+24 |         host = through(runtime, &local);
+   |                                 ^^^^^^ borrowed value does not live long enough
+25 |     }
+   |     - `local` dropped here while still borrowed
+...
+30 |     let _escape = host;
+   |                   ---- borrow later used here

@@ -12,6 +12,7 @@ rust-version = "1.91"
 version = "0.1.0"
 
 [workspace.dependencies]
+lean-rs = { version = "0.1.0", path = "crates/lean-rs" }
 lean-rs-sys = { version = "0.1.0", path = "crates/lean-rs-sys" }
 sha2 = "0.11"
 
