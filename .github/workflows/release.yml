@@ -129,10 +129,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      # `cargo public-api` invokes `cargo +nightly rustdoc` internally
+      # to emit the structured JSON form of the public surface.
+      # Without nightly installed it bails before reaching the
+      # `-p <crate>` filter and confusingly reports "Cargo.toml is a
+      # virtual manifest". Install nightly explicitly here.
+      - name: Install Rust nightly (for cargo-public-api)
+        uses: dtolnay/rust-toolchain@nightly
 
       - uses: Swatinem/rust-cache@v2
         with:
