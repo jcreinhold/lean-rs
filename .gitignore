@@ -32,3 +32,6 @@ perf.data*
 
 # Codex system artifacts
 .system/
+
+# Claude harness state (the skills/ subtree is tracked; only ephemeral state is ignored)
+.claude/scheduled_tasks.lock

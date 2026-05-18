@@ -15,12 +15,23 @@ env:
 
 jobs:
   check:
-    name: ${{ matrix.os }}
+    # Matrix over (OS, Lean toolchain). The Lean entries name every
+    # release in lean_rs_sys::SUPPORTED_TOOLCHAINS; bumping the window
+    # requires (a) adding a row to that table and (b) adding the
+    # corresponding lean_version entry here. See docs/bump-toolchain.md.
+    name: ${{ matrix.os }} / Lean ${{ matrix.lean_version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        lean_version:
+          - "4.26.0"
+          - "4.27.0"
+          - "4.28.0"
+          - "4.28.1"
+          - "4.29.0"
+          - "4.29.1"
     steps:
       - uses: actions/checkout@v4
 
@@ -30,29 +41,58 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: lean-${{ matrix.lean_version }}
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
 
+      - name: Install elan + Lean ${{ matrix.lean_version }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Pin workspace to Lean ${{ matrix.lean_version }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
+
+      - name: Build Lake packages
+        run: |
+          (cd lake/lean-rs-host-shims && lake build)
+          (cd fixtures/lean && lake build)
+
       - name: cargo fmt --check
+        # Format check only needs to run once per branch, but it's
+        # cheap so it stays in every matrix cell rather than getting
+        # split into a separate single-cell job.
         run: cargo fmt --check
 
       - name: cargo clippy --all-targets -- -D warnings
+        env:
+          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}
         run: cargo clippy --all-targets -- -D warnings
 
       # Tests run under nextest (one process per test) because the
       # default single-process `cargo test` accumulates Lean runtime
       # state across tests and exhausts memory. See docs/testing.md.
       - name: cargo nextest run
+        env:
+          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}
         run: cargo nextest run --workspace --profile ci
 
       # Doctests are not picked up by nextest; run separately.
       - name: cargo test --doc
+        env:
+          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}
         run: cargo test --doc --workspace
 
       - name: cargo doc --no-deps
-        run: cargo doc --no-deps --workspace
         env:
+          LEAN_SYSROOT: ${{ env.HOME }}/.elan/toolchains/leanprover--lean4---v${{ matrix.lean_version }}
           RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --workspace

@@ -37,17 +37,30 @@ env:
 
 jobs:
   asan:
-    name: AddressSanitizer (ubuntu-latest, nightly)
+    name: AddressSanitizer (ubuntu-latest, nightly, Lean ${{ matrix.lean_version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Sanitizer covers the endpoints of the supported window plus
+        # the current head; the full matrix is in ci.yml. Bumping the
+        # window: update these entries to the new endpoints.
+        lean_version: ["4.26.0", "4.29.1"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install elan + Lean 4.29.1
+      - name: Install elan + Lean ${{ matrix.lean_version }}
         run: |
           set -euo pipefail
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Pin workspace to Lean ${{ matrix.lean_version }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
 
       - name: Install Rust nightly + rust-src
         uses: dtolnay/rust-toolchain@nightly
@@ -73,17 +86,29 @@ jobs:
             -- --include-ignored --test-threads=1
 
   fuzz:
-    name: cargo-fuzz abi_decode (ubuntu-latest, nightly)
+    name: cargo-fuzz abi_decode (ubuntu-latest, nightly, Lean ${{ matrix.lean_version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Fuzz against current head; the asan job above sweeps both
+        # endpoints. Bumping the window: update to the new head.
+        lean_version: ["4.29.1"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install elan + Lean 4.29.1
+      - name: Install elan + Lean ${{ matrix.lean_version }}
         run: |
           set -euo pipefail
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ matrix.lean_version }}
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Pin workspace to Lean ${{ matrix.lean_version }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
 
       - name: Install Rust nightly + rust-src
         uses: dtolnay/rust-toolchain@nightly
