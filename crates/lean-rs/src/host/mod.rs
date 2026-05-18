@@ -37,6 +37,7 @@ pub mod elaboration;
 pub mod evidence;
 pub mod handle;
 pub mod meta;
+pub mod pool;
 
 pub(crate) mod lake;
 
@@ -50,7 +51,8 @@ mod session;
 
 pub use self::capabilities::LeanCapabilities;
 pub use self::host::LeanHost;
-pub use self::session::LeanSession;
+pub use self::pool::{PoolStats, PooledSession, SessionPool};
+pub use self::session::{LeanSession, SessionStats};
 
 #[cfg(test)]
 mod tests;

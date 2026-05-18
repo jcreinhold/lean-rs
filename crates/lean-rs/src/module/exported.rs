@@ -157,6 +157,21 @@ mod sealed {
 pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
     /// Number of arguments the tuple represents.
     const ARITY: usize;
+
+    /// Destructure `args` and dispatch through `handle`.
+    ///
+    /// The per-arity `.call(a1, a2, ...)` method on [`LeanExported`]
+    /// takes its arguments destructured (one per parameter) because
+    /// that is the natural ergonomic form for hand-written call sites.
+    /// Generic callers — most importantly
+    /// [`crate::LeanSession::call_capability`] — cannot destructure a
+    /// generic `Args` tuple, so they reach `.call(...)` through this
+    /// associated function instead. Macro-stamped per arity to forward
+    /// to the existing destructured impl.
+    #[doc(hidden)]
+    fn invoke<R>(handle: &LeanExported<'lean, '_, Self, R>, args: Self) -> LeanResult<R::Output>
+    where
+        R: DecodeCallResult<'lean>;
 }
 
 // -- DecodeCallResult: pure vs IO return decoding ------------------------
@@ -400,6 +415,22 @@ macro_rules! impl_arity {
             $($A: LeanAbi<'lean>,)*
         {
             const ARITY: usize = $arity;
+
+            #[allow(
+                clippy::unused_unit,
+                unused_variables,
+                reason = "arity 0 has no destructure target and no $A to bind"
+            )]
+            fn invoke<R>(
+                handle: &LeanExported<'lean, '_, Self, R>,
+                args: Self,
+            ) -> LeanResult<R::Output>
+            where
+                R: DecodeCallResult<'lean>,
+            {
+                let ($($a,)*) = args;
+                handle.call($($a,)*)
+            }
         }
 
         // Both lifetimes flow into LeanExported<'lean, 'lib, ...>.

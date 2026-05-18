@@ -169,6 +169,20 @@ def hostElaborate (env : Environment) (src : String) (expectedType : Option Expr
           return .error { diagnostics := diags, truncated := trunc }
         return .ok e
 
+/-- Bulk variant of [`hostElaborate`]: a single IO traversal that folds the
+    singular elaboration across `sources`. The boundary stays explicit —
+    each source is parsed and elaborated independently against the shared
+    environment and bounded options — but the FFI crossing, options
+    allocation, and heartbeat counter are paid once per batch instead of
+    once per source. Iteration semantics are identical to a Rust-side
+    fold over `hostElaborate` with `expectedType := none`. -/
+@[export lean_rs_host_elaborate_bulk]
+def hostElaborateBulk (env : Environment) (sources : Array String)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    : IO (Array (Except ElabFailure Expr)) := do
+  sources.mapM fun src =>
+    hostElaborate env src none ns fileLabel heartbeats diagByteLimit
+
 /-- Parse, elaborate, and kernel-check a Lean declaration source.
     Drives the full `Lean.Elab.Frontend.process` pipeline, which runs
     `Command.elabCommand` followed by `Environment.addDecl` — the latter

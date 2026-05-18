@@ -107,4 +107,13 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     pub(crate) fn symbols(&self) -> &SessionSymbols {
         &self.symbols
     }
+
+    /// The owned [`LeanLibrary`] this capability dispatches through.
+    ///
+    /// `pub(crate)` so [`crate::LeanSession::call_capability`] can
+    /// resolve ad-hoc function symbols on the same dylib without
+    /// holding a separate library borrow.
+    pub(crate) fn library(&self) -> &LeanLibrary<'lean> {
+        &self.library
+    }
 }

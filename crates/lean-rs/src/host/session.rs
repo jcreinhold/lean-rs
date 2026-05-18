@@ -11,26 +11,28 @@
 //! ## Capability contract
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export eleven **mandatory** `@[export]` symbols and may
+//! loads must export thirteen **mandatory** `@[export]` symbols and may
 //! export three **optional** meta-service symbols (matched at
 //! `LeanCapabilities::load_capabilities` time):
 //!
-//! | C symbol                                  | Mandatory? | Lean signature                                             |
-//! | ----------------------------------------- | ---------- | ---------------------------------------------------------- |
-//! | `lean_rs_host_session_import`             | yes        | `String -> Array String -> IO Environment`                 |
-//! | `lean_rs_host_name_from_string`           | yes        | `String -> Name`                                           |
-//! | `lean_rs_host_env_query_declaration`      | yes        | `Environment -> Name -> IO (Option Declaration)`           |
-//! | `lean_rs_host_env_list_declarations`      | yes        | `Environment -> IO (Array Name)`                           |
-//! | `lean_rs_host_env_declaration_type`       | yes        | `Environment -> Name -> IO (Option Expr)`                  |
-//! | `lean_rs_host_env_declaration_kind`       | yes        | `Environment -> Name -> IO String`                         |
-//! | `lean_rs_host_env_declaration_name`       | yes        | `Environment -> Name -> IO String`                         |
-//! | `lean_rs_host_elaborate`                  | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
-//! | `lean_rs_host_kernel_check`               | yes        | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome` |
-//! | `lean_rs_host_check_evidence`             | yes        | `Environment -> Evidence -> IO EvidenceStatus`             |
-//! | `lean_rs_host_evidence_summary`           | yes        | `Environment -> Evidence -> IO ProofSummary`               |
-//! | `lean_rs_host_meta_infer_type`            | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
-//! | `lean_rs_host_meta_whnf`                  | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
-//! | `lean_rs_host_meta_heartbeat_burn`        | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)` |
+//! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
+//! | ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+//! | `lean_rs_host_session_import`                  | yes        | `String -> Array String -> IO Environment`                                                                    |
+//! | `lean_rs_host_name_from_string`                | yes        | `String -> Name`                                                                                              |
+//! | `lean_rs_host_env_query_declaration`           | yes        | `Environment -> Name -> IO (Option Declaration)`                                                              |
+//! | `lean_rs_host_env_query_declarations_bulk`     | yes        | `Environment -> Array Name -> IO (Array (Option Declaration))`                                                |
+//! | `lean_rs_host_env_list_declarations`           | yes        | `Environment -> IO (Array Name)`                                                                              |
+//! | `lean_rs_host_env_declaration_type`            | yes        | `Environment -> Name -> IO (Option Expr)`                                                                     |
+//! | `lean_rs_host_env_declaration_kind`            | yes        | `Environment -> Name -> IO String`                                                                            |
+//! | `lean_rs_host_env_declaration_name`            | yes        | `Environment -> Name -> IO String`                                                                            |
+//! | `lean_rs_host_elaborate`                       | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
+//! | `lean_rs_host_elaborate_bulk`                  | yes        | `Environment -> Array String -> String -> String -> UInt64 -> USize -> IO (Array (Except ElabFailure Expr))`  |
+//! | `lean_rs_host_kernel_check`                    | yes        | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome`                            |
+//! | `lean_rs_host_check_evidence`                  | yes        | `Environment -> Evidence -> IO EvidenceStatus`                                                                |
+//! | `lean_rs_host_evidence_summary`                | yes        | `Environment -> Evidence -> IO ProofSummary`                                                                  |
+//! | `lean_rs_host_meta_infer_type`                 | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
+//! | `lean_rs_host_meta_whnf`                       | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
+//! | `lean_rs_host_meta_heartbeat_burn`             | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`crate::HostStage::Link`] — failures bind to the capability's load,
@@ -48,7 +50,20 @@
 //! The baseline (prompts 13–14) is the first seven symbols; prompt 15
 //! adds the `elaborate` / `kernel_check` pair; prompt 16 adds the three
 //! optional meta-service symbols; prompt 17 adds the `check_evidence` /
-//! `evidence_summary` pair. Future prompts extend additively.
+//! `evidence_summary` pair; prompt 20 adds the
+//! `env_query_declarations_bulk` and `elaborate_bulk` pair to amortise
+//! per-item FFI overhead across a single Lean traversal. Future prompts
+//! extend additively.
+//!
+//! ## Per-session metrics
+//!
+//! Every [`LeanSession`] carries a [`SessionStats`] counter that
+//! accumulates dispatch events (one FFI call per typed query, plus
+//! per-item counts for the bulk methods) and the wall time spent inside
+//! `.call(...)`. Snapshot via [`LeanSession::stats`]; reset by dropping
+//! the session. `import` itself is **not** counted as a query FFI call
+//! — pool reuse vs. fresh import is tracked at the
+//! [`crate::host::pool::SessionPool`] level instead.
 //!
 //! The Rust side passes the `.olean` search path (resolved by
 //! [`crate::host::lake::LakeProject`]) as the first argument to
@@ -79,7 +94,9 @@
 // precedent as `module::exported.rs`.
 #![allow(private_bounds, private_interfaces)]
 
+use core::cell::Cell;
 use core::ffi::c_void;
+use std::time::Instant;
 
 use crate::abi::traits::TryFromLean;
 use crate::error::{HostStage, LeanError, LeanResult};
@@ -87,9 +104,40 @@ use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
-use crate::module::{LeanExported, LeanIo, LeanLibrary};
+use crate::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary};
 use crate::runtime::obj::Obj;
 use crate::{LeanDeclaration, LeanExpr, LeanName};
+
+// -- SessionStats: per-session dispatch metrics --------------------------
+
+/// Cumulative dispatch metrics for one [`LeanSession`].
+///
+/// Snapshot via [`LeanSession::stats`]. Each typed query method records
+/// one FFI call; the bulk methods additionally record the per-item batch
+/// size. `elapsed_ns` accumulates the wall time spent inside the inner
+/// `.call(...)` dispatch (measured with [`Instant::now`]) — it excludes
+/// Rust-side argument marshaling, name lookup, and result decoding so
+/// the number is comparable across singular and bulk paths.
+///
+/// `import` is **not** counted: import vs. reuse is tracked at the
+/// [`crate::host::pool::SessionPool`] level. Construction of a session
+/// always pays for one import, and that cost is reported by
+/// [`crate::host::pool::PoolStats::imports_performed`] when the session
+/// flows through a pool.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SessionStats {
+    /// Number of typed query FFI calls dispatched through this session,
+    /// counting each singular call once and each bulk call once
+    /// regardless of batch size.
+    pub ffi_calls: u64,
+    /// Cumulative number of per-item entries processed by the bulk
+    /// methods. Singular calls do not contribute. A batch of N items
+    /// adds N here and 1 to [`Self::ffi_calls`].
+    pub batch_items: u64,
+    /// Cumulative nanoseconds spent inside the dispatch `.call(...)`
+    /// across every recorded FFI call.
+    pub elapsed_ns: u64,
+}
 
 // -- SessionSymbols: pre-resolved C-ABI function addresses ---------------
 
@@ -109,11 +157,13 @@ pub(crate) struct SessionSymbols {
     pub(crate) session_import: *mut c_void,
     pub(crate) name_from_string: *mut c_void,
     pub(crate) env_query_declaration: *mut c_void,
+    pub(crate) env_query_declarations_bulk: *mut c_void,
     pub(crate) env_list_declarations: *mut c_void,
     pub(crate) env_declaration_type: *mut c_void,
     pub(crate) env_declaration_kind: *mut c_void,
     pub(crate) env_declaration_name: *mut c_void,
     pub(crate) elaborate: *mut c_void,
+    pub(crate) elaborate_bulk: *mut c_void,
     pub(crate) kernel_check: *mut c_void,
     pub(crate) check_evidence: *mut c_void,
     pub(crate) evidence_summary: *mut c_void,
@@ -141,11 +191,13 @@ impl SessionSymbols {
             session_import: library.resolve_function_symbol("lean_rs_host_session_import")?,
             name_from_string: library.resolve_function_symbol("lean_rs_host_name_from_string")?,
             env_query_declaration: library.resolve_function_symbol("lean_rs_host_env_query_declaration")?,
+            env_query_declarations_bulk: library.resolve_function_symbol("lean_rs_host_env_query_declarations_bulk")?,
             env_list_declarations: library.resolve_function_symbol("lean_rs_host_env_list_declarations")?,
             env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
             env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
             env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
             elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
+            elaborate_bulk: library.resolve_function_symbol("lean_rs_host_elaborate_bulk")?,
             kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
             check_evidence: library.resolve_function_symbol("lean_rs_host_check_evidence")?,
             evidence_summary: library.resolve_function_symbol("lean_rs_host_evidence_summary")?,
@@ -183,6 +235,12 @@ pub struct LeanSession<'lean, 'c> {
     /// the environment directly; every query routes through a Lean
     /// capability export.
     environment: Obj<'lean>,
+    /// Per-session dispatch metrics. `Cell` because every query method
+    /// takes `&mut self` but the bulk path can also be invoked through a
+    /// shared reference (e.g. inside a fold helper) — keeping the
+    /// counter in `Cell` makes the recording uniform without adding an
+    /// extra `&mut` borrow at each call site.
+    stats: Cell<SessionStats>,
 }
 
 impl<'lean, 'c> LeanSession<'lean, 'c> {
@@ -214,7 +272,59 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         Ok(Self {
             capabilities,
             environment,
+            stats: Cell::new(SessionStats::default()),
         })
+    }
+
+    /// Wrap a previously-imported `Lean.Environment` as a fresh
+    /// [`LeanSession`] over `capabilities`.
+    ///
+    /// Crate-private; only [`crate::host::pool::SessionPool::acquire`]
+    /// calls this to recycle a pooled environment under a new
+    /// capability borrow. The returned session's [`SessionStats`] start
+    /// at zero — accumulated counters from the previous owner do not
+    /// leak across pool checkouts.
+    pub(crate) fn from_environment(capabilities: &'c LeanCapabilities<'lean, 'c>, environment: Obj<'lean>) -> Self {
+        Self {
+            capabilities,
+            environment,
+            stats: Cell::new(SessionStats::default()),
+        }
+    }
+
+    /// Consume the session and return its owned `Lean.Environment`.
+    ///
+    /// Crate-private; only [`crate::host::pool::SessionPool`] uses this
+    /// to reclaim the environment when a [`crate::host::pool::PooledSession`]
+    /// drops. The returned `Obj<'lean>` carries one Lean refcount, which
+    /// the pool is responsible for either pushing back into the free
+    /// list (in which case `Drop` runs later when the pool itself
+    /// drops) or releasing immediately (when at capacity).
+    pub(crate) fn into_environment(self) -> Obj<'lean> {
+        self.environment
+    }
+
+    /// Snapshot of this session's accumulated dispatch metrics.
+    ///
+    /// Returns a copy; the counters keep accumulating after the call.
+    /// Use [`SessionStats::default`] to compute a delta across two
+    /// snapshots.
+    #[must_use]
+    pub fn stats(&self) -> SessionStats {
+        self.stats.get()
+    }
+
+    /// Internal helper: record one FFI call and add `batch` per-item
+    /// entries plus `elapsed` nanoseconds. Singular methods pass
+    /// `batch = 0`; bulk methods pass the input length.
+    fn record_call(&self, batch: u64, elapsed: std::time::Duration) {
+        let mut s = self.stats.get();
+        s.ffi_calls = s.ffi_calls.saturating_add(1);
+        s.batch_items = s.batch_items.saturating_add(batch);
+        s.elapsed_ns = s
+            .elapsed_ns
+            .saturating_add(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX));
+        self.stats.set(s);
     }
 
     /// Look up a declaration by full Lean name (e.g. `"Nat.zero"`).
@@ -231,7 +341,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Name) -> IO (Option Declaration)`.
         let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<Option<LeanDeclaration<'lean>>>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        match query.call(self.environment.clone(), name_handle)? {
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), name_handle);
+        self.record_call(0, t.elapsed());
+        match result? {
             Some(decl) => Ok(decl),
             None => Err(LeanError::host(
                 HostStage::Conversion,
@@ -257,8 +370,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `Environment -> IO (Array Name)`.
         let list: LeanExported<'lean, '_, (Obj<'lean>,), LeanIo<Vec<Obj<'lean>>>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        let raw = list.call(self.environment.clone())?;
-        raw.into_iter().map(LeanName::try_from_lean).collect()
+        let t = Instant::now();
+        let raw = list.call(self.environment.clone());
+        self.record_call(0, t.elapsed());
+        raw?.into_iter().map(LeanName::try_from_lean).collect()
     }
 
     /// The declared type of `name`, as an opaque [`LeanExpr`] handle.
@@ -276,7 +391,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Name) -> IO (Option Expr)`.
         let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<Option<LeanExpr<'lean>>>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        query.call(self.environment.clone(), name_handle)
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), name_handle);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// The kind of `name` as a Lean-rendered string
@@ -295,7 +413,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Name) -> IO String`.
         let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<String>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        query.call(self.environment.clone(), name_handle)
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), name_handle);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// The Lean-rendered display string of `name`. Round-trips a name
@@ -317,7 +438,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Name) -> IO String`.
         let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<String>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        query.call(self.environment.clone(), name_handle)
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), name_handle);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Parse and elaborate a single Lean term against the imported
@@ -360,7 +484,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             (Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize),
             LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>,
         > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        call.call(
+        let t = Instant::now();
+        let result = call.call(
             self.environment.clone(),
             source.to_owned(),
             expected_type.cloned(),
@@ -368,7 +493,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
-        )
+        );
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Parse, elaborate, and kernel-check a Lean declaration source
@@ -401,14 +528,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             (Obj<'lean>, String, String, String, u64, usize),
             LeanIo<LeanKernelOutcome<'lean>>,
         > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        call.call(
+        let t = Instant::now();
+        let result = call.call(
             self.environment.clone(),
             source.to_owned(),
             options.namespace_context_str().to_owned(),
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
-        )
+        );
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Re-validate a previously captured [`LeanEvidence`] against the
@@ -445,7 +575,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Evidence) -> IO EvidenceStatus`.
         let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<EvidenceStatus>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        call.call(self.environment.clone(), handle.clone())
+        let t = Instant::now();
+        let result = call.call(self.environment.clone(), handle.clone());
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Project a previously captured [`LeanEvidence`] into a bounded
@@ -475,7 +608,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `(Environment, Evidence) -> IO ProofSummary`.
         let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<ProofSummary>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        call.call(self.environment.clone(), handle.clone())
+        let t = Instant::now();
+        let result = call.call(self.environment.clone(), handle.clone());
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Invoke a registered bounded [`MetaM`](https://leanprover.github.io/theorem_proving_in_lean4/)
@@ -530,13 +666,184 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // `LeanIo` decoder.
         let call: LeanExported<'lean, '_, (Obj<'lean>, Req, u64, usize, u8), LeanIo<LeanMetaResponse<Resp>>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        call.call(
+        let t = Instant::now();
+        let result = call.call(
             self.environment.clone(),
             request,
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
             options.transparency_byte(),
-        )
+        );
+        self.record_call(0, t.elapsed());
+        result
+    }
+
+    /// Look up many declarations in one Lean traversal.
+    ///
+    /// Equivalent to calling [`Self::query_declaration`] in a loop over
+    /// `names`, except that the entire batch crosses the FFI boundary
+    /// exactly once: one `Array Name` allocation in, one
+    /// `Array (Option Declaration)` allocation out. The Lean shim folds
+    /// the singular `envQueryDeclaration` across the input array, so the
+    /// iteration semantics are identical to a Rust-side fold over the
+    /// singular path — a missing name still errors the batch.
+    ///
+    /// Names are still resolved through the capability's
+    /// `name_from_string` shim, one [`crate::LeanName`] handle per
+    /// input. The metric impact is `names.len() + 1` recorded FFI calls
+    /// for a batch of `names.len()` items, versus `2 * names.len()` for
+    /// the same workload through [`Self::query_declaration`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::Host`] with stage [`HostStage::Conversion`]
+    /// on the first name that is not present in the imported
+    /// environment, with the missing name in the diagnostic. Returns
+    /// [`LeanError::LeanException`] if the Lean-side bulk shim raises
+    /// through `IO`.
+    pub fn query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>> {
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        let name_handles: Vec<LeanName<'lean>> = names.iter().map(|n| self.make_name(n)).collect::<LeanResult<_>>()?;
+        let address = self.capabilities.symbols().env_query_declarations_bulk;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Array Name) -> IO (Array (Option Declaration))`.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (Obj<'lean>, Vec<LeanName<'lean>>),
+            LeanIo<Vec<Option<LeanDeclaration<'lean>>>>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = call.call(self.environment.clone(), name_handles);
+        let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+        self.record_call(batch_len, t.elapsed());
+        let raw = result?;
+        let mut out: Vec<LeanDeclaration<'lean>> = Vec::with_capacity(raw.len());
+        for (slot, name) in raw.into_iter().zip(names.iter()) {
+            match slot {
+                Some(decl) => out.push(decl),
+                None => {
+                    return Err(LeanError::host(
+                        HostStage::Conversion,
+                        format!("declaration '{name}' not found in imported environment"),
+                    ));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Parse and elaborate many independent Lean terms in one Lean
+    /// traversal.
+    ///
+    /// Per-source `Result<LeanExpr, LeanElabFailure>` shape matches
+    /// [`Self::elaborate`] exactly: outer [`LeanResult`] surfaces
+    /// host-stack failures, inner per-source `Result` distinguishes
+    /// successful elaboration from elaborator-reported diagnostics. A
+    /// caller treating the bulk path as a fold over the singular path
+    /// sees no semantic surprise.
+    ///
+    /// The `expected_type` parameter is **not** carried by the bulk
+    /// shape: per-source expectations would force a parallel
+    /// `&[Option<&LeanExpr>]` array, and no in-tree caller has earned
+    /// the surface. Use [`Self::elaborate`] for individual terms with
+    /// expected types.
+    ///
+    /// The heartbeat and diagnostic-byte budgets in `options` apply
+    /// once each per source (the Lean shim builds fresh
+    /// [`Lean.Options`](https://leanprover.github.io/) per item via the
+    /// same `hostElaborate` path), so the per-batch upper bound on
+    /// elapsed CPU work is `sources.len() * options.heartbeats()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::LeanException`] if the Lean-side bulk shim
+    /// raises through `IO`. Returns [`LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] if the Lean return value does not
+    /// decode into a `Vec<Result<LeanExpr, LeanElabFailure>>`.
+    pub fn elaborate_bulk(
+        &mut self,
+        sources: &[&str],
+        options: &LeanElabOptions,
+    ) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>> {
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+        let address = self.capabilities.symbols().elaborate_bulk;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Array String, String, String, UInt64, USize)
+        // -> IO (Array (Except ElabFailure Expr))`.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (Obj<'lean>, Vec<String>, String, String, u64, usize),
+            LeanIo<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let sources_owned: Vec<String> = sources.iter().map(|&s| s.to_owned()).collect();
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            sources_owned,
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        let batch_len = u64::try_from(sources.len()).unwrap_or(u64::MAX);
+        self.record_call(batch_len, t.elapsed());
+        result
+    }
+
+    /// Look up and invoke a capability-exported function by name with a
+    /// typed argument tuple and a typed result decoder.
+    ///
+    /// This is the transport-neutral escape hatch for capability dylibs
+    /// that export Lean functions beyond the thirteen session-fixed
+    /// symbols. The conversion bounds — [`LeanArgs`] on the argument
+    /// tuple and [`DecodeCallResult`] on the result — are the same
+    /// bounds [`crate::module::LeanModule::exported`] uses, so an
+    /// IO-returning Lean capability is invoked with `R = LeanIo<T>`
+    /// (fused `decode_io` + `T::try_from_lean`) and a pure capability
+    /// with `R = T` for `T: LeanAbi`. The sealed traits stay invisible
+    /// at the call site; the bound is satisfied automatically.
+    ///
+    /// Function-only: nullary-constant globals are not capabilities.
+    /// Reach a Lean nullary-constant global directly through
+    /// [`crate::module::LeanModule::exported`] if you need one. The
+    /// symbol address is resolved on every call (one `dlsym` per
+    /// invocation); for hot capabilities, prefer pre-resolving via
+    /// `LeanModule::exported` and caching the [`crate::module::LeanExported`]
+    /// handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::Host`] with stage [`HostStage::Link`] if
+    /// `name` does not resolve as a function symbol in the capability
+    /// dylib. Returns [`LeanError::LeanException`] when the underlying
+    /// Lean export raises through `IO` (only possible when
+    /// `R = LeanIo<_>`). Returns [`LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] when the return value does not decode
+    /// into the declared `R::Output`.
+    pub fn call_capability<Args, R>(&mut self, name: &str, args: Args) -> LeanResult<R::Output>
+    where
+        Args: LeanArgs<'lean>,
+        R: DecodeCallResult<'lean>,
+    {
+        let address = self.capabilities.library().resolve_function_symbol(name)?;
+        // SAFETY: `resolve_function_symbol` resolved an address inside
+        // the capability's `LeanLibrary<'lean>` (the dylib outlives the
+        // session via the `'c` borrow). `Args: LeanArgs<'lean>` and
+        // `R: DecodeCallResult<'lean>` line up with Lake's emitted C
+        // ABI for the named symbol. The caller is responsible for
+        // matching the Lean export's actual signature.
+        let call: LeanExported<'lean, '_, Args, R> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = Args::invoke(&call, args);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     fn runtime(&self) -> &'lean crate::runtime::LeanRuntime {
@@ -551,6 +858,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // is `String -> Name` (pure, not IO).
         let to_name: LeanExported<'lean, '_, (String,), LeanName<'lean>> =
             unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        to_name.call(name.to_owned())
+        let t = Instant::now();
+        let result = to_name.call(name.to_owned());
+        self.record_call(0, t.elapsed());
+        result
     }
 }

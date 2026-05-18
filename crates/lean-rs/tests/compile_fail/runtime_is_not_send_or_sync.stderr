@@ -135,6 +135,25 @@ note: required by a bound in `require_send`
 10 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
 
+error[E0277]: `Cell<SessionStats>` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:17:20
+   |
+17 |     require_sync::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Cell<SessionStats>` cannot be shared between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `Cell<SessionStats>`
+   = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock`
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:11:20
+   |
+11 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+
 error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:17:20
    |

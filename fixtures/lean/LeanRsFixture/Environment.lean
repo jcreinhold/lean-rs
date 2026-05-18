@@ -80,4 +80,13 @@ def envDeclarationKind (env : Environment) (name : Name) : IO String := do
 def envDeclarationName (_env : Environment) (name : Name) : IO String := do
   pure name.toString
 
+/-- Bulk variant of [`envQueryDeclaration`]: a single IO traversal that
+    folds the singular lookup across `names`. One Lean traversal, one
+    `MessageLog`-less FFI crossing. Iteration semantics are identical to a
+    Rust-side fold over the singular path. -/
+@[export lean_rs_host_env_query_declarations_bulk]
+def envQueryDeclarationsBulk (env : Environment) (names : Array Name)
+    : IO (Array (Option Declaration)) := do
+  names.mapM (envQueryDeclaration env)
+
 end LeanRsFixture.Environment

@@ -110,7 +110,7 @@ pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
-pub use crate::host::{LeanCapabilities, LeanHost, LeanSession};
+pub use crate::host::{LeanCapabilities, LeanHost, LeanSession, PoolStats, PooledSession, SessionPool, SessionStats};
 pub use crate::runtime::LeanRuntime;
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.

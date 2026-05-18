@@ -18,19 +18,26 @@ prompts 06–17 must land items consistent with this table.
 - `runtime` (pub(crate)): init, `Obj<'lean>`, thread guards.
 - `abi` (pub(crate)): scalar / string / array / option / except conversions.
 
-Batch and session-pool operations are methods on `LeanSession`. There is no sibling `batch` module.
+Batch operations are methods on `LeanSession`; session pooling is a sibling helper at `lean_rs::host::pool::SessionPool`
+(re-exported at the crate root) — both shape choices follow `RD-2026-05-17-004`. There is no `lean_rs::batch` module.
+The pool's storage state and capacity policy are self-contained enough to earn its own file but not its own module
+boundary: it speaks only to `LeanSession`'s `pub(crate) from_environment` / `into_environment` helpers and to the
+caller-supplied `LeanCapabilities` at acquire time.
 
 ## Curated crate-root surface
 
 ```rust
-// crates/lean-rs/src/lib.rs (illustrative — landed by prompt 18)
+// crates/lean-rs/src/lib.rs (illustrative — landed by prompt 18, extended by prompt 20)
 pub use crate::error::{
     LeanError, LeanResult,
     LeanException, HostFailure,
     HostStage, LeanExceptionKind,
     LEAN_ERROR_MESSAGE_LIMIT,
 };
-pub use crate::host::{LeanHost, LeanCapabilities, LeanSession};
+pub use crate::host::{
+    LeanHost, LeanCapabilities, LeanSession,
+    SessionPool, PooledSession, SessionStats, PoolStats,
+};
 pub use crate::host::handle::{LeanName, LeanLevel, LeanExpr, LeanDeclaration};
 pub use crate::host::elaboration::{
     LeanElabOptions, LeanElabFailure, LeanDiagnostic, LeanSeverity, LeanPosition,
@@ -111,6 +118,10 @@ different abstraction).
 | `LeanHost<'lean>`                                 | `lean_rs::host::LeanHost`                   | yes                          | `pub`        | Entry point. `from_lake_project(runtime, path)`.                                                                                                       |
 | `LeanCapabilities<'lean, 'h>`                     | `lean_rs::host::LeanCapabilities`           | yes                          | `pub`        | Loaded capability module reference.                                                                                                                    |
 | `LeanSession<'lean, 'c>`                          | `lean_rs::host::LeanSession`                | yes                          | `pub`        | Long-lived imports + queries; **owns batch/bulk methods**.                                                                                             |
+| `SessionStats`                                    | `lean_rs::host::session::SessionStats`      | yes                          | `pub`        | Per-session dispatch metrics (ffi_calls, batch_items, elapsed_ns) returned by `LeanSession::stats()`. `Copy + Default + PartialEq`; snapshot semantics. |
+| `SessionPool<'lean>`                              | `lean_rs::host::pool::SessionPool`          | yes                          | `pub`        | Capacity-bounded reuse pool of imported Lean environments. `with_capacity(runtime, capacity)`; `acquire(caps, imports)` returns a `PooledSession`. `!Send + !Sync`. |
+| `PooledSession<'lean, 'p, 'c>`                    | `lean_rs::host::pool::PooledSession`        | yes                          | `pub`        | A `LeanSession` borrowed from a [`SessionPool`]; `Deref`/`DerefMut` to `LeanSession`; `Drop` returns the environment to the pool (or releases if at capacity). |
+| `PoolStats`                                       | `lean_rs::host::pool::PoolStats`            | yes                          | `pub`        | Per-pool reuse metrics (imports_performed, reused, acquired, released_to_pool, released_dropped). `Copy + Default + PartialEq`; snapshot semantics. |
 | `LeanName<'lean>`                                 | `lean_rs::host::handle::LeanName`           | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
 | `LeanLevel<'lean>`                                | `lean_rs::host::handle::LeanLevel`          | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
 | `LeanExpr<'lean>`                                 | `lean_rs::host::handle::LeanExpr`           | yes                          | `pub`        | Opaque semantic handle.                                                                                                                                |
@@ -189,8 +200,22 @@ piecewise. Doc comments and `# Errors` / `# Panics` sections are mandatory.
     `LeanMetaOptions`, `LeanMetaTransparency`, `MetaCallStatus`, and the three service constructors `infer_type` /
     `whnf` / `heartbeat_burn` live at `lean_rs::host::meta::*` — see *Specialized sub-module surfaces*.
 - `LeanSession::query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>>` (prompt
-    20\)
-- `LeanSession::with_session_pool(...) -> ...` (prompt 20 — exact signature deferred)
+    20). Strict semantics — the first missing name errors the batch with `Host(Conversion)` naming it. Costs `N + 1`
+    FFI calls (one bulk dispatch + `N` `name_from_string`) vs. `2 * N` for the singular fold.
+- `LeanSession::elaborate_bulk(&mut self, sources: &[&str], options: &LeanElabOptions) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>`
+    (prompt 20). Per-source `Result` mirrors `LeanSession::elaborate` exactly. No `expected_type` parameter — deferred
+    until a real second caller earns the per-source `&[Option<&LeanExpr>]` surface.
+- `LeanSession::call_capability<Args, R>(&mut self, name: &str, args: Args) -> LeanResult<R::Output>` where
+    `Args: LeanArgs<'lean>` and `R: DecodeCallResult<'lean>` (prompt 20). Function-only escape hatch for invoking
+    capability-dylib exports beyond the thirteen session-fixed symbols; reuses the same `Args` / `R` bounds as
+    `LeanModule::exported`, including the `LeanIo<T>` IO marker.
+- `LeanSession::stats(&self) -> SessionStats` — snapshot of per-session dispatch metrics.
+- `SessionPool::with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self` (prompt 20)
+- `SessionPool::acquire<'p, 'c>(&'p self, caps: &'c LeanCapabilities<'lean, 'c>, imports: &[&str]) -> LeanResult<PooledSession<'lean, 'p, 'c>>`
+    (prompt 20). Capability-agnostic storage — entries are bare `Obj<'lean>` environments rewrapped under the
+    supplied capability borrow at acquire time. FIFO on take, LIFO on push; matches the `imports`-list cache key
+    structurally.
+- `SessionPool::stats(&self) -> PoolStats`, `len()`, `is_empty()`, `capacity()` — observability.
 
 None leak raw `lean_*` types, raw refcount obligations, or initializer-symbol order.
 

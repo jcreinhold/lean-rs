@@ -16,7 +16,7 @@ use core::fmt;
 
 use lean_rs_sys::lean_object;
 
-use crate::abi::traits::{LeanAbi, TryFromLean, sealed};
+use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, sealed};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -78,5 +78,17 @@ impl<'lean> LeanAbi<'lean> for LeanName<'lean> {
 impl<'lean> TryFromLean<'lean> for LeanName<'lean> {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
         Ok(Self { obj })
+    }
+}
+
+impl<'lean> IntoLean<'lean> for LeanName<'lean> {
+    fn into_lean(self, _runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        // The handle already wraps a fully-owned Lean object reference;
+        // hand it off unchanged. Required so `Vec<LeanName<'lean>>` can
+        // satisfy [`LeanAbi`] (which is bounded on
+        // `IntoLean + TryFromLean`) at the
+        // [`crate::LeanSession::query_declarations_bulk`] call site that
+        // marshals an `Array Name`.
+        self.obj
     }
 }
