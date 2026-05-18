@@ -61,6 +61,13 @@ trybuild = "1"
 # are once-per-process and live in `examples/cold_probe.rs` instead —
 # see `docs/performance/baseline.md` for the rationale.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# Examples under `examples/` install a `tracing_subscriber::fmt`
+# sink so `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces
+# the spans the crate emits. The non-dev `tracing-subscriber`
+# dependency carries only `registry` + `std` (enough for
+# `DiagnosticCapture`); the dev override layers `fmt` + `env-filter`
+# on top so production builds don't pull either.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "fmt", "env-filter"] }
 
 [[bench]]
 name = "hot_paths"
