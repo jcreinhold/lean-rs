@@ -73,14 +73,28 @@ jobs:
         working-directory: fixtures/lean
         run: lake build
 
-      - name: cargo +nightly test with AddressSanitizer
-        working-directory: crates/lean-rs
+      # Scoped to `lean-rs-sys` only. The L1/L2 safe layers initialize the
+      # Lean runtime, which drags in `libleanshared`'s statically-linked
+      # mimalloc; mimalloc's `munmap` patterns collide with AddressSanitizer's
+      # shadow-memory tracking (`CHECK failed: sanitizer_common.cpp "unable
+      # to unmmap"`) and the process aborts before any test result is
+      # reported. The `lean-rs-sys` tests (`linkage.rs`, `layout.rs`,
+      # `safety_grep.rs`) take symbol addresses and inspect repr layouts
+      # without ever calling `lean_initialize`, so mimalloc stays dormant
+      # and ASan sees a clean process. The fuzz job below covers the ABI
+      # decode surface; the regular `ci.yml` matrix covers the safe-layer
+      # correctness on every supported Lean toolchain. Upstream tracking:
+      # mimalloc + ASan compatibility is a known limitation in the Lean
+      # 4.x runtime; revisit when Lean ships a build that supports
+      # `LEAN_USE_MIMALLOC=OFF` through elan.
+      - name: cargo +nightly test with AddressSanitizer (lean-rs-sys scope)
         env:
           RUSTFLAGS: "-Z sanitizer=address -Cdebug-assertions=on"
           RUSTDOCFLAGS: "-Z sanitizer=address"
           ASAN_OPTIONS: "detect_leaks=1:abort_on_error=1"
         run: |
           cargo +nightly test \
+            -p lean-rs-sys \
             --target x86_64-unknown-linux-gnu \
             --tests \
             -- --include-ignored --test-threads=1
