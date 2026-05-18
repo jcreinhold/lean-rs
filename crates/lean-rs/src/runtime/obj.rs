@@ -208,7 +208,7 @@ mod tests {
     //! (`lean_is_exclusive`, `lean_is_shared`) — neither dereferences
     //! the object payload, only the header's refcount.
 
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::expect_used, clippy::panic)]
 
     use core::ffi::c_char;
 
@@ -376,5 +376,106 @@ mod tests {
         // SAFETY: `lean_box` produces a scalar-tagged pointer; the
         // refcount helpers treat it as a no-op.
         unsafe { Obj::from_owned_raw(runtime, lean_box(0)) }
+    }
+
+    /// Iteration count for the long-running refcount stress tests.
+    ///
+    /// `LEAN_RS_REFCOUNT_STRESS_ITERS` lets the sanitizer CI job crank
+    /// the loop without code changes; the default keeps the stable
+    /// `cargo test` run in single-digit milliseconds.
+    fn stress_iters() -> usize {
+        std::env::var("LEAN_RS_REFCOUNT_STRESS_ITERS")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(256)
+    }
+
+    #[test]
+    fn clone_drop_cycle_preserves_exclusive_after_release() {
+        // A long Clone/Drop sequence on the same heap object must leave
+        // the refcount exactly where it started: bumping `lean_inc` for
+        // every clone and pairing it with `lean_dec` on drop is the
+        // single invariant the `Obj` wrapper exists to enforce. Under
+        // AddressSanitizer this also surfaces use-after-free if a Drop
+        // ever ran out of order with the wrapper's `ManuallyDrop` /
+        // `into_raw` paths.
+        let runtime = LeanRuntime::init().expect("runtime init must succeed");
+        let obj = heap_string(runtime);
+        // SAFETY: header-only inspection of a live owned object.
+        assert!(unsafe { lean_is_exclusive(obj.as_raw_borrowed()) });
+
+        let iters = stress_iters();
+        for _ in 0..iters {
+            let copy = obj.clone();
+            // SAFETY: header-only inspection.
+            assert!(unsafe { lean_is_shared(copy.as_raw_borrowed()) });
+            drop(copy);
+        }
+
+        // SAFETY: every clone above was paired with a drop; we should be
+        // back to the original sole owner.
+        assert!(unsafe { lean_is_exclusive(obj.as_raw_borrowed()) });
+    }
+
+    #[test]
+    fn many_independent_objs_drop_in_arbitrary_order() {
+        // Allocate a vector of distinct heap strings, clone every
+        // alternate handle to push half of them into the shared regime,
+        // then drop the originals in reverse order while keeping the
+        // clones live. Each clone must still inspect as exclusive after
+        // the matching original is gone — i.e. `Drop` released exactly
+        // one refcount, no more, no fewer. AddressSanitizer turns any
+        // double-`lean_dec` here into a heap-after-free diagnostic.
+        let runtime = LeanRuntime::init().expect("runtime init must succeed");
+        let n = stress_iters().clamp(8, 64);
+
+        let mut originals: Vec<Obj<'_>> = (0..n).map(|_| heap_string(runtime)).collect();
+        let clones: Vec<Obj<'_>> = originals.iter().map(Obj::clone).collect();
+
+        // Every original is now shared with its sibling clone.
+        for clone in &clones {
+            // SAFETY: header-only inspection.
+            assert!(unsafe { lean_is_shared(clone.as_raw_borrowed()) });
+        }
+
+        // Drop the originals last-to-first; the clones must observe a
+        // refcount transition shared → exclusive as their partner drops.
+        while let Some(orig) = originals.pop() {
+            drop(orig);
+        }
+
+        for clone in &clones {
+            // SAFETY: header-only inspection; partner original is gone.
+            assert!(unsafe { lean_is_exclusive(clone.as_raw_borrowed()) });
+        }
+    }
+
+    #[test]
+    fn panic_inside_clone_scope_does_not_leak_refcount() {
+        // A panic that unwinds past a live `Obj` must run its `Drop` so
+        // the refcount is released. We hold the original alive across
+        // the `catch_unwind`, clone it inside the closure, then panic
+        // before the clone's natural scope exit. If the panic path
+        // skipped `lean_dec`, the original would remain `lean_is_shared`
+        // after the catch; if it double-`lean_dec`d, AddressSanitizer
+        // would flag a heap-after-free on the next access.
+        use std::panic::{self, AssertUnwindSafe};
+
+        let runtime = LeanRuntime::init().expect("runtime init must succeed");
+        let obj = heap_string(runtime);
+        // SAFETY: header-only inspection of a live owned object.
+        assert!(unsafe { lean_is_exclusive(obj.as_raw_borrowed()) });
+
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            let copy = obj.clone();
+            // SAFETY: header-only inspection.
+            assert!(unsafe { lean_is_shared(copy.as_raw_borrowed()) });
+            panic!("synthetic panic — `copy` must drop on the unwind path");
+        }));
+        assert!(outcome.is_err(), "closure was expected to panic");
+
+        // SAFETY: header-only inspection; the clone's `Drop` must have
+        // run on the unwind path, restoring sole ownership to `obj`.
+        assert!(unsafe { lean_is_exclusive(obj.as_raw_borrowed()) });
     }
 }

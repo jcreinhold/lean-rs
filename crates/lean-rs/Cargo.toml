@@ -30,6 +30,15 @@ dhat = { version = "0.3", optional = true }
 # Enables the dhat-instrumented `alloc_probe` example. Not consumed by
 # any library code path — purely a build switch for the profiling binary.
 dhat-heap = ["dep:dhat"]
+# Opens a narrow set of `pub(crate)` ABI decoders as `pub fn` entry
+# points so the in-tree `fuzz/` crate (cargo-fuzz, nightly-only) can
+# drive them with `lean-rs-sys`-constructed Lean-shaped inputs.
+#
+# This feature is **not** semver-stable: it is intentionally invisible
+# in published documentation and is gated solely for fuzzing
+# infrastructure. The exposed surface is the `lean_rs::abi::fuzz_entry`
+# module; it is not re-exported at the crate root.
+fuzzing = []
 
 [dev-dependencies]
 # Compile-fail tests pinning the curated surface invariants (handles

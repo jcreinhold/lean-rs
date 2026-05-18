@@ -112,3 +112,70 @@ fn catch_callback_panic_bounds_oversize_panic_payload() {
     };
     assert!(host.message().len() <= LEAN_ERROR_MESSAGE_LIMIT);
 }
+
+/// Regression: a long run of caught panics must not leak state between
+/// invocations. Each call is supposed to be independent — the helper
+/// holds no global registry, no thread-local payload buffer, no
+/// accumulating counter — and a leak would surface either as a
+/// monotonic growth in resident memory under the sanitizer job or as a
+/// flaky assertion if the message-bounding side-channel shared state.
+#[test]
+fn catch_callback_panic_loop_remains_independent() {
+    // The default loops a few hundred times to keep stable `cargo test`
+    // cheap; the sanitizer CI job overrides this to push the count into
+    // five digits so AddressSanitizer / LeakSanitizer has enough surface
+    // to surface a regression. Reusing the same env var as the runtime
+    // refcount stress tests keeps the operator vocabulary small.
+    let iters = std::env::var("LEAN_RS_REFCOUNT_STRESS_ITERS")
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(512);
+    for i in 0..iters {
+        let err = catch_callback_panic::<_, ()>(move || panic!("iter {i}")).expect_err("closure panicked");
+        let LeanError::Host(host) = err else {
+            panic!("expected Host");
+        };
+        assert_eq!(host.stage(), HostStage::CallbackPanic);
+        // The per-iteration message must reflect *this* iteration's
+        // payload; any cross-iteration bleed would show up here.
+        let expected = format!("iter {i}");
+        assert!(
+            host.message().contains(&expected),
+            "iteration {i} produced unrelated payload {:?}",
+            host.message(),
+        );
+    }
+}
+
+/// Regression: a closure that panics while holding `Box<dyn Display>`
+/// (a non-`&'static str`, non-`String` payload) must still surface a
+/// best-effort message rather than crash the catch path. The current
+/// implementation falls back to a synthesised description when the
+/// payload is not one of the well-known shapes; this test pins that
+/// behaviour so future panic-payload extraction changes do not silently
+/// regress to a less informative error.
+#[test]
+fn catch_callback_panic_handles_non_string_payload() {
+    struct DisplayMarker;
+    impl std::fmt::Display for DisplayMarker {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("display-marker")
+        }
+    }
+
+    let err = catch_callback_panic::<_, ()>(|| std::panic::panic_any(DisplayMarker))
+        .expect_err("panic_any with custom payload should still be caught");
+    let LeanError::Host(host) = err else {
+        panic!("expected Host");
+    };
+    assert_eq!(host.stage(), HostStage::CallbackPanic);
+    // We do not assert on the exact wording — the catch path is only
+    // contractually required to produce *some* bounded message — but
+    // the message must be non-empty so a downstream reader can tell
+    // a panic occurred at all.
+    assert!(
+        !host.message().is_empty(),
+        "non-string panic payloads must still surface a non-empty diagnostic",
+    );
+    assert!(host.message().len() <= LEAN_ERROR_MESSAGE_LIMIT);
+}

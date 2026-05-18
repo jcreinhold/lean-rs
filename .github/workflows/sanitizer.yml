@@ -1,0 +1,100 @@
+name: Sanitizer
+
+# Runs the platform-supported sanitizer (AddressSanitizer on Linux,
+# which includes LeakSanitizer by default) against the `lean-rs` test
+# binaries, plus a short cargo-fuzz session against the `abi_decode`
+# target. The job needs nightly Rust (sanitizer flags + cargo-fuzz)
+# and the Lean toolchain (for the fixture dylib the integration tests
+# load). It is the verification step that the SAFETY-HARDENING contract
+# in `prompts/lean-rs/00-current-state.md` cites.
+#
+# This workflow is kept separate from `ci.yml` because the stable
+# matrix there pins `rust-toolchain.toml`'s `stable`; sanitizers need
+# nightly, and mixing them into one job would obscure which step
+# regressed when something breaks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly Monday 07:00 UTC — catches drift even on quiet weeks.
+    - cron: "0 7 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Crank the per-test loops so the sanitizer has enough surface to
+  # surface any leak / use-after-free. The defaults the tests use on
+  # stable `cargo test` keep the suite fast; this override is the
+  # sanitizer-only bump.
+  LEAN_RS_REFCOUNT_STRESS_ITERS: "20000"
+  LEAN_RS_LEAK_LOOP_ITERS: "256"
+
+jobs:
+  asan:
+    name: AddressSanitizer (ubuntu-latest, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan + Lean 4.29.1
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Lean fixtures
+        working-directory: fixtures/lean
+        run: lake build
+
+      - name: cargo +nightly test with AddressSanitizer
+        working-directory: crates/lean-rs
+        env:
+          RUSTFLAGS: "-Z sanitizer=address -Cdebug-assertions=on"
+          RUSTDOCFLAGS: "-Z sanitizer=address"
+          ASAN_OPTIONS: "detect_leaks=1:abort_on_error=1"
+        run: |
+          cargo +nightly test \
+            --target x86_64-unknown-linux-gnu \
+            --tests \
+            -- --include-ignored --test-threads=1
+
+  fuzz:
+    name: cargo-fuzz abi_decode (ubuntu-latest, nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan + Lean 4.29.1
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v4.29.1
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: cargo +nightly fuzz run abi_decode (120s budget)
+        working-directory: crates/lean-rs/fuzz
+        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120

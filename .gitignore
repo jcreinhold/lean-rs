@@ -1,5 +1,5 @@
 # Rust build output
-/target/
+**/target/
 **/*.rs.bk
 
 # Cargo lock for libraries is conventionally committed at the workspace root;

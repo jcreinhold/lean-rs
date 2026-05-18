@@ -99,6 +99,9 @@ pub mod host;
 pub mod module;
 pub(crate) mod runtime;
 
+#[cfg(feature = "fuzzing")]
+pub mod fuzz_entry;
+
 pub use crate::error::{
     HostFailure, HostStage, LEAN_ERROR_MESSAGE_LIMIT, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };

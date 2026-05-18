@@ -1,0 +1,27 @@
+[package]
+name = "lean-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.95"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+lean-rs = { path = "..", features = ["fuzzing"] }
+lean-rs-sys = { path = "../../lean-rs-sys" }
+
+[[bin]]
+name = "abi_decode"
+path = "fuzz_targets/abi_decode.rs"
+test = false
+doc = false
+bench = false
+
+# Workspace exclusion: the parent Cargo workspace does not build the
+# fuzz crate by default (it needs nightly). The fuzz target is invoked
+# explicitly via `cargo +nightly fuzz run abi_decode`.
+[workspace]
