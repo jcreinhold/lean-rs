@@ -66,7 +66,7 @@ Per-crate placement:
   `LEAN_HEADER_DIGEST` / `LEAN_HEADER_PATH` / `LEAN_VERSION` are pass-through
   from `lean-rs-sys`'s `consts` module so a downstream `build.rs` can read
   them without depending on `lean-rs-sys` directly.
-- `lean-rs`: classification matches `docs/architecture/03-host-api.md`
+- `lean-rs`: classification matches `docs/architecture/04-host-stack.md`
   line-for-line (rather than restating it here):
   - **Crate root (category 3)** — entry points and mandatory session
     capabilities. The six `pub use` blocks in
@@ -79,7 +79,7 @@ Per-crate placement:
     whnf, heartbeat_burn}` for the optional bounded `MetaM` capability.
     These intentionally stay at sub-module paths per the prompt-18
     Decision 1 (different layer ⇒ different abstraction; see
-    `03-host-api.md`'s "Specialized sub-module surfaces" section).
+    `04-host-stack.md`'s "Specialized sub-module surfaces" section).
 
 ## Demotions
 
@@ -169,7 +169,7 @@ would mix one optional capability with thirteen mandatory ones in the
 same namespace. The prompt-18 Decision 1 keeps the meta types at
 `lean_rs::host::meta::*` instead — callers opt in via
 `use lean_rs::host::meta::{...}` only when they need it. Rationale is
-recorded in `docs/architecture/03-host-api.md` ("Specialized sub-module
+recorded in `docs/architecture/04-host-stack.md` ("Specialized sub-module
 surfaces").
 
 ### Conjoined methods — none
@@ -188,13 +188,13 @@ every `kernel_check` caller to pay the pretty-print cost (non-trivial for
 realistic `Lean.Expr` values), even though most callers only inspect the
 `EvidenceStatus` tag. The split keeps the cheap path cheap and lets the
 expensive paths be paid only when the caller asks. The
-`docs/architecture/03-host-api.md` "Methods on the curated types" section
+`docs/architecture/04-host-stack.md` "Methods on the curated types" section
 pins this shape.
 
 ### Hard-to-describe API — none
 
 The curated surface fits in one classification table
-(`docs/architecture/03-host-api.md` §"Classification table") and reduces
+(`docs/architecture/04-host-stack.md` §"Classification table") and reduces
 to one sentence at a call site: **runtime → host → capabilities → session
 → typed query**. The five-line happy-path snippet now in the
 `crate::lean_rs` root doc exercises every entry-point promotion.

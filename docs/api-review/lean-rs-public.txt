@@ -1,4 +1,182 @@
 pub mod lean_rs
+pub mod lean_rs::abi
+pub mod lean_rs::abi::nat
+pub fn lean_rs::abi::nat::from_u64(runtime: &lean_rs::LeanRuntime, n: u64) -> lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::abi::nat::from_usize(runtime: &lean_rs::LeanRuntime, n: usize) -> lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::abi::nat::try_to_u64(obj: lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u64>
+pub fn lean_rs::abi::nat::try_to_usize(obj: lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<usize>
+pub mod lean_rs::abi::structure
+pub fn lean_rs::abi::structure::alloc_ctor_with_objects<'lean, const N: usize>(runtime: &'lean lean_rs::LeanRuntime, tag: u8, objects: [lean_rs::runtime::obj::Obj<'lean>; N]) -> lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::abi::structure::ctor_tag(obj: &lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u8>
+pub fn lean_rs::abi::structure::take_ctor_objects<'lean, const N: usize>(obj: lean_rs::runtime::obj::Obj<'lean>, expected_tag: u8, label: &str) -> lean_rs::error::LeanResult<[lean_rs::runtime::obj::Obj<'lean>; N]>
+pub mod lean_rs::abi::traits
+pub mod lean_rs::abi::traits::sealed
+pub trait lean_rs::abi::traits::sealed::SealedAbi
+impl lean_rs::abi::traits::sealed::SealedAbi for &str
+impl lean_rs::abi::traits::sealed::SealedAbi for ()
+impl lean_rs::abi::traits::sealed::SealedAbi for alloc::string::String
+impl lean_rs::abi::traits::sealed::SealedAbi for bool
+impl lean_rs::abi::traits::sealed::SealedAbi for char
+impl lean_rs::abi::traits::sealed::SealedAbi for f64
+impl lean_rs::abi::traits::sealed::SealedAbi for i16
+impl lean_rs::abi::traits::sealed::SealedAbi for i32
+impl lean_rs::abi::traits::sealed::SealedAbi for i64
+impl lean_rs::abi::traits::sealed::SealedAbi for i8
+impl lean_rs::abi::traits::sealed::SealedAbi for isize
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
+impl lean_rs::abi::traits::sealed::SealedAbi for u16
+impl lean_rs::abi::traits::sealed::SealedAbi for u32
+impl lean_rs::abi::traits::sealed::SealedAbi for u64
+impl lean_rs::abi::traits::sealed::SealedAbi for u8
+impl lean_rs::abi::traits::sealed::SealedAbi for usize
+impl<T, E> lean_rs::abi::traits::sealed::SealedAbi for core::result::Result<T, E>
+impl<T> lean_rs::abi::traits::sealed::SealedAbi for alloc::vec::Vec<T>
+impl<T> lean_rs::abi::traits::sealed::SealedAbi for core::option::Option<T>
+pub trait lean_rs::abi::traits::IntoLean<'lean>: core::marker::Sized
+pub fn lean_rs::abi::traits::IntoLean::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean, T, E> lean_rs::abi::traits::IntoLean<'lean> for core::result::Result<T, E> where E: lean_rs::abi::traits::IntoLean<'lean>, T: lean_rs::abi::traits::IntoLean<'lean>
+pub fn core::result::Result<T, E>::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean, T> lean_rs::abi::traits::IntoLean<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean>
+pub fn alloc::vec::Vec<T>::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean, T> lean_rs::abi::traits::IntoLean<'lean> for core::option::Option<T> where T: lean_rs::abi::traits::IntoLean<'lean>
+pub fn core::option::Option<T>::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for ()
+pub fn ()::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for alloc::string::String
+pub fn alloc::string::String::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for bool
+pub fn bool::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for char
+pub fn char::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for f64
+pub fn f64::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for i16
+pub fn i16::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for i32
+pub fn i32::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for i64
+pub fn i64::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for i8
+pub fn i8::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for isize
+pub fn isize::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for u16
+pub fn u16::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for u32
+pub fn u32::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for u64
+pub fn u64::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for u8
+pub fn u8::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for usize
+pub fn usize::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+pub trait lean_rs::abi::traits::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
+pub type lean_rs::abi::traits::LeanAbi::CRepr: core::marker::Copy
+impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type alloc::vec::Vec<T>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for core::option::Option<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type core::option::Option<T>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &str
+pub type &str::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for ()
+pub type ()::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for alloc::string::String
+pub type alloc::string::String::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for bool
+pub type bool::CRepr = u8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for char
+pub type char::CRepr = u32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for f64
+pub type f64::CRepr = f64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i16
+pub type i16::CRepr = i16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i32
+pub type i32::CRepr = i32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i64
+pub type i64::CRepr = i64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i8
+pub type i8::CRepr = i8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for isize
+pub type isize::CRepr = isize
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
+pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
+pub type lean_rs::LeanExpr<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
+pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
+pub type lean_rs::LeanName<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u16
+pub type u16::CRepr = u16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u32
+pub type u32::CRepr = u32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u64
+pub type u64::CRepr = u64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u8
+pub type u8::CRepr = u8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for usize
+pub type usize::CRepr = usize
+pub trait lean_rs::abi::traits::TryFromLean<'lean>: core::marker::Sized
+pub fn lean_rs::abi::traits::TryFromLean::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean, T, E> lean_rs::abi::traits::TryFromLean<'lean> for core::result::Result<T, E> where E: lean_rs::abi::traits::TryFromLean<'lean>, T: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn core::result::Result<T, E>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean, T> lean_rs::abi::traits::TryFromLean<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn alloc::vec::Vec<T>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean, T> lean_rs::abi::traits::TryFromLean<'lean> for core::option::Option<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn core::option::Option<T>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for ()
+pub fn ()::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for alloc::string::String
+pub fn alloc::string::String::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for bool
+pub fn bool::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for char
+pub fn char::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for f64
+pub fn f64::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for i16
+pub fn i16::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for i32
+pub fn i32::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for i64
+pub fn i64::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for i8
+pub fn i8::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for isize
+pub fn isize::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanDeclaration<'lean>
+pub fn lean_rs::LeanDeclaration<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanLevel<'lean>
+pub fn lean_rs::LeanLevel<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::runtime::obj::Obj<'lean>::try_from_lean(obj: Self) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for u16
+pub fn u16::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for u32
+pub fn u32::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for u64
+pub fn u64::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for u8
+pub fn u8::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for usize
+pub fn usize::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::abi::traits::conversion_error(message: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanError
 pub mod lean_rs::error
 #[non_exhaustive] pub enum lean_rs::error::HostStage
 pub lean_rs::error::HostStage::CallbackPanic
@@ -189,187 +367,17 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanException
 pub const lean_rs::error::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
 pub const lean_rs::error::LEAN_ERROR_MESSAGE_LIMIT: usize
 pub type lean_rs::error::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
-pub mod lean_rs::host
-pub mod lean_rs::host::elaboration
-#[non_exhaustive] pub enum lean_rs::host::elaboration::LeanSeverity
-pub lean_rs::host::elaboration::LeanSeverity::Error
-pub lean_rs::host::elaboration::LeanSeverity::Info
-pub lean_rs::host::elaboration::LeanSeverity::Warning
-impl core::clone::Clone for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::clone(&self) -> lean_rs::LeanSeverity
-impl core::cmp::Eq for lean_rs::LeanSeverity
-impl core::cmp::PartialEq for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::eq(&self, other: &lean_rs::LeanSeverity) -> bool
-impl core::fmt::Debug for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::LeanSeverity
-impl core::marker::StructuralPartialEq for lean_rs::LeanSeverity
-impl core::marker::Freeze for lean_rs::LeanSeverity
-impl core::marker::Send for lean_rs::LeanSeverity
-impl core::marker::Sync for lean_rs::LeanSeverity
-impl core::marker::Unpin for lean_rs::LeanSeverity
-impl core::marker::UnsafeUnpin for lean_rs::LeanSeverity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanSeverity
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanSeverity
-pub struct lean_rs::host::elaboration::LeanDiagnostic
-impl lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::file_label(&self) -> &str
-pub fn lean_rs::LeanDiagnostic::message(&self) -> &str
-pub fn lean_rs::LeanDiagnostic::position(&self) -> core::option::Option<&lean_rs::LeanPosition>
-pub fn lean_rs::LeanDiagnostic::severity(&self) -> lean_rs::LeanSeverity
-impl core::clone::Clone for lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::clone(&self) -> lean_rs::LeanDiagnostic
-impl core::fmt::Debug for lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanDiagnostic
-impl core::marker::Send for lean_rs::LeanDiagnostic
-impl core::marker::Sync for lean_rs::LeanDiagnostic
-impl core::marker::Unpin for lean_rs::LeanDiagnostic
-impl core::marker::UnsafeUnpin for lean_rs::LeanDiagnostic
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanDiagnostic
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanDiagnostic
-pub struct lean_rs::host::elaboration::LeanElabFailure
-impl lean_rs::LeanElabFailure
-pub const fn lean_rs::LeanElabFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
-pub fn lean_rs::LeanElabFailure::diagnostics(&self) -> &[lean_rs::LeanDiagnostic]
-pub fn lean_rs::LeanElabFailure::truncated(&self) -> bool
-impl core::clone::Clone for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::clone(&self) -> lean_rs::LeanElabFailure
-impl core::error::Error for lean_rs::LeanElabFailure
-impl core::fmt::Debug for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanElabFailure
-impl core::marker::Send for lean_rs::LeanElabFailure
-impl core::marker::Sync for lean_rs::LeanElabFailure
-impl core::marker::Unpin for lean_rs::LeanElabFailure
-impl core::marker::UnsafeUnpin for lean_rs::LeanElabFailure
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanElabFailure
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanElabFailure
-pub struct lean_rs::host::elaboration::LeanElabOptions
-impl lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
-pub fn lean_rs::LeanElabOptions::file_label(self, label: &str) -> Self
-pub fn lean_rs::LeanElabOptions::heartbeat_limit(self, heartbeats: u64) -> Self
-pub fn lean_rs::LeanElabOptions::namespace_context(self, ns: &str) -> Self
-pub fn lean_rs::LeanElabOptions::new() -> Self
-impl core::clone::Clone for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::clone(&self) -> lean_rs::LeanElabOptions
-impl core::default::Default for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::default() -> Self
-impl core::fmt::Debug for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanElabOptions
-impl core::marker::Send for lean_rs::LeanElabOptions
-impl core::marker::Sync for lean_rs::LeanElabOptions
-impl core::marker::Unpin for lean_rs::LeanElabOptions
-impl core::marker::UnsafeUnpin for lean_rs::LeanElabOptions
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanElabOptions
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanElabOptions
-pub struct lean_rs::host::elaboration::LeanPosition
-impl lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::column(&self) -> u32
-pub fn lean_rs::LeanPosition::end_column(&self) -> core::option::Option<u32>
-pub fn lean_rs::LeanPosition::end_line(&self) -> core::option::Option<u32>
-pub fn lean_rs::LeanPosition::line(&self) -> u32
-impl core::clone::Clone for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::clone(&self) -> lean_rs::LeanPosition
-impl core::cmp::Eq for lean_rs::LeanPosition
-impl core::cmp::PartialEq for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::eq(&self, other: &lean_rs::LeanPosition) -> bool
-impl core::fmt::Debug for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::LeanPosition
-impl core::marker::StructuralPartialEq for lean_rs::LeanPosition
-impl core::marker::Freeze for lean_rs::LeanPosition
-impl core::marker::Send for lean_rs::LeanPosition
-impl core::marker::Sync for lean_rs::LeanPosition
-impl core::marker::Unpin for lean_rs::LeanPosition
-impl core::marker::UnsafeUnpin for lean_rs::LeanPosition
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanPosition
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanPosition
-pub const lean_rs::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
-pub const lean_rs::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
-pub const lean_rs::host::elaboration::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
-pub const lean_rs::host::elaboration::LEAN_HEARTBEAT_LIMIT_MAX: u64
-pub mod lean_rs::host::evidence
-#[non_exhaustive] pub enum lean_rs::host::evidence::EvidenceStatus
-pub lean_rs::host::evidence::EvidenceStatus::Checked
-pub lean_rs::host::evidence::EvidenceStatus::Rejected
-pub lean_rs::host::evidence::EvidenceStatus::Unavailable
-pub lean_rs::host::evidence::EvidenceStatus::Unsupported
-impl core::clone::Clone for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::clone(&self) -> lean_rs::EvidenceStatus
-impl core::cmp::Eq for lean_rs::EvidenceStatus
-impl core::cmp::PartialEq for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::eq(&self, other: &lean_rs::EvidenceStatus) -> bool
-impl core::fmt::Debug for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::EvidenceStatus
-impl core::marker::StructuralPartialEq for lean_rs::EvidenceStatus
-impl core::marker::Freeze for lean_rs::EvidenceStatus
-impl core::marker::Send for lean_rs::EvidenceStatus
-impl core::marker::Sync for lean_rs::EvidenceStatus
-impl core::marker::Unpin for lean_rs::EvidenceStatus
-impl core::marker::UnsafeUnpin for lean_rs::EvidenceStatus
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::EvidenceStatus
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::EvidenceStatus
-#[non_exhaustive] pub enum lean_rs::host::evidence::LeanKernelOutcome<'lean>
-pub lean_rs::host::evidence::LeanKernelOutcome::Checked(lean_rs::LeanEvidence<'lean>)
-pub lean_rs::host::evidence::LeanKernelOutcome::Rejected(lean_rs::LeanElabFailure)
-pub lean_rs::host::evidence::LeanKernelOutcome::Unavailable(lean_rs::LeanElabFailure)
-pub lean_rs::host::evidence::LeanKernelOutcome::Unsupported(lean_rs::LeanElabFailure)
-impl lean_rs::LeanKernelOutcome<'_>
-pub fn lean_rs::LeanKernelOutcome<'_>::status(&self) -> lean_rs::EvidenceStatus
-impl<'lean> core::fmt::Debug for lean_rs::LeanKernelOutcome<'lean>
-pub fn lean_rs::LeanKernelOutcome<'lean>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> core::marker::Freeze for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanKernelOutcome<'lean>
-pub struct lean_rs::host::evidence::LeanEvidence<'lean>
-impl core::clone::Clone for lean_rs::LeanEvidence<'_>
-pub fn lean_rs::LeanEvidence<'_>::clone(&self) -> Self
-impl core::fmt::Debug for lean_rs::LeanEvidence<'_>
-pub fn lean_rs::LeanEvidence<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanEvidence<'lean>
-pub type lean_rs::LeanEvidence<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> core::marker::Freeze for lean_rs::LeanEvidence<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanEvidence<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanEvidence<'lean>
-pub struct lean_rs::host::evidence::ProofSummary
-impl lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::declaration_name(&self) -> &str
-pub fn lean_rs::ProofSummary::kind(&self) -> &str
-pub fn lean_rs::ProofSummary::type_signature(&self) -> &str
-impl core::clone::Clone for lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::clone(&self) -> lean_rs::ProofSummary
-impl core::fmt::Debug for lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::ProofSummary
-impl core::marker::Send for lean_rs::ProofSummary
-impl core::marker::Sync for lean_rs::ProofSummary
-impl core::marker::Unpin for lean_rs::ProofSummary
-impl core::marker::UnsafeUnpin for lean_rs::ProofSummary
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::ProofSummary
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::ProofSummary
-pub const lean_rs::host::evidence::LEAN_PROOF_SUMMARY_BYTE_LIMIT: usize
-pub mod lean_rs::host::handle
-pub struct lean_rs::host::handle::LeanDeclaration<'lean>
+pub mod lean_rs::handle
+pub struct lean_rs::handle::LeanDeclaration<'lean>
 impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
 pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanDeclaration<'lean>
+pub fn lean_rs::LeanDeclaration<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanDeclaration<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanDeclaration<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanDeclaration<'lean>
@@ -377,13 +385,18 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanDeclaration<'lean>
-pub struct lean_rs::host::handle::LeanExpr<'lean>
+pub struct lean_rs::handle::LeanExpr<'lean>
 impl core::clone::Clone for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
 pub type lean_rs::LeanExpr<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanExpr<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanExpr<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanExpr<'lean>
@@ -391,13 +404,16 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanExpr<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanExpr<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanExpr<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanExpr<'lean>
-pub struct lean_rs::host::handle::LeanLevel<'lean>
+pub struct lean_rs::handle::LeanLevel<'lean>
 impl core::clone::Clone for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
 pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanLevel<'lean>
+pub fn lean_rs::LeanLevel<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanLevel<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanLevel<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanLevel<'lean>
@@ -405,13 +421,18 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLevel<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLevel<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLevel<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLevel<'lean>
-pub struct lean_rs::host::handle::LeanName<'lean>
+pub struct lean_rs::handle::LeanName<'lean>
 impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanName<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
 pub type lean_rs::LeanName<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanName<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanName<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanName<'lean>
@@ -419,479 +440,235 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanName<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
-pub mod lean_rs::host::meta
-#[non_exhaustive] pub enum lean_rs::host::meta::LeanMetaResponse<Resp>
-pub lean_rs::host::meta::LeanMetaResponse::Failed(lean_rs::LeanElabFailure)
-pub lean_rs::host::meta::LeanMetaResponse::Ok(Resp)
-pub lean_rs::host::meta::LeanMetaResponse::TimeoutOrHeartbeat(lean_rs::LeanElabFailure)
-pub lean_rs::host::meta::LeanMetaResponse::Unsupported(lean_rs::LeanElabFailure)
-impl<Resp> lean_rs::host::meta::LeanMetaResponse<Resp>
-pub const fn lean_rs::host::meta::LeanMetaResponse<Resp>::code(&self) -> core::option::Option<lean_rs::error::LeanDiagnosticCode>
-pub fn lean_rs::host::meta::LeanMetaResponse<Resp>::status(&self) -> lean_rs::host::meta::MetaCallStatus
-impl<Resp: core::fmt::Debug> core::fmt::Debug for lean_rs::host::meta::LeanMetaResponse<Resp>
-pub fn lean_rs::host::meta::LeanMetaResponse<Resp>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<Resp> core::marker::Freeze for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::marker::Freeze
-impl<Resp> core::marker::Send for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::marker::Send
-impl<Resp> core::marker::Sync for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::marker::Sync
-impl<Resp> core::marker::Unpin for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::marker::Unpin
-impl<Resp> core::marker::UnsafeUnpin for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::marker::UnsafeUnpin
-impl<Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::RefUnwindSafe
-impl<Resp> core::panic::unwind_safe::UnwindSafe for lean_rs::host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::UnwindSafe
-#[non_exhaustive] pub enum lean_rs::host::meta::LeanMetaTransparency
-pub lean_rs::host::meta::LeanMetaTransparency::All
-pub lean_rs::host::meta::LeanMetaTransparency::Default
-pub lean_rs::host::meta::LeanMetaTransparency::Instances
-pub lean_rs::host::meta::LeanMetaTransparency::Reducible
-impl lean_rs::host::meta::LeanMetaTransparency
-pub fn lean_rs::host::meta::LeanMetaTransparency::as_byte(self) -> u8
-impl core::clone::Clone for lean_rs::host::meta::LeanMetaTransparency
-pub fn lean_rs::host::meta::LeanMetaTransparency::clone(&self) -> lean_rs::host::meta::LeanMetaTransparency
-impl core::cmp::Eq for lean_rs::host::meta::LeanMetaTransparency
-impl core::cmp::PartialEq for lean_rs::host::meta::LeanMetaTransparency
-pub fn lean_rs::host::meta::LeanMetaTransparency::eq(&self, other: &lean_rs::host::meta::LeanMetaTransparency) -> bool
-impl core::default::Default for lean_rs::host::meta::LeanMetaTransparency
-pub fn lean_rs::host::meta::LeanMetaTransparency::default() -> lean_rs::host::meta::LeanMetaTransparency
-impl core::fmt::Debug for lean_rs::host::meta::LeanMetaTransparency
-pub fn lean_rs::host::meta::LeanMetaTransparency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::StructuralPartialEq for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::Freeze for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::Send for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::Sync for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::Unpin for lean_rs::host::meta::LeanMetaTransparency
-impl core::marker::UnsafeUnpin for lean_rs::host::meta::LeanMetaTransparency
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::meta::LeanMetaTransparency
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::meta::LeanMetaTransparency
-#[non_exhaustive] pub enum lean_rs::host::meta::MetaCallStatus
-pub lean_rs::host::meta::MetaCallStatus::Failed
-pub lean_rs::host::meta::MetaCallStatus::Ok
-pub lean_rs::host::meta::MetaCallStatus::TimeoutOrHeartbeat
-pub lean_rs::host::meta::MetaCallStatus::Unsupported
-impl core::clone::Clone for lean_rs::host::meta::MetaCallStatus
-pub fn lean_rs::host::meta::MetaCallStatus::clone(&self) -> lean_rs::host::meta::MetaCallStatus
-impl core::cmp::Eq for lean_rs::host::meta::MetaCallStatus
-impl core::cmp::PartialEq for lean_rs::host::meta::MetaCallStatus
-pub fn lean_rs::host::meta::MetaCallStatus::eq(&self, other: &lean_rs::host::meta::MetaCallStatus) -> bool
-impl core::fmt::Debug for lean_rs::host::meta::MetaCallStatus
-pub fn lean_rs::host::meta::MetaCallStatus::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host::meta::MetaCallStatus
-impl core::marker::StructuralPartialEq for lean_rs::host::meta::MetaCallStatus
-impl core::marker::Freeze for lean_rs::host::meta::MetaCallStatus
-impl core::marker::Send for lean_rs::host::meta::MetaCallStatus
-impl core::marker::Sync for lean_rs::host::meta::MetaCallStatus
-impl core::marker::Unpin for lean_rs::host::meta::MetaCallStatus
-impl core::marker::UnsafeUnpin for lean_rs::host::meta::MetaCallStatus
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::meta::MetaCallStatus
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::meta::MetaCallStatus
-pub struct lean_rs::host::meta::LeanMetaOptions
-impl lean_rs::host::meta::LeanMetaOptions
-pub fn lean_rs::host::meta::LeanMetaOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
-pub fn lean_rs::host::meta::LeanMetaOptions::heartbeat_limit(self, heartbeats: u64) -> Self
-pub fn lean_rs::host::meta::LeanMetaOptions::namespace_context(self, ns: &str) -> Self
-pub fn lean_rs::host::meta::LeanMetaOptions::new() -> Self
-pub fn lean_rs::host::meta::LeanMetaOptions::transparency(self, transparency: lean_rs::host::meta::LeanMetaTransparency) -> Self
-impl core::clone::Clone for lean_rs::host::meta::LeanMetaOptions
-pub fn lean_rs::host::meta::LeanMetaOptions::clone(&self) -> lean_rs::host::meta::LeanMetaOptions
-impl core::default::Default for lean_rs::host::meta::LeanMetaOptions
-pub fn lean_rs::host::meta::LeanMetaOptions::default() -> Self
-impl core::fmt::Debug for lean_rs::host::meta::LeanMetaOptions
-pub fn lean_rs::host::meta::LeanMetaOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::host::meta::LeanMetaOptions
-impl core::marker::Send for lean_rs::host::meta::LeanMetaOptions
-impl core::marker::Sync for lean_rs::host::meta::LeanMetaOptions
-impl core::marker::Unpin for lean_rs::host::meta::LeanMetaOptions
-impl core::marker::UnsafeUnpin for lean_rs::host::meta::LeanMetaOptions
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::meta::LeanMetaOptions
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::meta::LeanMetaOptions
-pub struct lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> lean_rs::host::meta::LeanMetaService<Req, Resp>
-pub fn lean_rs::host::meta::LeanMetaService<Req, Resp>::name(&self) -> &'static str
-pub fn lean_rs::host::meta::LeanMetaService<Req, Resp>::required_imports(&self) -> &'static [&'static str]
-impl<Req, Resp> core::fmt::Debug for lean_rs::host::meta::LeanMetaService<Req, Resp>
-pub fn lean_rs::host::meta::LeanMetaService<Req, Resp>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<Req: core::clone::Clone, Resp: core::clone::Clone> core::clone::Clone for lean_rs::host::meta::LeanMetaService<Req, Resp>
-pub fn lean_rs::host::meta::LeanMetaService<Req, Resp>::clone(&self) -> lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req: core::marker::Copy, Resp: core::marker::Copy> core::marker::Copy for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::marker::Freeze for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::marker::Send for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::marker::Sync for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::marker::Unpin for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::marker::UnsafeUnpin for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::meta::LeanMetaService<Req, Resp>
-impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs::host::meta::LeanMetaService<Req, Resp>
-pub fn lean_rs::host::meta::heartbeat_burn<'lean>() -> lean_rs::host::meta::LeanMetaService<lean_rs::LeanExpr<'lean>, lean_rs::LeanExpr<'lean>>
-pub fn lean_rs::host::meta::infer_type<'lean>() -> lean_rs::host::meta::LeanMetaService<lean_rs::LeanExpr<'lean>, lean_rs::LeanExpr<'lean>>
-pub fn lean_rs::host::meta::whnf<'lean>() -> lean_rs::host::meta::LeanMetaService<lean_rs::LeanExpr<'lean>, lean_rs::LeanExpr<'lean>>
-pub mod lean_rs::host::pool
-pub struct lean_rs::host::pool::PoolStats
-pub lean_rs::host::pool::PoolStats::acquired: u64
-pub lean_rs::host::pool::PoolStats::imports_performed: u64
-pub lean_rs::host::pool::PoolStats::released_dropped: u64
-pub lean_rs::host::pool::PoolStats::released_to_pool: u64
-pub lean_rs::host::pool::PoolStats::reused: u64
-impl core::clone::Clone for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::clone(&self) -> lean_rs::host::pool::PoolStats
-impl core::cmp::Eq for lean_rs::host::pool::PoolStats
-impl core::cmp::PartialEq for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::eq(&self, other: &lean_rs::host::pool::PoolStats) -> bool
-impl core::default::Default for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::default() -> lean_rs::host::pool::PoolStats
-impl core::fmt::Debug for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host::pool::PoolStats
-impl core::marker::StructuralPartialEq for lean_rs::host::pool::PoolStats
-impl core::marker::Freeze for lean_rs::host::pool::PoolStats
-impl core::marker::Send for lean_rs::host::pool::PoolStats
-impl core::marker::Sync for lean_rs::host::pool::PoolStats
-impl core::marker::Unpin for lean_rs::host::pool::PoolStats
-impl core::marker::UnsafeUnpin for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PoolStats
-pub struct lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl core::fmt::Debug for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::ops::drop::Drop for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::drop(&mut self)
-impl<'lean, 'c> core::ops::deref::Deref for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub type lean_rs::host::pool::PooledSession<'lean, '_, 'c>::Target = lean_rs::LeanSession<'lean, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref(&self) -> &Self::Target
-impl<'lean, 'c> core::ops::deref::DerefMut for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref_mut(&mut self) -> &mut lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'p, 'c> !core::marker::Freeze for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Send for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Sync for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::Unpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::UnsafeUnpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-pub struct lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> lean_rs::host::pool::SessionPool<'lean>
-pub fn lean_rs::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs::host::pool::PooledSession<'lean, 'p, 'c>>
-pub fn lean_rs::host::pool::SessionPool<'lean>::capacity(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
-pub fn lean_rs::host::pool::SessionPool<'lean>::len(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::SessionPool<'lean>::with_capacity(runtime: &'lean lean_rs::LeanRuntime, capacity: usize) -> Self
-impl core::fmt::Debug for lean_rs::host::pool::SessionPool<'_>
-pub fn lean_rs::host::pool::SessionPool<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> !core::marker::Freeze for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Send for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-pub struct lean_rs::host::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> lean_rs::LeanCapabilities<'lean, 'h>
-pub fn lean_rs::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs::LeanSession<'lean, 'c>>
-impl core::fmt::Debug for lean_rs::LeanCapabilities<'_, '_>
-pub fn lean_rs::LeanCapabilities<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean, 'h> core::marker::Freeze for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> !core::marker::Send for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> !core::marker::Sync for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::marker::Unpin for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::marker::UnsafeUnpin for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapabilities<'lean, 'h>
-pub struct lean_rs::host::LeanHost<'lean>
-impl<'lean> lean_rs::LeanHost<'lean>
-pub fn lean_rs::LeanHost<'lean>::from_lake_project(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanHost<'lean>::load_capabilities<'h>(&'h self, package: &str, lib_name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanCapabilities<'lean, 'h>>
-impl core::fmt::Debug for lean_rs::LeanHost<'_>
-pub fn lean_rs::LeanHost<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> core::marker::Freeze for lean_rs::LeanHost<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanHost<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanHost<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanHost<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanHost<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanHost<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanHost<'lean>
-pub struct lean_rs::host::LeanSession<'lean, 'c>
-impl<'lean, 'c> lean_rs::LeanSession<'lean, 'c>
-pub fn lean_rs::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output> where Args: lean_rs::module::LeanArgs<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs::EvidenceStatus>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::LeanExpr<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::LeanExpr<'lean>>, options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::LeanExpr<'lean>, lean_rs::LeanElabFailure>>
-pub fn lean_rs::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::LeanExpr<'lean>, lean_rs::LeanElabFailure>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<lean_rs::LeanKernelOutcome<'lean>>
-pub fn lean_rs::LeanSession<'lean, 'c>::list_declarations(&mut self) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::LeanName<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanDeclaration<'lean>>
-pub fn lean_rs::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str]) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::LeanDeclaration<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs::host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs::host::meta::LeanMetaOptions) -> lean_rs::error::LeanResult<lean_rs::host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::module::LeanAbi<'lean>, Resp: TryFromLean<'lean>
-pub fn lean_rs::LeanSession<'lean, 'c>::stats(&self) -> lean_rs::SessionStats
-pub fn lean_rs::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs::ProofSummary>
-impl<'lean, 'c> !core::marker::Freeze for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::marker::Send for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::marker::Sync for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::marker::Unpin for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::marker::UnsafeUnpin for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanSession<'lean, 'c>
-pub struct lean_rs::host::PoolStats
-pub lean_rs::host::PoolStats::acquired: u64
-pub lean_rs::host::PoolStats::imports_performed: u64
-pub lean_rs::host::PoolStats::released_dropped: u64
-pub lean_rs::host::PoolStats::released_to_pool: u64
-pub lean_rs::host::PoolStats::reused: u64
-impl core::clone::Clone for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::clone(&self) -> lean_rs::host::pool::PoolStats
-impl core::cmp::Eq for lean_rs::host::pool::PoolStats
-impl core::cmp::PartialEq for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::eq(&self, other: &lean_rs::host::pool::PoolStats) -> bool
-impl core::default::Default for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::default() -> lean_rs::host::pool::PoolStats
-impl core::fmt::Debug for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host::pool::PoolStats
-impl core::marker::StructuralPartialEq for lean_rs::host::pool::PoolStats
-impl core::marker::Freeze for lean_rs::host::pool::PoolStats
-impl core::marker::Send for lean_rs::host::pool::PoolStats
-impl core::marker::Sync for lean_rs::host::pool::PoolStats
-impl core::marker::Unpin for lean_rs::host::pool::PoolStats
-impl core::marker::UnsafeUnpin for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PoolStats
-pub struct lean_rs::host::PooledSession<'lean, 'p, 'c>
-impl core::fmt::Debug for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::ops::drop::Drop for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::drop(&mut self)
-impl<'lean, 'c> core::ops::deref::Deref for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub type lean_rs::host::pool::PooledSession<'lean, '_, 'c>::Target = lean_rs::LeanSession<'lean, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref(&self) -> &Self::Target
-impl<'lean, 'c> core::ops::deref::DerefMut for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref_mut(&mut self) -> &mut lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'p, 'c> !core::marker::Freeze for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Send for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Sync for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::Unpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::UnsafeUnpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-pub struct lean_rs::host::SessionPool<'lean>
-impl<'lean> lean_rs::host::pool::SessionPool<'lean>
-pub fn lean_rs::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs::host::pool::PooledSession<'lean, 'p, 'c>>
-pub fn lean_rs::host::pool::SessionPool<'lean>::capacity(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
-pub fn lean_rs::host::pool::SessionPool<'lean>::len(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::SessionPool<'lean>::with_capacity(runtime: &'lean lean_rs::LeanRuntime, capacity: usize) -> Self
-impl core::fmt::Debug for lean_rs::host::pool::SessionPool<'_>
-pub fn lean_rs::host::pool::SessionPool<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> !core::marker::Freeze for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Send for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-pub struct lean_rs::host::SessionStats
-pub lean_rs::host::SessionStats::batch_items: u64
-pub lean_rs::host::SessionStats::elapsed_ns: u64
-pub lean_rs::host::SessionStats::ffi_calls: u64
-impl core::clone::Clone for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::clone(&self) -> lean_rs::SessionStats
-impl core::cmp::Eq for lean_rs::SessionStats
-impl core::cmp::PartialEq for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::eq(&self, other: &lean_rs::SessionStats) -> bool
-impl core::default::Default for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::default() -> lean_rs::SessionStats
-impl core::fmt::Debug for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::SessionStats
-impl core::marker::StructuralPartialEq for lean_rs::SessionStats
-impl core::marker::Freeze for lean_rs::SessionStats
-impl core::marker::Send for lean_rs::SessionStats
-impl core::marker::Sync for lean_rs::SessionStats
-impl core::marker::Unpin for lean_rs::SessionStats
-impl core::marker::UnsafeUnpin for lean_rs::SessionStats
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::SessionStats
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::SessionStats
 pub mod lean_rs::module
 pub struct lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>, A11: lean_rs::module::LeanAbi<'lean>, A12: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11, a12: A12) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>, A11: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, A5, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, A4, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, A3, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2, A3), R>::call(&self, a1: A1, a2: A2, a3: A3) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, A2, R> lean_rs::module::LeanExported<'lean, 'lib, (A1, A2), R> where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1, A2), R>::call(&self, a1: A1, a2: A2) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, A1, R> lean_rs::module::LeanExported<'lean, 'lib, (A1), R> where A1: lean_rs::module::LeanAbi<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (A1), R>::call(&self, a1: A1) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<'lean, 'lib, R> lean_rs::module::LeanExported<'lean, 'lib, (), R> where R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::module::LeanExported<'lean, 'lib, (), R>::call(&self) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output>
-impl<Args, R> core::fmt::Debug for lean_rs::module::LeanExported<'_, '_, Args, R>
-pub fn lean_rs::module::LeanExported<'_, '_, Args, R>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean, 'lib, Args, R> core::marker::Freeze for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> !core::marker::Send for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> !core::marker::Sync for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> core::marker::Unpin for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> core::marker::UnsafeUnpin for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
-impl<'lean, 'lib, Args, R> core::panic::unwind_safe::UnwindSafe for lean_rs::module::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11, a12: A12) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3), R>::call(&self, a1: A1, a2: A2, a3: A3) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2), R>::call(&self, a1: A1, a2: A2) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, R> lean_rs::LeanExported<'lean, 'lib, (A1), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1), R>::call(&self, a1: A1) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, R> lean_rs::LeanExported<'lean, 'lib, (), R> where R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (), R>::call(&self) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, Args, R> lean_rs::LeanExported<'lean, '_, Args, R>
+pub unsafe fn lean_rs::LeanExported<'lean, '_, Args, R>::from_function_address(runtime: &'lean lean_rs::LeanRuntime, address: *mut core::ffi::c_void) -> Self
+impl<Args, R> core::fmt::Debug for lean_rs::LeanExported<'_, '_, Args, R>
+pub fn lean_rs::LeanExported<'_, '_, Args, R>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'lib, Args, R> core::marker::Freeze for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> !core::marker::Send for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> !core::marker::Sync for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::marker::Unpin for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::marker::UnsafeUnpin for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanExported<'lean, 'lib, Args, R>
 pub struct lean_rs::module::LeanIo<T>(_)
-impl<'lean, T> lean_rs::module::DecodeCallResult<'lean> for lean_rs::module::LeanIo<T> where T: TryFromLean<'lean>
-pub type lean_rs::module::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
-pub type lean_rs::module::LeanIo<T>::Output = T
-impl<T> core::marker::Freeze for lean_rs::module::LeanIo<T>
-impl<T> core::marker::Send for lean_rs::module::LeanIo<T>
-impl<T> core::marker::Sync for lean_rs::module::LeanIo<T>
-impl<T> core::marker::Unpin for lean_rs::module::LeanIo<T>
-impl<T> core::marker::UnsafeUnpin for lean_rs::module::LeanIo<T>
-impl<T> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::LeanIo<T>
-impl<T> core::panic::unwind_safe::UnwindSafe for lean_rs::module::LeanIo<T>
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs::LeanIo<T>::Output = T
+impl<T> core::marker::Freeze for lean_rs::LeanIo<T>
+impl<T> core::marker::Send for lean_rs::LeanIo<T>
+impl<T> core::marker::Sync for lean_rs::LeanIo<T>
+impl<T> core::marker::Unpin for lean_rs::LeanIo<T>
+impl<T> core::marker::UnsafeUnpin for lean_rs::LeanIo<T>
+impl<T> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanIo<T>
+impl<T> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanIo<T>
 pub struct lean_rs::module::LeanLibrary<'lean>
-impl<'lean> lean_rs::module::LeanLibrary<'lean>
-pub fn lean_rs::module::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::module::LeanModule<'lean, 'lib>>
-pub fn lean_rs::module::LeanLibrary<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
-impl core::fmt::Debug for lean_rs::module::LeanLibrary<'_>
-pub fn lean_rs::module::LeanLibrary<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> core::marker::Freeze for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> !core::marker::Send for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::LeanLibrary<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::module::LeanLibrary<'lean>
+impl<'lean> lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
+pub fn lean_rs::LeanLibrary<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, name: &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
+pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, name: &str) -> core::option::Option<*mut core::ffi::c_void>
+impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
+pub fn lean_rs::LeanLibrary<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> core::marker::Freeze for lean_rs::LeanLibrary<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanLibrary<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibrary<'lean>
 pub struct lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> lean_rs::module::LeanModule<'lean, 'lib>
-pub fn lean_rs::module::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::module::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::module::LeanArgs<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-impl<'lean, 'lib> lean_rs::module::LeanModule<'lean, 'lib>
-pub fn lean_rs::module::LeanModule<'lean, 'lib>::module_name(&self) -> &str
-impl core::fmt::Debug for lean_rs::module::LeanModule<'_, '_>
-pub fn lean_rs::module::LeanModule<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean, 'lib> core::marker::Freeze for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> !core::marker::Send for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> !core::marker::Sync for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> core::marker::Unpin for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::module::LeanModule<'lean, 'lib>
-impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::module::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
+pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
+impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
+pub fn lean_rs::LeanModule<'lean, 'lib>::module_name(&self) -> &str
+impl core::fmt::Debug for lean_rs::LeanModule<'_, '_>
+pub fn lean_rs::LeanModule<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'lib> core::marker::Freeze for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> !core::marker::Send for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> !core::marker::Sync for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 pub trait lean_rs::module::DecodeCallResult<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedResult
 pub type lean_rs::module::DecodeCallResult::CRepr: core::marker::Copy
 pub type lean_rs::module::DecodeCallResult::Output
-impl<'lean, T> lean_rs::module::DecodeCallResult<'lean> for T where T: lean_rs::module::LeanAbi<'lean>
-pub type T::CRepr = <T as lean_rs::module::LeanAbi<'lean>>::CRepr
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for T where T: lean_rs::abi::traits::LeanAbi<'lean>
+pub type T::CRepr = <T as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 pub type T::Output = T
-impl<'lean, T> lean_rs::module::DecodeCallResult<'lean> for lean_rs::module::LeanIo<T> where T: TryFromLean<'lean>
-pub type lean_rs::module::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
-pub type lean_rs::module::LeanIo<T>::Output = T
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs::LeanIo<T>::Output = T
 pub trait lean_rs::module::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
 pub type lean_rs::module::LeanAbi::CRepr: core::marker::Copy
-impl<'lean, T, E> lean_rs::module::LeanAbi<'lean> for core::result::Result<T, E> where T: IntoLean<'lean> + TryFromLean<'lean>, E: IntoLean<'lean> + TryFromLean<'lean>
+impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean, T> lean_rs::module::LeanAbi<'lean> for alloc::vec::Vec<T> where T: IntoLean<'lean> + TryFromLean<'lean>
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type alloc::vec::Vec<T>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean, T> lean_rs::module::LeanAbi<'lean> for core::option::Option<T> where T: IntoLean<'lean> + TryFromLean<'lean>
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for core::option::Option<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::option::Option<T>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for &str
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &str
 pub type &str::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for ()
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for ()
 pub type ()::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for alloc::string::String
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for alloc::string::String
 pub type alloc::string::String::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for bool
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for bool
 pub type bool::CRepr = u8
-impl<'lean> lean_rs::module::LeanAbi<'lean> for char
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for char
 pub type char::CRepr = u32
-impl<'lean> lean_rs::module::LeanAbi<'lean> for f64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for f64
 pub type f64::CRepr = f64
-impl<'lean> lean_rs::module::LeanAbi<'lean> for i16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i16
 pub type i16::CRepr = i16
-impl<'lean> lean_rs::module::LeanAbi<'lean> for i32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i32
 pub type i32::CRepr = i32
-impl<'lean> lean_rs::module::LeanAbi<'lean> for i64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i64
 pub type i64::CRepr = i64
-impl<'lean> lean_rs::module::LeanAbi<'lean> for i8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i8
 pub type i8::CRepr = i8
-impl<'lean> lean_rs::module::LeanAbi<'lean> for isize
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for isize
 pub type isize::CRepr = isize
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
 pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanEvidence<'lean>
-pub type lean_rs::LeanEvidence<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
 pub type lean_rs::LeanExpr<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
 pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanName<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
 pub type lean_rs::LeanName<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> lean_rs::module::LeanAbi<'lean> for u16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u16
 pub type u16::CRepr = u16
-impl<'lean> lean_rs::module::LeanAbi<'lean> for u32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u32
 pub type u32::CRepr = u32
-impl<'lean> lean_rs::module::LeanAbi<'lean> for u64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u64
 pub type u64::CRepr = u64
-impl<'lean> lean_rs::module::LeanAbi<'lean> for u8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u8
 pub type u8::CRepr = u8
-impl<'lean> lean_rs::module::LeanAbi<'lean> for usize
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for usize
 pub type usize::CRepr = usize
 pub trait lean_rs::module::LeanArgs<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedArgs
 pub const lean_rs::module::LeanArgs::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>, A11: lean_rs::module::LeanAbi<'lean>, A12: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>, A11: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>, A10: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>, A9: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>, A8: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7, A8)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6, A7> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>, A7: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6, A7> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6, A7)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5, A6> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>, A6: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5, A6> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5, A6)::ARITY: usize
-impl<'lean, A1, A2, A3, A4, A5> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4, A5) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>, A5: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4, A5> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4, A5)::ARITY: usize
-impl<'lean, A1, A2, A3, A4> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3, A4) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>, A4: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3, A4> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3, A4)::ARITY: usize
-impl<'lean, A1, A2, A3> lean_rs::module::LeanArgs<'lean> for (A1, A2, A3) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>, A3: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2, A3> lean_rs::LeanArgs<'lean> for (A1, A2, A3) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2, A3)::ARITY: usize
-impl<'lean, A1, A2> lean_rs::module::LeanArgs<'lean> for (A1, A2) where A1: lean_rs::module::LeanAbi<'lean>, A2: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1, A2> lean_rs::LeanArgs<'lean> for (A1, A2) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1, A2)::ARITY: usize
-impl<'lean, A1> lean_rs::module::LeanArgs<'lean> for (A1) where A1: lean_rs::module::LeanAbi<'lean>
+impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits::LeanAbi<'lean>
 pub const (A1)::ARITY: usize
-impl<'lean> lean_rs::module::LeanArgs<'lean> for ()
+impl<'lean> lean_rs::LeanArgs<'lean> for ()
 pub const ()::ARITY: usize
-#[non_exhaustive] pub enum lean_rs::EvidenceStatus
-pub lean_rs::EvidenceStatus::Checked
-pub lean_rs::EvidenceStatus::Rejected
-pub lean_rs::EvidenceStatus::Unavailable
-pub lean_rs::EvidenceStatus::Unsupported
-impl core::clone::Clone for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::clone(&self) -> lean_rs::EvidenceStatus
-impl core::cmp::Eq for lean_rs::EvidenceStatus
-impl core::cmp::PartialEq for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::eq(&self, other: &lean_rs::EvidenceStatus) -> bool
-impl core::fmt::Debug for lean_rs::EvidenceStatus
-pub fn lean_rs::EvidenceStatus::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::EvidenceStatus
-impl core::marker::StructuralPartialEq for lean_rs::EvidenceStatus
-impl core::marker::Freeze for lean_rs::EvidenceStatus
-impl core::marker::Send for lean_rs::EvidenceStatus
-impl core::marker::Sync for lean_rs::EvidenceStatus
-impl core::marker::Unpin for lean_rs::EvidenceStatus
-impl core::marker::UnsafeUnpin for lean_rs::EvidenceStatus
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::EvidenceStatus
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::EvidenceStatus
+pub mod lean_rs::runtime
+pub mod lean_rs::runtime::obj
+pub struct lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::runtime::obj::Obj<'lean>::as_raw_borrowed(&self) -> *mut lean_rs_sys::types::lean_object
+pub fn lean_rs::runtime::obj::Obj<'lean>::borrow(&self) -> lean_rs::runtime::obj::ObjRef<'lean, '_>
+pub unsafe fn lean_rs::runtime::obj::Obj<'lean>::from_owned_raw(_runtime: &'lean lean_rs::LeanRuntime, ptr: *mut lean_rs_sys::types::lean_object) -> Self
+pub fn lean_rs::runtime::obj::Obj<'lean>::into_raw(self) -> *mut lean_rs_sys::types::lean_object
+pub fn lean_rs::runtime::obj::Obj<'lean>::runtime(&self) -> &'lean lean_rs::LeanRuntime
+impl core::clone::Clone for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::clone(&self) -> Self
+impl core::fmt::Debug for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::drop(&mut self)
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::runtime::obj::Obj<'lean>::try_from_lean(obj: Self) -> lean_rs::error::LeanResult<Self>
+impl<'lean> core::marker::Freeze for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> !core::marker::Send for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::runtime::obj::Obj<'lean>
+pub struct lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl lean_rs::runtime::obj::ObjRef<'_, '_>
+pub fn lean_rs::runtime::obj::ObjRef<'_, '_>::as_raw_borrowed(&self) -> *mut lean_rs_sys::types::lean_object
+impl core::fmt::Debug for lean_rs::runtime::obj::ObjRef<'_, '_>
+pub fn lean_rs::runtime::obj::ObjRef<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'a> core::marker::Freeze for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> !core::marker::Send for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> !core::marker::Sync for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::marker::Unpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::marker::UnsafeUnpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::RefUnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::UnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+pub struct lean_rs::runtime::LeanRuntime
+impl lean_rs::LeanRuntime
+pub fn lean_rs::LeanRuntime::init() -> lean_rs::error::LeanResult<&'static Self>
+impl core::fmt::Debug for lean_rs::LeanRuntime
+pub fn lean_rs::LeanRuntime::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs::LeanRuntime
+impl !core::marker::Send for lean_rs::LeanRuntime
+impl !core::marker::Sync for lean_rs::LeanRuntime
+impl core::marker::Unpin for lean_rs::LeanRuntime
+impl core::marker::UnsafeUnpin for lean_rs::LeanRuntime
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntime
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntime
+pub struct lean_rs::runtime::LeanThreadGuard<'lean>
+impl<'lean> lean_rs::LeanThreadGuard<'lean>
+pub fn lean_rs::LeanThreadGuard<'lean>::attach(_runtime: &'lean lean_rs::LeanRuntime) -> Self
+impl core::ops::drop::Drop for lean_rs::LeanThreadGuard<'_>
+pub fn lean_rs::LeanThreadGuard<'_>::drop(&mut self)
+impl<'lean> core::marker::Freeze for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanThreadGuard<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanThreadGuard<'lean>
 #[non_exhaustive] pub enum lean_rs::HostStage
 pub lean_rs::HostStage::CallbackPanic
 pub lean_rs::HostStage::Conversion
@@ -1004,42 +781,6 @@ impl core::marker::Unpin for lean_rs::error::LeanExceptionKind
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanExceptionKind
-#[non_exhaustive] pub enum lean_rs::LeanKernelOutcome<'lean>
-pub lean_rs::LeanKernelOutcome::Checked(lean_rs::LeanEvidence<'lean>)
-pub lean_rs::LeanKernelOutcome::Rejected(lean_rs::LeanElabFailure)
-pub lean_rs::LeanKernelOutcome::Unavailable(lean_rs::LeanElabFailure)
-pub lean_rs::LeanKernelOutcome::Unsupported(lean_rs::LeanElabFailure)
-impl lean_rs::LeanKernelOutcome<'_>
-pub fn lean_rs::LeanKernelOutcome<'_>::status(&self) -> lean_rs::EvidenceStatus
-impl<'lean> core::fmt::Debug for lean_rs::LeanKernelOutcome<'lean>
-pub fn lean_rs::LeanKernelOutcome<'lean>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> core::marker::Freeze for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanKernelOutcome<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanKernelOutcome<'lean>
-#[non_exhaustive] pub enum lean_rs::LeanSeverity
-pub lean_rs::LeanSeverity::Error
-pub lean_rs::LeanSeverity::Info
-pub lean_rs::LeanSeverity::Warning
-impl core::clone::Clone for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::clone(&self) -> lean_rs::LeanSeverity
-impl core::cmp::Eq for lean_rs::LeanSeverity
-impl core::cmp::PartialEq for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::eq(&self, other: &lean_rs::LeanSeverity) -> bool
-impl core::fmt::Debug for lean_rs::LeanSeverity
-pub fn lean_rs::LeanSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::LeanSeverity
-impl core::marker::StructuralPartialEq for lean_rs::LeanSeverity
-impl core::marker::Freeze for lean_rs::LeanSeverity
-impl core::marker::Send for lean_rs::LeanSeverity
-impl core::marker::Sync for lean_rs::LeanSeverity
-impl core::marker::Unpin for lean_rs::LeanSeverity
-impl core::marker::UnsafeUnpin for lean_rs::LeanSeverity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanSeverity
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanSeverity
 pub struct lean_rs::CapturedEvent
 pub lean_rs::CapturedEvent::code: core::option::Option<lean_rs::error::LeanDiagnosticCode>
 pub lean_rs::CapturedEvent::fields: alloc::vec::Vec<(&'static str, alloc::string::String)>
@@ -1097,25 +838,16 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
-pub struct lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> lean_rs::LeanCapabilities<'lean, 'h>
-pub fn lean_rs::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs::LeanSession<'lean, 'c>>
-impl core::fmt::Debug for lean_rs::LeanCapabilities<'_, '_>
-pub fn lean_rs::LeanCapabilities<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean, 'h> core::marker::Freeze for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> !core::marker::Send for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> !core::marker::Sync for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::marker::Unpin for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::marker::UnsafeUnpin for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapabilities<'lean, 'h>
-impl<'lean, 'h> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapabilities<'lean, 'h>
 pub struct lean_rs::LeanDeclaration<'lean>
 impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanDeclaration<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
 pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanDeclaration<'lean>
+pub fn lean_rs::LeanDeclaration<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanDeclaration<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanDeclaration<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanDeclaration<'lean>
@@ -1123,76 +855,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanDeclaration<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanDeclaration<'lean>
-pub struct lean_rs::LeanDiagnostic
-impl lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::file_label(&self) -> &str
-pub fn lean_rs::LeanDiagnostic::message(&self) -> &str
-pub fn lean_rs::LeanDiagnostic::position(&self) -> core::option::Option<&lean_rs::LeanPosition>
-pub fn lean_rs::LeanDiagnostic::severity(&self) -> lean_rs::LeanSeverity
-impl core::clone::Clone for lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::clone(&self) -> lean_rs::LeanDiagnostic
-impl core::fmt::Debug for lean_rs::LeanDiagnostic
-pub fn lean_rs::LeanDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanDiagnostic
-impl core::marker::Send for lean_rs::LeanDiagnostic
-impl core::marker::Sync for lean_rs::LeanDiagnostic
-impl core::marker::Unpin for lean_rs::LeanDiagnostic
-impl core::marker::UnsafeUnpin for lean_rs::LeanDiagnostic
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanDiagnostic
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanDiagnostic
-pub struct lean_rs::LeanElabFailure
-impl lean_rs::LeanElabFailure
-pub const fn lean_rs::LeanElabFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
-pub fn lean_rs::LeanElabFailure::diagnostics(&self) -> &[lean_rs::LeanDiagnostic]
-pub fn lean_rs::LeanElabFailure::truncated(&self) -> bool
-impl core::clone::Clone for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::clone(&self) -> lean_rs::LeanElabFailure
-impl core::error::Error for lean_rs::LeanElabFailure
-impl core::fmt::Debug for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanElabFailure
-pub fn lean_rs::LeanElabFailure::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanElabFailure
-impl core::marker::Send for lean_rs::LeanElabFailure
-impl core::marker::Sync for lean_rs::LeanElabFailure
-impl core::marker::Unpin for lean_rs::LeanElabFailure
-impl core::marker::UnsafeUnpin for lean_rs::LeanElabFailure
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanElabFailure
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanElabFailure
-pub struct lean_rs::LeanElabOptions
-impl lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
-pub fn lean_rs::LeanElabOptions::file_label(self, label: &str) -> Self
-pub fn lean_rs::LeanElabOptions::heartbeat_limit(self, heartbeats: u64) -> Self
-pub fn lean_rs::LeanElabOptions::namespace_context(self, ns: &str) -> Self
-pub fn lean_rs::LeanElabOptions::new() -> Self
-impl core::clone::Clone for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::clone(&self) -> lean_rs::LeanElabOptions
-impl core::default::Default for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::default() -> Self
-impl core::fmt::Debug for lean_rs::LeanElabOptions
-pub fn lean_rs::LeanElabOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::LeanElabOptions
-impl core::marker::Send for lean_rs::LeanElabOptions
-impl core::marker::Sync for lean_rs::LeanElabOptions
-impl core::marker::Unpin for lean_rs::LeanElabOptions
-impl core::marker::UnsafeUnpin for lean_rs::LeanElabOptions
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanElabOptions
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanElabOptions
-pub struct lean_rs::LeanEvidence<'lean>
-impl core::clone::Clone for lean_rs::LeanEvidence<'_>
-pub fn lean_rs::LeanEvidence<'_>::clone(&self) -> Self
-impl core::fmt::Debug for lean_rs::LeanEvidence<'_>
-pub fn lean_rs::LeanEvidence<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanEvidence<'lean>
-pub type lean_rs::LeanEvidence<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
-impl<'lean> core::marker::Freeze for lean_rs::LeanEvidence<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanEvidence<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanEvidence<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanEvidence<'lean>
 pub struct lean_rs::LeanException
 impl lean_rs::error::LeanException
 pub fn lean_rs::error::LeanException::kind(&self) -> lean_rs::error::LeanExceptionKind
@@ -1210,13 +872,56 @@ impl core::marker::Unpin for lean_rs::error::LeanException
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanException
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanException
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanException
+pub struct lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11, a12: A12) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, A5, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, A4, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, A3, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3), R>::call(&self, a1: A1, a2: A2, a3: A3) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, A2, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2), R>::call(&self, a1: A1, a2: A2) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, A1, R> lean_rs::LeanExported<'lean, 'lib, (A1), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (A1), R>::call(&self, a1: A1) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, 'lib, R> lean_rs::LeanExported<'lean, 'lib, (), R> where R: lean_rs::DecodeCallResult<'lean>
+pub fn lean_rs::LeanExported<'lean, 'lib, (), R>::call(&self) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
+impl<'lean, Args, R> lean_rs::LeanExported<'lean, '_, Args, R>
+pub unsafe fn lean_rs::LeanExported<'lean, '_, Args, R>::from_function_address(runtime: &'lean lean_rs::LeanRuntime, address: *mut core::ffi::c_void) -> Self
+impl<Args, R> core::fmt::Debug for lean_rs::LeanExported<'_, '_, Args, R>
+pub fn lean_rs::LeanExported<'_, '_, Args, R>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'lib, Args, R> core::marker::Freeze for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> !core::marker::Send for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> !core::marker::Sync for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::marker::Unpin for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::marker::UnsafeUnpin for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanExported<'lean, 'lib, Args, R>
+impl<'lean, 'lib, Args, R> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanExported<'lean, 'lib, Args, R>
 pub struct lean_rs::LeanExpr<'lean>
 impl core::clone::Clone for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanExpr<'_>
 pub fn lean_rs::LeanExpr<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanExpr<'_>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
 pub type lean_rs::LeanExpr<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanExpr<'lean>
+pub fn lean_rs::LeanExpr<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanExpr<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanExpr<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanExpr<'lean>
@@ -1224,26 +929,27 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanExpr<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanExpr<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanExpr<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanExpr<'lean>
-pub struct lean_rs::LeanHost<'lean>
-impl<'lean> lean_rs::LeanHost<'lean>
-pub fn lean_rs::LeanHost<'lean>::from_lake_project(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanHost<'lean>::load_capabilities<'h>(&'h self, package: &str, lib_name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanCapabilities<'lean, 'h>>
-impl core::fmt::Debug for lean_rs::LeanHost<'_>
-pub fn lean_rs::LeanHost<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> core::marker::Freeze for lean_rs::LeanHost<'lean>
-impl<'lean> !core::marker::Send for lean_rs::LeanHost<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::LeanHost<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::LeanHost<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanHost<'lean>
-impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanHost<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanHost<'lean>
+pub struct lean_rs::LeanIo<T>(_)
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs::LeanIo<T>::Output = T
+impl<T> core::marker::Freeze for lean_rs::LeanIo<T>
+impl<T> core::marker::Send for lean_rs::LeanIo<T>
+impl<T> core::marker::Sync for lean_rs::LeanIo<T>
+impl<T> core::marker::Unpin for lean_rs::LeanIo<T>
+impl<T> core::marker::UnsafeUnpin for lean_rs::LeanIo<T>
+impl<T> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanIo<T>
+impl<T> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanIo<T>
 pub struct lean_rs::LeanLevel<'lean>
 impl core::clone::Clone for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanLevel<'_>
 pub fn lean_rs::LeanLevel<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanLevel<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
 pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanLevel<'lean>
+pub fn lean_rs::LeanLevel<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanLevel<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanLevel<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanLevel<'lean>
@@ -1251,13 +957,47 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLevel<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLevel<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLevel<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLevel<'lean>
+pub struct lean_rs::LeanLibrary<'lean>
+impl<'lean> lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
+pub fn lean_rs::LeanLibrary<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, path: impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, name: &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
+pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, name: &str) -> core::option::Option<*mut core::ffi::c_void>
+impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
+pub fn lean_rs::LeanLibrary<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> core::marker::Freeze for lean_rs::LeanLibrary<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanLibrary<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibrary<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibrary<'lean>
+pub struct lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
+pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
+impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
+pub fn lean_rs::LeanModule<'lean, 'lib>::module_name(&self) -> &str
+impl core::fmt::Debug for lean_rs::LeanModule<'_, '_>
+pub fn lean_rs::LeanModule<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'lib> core::marker::Freeze for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> !core::marker::Send for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> !core::marker::Sync for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
+impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 pub struct lean_rs::LeanName<'lean>
 impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self
 impl core::fmt::Debug for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> lean_rs::module::LeanAbi<'lean> for lean_rs::LeanName<'lean>
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::LeanName<'_>
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::into_lean(self, _runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
 pub type lean_rs::LeanName<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::LeanName<'lean>
+pub fn lean_rs::LeanName<'lean>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs::LeanName<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanName<'lean>
 impl<'lean> !core::marker::Sync for lean_rs::LeanName<'lean>
@@ -1265,28 +1005,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanName<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
-pub struct lean_rs::LeanPosition
-impl lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::column(&self) -> u32
-pub fn lean_rs::LeanPosition::end_column(&self) -> core::option::Option<u32>
-pub fn lean_rs::LeanPosition::end_line(&self) -> core::option::Option<u32>
-pub fn lean_rs::LeanPosition::line(&self) -> u32
-impl core::clone::Clone for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::clone(&self) -> lean_rs::LeanPosition
-impl core::cmp::Eq for lean_rs::LeanPosition
-impl core::cmp::PartialEq for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::eq(&self, other: &lean_rs::LeanPosition) -> bool
-impl core::fmt::Debug for lean_rs::LeanPosition
-pub fn lean_rs::LeanPosition::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::LeanPosition
-impl core::marker::StructuralPartialEq for lean_rs::LeanPosition
-impl core::marker::Freeze for lean_rs::LeanPosition
-impl core::marker::Send for lean_rs::LeanPosition
-impl core::marker::Sync for lean_rs::LeanPosition
-impl core::marker::Unpin for lean_rs::LeanPosition
-impl core::marker::UnsafeUnpin for lean_rs::LeanPosition
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanPosition
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanPosition
 pub struct lean_rs::LeanRuntime
 impl lean_rs::LeanRuntime
 pub fn lean_rs::LeanRuntime::init() -> lean_rs::error::LeanResult<&'static Self>
@@ -1299,29 +1017,6 @@ impl core::marker::Unpin for lean_rs::LeanRuntime
 impl core::marker::UnsafeUnpin for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntime
-pub struct lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> lean_rs::LeanSession<'lean, 'c>
-pub fn lean_rs::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args) -> lean_rs::error::LeanResult<<R as lean_rs::module::DecodeCallResult>::Output> where Args: lean_rs::module::LeanArgs<'lean>, R: lean_rs::module::DecodeCallResult<'lean>
-pub fn lean_rs::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs::EvidenceStatus>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::LeanExpr<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::LeanExpr<'lean>>, options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::LeanExpr<'lean>, lean_rs::LeanElabFailure>>
-pub fn lean_rs::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::LeanExpr<'lean>, lean_rs::LeanElabFailure>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs::LeanElabOptions) -> lean_rs::error::LeanResult<lean_rs::LeanKernelOutcome<'lean>>
-pub fn lean_rs::LeanSession<'lean, 'c>::list_declarations(&mut self) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::LeanName<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanDeclaration<'lean>>
-pub fn lean_rs::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str]) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::LeanDeclaration<'lean>>>
-pub fn lean_rs::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs::host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs::host::meta::LeanMetaOptions) -> lean_rs::error::LeanResult<lean_rs::host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::module::LeanAbi<'lean>, Resp: TryFromLean<'lean>
-pub fn lean_rs::LeanSession<'lean, 'c>::stats(&self) -> lean_rs::SessionStats
-pub fn lean_rs::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs::ProofSummary>
-impl<'lean, 'c> !core::marker::Freeze for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::marker::Send for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::marker::Sync for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::marker::Unpin for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::marker::UnsafeUnpin for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'c> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanSession<'lean, 'c>
 pub struct lean_rs::LeanThreadGuard<'lean>
 impl<'lean> lean_rs::LeanThreadGuard<'lean>
 pub fn lean_rs::LeanThreadGuard<'lean>::attach(_runtime: &'lean lean_rs::LeanRuntime) -> Self
@@ -1334,108 +1029,131 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanThreadGuard<'lean>
-pub struct lean_rs::PoolStats
-pub lean_rs::PoolStats::acquired: u64
-pub lean_rs::PoolStats::imports_performed: u64
-pub lean_rs::PoolStats::released_dropped: u64
-pub lean_rs::PoolStats::released_to_pool: u64
-pub lean_rs::PoolStats::reused: u64
-impl core::clone::Clone for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::clone(&self) -> lean_rs::host::pool::PoolStats
-impl core::cmp::Eq for lean_rs::host::pool::PoolStats
-impl core::cmp::PartialEq for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::eq(&self, other: &lean_rs::host::pool::PoolStats) -> bool
-impl core::default::Default for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::default() -> lean_rs::host::pool::PoolStats
-impl core::fmt::Debug for lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::PoolStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::host::pool::PoolStats
-impl core::marker::StructuralPartialEq for lean_rs::host::pool::PoolStats
-impl core::marker::Freeze for lean_rs::host::pool::PoolStats
-impl core::marker::Send for lean_rs::host::pool::PoolStats
-impl core::marker::Sync for lean_rs::host::pool::PoolStats
-impl core::marker::Unpin for lean_rs::host::pool::PoolStats
-impl core::marker::UnsafeUnpin for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PoolStats
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PoolStats
-pub struct lean_rs::PooledSession<'lean, 'p, 'c>
-impl core::fmt::Debug for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::ops::drop::Drop for lean_rs::host::pool::PooledSession<'_, '_, '_>
-pub fn lean_rs::host::pool::PooledSession<'_, '_, '_>::drop(&mut self)
-impl<'lean, 'c> core::ops::deref::Deref for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub type lean_rs::host::pool::PooledSession<'lean, '_, 'c>::Target = lean_rs::LeanSession<'lean, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref(&self) -> &Self::Target
-impl<'lean, 'c> core::ops::deref::DerefMut for lean_rs::host::pool::PooledSession<'lean, '_, 'c>
-pub fn lean_rs::host::pool::PooledSession<'lean, '_, 'c>::deref_mut(&mut self) -> &mut lean_rs::LeanSession<'lean, 'c>
-impl<'lean, 'p, 'c> !core::marker::Freeze for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Send for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::marker::Sync for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::Unpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> core::marker::UnsafeUnpin for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::PooledSession<'lean, 'p, 'c>
-pub struct lean_rs::ProofSummary
-impl lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::declaration_name(&self) -> &str
-pub fn lean_rs::ProofSummary::kind(&self) -> &str
-pub fn lean_rs::ProofSummary::type_signature(&self) -> &str
-impl core::clone::Clone for lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::clone(&self) -> lean_rs::ProofSummary
-impl core::fmt::Debug for lean_rs::ProofSummary
-pub fn lean_rs::ProofSummary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for lean_rs::ProofSummary
-impl core::marker::Send for lean_rs::ProofSummary
-impl core::marker::Sync for lean_rs::ProofSummary
-impl core::marker::Unpin for lean_rs::ProofSummary
-impl core::marker::UnsafeUnpin for lean_rs::ProofSummary
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::ProofSummary
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::ProofSummary
-pub struct lean_rs::SessionPool<'lean>
-impl<'lean> lean_rs::host::pool::SessionPool<'lean>
-pub fn lean_rs::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs::host::pool::PooledSession<'lean, 'p, 'c>>
-pub fn lean_rs::host::pool::SessionPool<'lean>::capacity(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
-pub fn lean_rs::host::pool::SessionPool<'lean>::len(&self) -> usize
-pub fn lean_rs::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs::host::pool::PoolStats
-pub fn lean_rs::host::pool::SessionPool<'lean>::with_capacity(runtime: &'lean lean_rs::LeanRuntime, capacity: usize) -> Self
-impl core::fmt::Debug for lean_rs::host::pool::SessionPool<'_>
-pub fn lean_rs::host::pool::SessionPool<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'lean> !core::marker::Freeze for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Send for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::marker::Sync for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::Unpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::marker::UnsafeUnpin for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::host::pool::SessionPool<'lean>
-pub struct lean_rs::SessionStats
-pub lean_rs::SessionStats::batch_items: u64
-pub lean_rs::SessionStats::elapsed_ns: u64
-pub lean_rs::SessionStats::ffi_calls: u64
-impl core::clone::Clone for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::clone(&self) -> lean_rs::SessionStats
-impl core::cmp::Eq for lean_rs::SessionStats
-impl core::cmp::PartialEq for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::eq(&self, other: &lean_rs::SessionStats) -> bool
-impl core::default::Default for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::default() -> lean_rs::SessionStats
-impl core::fmt::Debug for lean_rs::SessionStats
-pub fn lean_rs::SessionStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::SessionStats
-impl core::marker::StructuralPartialEq for lean_rs::SessionStats
-impl core::marker::Freeze for lean_rs::SessionStats
-impl core::marker::Send for lean_rs::SessionStats
-impl core::marker::Sync for lean_rs::SessionStats
-impl core::marker::Unpin for lean_rs::SessionStats
-impl core::marker::UnsafeUnpin for lean_rs::SessionStats
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::SessionStats
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::SessionStats
+pub struct lean_rs::Obj<'lean>
+impl<'lean> lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::runtime::obj::Obj<'lean>::as_raw_borrowed(&self) -> *mut lean_rs_sys::types::lean_object
+pub fn lean_rs::runtime::obj::Obj<'lean>::borrow(&self) -> lean_rs::runtime::obj::ObjRef<'lean, '_>
+pub unsafe fn lean_rs::runtime::obj::Obj<'lean>::from_owned_raw(_runtime: &'lean lean_rs::LeanRuntime, ptr: *mut lean_rs_sys::types::lean_object) -> Self
+pub fn lean_rs::runtime::obj::Obj<'lean>::into_raw(self) -> *mut lean_rs_sys::types::lean_object
+pub fn lean_rs::runtime::obj::Obj<'lean>::runtime(&self) -> &'lean lean_rs::LeanRuntime
+impl core::clone::Clone for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::clone(&self) -> Self
+impl core::fmt::Debug for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for lean_rs::runtime::obj::Obj<'_>
+pub fn lean_rs::runtime::obj::Obj<'_>::drop(&mut self)
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs::runtime::obj::Obj<'_>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub fn lean_rs::runtime::obj::Obj<'lean>::try_from_lean(obj: Self) -> lean_rs::error::LeanResult<Self>
+impl<'lean> core::marker::Freeze for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> !core::marker::Send for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::runtime::obj::Obj<'lean>
+pub struct lean_rs::ObjRef<'lean, 'a>
+impl lean_rs::runtime::obj::ObjRef<'_, '_>
+pub fn lean_rs::runtime::obj::ObjRef<'_, '_>::as_raw_borrowed(&self) -> *mut lean_rs_sys::types::lean_object
+impl core::fmt::Debug for lean_rs::runtime::obj::ObjRef<'_, '_>
+pub fn lean_rs::runtime::obj::ObjRef<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean, 'a> core::marker::Freeze for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> !core::marker::Send for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> !core::marker::Sync for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::marker::Unpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::marker::UnsafeUnpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::RefUnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::UnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
 pub const lean_rs::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
-pub const lean_rs::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
-pub const lean_rs::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
 pub const lean_rs::LEAN_ERROR_MESSAGE_LIMIT: usize
-pub const lean_rs::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
-pub const lean_rs::LEAN_HEARTBEAT_LIMIT_MAX: u64
-pub const lean_rs::LEAN_PROOF_SUMMARY_BYTE_LIMIT: usize
 pub const lean_rs::VERSION: &str
+pub trait lean_rs::DecodeCallResult<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedResult
+pub type lean_rs::DecodeCallResult::CRepr: core::marker::Copy
+pub type lean_rs::DecodeCallResult::Output
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for T where T: lean_rs::abi::traits::LeanAbi<'lean>
+pub type T::CRepr = <T as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+pub type T::Output = T
+impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs::LeanIo<T>::Output = T
+pub trait lean_rs::LeanAbi<'lean>: core::marker::Sized + lean_rs::abi::traits::sealed::SealedAbi
+pub type lean_rs::LeanAbi::CRepr: core::marker::Copy
+impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type alloc::vec::Vec<T>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for core::option::Option<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type core::option::Option<T>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &str
+pub type &str::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for ()
+pub type ()::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for alloc::string::String
+pub type alloc::string::String::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for bool
+pub type bool::CRepr = u8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for char
+pub type char::CRepr = u32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for f64
+pub type f64::CRepr = f64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i16
+pub type i16::CRepr = i16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i32
+pub type i32::CRepr = i32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i64
+pub type i64::CRepr = i64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for i8
+pub type i8::CRepr = i8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for isize
+pub type isize::CRepr = isize
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanDeclaration<'lean>
+pub type lean_rs::LeanDeclaration<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanExpr<'lean>
+pub type lean_rs::LeanExpr<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanLevel<'lean>
+pub type lean_rs::LeanLevel<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::LeanName<'lean>
+pub type lean_rs::LeanName<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs::runtime::obj::Obj<'lean>
+pub type lean_rs::runtime::obj::Obj<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u16
+pub type u16::CRepr = u16
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u32
+pub type u32::CRepr = u32
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u64
+pub type u64::CRepr = u64
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u8
+pub type u8::CRepr = u8
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for usize
+pub type usize::CRepr = usize
+pub trait lean_rs::LeanArgs<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedArgs
+pub const lean_rs::LeanArgs::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8, A9> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8, A9) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7, A8, A9)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7, A8> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7, A8) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7, A8)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6, A7> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6, A7) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6, A7)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5, A6> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5, A6) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5, A6)::ARITY: usize
+impl<'lean, A1, A2, A3, A4, A5> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4, A5) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4, A5)::ARITY: usize
+impl<'lean, A1, A2, A3, A4> lean_rs::LeanArgs<'lean> for (A1, A2, A3, A4) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3, A4)::ARITY: usize
+impl<'lean, A1, A2, A3> lean_rs::LeanArgs<'lean> for (A1, A2, A3) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2, A3)::ARITY: usize
+impl<'lean, A1, A2> lean_rs::LeanArgs<'lean> for (A1, A2) where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1, A2)::ARITY: usize
+impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits::LeanAbi<'lean>
+pub const (A1)::ARITY: usize
+impl<'lean> lean_rs::LeanArgs<'lean> for ()
+pub const ()::ARITY: usize
 pub type lean_rs::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
