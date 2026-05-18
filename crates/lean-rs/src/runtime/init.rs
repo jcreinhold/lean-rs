@@ -60,7 +60,19 @@ impl LeanRuntime {
     /// unwind into Lean or C frames.
     pub fn init() -> LeanResult<&'static Self> {
         match INIT.get_or_init(do_initialize_once) {
-            Ok(()) => Ok(static_ref()),
+            Ok(()) => {
+                // Every successful `init()` mints the caller's permission
+                // to invoke Lean from the calling thread. The first call
+                // also runs the C-level `lean_initialize*` sequence inside
+                // `do_initialize_once`; subsequent calls (including those
+                // from other threads) only mark the local TLS depth. The
+                // call is idempotent and `!Send`-coherent: every safe
+                // handle requires a `&'lean LeanRuntime` to construct, so
+                // any thread that reaches a host call has provably been
+                // through `init()` on that thread.
+                super::thread::mark_calling_thread_permitted();
+                Ok(static_ref())
+            }
             Err(err) => Err(err.clone()),
         }
     }

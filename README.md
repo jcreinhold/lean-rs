@@ -40,7 +40,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
     proof-object opacity, concurrency stance, and the workspace `unsafe-code = "deny"` lint policy.
 - [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md) — supported Lean
     toolchain range, in-tree raw-FFI policy, header digest policy, crate semver, and supported-platform list.
-- [`04-raw-sys-design.md`](docs/architecture/04-raw-sys-design.md) — per-decision rationale behind `lean-rs-sys`
+- [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md) — per-decision rationale behind `lean-rs-sys`
     (publication status, opaque types, refcount-mirror strategy, module layout, naming, minimum-unsafe discipline).
 
 Later prompts in the implementation sequence read these docs first when deciding whether an API is deep, safe, and

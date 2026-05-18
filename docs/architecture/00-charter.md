@@ -198,5 +198,5 @@ The internal modules give the organizational benefit the layer cake encoded with
 intermediate published crates: a later refactor that moves `lean_rs::module` into `lean_rs::host::module` or collapses
 `batch` into `host` requires no consumer change.
 
-See [`04-raw-sys-design.md`](04-raw-sys-design.md) for the per-decision rationale behind `lean-rs-sys`'s shape
+See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the per-decision rationale behind `lean-rs-sys`'s shape
 (publication status, opaque types, refcount-mirror strategy, module layout, naming).

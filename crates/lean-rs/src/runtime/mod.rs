@@ -22,6 +22,7 @@ pub(crate) mod obj;
 pub(crate) mod thread;
 
 pub use init::LeanRuntime;
+pub use thread::LeanThreadGuard;
 
 #[cfg(test)]
 mod tests;

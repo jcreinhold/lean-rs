@@ -50,7 +50,7 @@ The split between `lean-rs-sys` and `lean-toolchain` is:
     layered link diagnostics, the reusable build-script helpers for downstream embedders, and the `required_symbols()`
     accessor that returns `lean_rs_sys::REQUIRED_SYMBOLS` directly.
 
-See [`04-raw-sys-design.md`](04-raw-sys-design.md) for the per-decision rationale behind `lean-rs-sys`'s shape.
+See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the per-decision rationale behind `lean-rs-sys`'s shape.
 
 ## Header digest
 

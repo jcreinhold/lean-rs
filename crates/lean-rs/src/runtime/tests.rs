@@ -51,3 +51,56 @@ fn worker_thread_can_attach_and_finalize() {
     });
     handle.join().expect("worker thread must not panic");
 }
+
+#[test]
+#[cfg(debug_assertions)]
+fn debug_assert_attached_panics_on_unattached_worker() {
+    use super::thread::debug_assert_attached;
+
+    // Every successful `init()` lifts the per-thread attach depth, but
+    // the worker spawned below never calls `init()` and never constructs
+    // a `LeanThreadGuard`. Its TLS depth stays at zero, so the
+    // assertion must fire.
+    let _ = LeanRuntime::init().expect("main-thread init must succeed");
+    let handle = thread::spawn(|| {
+        debug_assert_attached("tests::debug_assert_attached_panics_on_unattached_worker");
+    });
+    let err = handle
+        .join()
+        .expect_err("worker without a guard must panic the debug assertion");
+    drop(err);
+}
+
+#[test]
+fn attach_guard_satisfies_debug_assert_attached() {
+    use super::thread::debug_assert_attached;
+
+    let _ = LeanRuntime::init().expect("main-thread init must succeed");
+    let handle = thread::spawn(|| {
+        let runtime = LeanRuntime::init().expect("worker init must succeed");
+        let _guard = LeanThreadGuard::attach(runtime);
+        // No panic: the guard pushed the per-thread attach depth to 1.
+        debug_assert_attached("tests::attach_guard_satisfies_debug_assert_attached");
+    });
+    handle.join().expect("worker thread must not panic");
+}
+
+#[test]
+fn nested_attach_guards_balance_depth() {
+    use super::thread::debug_assert_attached;
+
+    let _ = LeanRuntime::init().expect("main-thread init must succeed");
+    let handle = thread::spawn(|| {
+        let runtime = LeanRuntime::init().expect("worker init must succeed");
+        let outer = LeanThreadGuard::attach(runtime);
+        {
+            let inner = LeanThreadGuard::attach(runtime);
+            debug_assert_attached("nested outer + inner");
+            drop(inner);
+        }
+        // Inner dropped; outer still keeps us attached.
+        debug_assert_attached("nested outer only");
+        drop(outer);
+    });
+    handle.join().expect("worker thread must not panic");
+}

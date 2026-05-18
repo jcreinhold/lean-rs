@@ -455,6 +455,11 @@ macro_rules! impl_arity {
                 reason = "arity 0 does not convert args or destructure them"
             )]
             pub fn call(&self, $($a: $A),*) -> LeanResult<R::Output> {
+                // Debug-only: catch worker threads that forgot to construct
+                // a `LeanThreadGuard` before invoking Lean code. Compiles
+                // to a no-op in release. See
+                // `docs/architecture/04-concurrency.md`.
+                crate::runtime::thread::debug_assert_attached("LeanExported::call");
                 let runtime = self.runtime;
                 let raw_out: R::CRepr = match self.target {
                     CallableTarget::Function(addr) => {

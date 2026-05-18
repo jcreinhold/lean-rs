@@ -114,7 +114,7 @@ pub use crate::host::evidence::{
 };
 pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::host::{LeanCapabilities, LeanHost, LeanSession, PoolStats, PooledSession, SessionPool, SessionStats};
-pub use crate::runtime::LeanRuntime;
+pub use crate::runtime::{LeanRuntime, LeanThreadGuard};
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
