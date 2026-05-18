@@ -77,7 +77,7 @@ impl<Req, Resp> core::fmt::Debug for LeanMetaService<Req, Resp> {
 // import strings are pinned here; the `LeanMetaService` shape is
 // otherwise sealed.
 
-const REQUIRED_IMPORTS: &[&str] = &["LeanRsFixture.Meta"];
+const REQUIRED_IMPORTS: &[&str] = &["LeanRsHostShims.Meta"];
 
 /// Register the `Meta.inferType` service.
 ///

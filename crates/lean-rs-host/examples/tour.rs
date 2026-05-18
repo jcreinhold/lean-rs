@@ -76,7 +76,7 @@ fn main() {
     // declarations the bulk query exercises.
     let t = Instant::now();
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsFixture.Meta"])
+        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"])
         .expect("session imports");
     report("session_import", t.elapsed().as_micros());
 

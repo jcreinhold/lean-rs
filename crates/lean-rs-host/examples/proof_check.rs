@@ -46,10 +46,10 @@ fn run() -> LeanResult<()> {
     let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
 
-    // `LeanRsFixture.Elaboration` brings in the Lean shim that
+    // `LeanRsHostShims.Elaboration` brings in the Lean shim that
     // `kernel_check` dispatches through; the Lean prelude is
     // imported transitively, so `1 + 1 = 2 := rfl` elaborates.
-    let mut session = caps.session(&["LeanRsFixture.Elaboration"])?;
+    let mut session = caps.session(&["LeanRsHostShims.Elaboration"])?;
 
     let source = "theorem demo_proof_check : 1 + 1 = 2 := rfl";
     let options = LeanElabOptions::new();

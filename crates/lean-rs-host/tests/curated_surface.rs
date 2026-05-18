@@ -33,8 +33,8 @@ fn curated_surface_drives_full_happy_path() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("fixture capability loads cleanly");
     let mut session = caps
-        .session(&["LeanRsFixture.Elaboration"])
-        .expect("Elaboration module imports cleanly");
+        .session(&["LeanRsHostShims.Elaboration"])
+        .expect("LeanRsHostShims.Elaboration module imports cleanly");
 
     let _decl = session
         .query_declaration("Nat.add")

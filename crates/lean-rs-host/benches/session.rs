@@ -95,7 +95,7 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsFixture.Elaboration"])
+        .session(&["LeanRsHostShims.Elaboration"])
         .expect("Elaboration imports cleanly");
     let opts = LeanElabOptions::new();
 
@@ -120,7 +120,7 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 // construction.
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
-    let mut session = caps.session(&["LeanRsFixture.Meta"]).expect("Meta imports cleanly");
+    let mut session = caps.session(&["LeanRsHostShims.Meta"]).expect("Meta imports cleanly");
     let expr = session
         .declaration_type("Nat.zero")
         .expect("type query for Nat.zero")

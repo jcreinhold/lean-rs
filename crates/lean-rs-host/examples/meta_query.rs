@@ -55,7 +55,7 @@ fn run() -> LeanResult<()> {
     // `Meta` carries the `MetaM` shims `run_meta` dispatches to;
     // `Elaboration` carries the elaborator we use to build a
     // `LeanExpr` to feed `infer_type`.
-    let mut session = caps.session(&["LeanRsFixture.Meta", "LeanRsFixture.Elaboration"])?;
+    let mut session = caps.session(&["LeanRsHostShims.Meta", "LeanRsHostShims.Elaboration"])?;
 
     // Build an expression to query. `Nat.succ 0` elaborates against
     // the prelude without needing any extra imports. A failure here

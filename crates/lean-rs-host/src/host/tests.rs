@@ -240,7 +240,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
 // -- elaborate + kernel_check (prompt 15) -------------------------------
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Elaboration"])
+    caps.session(&["LeanRsHostShims.Elaboration"])
         .expect("session imports cleanly")
 }
 
@@ -622,14 +622,15 @@ fn session_reuse_amortises_import() {
 
 // -- run_meta (prompt 16) -----------------------------------------------
 //
-// Each test imports `LeanRsFixture.Meta` (which also pulls in
-// `LeanRsFixture.Elaboration` via the dependency edge). The fixture
+// Each test imports `LeanRsHostShims.Meta` (which also pulls in
+// `LeanRsHostShims.Elaboration` via the dependency edge). The fixture
 // dylib exports the three optional meta-service symbols, so the
 // `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
 // dispatches through cached addresses.
 
 fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Meta"]).expect("session imports cleanly")
+    caps.session(&["LeanRsHostShims.Meta"])
+        .expect("session imports cleanly")
 }
 
 #[test]

@@ -52,7 +52,7 @@ pub enum LeanSeverity {
 impl LeanSeverity {
     /// Decode the byte the Lean side wrote for the `severity` scalar field.
     /// `0 = info`, `1 = warning`, `2 = error` per the Lean-side
-    /// declaration order of `LeanRsFixture.Elaboration.Severity`.
+    /// declaration order of `LeanRsHostShims.Elaboration.Severity`.
     fn from_byte(byte: u8) -> LeanResult<Self> {
         match byte {
             0 => Ok(Self::Info),

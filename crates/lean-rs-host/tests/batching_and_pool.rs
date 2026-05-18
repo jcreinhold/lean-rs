@@ -42,7 +42,7 @@ fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> Lea
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Elaboration"])
+    caps.session(&["LeanRsHostShims.Elaboration"])
         .expect("session imports cleanly")
 }
 
@@ -337,7 +337,10 @@ fn session_pool_distinct_imports_do_not_match() {
     let pool = SessionPool::with_capacity(runtime, 4);
 
     drop(pool.acquire(&caps, &["LeanRsFixture.Handles"]).expect("acquire A"));
-    drop(pool.acquire(&caps, &["LeanRsFixture.Elaboration"]).expect("acquire B"));
+    drop(
+        pool.acquire(&caps, &["LeanRsHostShims.Elaboration"])
+            .expect("acquire B"),
+    );
 
     let stats = pool.stats();
     assert_eq!(
