@@ -2,15 +2,16 @@
 //! symbol addresses pre-resolved.
 //!
 //! [`LeanCapabilities`] owns the [`crate::module::LeanLibrary`] and
-//! caches up to twelve function-symbol addresses that
-//! [`crate::host::LeanSession`] dispatches through: nine **mandatory**
-//! baseline symbols (seven environment-query symbols from prompt 14
-//! plus the prompt-15 `elaborate` / `kernel_check` pair) and three
-//! **optional** prompt-16 meta-service symbols (`infer_type`, `whnf`,
-//! `heartbeat_burn`). A missing mandatory symbol fails capability
-//! load; a missing meta-service symbol degrades to a synthesised
-//! [`crate::host::meta::LeanMetaResponse::Unsupported`] at the
-//! [`crate::LeanSession::run_meta`] call site. Pre-resolution at
+//! caches the session symbol addresses that
+//! [`crate::host::LeanSession`] dispatches through: thirteen
+//! **mandatory** symbols (environment queries, elaboration / kernel
+//! check, bulk variants, evidence re-validation / summary) plus three
+//! **optional** meta-service symbols (`infer_type`, `whnf`,
+//! `heartbeat_burn`). The full table lives on
+//! [`crate::host::LeanSession`]. A missing mandatory symbol fails
+//! capability load; a missing meta-service symbol degrades to a
+//! synthesised [`crate::host::meta::LeanMetaResponse::Unsupported`] at
+//! the [`crate::LeanSession::run_meta`] call site. Pre-resolution at
 //! construction means each later query is one struct-field read and
 //! one FFI call — no per-query `dlsym`.
 //!

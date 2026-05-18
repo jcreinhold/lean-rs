@@ -16,9 +16,10 @@ use crate::runtime::obj::Obj;
 /// by [`crate::LeanSession::kernel_check`]. The Rust handle wraps the
 /// Lean-side `Evidence` value (currently a one-field structure carrying
 /// a `Lean.Declaration`) opaquely — Rust does not inspect the contained
-/// proof term or declaration. Prompt 17 layers `ProofSummary` and the
-/// `check_evidence` re-validation method on top; for prompt 15 the
-/// handle is intentionally accessor-free.
+/// proof term or declaration. The two operations callers do with a
+/// handle are [`crate::LeanSession::check_evidence`] (re-run the kernel
+/// against it) and [`crate::LeanSession::summarize_evidence`] (project
+/// it to a bounded [`crate::host::evidence::ProofSummary`]).
 ///
 /// [`Clone`] bumps the underlying refcount; [`Drop`] releases it.
 /// Neither [`Send`] nor [`Sync`]: inherited from the crate-internal

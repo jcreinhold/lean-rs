@@ -39,8 +39,8 @@
 //!
 //! [`SessionPool`] is `!Send + !Sync` (inherited from the contained
 //! `Obj<'lean>` and the `RefCell` that wraps the free list). The pool
-//! is a per-thread reuse helper; cross-thread pooling is explicitly out
-//! of scope (per prompt 20). Per-pool stats are `Cell<PoolStats>` —
+//! is a per-thread reuse helper; cross-thread pooling is explicitly
+//! out of scope. Per-pool stats are `Cell<PoolStats>` —
 //! single-threaded but uniform with the per-session
 //! [`crate::host::session::SessionStats`] story.
 
@@ -88,7 +88,7 @@ pub struct PoolStats {
 /// Free-list key: the ordered imports list a pooled environment was
 /// imported with.
 ///
-/// Order matters because [`Lean.importModules`] is order-sensitive — a
+/// Order matters because `Lean.importModules` is order-sensitive — a
 /// later import can shadow an earlier one. Equality is structural and
 /// canonical (the same `&[&str]` always produces the same key).
 #[derive(Clone, Eq, PartialEq)]
@@ -228,26 +228,40 @@ impl<'lean> SessionPool<'lean> {
         })
     }
 
-    /// Snapshot of accumulated pool metrics.
+    /// Snapshot the accumulated pool metrics.
+    ///
+    /// Counters never reset; subtract two snapshots to measure activity
+    /// over an interval. See [`PoolStats`] for the field invariants
+    /// (e.g. `imports_performed + reused == acquired`).
     #[must_use]
     pub fn stats(&self) -> PoolStats {
         self.stats.get()
     }
 
-    /// Current number of environments on the free list.
+    /// Number of environments currently sitting on the free list.
+    ///
+    /// Equals `acquired - released_to_pool` adjusted for outstanding
+    /// [`PooledSession`] handles — i.e. the count of warm imports
+    /// available for the next [`Self::acquire`] without going through
+    /// `Lean.importModules`.
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.borrow().free.len()
     }
 
-    /// `true` iff the free list is empty.
+    /// `true` iff [`Self::len`] is zero; every subsequent
+    /// [`Self::acquire`] will perform a fresh import.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Configured capacity (the upper bound passed to
-    /// [`Self::with_capacity`]).
+    /// Configured hard upper bound on the free list.
+    ///
+    /// Set by [`Self::with_capacity`]. A pool releasing a
+    /// [`PooledSession`] while at capacity drops the environment
+    /// instead of pushing it back; that release shows up in
+    /// [`PoolStats::released_dropped`] rather than `released_to_pool`.
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity

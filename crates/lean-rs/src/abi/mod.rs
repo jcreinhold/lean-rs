@@ -1,10 +1,9 @@
 //! Typed first-order ABI conversions for `lean-rs`.
 //!
 //! The whole module is `pub(crate)` per `RD-2026-05-17-004`. The traits
-//! [`IntoLean`] and [`TryFromLean`] are the infrastructure that prompt 11
-//! (`MODULE-EXPORTS` loading) and prompt 12 (typed `LeanExported{N}`)
-//! drive their argument marshalling and return decoding through; they
-//! never appear in the public surface.
+//! [`traits::IntoLean`] and [`traits::TryFromLean`] are the infrastructure
+//! that the `module` and `host` layers drive their argument marshalling
+//! and return decoding through; they never appear in the public surface.
 //!
 //! Trait imports for sibling modules:
 //!
@@ -26,7 +25,7 @@
 //!   [`borrow_bytes`](bytearray::borrow_bytes) helper avoids the Rust-side
 //!   copy) — see [`bytearray`].
 //! - `Array α` ↔ Rust `Vec<T>` (preallocated, single-allocation
-//!   construction) — see [`array`].
+//!   construction) — see [`mod@array`].
 //! - `Option α` ↔ Rust `Option<T>` — see [`option`].
 //! - `Except ε α` ↔ Rust [`Result<T, E>`] **and** the internal value-type
 //!   mirror [`Except`](except::Except) — see [`except`].
@@ -35,13 +34,13 @@
 //!   [`take_ctor_objects`](structure::take_ctor_objects), and
 //!   [`ctor_tag`](structure::ctor_tag) — see [`structure`].
 
-// Items here are infrastructure for the typed `LeanExported{N}` family
-// (prompt 12) and the `module`/`host` modules (prompts 09–18). Until the
-// first non-test caller lands they look dead to the lib-only `cargo
-// build`; only `cargo test` instantiates them through `abi::tests`.
+// Items here are infrastructure for the typed `LeanExported` family
+// and the `module` / `host` modules. A subset is exercised only by
+// `cargo test` (the in-tree `abi::tests` and the integration suites);
+// the lib-only `cargo build` cannot prove every helper is reachable.
 #![allow(
     dead_code,
-    reason = "first non-test caller lands in prompts 11–12 (LeanModule + LeanExported{N})"
+    reason = "ABI helpers reached through generic dispatch; lib-only build cannot prove reachability"
 )]
 
 pub(crate) mod array;

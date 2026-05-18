@@ -7,10 +7,10 @@
 //! therefore a value of this type cannot exist unless the corresponding
 //! module is live in the Lean runtime.
 //!
-//! This prompt (`11-module-loading-and-initializers`) lands the handle
-//! itself plus a diagnostic accessor. Typed exported-function call
-//! handles (`LeanExported{N}`) are added by prompt 12, which attaches
-//! `exported_*` methods to this type.
+//! Typed exported-function handles attach to this type via
+//! [`LeanModule::exported`], which returns a
+//! [`crate::module::LeanExported`] parameterised by the argument tuple
+//! and return-type marker.
 
 use super::initializer::InitializerName;
 use super::library::LeanLibrary;

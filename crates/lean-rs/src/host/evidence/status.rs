@@ -21,10 +21,10 @@ use crate::runtime::obj::Obj;
 /// source.
 ///
 /// The tag accessor on [`LeanKernelOutcome::status`] returns values of
-/// this type; it is also the tag prompt 17 will return from the
-/// [`crate::LeanEvidence`] re-validation method. `#[non_exhaustive]`
-/// so future capability refinements can extend the taxonomy without
-/// breaking exhaustive matches.
+/// this type, as does [`crate::LeanSession::check_evidence`] when
+/// re-validating a captured [`crate::LeanEvidence`] handle.
+/// `#[non_exhaustive]` so future capability refinements can extend the
+/// taxonomy without breaking exhaustive matches.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum EvidenceStatus {
@@ -72,7 +72,11 @@ pub enum LeanKernelOutcome<'lean> {
 }
 
 impl LeanKernelOutcome<'_> {
-    /// Project the variant tag without inspecting the payload.
+    /// Project the variant tag without consuming the payload.
+    ///
+    /// Useful when the caller only needs to branch on `Checked` vs. one
+    /// of the failure tags before deciding whether to read the contained
+    /// [`LeanElabFailure`] diagnostics.
     #[must_use]
     pub fn status(&self) -> EvidenceStatus {
         match self {

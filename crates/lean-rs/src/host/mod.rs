@@ -1,22 +1,32 @@
 //! High-level surface for hosting Lean capabilities.
 //!
-//! The eventual public shape of `host` (per
-//! [`docs/architecture/03-host-api.md`](../../../docs/architecture/03-host-api.md))
-//! is a four-piece API on top of the [`crate::module`] dispatch primitives:
+//! Sits on top of the [`crate::module`] dispatch primitives. The four-piece
+//! shape is pinned by `docs/architecture/03-host-api.md`:
 //!
-//! - [`handle`] — opaque, lifetime-bound receipts for semantic Lean values
-//!   (`Name`, `Level`, `Expr`, `Declaration`). **Landed (prompt 13).**
+//! - [`handle`] — opaque, lifetime-bound receipts for semantic Lean
+//!   values: [`handle::LeanName`], [`handle::LeanLevel`],
+//!   [`handle::LeanExpr`], [`handle::LeanDeclaration`].
 //! - [`LeanHost`], [`LeanCapabilities`], [`LeanSession`] — Lake-project
 //!   entry point, capability loading (with pre-resolved session symbol
-//!   addresses), and a long-lived session with import + environment-query
-//!   methods. **Landed (prompt 14).** Bulk methods on `LeanSession`
-//!   follow in prompt 20.
-//! - [`elaboration`] — typed options, diagnostics, and the
-//!   `LeanSession::elaborate` / `kernel_check` methods (prompt 15).
-//! - [`evidence`] — opaque kernel-checked evidence handle plus the
-//!   `EvidenceStatus` / `LeanKernelOutcome` taxonomy returned by
-//!   `kernel_check`. The prompt-17 expansion adds `ProofSummary` and a
-//!   re-validation method.
+//!   addresses cached at load time), and a long-lived session that owns
+//!   the imported `Lean.Environment` and dispatches every typed query,
+//!   elaboration, kernel check, bulk operation, and meta call.
+//! - [`elaboration`] — bounded [`elaboration::LeanElabOptions`], typed
+//!   [`elaboration::LeanDiagnostic`] / [`elaboration::LeanElabFailure`],
+//!   and the published byte / heartbeat ceilings consumed by
+//!   [`LeanSession::elaborate`] and [`LeanSession::kernel_check`].
+//! - [`evidence`] — opaque [`evidence::LeanEvidence`] kernel-checked
+//!   evidence handle plus the [`evidence::EvidenceStatus`] /
+//!   [`evidence::LeanKernelOutcome`] taxonomy returned by
+//!   [`LeanSession::kernel_check`], and the bounded
+//!   [`evidence::ProofSummary`] projection returned by
+//!   [`LeanSession::summarize_evidence`].
+//!
+//! Two further pieces sit alongside but stay at sub-module paths:
+//! [`meta`] for the optional bounded `MetaM` capability (only
+//! [`LeanSession::run_meta`] touches it), and [`pool`] for the
+//! capacity-bounded [`pool::SessionPool`] / [`pool::PooledSession`]
+//! reuse helper.
 //!
 //! ## Cascade
 //!
@@ -28,10 +38,9 @@
 //! let decl     = sess.query_declaration("MyLib.SomeModule.myDef")?;
 //! ```
 //!
-//! Construction or inspection of the handle types in [`handle`] still
-//! goes through Lean fixture exports reached via
-//! [`crate::module::LeanModule::exported`] when needed outside of a
-//! session.
+//! Construction or inspection of the handle types in [`handle`] outside
+//! of a session goes through Lean fixture exports reached via
+//! [`crate::module::LeanModule::exported`].
 
 pub mod elaboration;
 pub mod evidence;

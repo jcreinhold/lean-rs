@@ -5,9 +5,9 @@
 //!
 //! - `UInt8`, `UInt16`, `UInt32` (on 64-bit) and the matching `IntN` always
 //!   fit in a scalar-tagged pointer via [`lean_rs_sys::object::lean_box`].
-//! - `UInt64`, `USize`, `Float` are too wide for a scalar pointer; they are
-//!   wrapped in a single-field constructor by the polymorphic-boxing
-//!   helpers added in prompt 08 ([`lean_rs_sys::ctor::lean_box_uint64`]
+//! - `UInt64`, `USize`, `Float` are too wide for a scalar pointer; they
+//!   are wrapped in a single-field constructor by the polymorphic-boxing
+//!   helpers in [`lean_rs_sys::ctor`] ([`lean_rs_sys::ctor::lean_box_uint64`]
 //!   and friends).
 //! - `Bool` is the two-constructor inductive `false → lean_box(0)`,
 //!   `true → lean_box(1)`.
@@ -16,7 +16,7 @@
 //!   `UInt32` (always ctor-boxed because constructors carrying chars
 //!   land in the polymorphic-position layout).
 //!
-//! The unboxed direct-call form used by `LeanExported{N}` (prompt 12)
+//! The unboxed direct-call form used by [`crate::module::LeanExported`]
 //! does not pass through this module; the trait surface here is for
 //! polymorphic-position values that live inside Lean objects.
 
@@ -105,8 +105,8 @@ impl<'lean> TryFromLean<'lean> for () {
         // Unit has a single inhabitant; the payload value is `0` by
         // construction. We do not assert on the unbox result because a
         // future Lean encoding change (e.g. tag != 0 for Unit) should not
-        // silently fail at this layer — the prompt 09 ctor decoder will
-        // catch true mismatches.
+        // silently fail at this layer — the ctor decoder catches true
+        // mismatches at the surrounding constructor boundary.
         Ok(())
     }
 }

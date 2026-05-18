@@ -1,0 +1,124 @@
+pub mod lean_toolchain
+pub use lean_toolchain::LEAN_HEADER_DIGEST
+pub use lean_toolchain::LEAN_HEADER_PATH
+pub use lean_toolchain::LEAN_VERSION
+pub enum lean_toolchain::DiscoverySource
+pub lean_toolchain::DiscoverySource::ElanHome
+pub lean_toolchain::DiscoverySource::ExplicitSysroot
+pub lean_toolchain::DiscoverySource::LakeFixtureEnv
+pub lean_toolchain::DiscoverySource::LeanSysrootEnv
+pub lean_toolchain::DiscoverySource::Path
+impl core::clone::Clone for lean_toolchain::DiscoverySource
+pub fn lean_toolchain::DiscoverySource::clone(&self) -> lean_toolchain::DiscoverySource
+impl core::cmp::Eq for lean_toolchain::DiscoverySource
+impl core::cmp::PartialEq for lean_toolchain::DiscoverySource
+pub fn lean_toolchain::DiscoverySource::eq(&self, other: &lean_toolchain::DiscoverySource) -> bool
+impl core::fmt::Debug for lean_toolchain::DiscoverySource
+pub fn lean_toolchain::DiscoverySource::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_toolchain::DiscoverySource
+impl core::marker::StructuralPartialEq for lean_toolchain::DiscoverySource
+impl core::marker::Freeze for lean_toolchain::DiscoverySource
+impl core::marker::Send for lean_toolchain::DiscoverySource
+impl core::marker::Sync for lean_toolchain::DiscoverySource
+impl core::marker::Unpin for lean_toolchain::DiscoverySource
+impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverySource
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverySource
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverySource
+#[non_exhaustive] pub enum lean_toolchain::LinkDiagnostics
+pub lean_toolchain::LinkDiagnostics::AllowlistFailure
+pub lean_toolchain::LinkDiagnostics::AllowlistFailure::name: &'static str
+pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing
+pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing::path: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing::recovery: &'static str
+pub lean_toolchain::LinkDiagnostics::MissingHeader
+pub lean_toolchain::LinkDiagnostics::MissingHeader::path: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::MissingLean
+pub lean_toolchain::LinkDiagnostics::MissingLean::tried: alloc::vec::Vec<alloc::string::String>
+pub lean_toolchain::LinkDiagnostics::MissingLib
+pub lean_toolchain::LinkDiagnostics::MissingLib::name: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::MissingLib::search_dirs: alloc::vec::Vec<std::path::PathBuf>
+pub lean_toolchain::LinkDiagnostics::VersionMismatch
+pub lean_toolchain::LinkDiagnostics::VersionMismatch::actual: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::VersionMismatch::expected: alloc::string::String
+impl core::error::Error for lean_toolchain::LinkDiagnostics
+impl core::fmt::Debug for lean_toolchain::LinkDiagnostics
+pub fn lean_toolchain::LinkDiagnostics::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::LinkDiagnostics
+pub fn lean_toolchain::LinkDiagnostics::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::LinkDiagnostics
+impl core::marker::Send for lean_toolchain::LinkDiagnostics
+impl core::marker::Sync for lean_toolchain::LinkDiagnostics
+impl core::marker::Unpin for lean_toolchain::LinkDiagnostics
+impl core::marker::UnsafeUnpin for lean_toolchain::LinkDiagnostics
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LinkDiagnostics
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LinkDiagnostics
+pub struct lean_toolchain::DiscoverOptions
+pub lean_toolchain::DiscoverOptions::allow_elan: bool
+pub lean_toolchain::DiscoverOptions::allow_lake_env: bool
+pub lean_toolchain::DiscoverOptions::allow_path_lookup: bool
+pub lean_toolchain::DiscoverOptions::explicit_sysroot: core::option::Option<std::path::PathBuf>
+pub lean_toolchain::DiscoverOptions::toolchain_file: core::option::Option<std::path::PathBuf>
+impl core::clone::Clone for lean_toolchain::DiscoverOptions
+pub fn lean_toolchain::DiscoverOptions::clone(&self) -> lean_toolchain::DiscoverOptions
+impl core::default::Default for lean_toolchain::DiscoverOptions
+pub fn lean_toolchain::DiscoverOptions::default() -> Self
+impl core::fmt::Debug for lean_toolchain::DiscoverOptions
+pub fn lean_toolchain::DiscoverOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::DiscoverOptions
+impl core::marker::Send for lean_toolchain::DiscoverOptions
+impl core::marker::Sync for lean_toolchain::DiscoverOptions
+impl core::marker::Unpin for lean_toolchain::DiscoverOptions
+impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverOptions
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverOptions
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverOptions
+pub struct lean_toolchain::ToolchainFingerprint
+pub lean_toolchain::ToolchainFingerprint::fixture_sha256: &'static str
+pub lean_toolchain::ToolchainFingerprint::header_sha256: &'static str
+pub lean_toolchain::ToolchainFingerprint::host_triple: &'static str
+pub lean_toolchain::ToolchainFingerprint::lean_version: &'static str
+impl lean_toolchain::ToolchainFingerprint
+pub const fn lean_toolchain::ToolchainFingerprint::current() -> Self
+impl core::clone::Clone for lean_toolchain::ToolchainFingerprint
+pub fn lean_toolchain::ToolchainFingerprint::clone(&self) -> lean_toolchain::ToolchainFingerprint
+impl core::cmp::Eq for lean_toolchain::ToolchainFingerprint
+impl core::cmp::PartialEq for lean_toolchain::ToolchainFingerprint
+pub fn lean_toolchain::ToolchainFingerprint::eq(&self, other: &lean_toolchain::ToolchainFingerprint) -> bool
+impl core::default::Default for lean_toolchain::ToolchainFingerprint
+pub fn lean_toolchain::ToolchainFingerprint::default() -> Self
+impl core::fmt::Debug for lean_toolchain::ToolchainFingerprint
+pub fn lean_toolchain::ToolchainFingerprint::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::ToolchainFingerprint
+pub fn lean_toolchain::ToolchainFingerprint::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::StructuralPartialEq for lean_toolchain::ToolchainFingerprint
+impl core::marker::Freeze for lean_toolchain::ToolchainFingerprint
+impl core::marker::Send for lean_toolchain::ToolchainFingerprint
+impl core::marker::Sync for lean_toolchain::ToolchainFingerprint
+impl core::marker::Unpin for lean_toolchain::ToolchainFingerprint
+impl core::marker::UnsafeUnpin for lean_toolchain::ToolchainFingerprint
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::ToolchainFingerprint
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainFingerprint
+#[non_exhaustive] pub struct lean_toolchain::ToolchainInfo
+pub lean_toolchain::ToolchainInfo::fingerprint: lean_toolchain::ToolchainFingerprint
+pub lean_toolchain::ToolchainInfo::header_path: std::path::PathBuf
+pub lean_toolchain::ToolchainInfo::lean_binary: core::option::Option<std::path::PathBuf>
+pub lean_toolchain::ToolchainInfo::lib_dir: std::path::PathBuf
+pub lean_toolchain::ToolchainInfo::prefix: std::path::PathBuf
+pub lean_toolchain::ToolchainInfo::source: lean_toolchain::DiscoverySource
+pub lean_toolchain::ToolchainInfo::version: alloc::string::String
+impl core::clone::Clone for lean_toolchain::ToolchainInfo
+pub fn lean_toolchain::ToolchainInfo::clone(&self) -> lean_toolchain::ToolchainInfo
+impl core::fmt::Debug for lean_toolchain::ToolchainInfo
+pub fn lean_toolchain::ToolchainInfo::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::ToolchainInfo
+impl core::marker::Send for lean_toolchain::ToolchainInfo
+impl core::marker::Sync for lean_toolchain::ToolchainInfo
+impl core::marker::Unpin for lean_toolchain::ToolchainInfo
+impl core::marker::UnsafeUnpin for lean_toolchain::ToolchainInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::ToolchainInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainInfo
+pub const lean_toolchain::HOST_TRIPLE: &str
+pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
+pub const lean_toolchain::VERSION: &str
+pub fn lean_toolchain::discover_toolchain(opts: &lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::emit_lean_link_directives()
+pub fn lean_toolchain::required_symbols() -> &'static [&'static str]

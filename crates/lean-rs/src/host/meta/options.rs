@@ -102,11 +102,11 @@ impl LeanMetaOptions {
 
     /// Replace the diagnostic byte budget. Values above
     /// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`] saturate at the ceiling.
-    /// Threaded through the ABI; the prompt-16 single-message failure
+    /// Threaded through the ABI; the current single-message failure
     /// branches do not actively truncate (Rust's `LeanDiagnostic`
     /// decoder already bounds at [`crate::LEAN_ERROR_MESSAGE_LIMIT`]).
-    /// Future multi-message services will consume the budget the same
-    /// way the elaboration shim's `serializeMessages` already does.
+    /// Multi-message services would consume the budget the same way
+    /// the elaboration shim's `serializeMessages` does.
     #[must_use]
     pub fn diagnostic_byte_limit(mut self, bytes: usize) -> Self {
         self.diagnostic_byte_limit = bytes.min(LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX);

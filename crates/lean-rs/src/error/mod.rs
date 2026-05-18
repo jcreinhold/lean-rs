@@ -189,6 +189,11 @@ pub struct LeanException {
 
 impl LeanException {
     /// The `IO.Error` constructor Lean reported.
+    ///
+    /// Use this to classify a Lean-thrown exception when the
+    /// caller-facing taxonomy in [`LeanDiagnosticCode`] is not specific
+    /// enough — for example, distinguishing `FileNotFound` from
+    /// `PermissionDenied` to drive different recovery paths.
     #[must_use]
     pub fn kind(&self) -> LeanExceptionKind {
         self.kind
@@ -221,12 +226,22 @@ pub struct HostFailure {
 
 impl HostFailure {
     /// The host-stack stage that observed the failure.
+    ///
+    /// This is the *internal* classification; reach for
+    /// [`Self::code`] when displaying a stable identifier or routing on
+    /// the caller-facing failure family. The [`HostStage`] tag may grow
+    /// new variants alongside new internal paths.
     #[must_use]
     pub fn stage(&self) -> HostStage {
         self.stage
     }
 
     /// The stable diagnostic code matching this failure.
+    ///
+    /// Recorded at the construction site rather than projected from
+    /// [`Self::stage`], so the code identity does not drift if the
+    /// internal stage tag is later refined. Use this for stable
+    /// logging, metrics, or downstream error routing.
     #[must_use]
     pub fn code(&self) -> LeanDiagnosticCode {
         self.code

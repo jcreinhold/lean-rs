@@ -58,8 +58,9 @@ impl ProofSummary {
 
     /// A human-readable kind tag. The Lean shim emits one of
     /// `"theorem"`, `"definition"`, `"axiom"`, `"opaque"`, or
-    /// `"unsupported"` for declaration kinds the prompt-15
-    /// `kernel_check` classifier does not currently produce.
+    /// `"unsupported"` for declaration kinds the
+    /// [`crate::LeanSession::kernel_check`] classifier does not
+    /// currently produce.
     #[must_use]
     pub fn kind(&self) -> &str {
         &self.kind

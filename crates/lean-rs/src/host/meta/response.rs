@@ -9,9 +9,9 @@
 //! dispatch.
 //!
 //! `LeanMetaResponse<Resp>` is the value type [`crate::LeanSession::run_meta`]
-//! returns; callers can both branch on the typed tag via [`Self::status`]
-//! and read the typed payload on the `Ok` branch (or the structured
-//! diagnostics on the other three).
+//! returns; callers can both branch on the typed tag via
+//! [`LeanMetaResponse::status`] and read the typed payload on the `Ok`
+//! branch (or the structured diagnostics on the other three).
 
 use crate::abi::structure::{ctor_tag, take_ctor_objects};
 use crate::abi::traits::{TryFromLean, conversion_error};

@@ -6,14 +6,14 @@
 //! - [`LeanExported<'lean, 'lib, Args, R>`] — a typed handle for an
 //!   exported Lean symbol. `Args` is a tuple of Rust argument types
 //!   (`()`, `(A,)`, `(A, B)`, … up to arity 12); each element must
-//!   implement [`crate::abi::LeanAbi`]. `R` is the return type, bounded
+//!   implement [`crate::abi::traits::LeanAbi`]. `R` is the return type, bounded
 //!   by [`DecodeCallResult`] — a sealed trait satisfied by every
-//!   [`crate::abi::LeanAbi`] type (pure call) and by [`LeanIo<T>`] for
-//!   `T: crate::abi::TryFromLean` (IO-returning Lean export).
+//!   [`crate::abi::traits::LeanAbi`] type (pure call) and by [`LeanIo<T>`] for
+//!   `T: crate::abi::traits::TryFromLean` (IO-returning Lean export).
 //! - [`LeanIo<T>`] — return-type marker for Lean exports declared
 //!   `IO α`. Writing `exported::<Args, LeanIo<T>>(name)` tells the
 //!   handle to compose `decode_io` before
-//!   [`crate::abi::TryFromLean::try_from_lean`]. The `.call(...)` method
+//!   [`crate::abi::traits::TryFromLean::try_from_lean`]. The `.call(...)` method
 //!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`) — the marker
 //!   only lives in the type signature.
 //! - [`LeanModule::exported<Args, R>(name)`](super::loaded::LeanModule::exported)
@@ -43,7 +43,7 @@
 //! `LeanExported0..LeanExported12` arity family. Arity lives in the tuple
 //! type, not in the method name. IO-ness lives in the return type rather
 //! than in a `.call_io()` method. Per-type C-ABI representation (unboxed
-//! scalar vs boxed `lean_object*`) is hidden behind [`crate::abi::LeanAbi`]
+//! scalar vs boxed `lean_object*`) is hidden behind [`crate::abi::traits::LeanAbi`]
 //! — Lake emits both shapes depending on the Lean type, and the typed
 //! handle's function-pointer cast is generic over each arg's `CRepr`.
 //!

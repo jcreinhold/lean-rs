@@ -16,14 +16,14 @@
 //! `LeanError::LeanException`; application-level success-or-error
 //! semantics cross as values. A Lean function returning
 //! `IO (Except E T)` therefore decodes as `LeanResult<Result<T, E>>`
-//! once prompt 10's `decode_io` is wired in.
+//! through the `decode_io` helper in [`crate::error::io`].
 //!
 //! Two trait surfaces are exposed:
 //!
 //! 1. [`Except<E, T>`] is the precise Lean-shaped mirror (variant
 //!    ordering matches Lean's tag order). The `decode_io` helper and the
-//!    typed handles in prompt 12 use this type directly when the Lean
-//!    inductive is `Except`.
+//!    typed [`crate::module::LeanExported`] handles use this type
+//!    directly when the Lean inductive is `Except`.
 //! 2. `Result<T, E>` carries the same impls so Rust call sites can stay
 //!    in their native error type without an extra `.into()` hop.
 //!    Internally the `Result` impls funnel through the `Except` impls via

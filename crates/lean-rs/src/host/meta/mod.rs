@@ -3,8 +3,8 @@
 //! Rust can invoke a **closed registry** of Lean-authored meta services
 //! through [`crate::LeanSession::run_meta`]. Each service is a sealed
 //! [`LeanMetaService`] descriptor pinning a name, the `.olean` modules
-//! required in the session, and a typed `(Req, Resp)` shape. The three
-//! pinned services landed in prompt 16:
+//! required in the session, and a typed `(Req, Resp)` shape. Three
+//! services are pinned:
 //!
 //! - [`infer_type`] — runs `Meta.inferType` on a supplied `Expr`.
 //! - [`whnf`] — runs `Meta.whnf` on a supplied `Expr` under the bundle's

@@ -2,7 +2,7 @@
 //! [`crate::LeanSession`].
 //!
 //! Two session methods sit alongside the read-only environment-query
-//! surface from prompt 14:
+//! surface:
 //!
 //! - [`crate::LeanSession::elaborate`] — parse + elaborate a single Lean
 //!   term against an optional expected type, returning a
@@ -18,12 +18,11 @@
 //! saturate at the published ceilings — there is no error path for
 //! out-of-range option values; the bound exists as a safety rail.
 //!
-//! The capability contract is extended additively over prompt 14: the
-//! Lean-side fixture exports `lean_rs_host_elaborate` and
-//! `lean_rs_host_kernel_check` alongside the seven environment-query
-//! symbols. [`crate::host::LeanCapabilities`] caches the two new
-//! addresses at load time so the per-call cost is one struct-field
-//! read plus one FFI call.
+//! The capability contract names two Lean-side fixture exports
+//! (`lean_rs_host_elaborate`, `lean_rs_host_kernel_check`) alongside the
+//! seven environment-query symbols. [`crate::host::LeanCapabilities`]
+//! caches both addresses at load time so the per-call cost is one
+//! struct-field read plus one FFI call.
 
 pub(crate) mod diagnostic;
 pub(crate) mod failure;

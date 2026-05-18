@@ -1,11 +1,11 @@
 //! Constructor-object plumbing for product and sum structures.
 //!
-//! The "structure pattern" the prompt-09 work introduces is two
-//! primitives, hand-called at each struct boundary. There is no per-struct
-//! trait, no derive, no procedural macro: callers compose
-//! [`alloc_ctor_with_objects`] and [`take_ctor_objects`] field by field
-//! and let the per-field [`IntoLean`]/[`TryFromLean`] impls do the actual
-//! type marshalling.
+//! The "structure pattern" lives at two primitives, hand-called at each
+//! struct boundary. There is no per-struct trait, no derive, no
+//! procedural macro: callers compose [`alloc_ctor_with_objects`] and
+//! [`take_ctor_objects`] field by field and let the per-field
+//! [`super::traits::IntoLean`] / [`super::traits::TryFromLean`] impls
+//! do the actual type marshalling.
 //!
 //! The module is the only place in `abi` that knows how
 //! [`lean_alloc_ctor`], [`lean_ctor_obj_cptr`], and the constructor's
@@ -142,9 +142,9 @@ pub(crate) fn take_ctor_objects<'lean, const N: usize>(
 
 /// Read the tag byte of a constructor object.
 ///
-/// Used by sum-type decoders ([`Option`], [`Except`]) that need to pick a
-/// variant before they know the arity. Borrow-only: leaves the refcount
-/// untouched.
+/// Used by sum-type decoders ([`Option`], [`except::Except`](super::except::Except))
+/// that need to pick a variant before they know the arity. Borrow-only:
+/// leaves the refcount untouched.
 ///
 /// # Errors
 ///

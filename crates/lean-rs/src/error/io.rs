@@ -22,13 +22,14 @@
 //! Lean `String`); we read that field and bound it. Constructors
 //! without an object field (today: `unexpectedEof`) and unknown tags
 //! collapse to a generic placeholder. Faithful per-variant rendering
-//! is out of scope for prompt 10 (the prompt excludes
-//! "pretty-printing arbitrary Lean exceptions through `MetaM`").
+//! is out of scope here — it would require pretty-printing arbitrary
+//! Lean exceptions through `MetaM`, which the bounded `host::meta`
+//! surface does not currently expose.
 
 #![allow(unsafe_code)]
 #![allow(
     dead_code,
-    reason = "first non-test caller lands in prompts 11–12 (LeanModule + LeanExported{N})"
+    reason = "decoder helpers reached through generic dispatch; lib-only build cannot prove reachability"
 )]
 
 use core::slice;
@@ -184,10 +185,11 @@ fn read_last_string_field(ctor: *mut lean_rs_sys::lean_object) -> Option<String>
 #[cfg(test)]
 mod tests {
     //! Direct `decode_io` round trips. The fixture IO exports are
-    //! reachable through the typed handle landed by prompt 12; these
-    //! tests strip the handle and exercise `decode_io` on the raw
-    //! result `Obj` to keep the decoder under direct test (independent
-    //! of the typed-handle composition).
+    //! reachable through the typed
+    //! [`crate::module::LeanExported`] handle; these tests strip the
+    //! handle and exercise `decode_io` on the raw result `Obj` to keep
+    //! the decoder under direct test (independent of the typed-handle
+    //! composition).
     //!
     //! The `userError` test pins the Lean-4.29.1 constructor index for
     //! `userError` (`18`) against the live runtime, guarding

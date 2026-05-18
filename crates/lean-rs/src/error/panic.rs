@@ -7,15 +7,15 @@
 //! the payload as a [`LeanError::Host`] with [`super::HostStage::CallbackPanic`]
 //! and code [`super::LeanDiagnosticCode::Internal`].
 //!
-//! Prompt 10 adds this seam and exercises it from
-//! [`crate::error::tests`]; later prompts adopt it for every host-callback
-//! registration. The contained-and-converted mode is the only mode this
-//! crate offers; an explicit-abort mode (panic-the-process when a
-//! callback panics) is not part of the public discipline today.
+//! The contained-and-converted mode is the only mode this crate
+//! offers; an explicit-abort mode (panic-the-process when a callback
+//! panics) is not part of the public discipline today. The unit-test
+//! suite in `crate::error::tests` exercises both the panic-payload
+//! rendering and the diagnostic-code projection.
 
 #![allow(
     dead_code,
-    reason = "first non-test caller lands in prompts 11+ (host-callback registration)"
+    reason = "callback-panic helper instantiated only when host-callback registration is wired up"
 )]
 
 use std::panic::{self, AssertUnwindSafe};

@@ -47,13 +47,9 @@
 //! caller behaviour, so the error is folded into capability load
 //! rather than into every call site.
 //!
-//! The baseline (prompts 13–14) is the first seven symbols; prompt 15
-//! adds the `elaborate` / `kernel_check` pair; prompt 16 adds the three
-//! optional meta-service symbols; prompt 17 adds the `check_evidence` /
-//! `evidence_summary` pair; prompt 20 adds the
-//! `env_query_declarations_bulk` and `elaborate_bulk` pair to amortise
-//! per-item FFI overhead across a single Lean traversal. Future prompts
-//! extend additively.
+//! Capability contracts are extended additively over time: any future
+//! capability symbol becomes a new mandatory or optional row in the
+//! table above without renaming or removing existing ones.
 //!
 //! ## Per-session metrics
 //!

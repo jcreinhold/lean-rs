@@ -12,7 +12,7 @@
 //! - Writes use [`lean_alloc_array`] to preallocate exactly `n` slots in
 //!   a single call, then transfer each `T::into_lean(runtime)` result
 //!   into its slot via [`lean_array_set_core`]. There is no
-//!   [`lean_array_push`] / amortised-growth loop and no intermediate
+//!   `lean_array_push` / amortised-growth loop and no intermediate
 //!   `Obj::clone` (which would bump `lean_inc`).
 //! - Reads call [`lean_array_size`] once, allocate the Rust [`Vec`] with
 //!   matching capacity, then for each slot `lean_inc` the borrowed

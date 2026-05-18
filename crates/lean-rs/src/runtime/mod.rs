@@ -1,11 +1,11 @@
 //! Process-wide Lean runtime anchor (`pub(crate)` infrastructure).
 //!
 //! The `runtime` module is `pub(crate)` per
-//! `docs/architecture/03-host-api.md` and `RD-2026-05-17-004`. Only
-//! [`LeanRuntime`] is re-exported at the crate root; every other item in
-//! this module is internal scaffolding (init cell, panic boundary, thread
-//! attach RAII, and — landing in prompt 07 — the lifetime-bound object
-//! handles `Obj<'lean>` / `ObjRef<'lean, 'a>`).
+//! `docs/architecture/03-host-api.md`. [`LeanRuntime`] and
+//! [`LeanThreadGuard`] are re-exported at the crate root; every other
+//! item in this module is internal scaffolding (init cell, panic
+//! boundary, thread attach RAII, and the lifetime-bound object handles
+//! `Obj<'lean>` / `ObjRef<'lean, 'a>`).
 //!
 //! What this layer hides from the rest of the crate:
 //!

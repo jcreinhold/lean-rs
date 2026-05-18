@@ -119,7 +119,7 @@ fn do_initialize_once() -> Result<(), LeanError> {
         // inputs from Rust state, so there is no aliasing or lifetime
         // hazard. The task manager is required for any code path that
         // spawns Lean tasks — including
-        // `Lean.Elab.Frontend.process` (prompt 15's `kernel_check`),
+        // `Lean.Elab.Frontend.process` (driven by `kernel_check`),
         // which would otherwise abort with a
         // "g_task_manager" assertion on the first
         // `Language.Lean.processCommands` call. Lean tears the manager

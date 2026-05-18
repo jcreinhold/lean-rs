@@ -2,7 +2,7 @@
 //!
 //! Lean's `ByteArray` is a scalar-array (`LeanScalarArray`-tagged
 //! `lean_sarray_object`) with `elem_size = 1`. The writers use the
-//! `lean_alloc_sarray` mirror added in prompt 08 plus a single
+//! [`lean_rs_sys::array::lean_alloc_sarray`] mirror plus a single
 //! `copy_nonoverlapping`; readers borrow the byte view directly without
 //! a Rust-side allocation.
 //!

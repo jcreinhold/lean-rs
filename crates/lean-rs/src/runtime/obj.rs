@@ -19,11 +19,15 @@
 // `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
 // `Obj` / `ObjRef` and their methods are infrastructure consumed by the
-// `pub(crate) abi` module (prompt 08) and by the typed
-// `LeanExported{N}` / `LeanSession` machinery added in prompts 09–18.
-// The library build sees them as dead until a non-test caller lands;
-// only `cargo test` exercises them (transitively through `abi::tests`).
-#![allow(dead_code, reason = "non-test callers land in prompts 09–18")]
+// `pub(crate) abi` module and by the typed `LeanExported` /
+// `LeanSession` machinery in `module` and `host`. Many helpers are only
+// reached through generic dispatch and look dead to the lib-only
+// `cargo build`; only `cargo test` exercises every branch (transitively
+// through `abi::tests` and the integration suites).
+#![allow(
+    dead_code,
+    reason = "reached through generic dispatch; lib-only build cannot prove reachability"
+)]
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -47,7 +51,7 @@ use crate::runtime::LeanRuntime;
 /// Neither [`Send`] nor [`Sync`]: the contained `NonNull<lean_object>`
 /// and the `PhantomData<&'lean LeanRuntime>` (where `LeanRuntime: !Sync`)
 /// both propagate the per-thread restriction. A negative-bound static
-/// assertion in [`tests`] fails to compile if either auto-trait is ever
+/// assertion in `tests` fails to compile if either auto-trait is ever
 /// implemented.
 pub(crate) struct Obj<'lean> {
     ptr: NonNull<lean_object>,
