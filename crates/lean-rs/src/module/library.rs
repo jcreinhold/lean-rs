@@ -128,6 +128,45 @@ impl<'lean> LeanLibrary<'lean> {
         })
     }
 
+    /// Open a Lake-built Lean shared object with **globally visible
+    /// symbols** (POSIX `RTLD_GLOBAL` on Unix; the Windows side stays
+    /// on the default loader since DLL symbols are already global).
+    ///
+    /// The same contract as [`LeanLibrary::open`], plus: symbols
+    /// defined by this dylib become visible to the dynamic linker's
+    /// global namespace, so any subsequently `dlopen`ed dylib whose
+    /// initializer chain references them resolves correctly.
+    ///
+    /// The motivating case is the `lean-rs-host` two-dylib load: a
+    /// downstream capability dylib's `initialize_<ConsumerLib>`
+    /// transitively calls `initialize_<RequiredShim>`, which is
+    /// defined in a sibling dylib (the `lean-rs-host-shims` Lake
+    /// package). With the default `RTLD_LOCAL`, the consumer's
+    /// initializer chain SIGSEGVs jumping to the unresolved symbol;
+    /// opening the shim dylib globally first lets the consumer's
+    /// chain resolve through the global namespace.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`LeanLibrary::open`].
+    pub fn open_globally(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
+        let path = path.as_ref();
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.module.library.open_globally",
+            path = %crate::error::redact::short_path(path),
+        )
+        .entered();
+        let globals = classify_globals(path)?;
+        let library = open_with_global_visibility(path)?;
+        Ok(Self {
+            library,
+            path: path.to_path_buf(),
+            runtime,
+            globals,
+        })
+    }
+
     /// Initialize the Lean module identified by `(package, module)`.
     ///
     /// Resolves the Lake-mangled initializer symbol against this
@@ -339,6 +378,46 @@ fn classify_globals(path: &Path) -> LeanResult<HashSet<String>> {
         globals.insert(normalised.to_owned());
     }
     Ok(globals)
+}
+
+/// Open `path` with the dynamic loader's *global* symbol-visibility
+/// flag set so any subsequently loaded dylib can resolve symbols
+/// defined here.
+///
+/// On Unix this means `RTLD_LAZY | RTLD_GLOBAL`. On Windows the
+/// platform loader publishes module symbols globally by default, so
+/// the standard [`libloading::Library::new`] path is sufficient.
+fn open_with_global_visibility(path: &Path) -> LeanResult<libloading::Library> {
+    #[cfg(unix)]
+    {
+        // SAFETY: identical contract to `Library::new` — runs the
+        // platform dynamic loader against `path`. The added
+        // `RTLD_GLOBAL` flag only affects symbol-table visibility for
+        // later loads; it does not change initializer-execution
+        // semantics (Lake-built Lean dylibs have no constructor-style
+        // init).
+        let unix_library = unsafe {
+            libloading::os::unix::Library::open(
+                Some(path),
+                libloading::os::unix::RTLD_LAZY | libloading::os::unix::RTLD_GLOBAL,
+            )
+        }
+        .map_err(|err| {
+            LeanError::module_init(format!(
+                "failed to open Lean library '{}' with RTLD_GLOBAL: {err}",
+                path.display()
+            ))
+        })?;
+        Ok(unix_library.into())
+    }
+    #[cfg(not(unix))]
+    {
+        // SAFETY: same as `Library::new`. See unix branch.
+        let library = unsafe { libloading::Library::new(path) }.map_err(|err| {
+            LeanError::module_init(format!("failed to open Lean library '{}': {err}", path.display()))
+        })?;
+        Ok(library)
+    }
 }
 
 /// Section kinds that hold runtime data (Lean nullary-constant

@@ -13,12 +13,15 @@ open Lean
 
 /-- Initialise the Lean search path and import the named modules into a
     fresh environment. The Rust caller passes the resolved
-    `.lake/build/lib/lean` search path so this shim does not have to
-    know the Lake layout. -/
+    `.lake/build/lib/lean` search-path entries (one per Lake package
+    whose `.olean`s the import list may reach into — minimally the
+    user's own capability package; for `lean-rs-host` consumers also
+    the `lean-rs-host-shims` package). The shim does not need to know
+    the Lake layout; it just unions whatever entries Rust provides. -/
 @[export lean_rs_host_session_import]
-def sessionImport (searchPath : String) (importNames : Array String) : IO Environment := do
+def sessionImport (searchPaths : Array String) (importNames : Array String) : IO Environment := do
   let sysroot ← Lean.findSysroot
-  Lean.initSearchPath sysroot [System.FilePath.mk searchPath]
+  Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
   let imports := importNames.map fun n => { module := n.toName : Import }
   -- `loadExts := true` activates scoped environment extensions on
   -- import — including the parser extension. Without it, the

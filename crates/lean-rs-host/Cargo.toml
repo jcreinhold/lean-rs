@@ -29,6 +29,10 @@ lean-rs = { workspace = true }
 lean-rs-sys = { workspace = true }
 libloading = "0.8"
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+# Parses `lake-manifest.json` to locate the required `lean-rs-host-shims` Lake
+# package's dylib for the two-dylib load in `LeanCapabilities`. Default
+# features (std + serde, no preserve_order) are enough; the manifest is small.
+serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 

@@ -260,19 +260,21 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let runtime = capabilities.host().runtime();
         let address = capabilities.symbols().session_import;
         // SAFETY: `address` was resolved by `SessionSymbols::resolve`
-        // against `capabilities.library()`, which outlives `'c`. The
-        // signature `(String, Vec<String>) -> IO Environment` matches
-        // the Lean-side `lean_rs_host_session_import`.
-        let import_fn: LeanExported<'lean, '_, (String, Vec<String>), LeanIo<Obj<'lean>>> =
+        // against the shim library, which outlives `'c`. The
+        // signature `(Vec<String>, Vec<String>) -> IO Environment`
+        // matches the Lean-side `lean_rs_host_session_import` —
+        // first argument is the list of `.olean` search-path
+        // entries (the user's package + the shim package), second
+        // is the module-name list.
+        let import_fn: LeanExported<'lean, '_, (Vec<String>, Vec<String>), LeanIo<Obj<'lean>>> =
             unsafe { LeanExported::from_function_address(runtime, address) };
-        let search_path = capabilities
-            .host()
-            .project()
-            .olean_search_path()
-            .to_string_lossy()
-            .into_owned();
+        let project = capabilities.host().project();
+        let search_paths: Vec<String> = vec![
+            project.olean_search_path().to_string_lossy().into_owned(),
+            project.shim_olean_search_path()?.to_string_lossy().into_owned(),
+        ];
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
-        let environment = import_fn.call(search_path, imports_owned)?;
+        let environment = import_fn.call(search_paths, imports_owned)?;
         Ok(Self {
             capabilities,
             environment,

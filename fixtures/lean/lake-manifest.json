@@ -1,7 +1,12 @@
-{
-  "version": "1.1.0",
-  "packagesDir": ".lake/packages",
-  "packages": [],
-  "name": "lean_rs_fixture",
-  "lakeDir": ".lake"
-}
+{"version": "1.1.0",
+ "packagesDir": ".lake/packages",
+ "packages":
+ [{"type": "path",
+   "scope": "",
+   "name": "lean_rs_host_shims",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "../../lake/lean-rs-host-shims",
+   "configFile": "lakefile.lean"}],
+ "name": "lean_rs_fixture",
+ "lakeDir": ".lake"}
