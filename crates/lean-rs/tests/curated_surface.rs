@@ -7,8 +7,8 @@
 //! one must be brought into agreement before widening the imports here.
 //!
 //! There is no FFI in this test by design: `lean-rs` has no Lean-side
-//! fixture of its own (the L1 happy-path lives in
-//! `/Users/jcreinhold/Code/lean-rs-downstream/`); the structural
+//! fixture of its own (the L1 happy-path lives in the external
+//! `lean-rs-downstream` proof at the sibling repository); the structural
 //! compile-time gate is the in-tree CI signal. The L2 sibling crate has
 //! its own `tests/curated_surface.rs` that drives the host-stack happy
 //! path against the workspace fixture.
