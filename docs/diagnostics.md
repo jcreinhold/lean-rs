@@ -1,20 +1,26 @@
 # Diagnostics and observability
 
-`lean-rs` reports failures through one typed error (`LeanError`), one
-typed diagnostic payload (`LeanElabFailure`), and one typed meta
-response (`LeanMetaResponse`). Every error-bearing surface projects to
-the same stable [`LeanDiagnosticCode`] taxonomy and threads structured
-events through the standard [`tracing`] crate. The combination gives a
-downstream caller two things:
+`lean-rs` (the L1 typed-FFI primitive) and `lean-rs-host` (the L2
+opinionated theorem-prover-host stack) report failures through one
+shared typed error (`lean_rs::LeanError`), plus the host-stack's
+typed diagnostic payload (`lean_rs_host::LeanElabFailure`) and typed
+meta response (`lean_rs_host::meta::LeanMetaResponse`). Every error-
+bearing surface — on either crate — projects to the same stable
+[`lean_rs::LeanDiagnosticCode`] taxonomy and threads structured
+events through the standard [`tracing`] crate. The combination gives
+a downstream caller two things:
 
 - a stable identifier (`err.code()`) to react by family, independent of
   internal stage tags that may grow new variants;
 - visibility into where time is spent and where failures originate,
-  without rebuilding `lean-rs` or installing patched code.
+  without rebuilding the crates or installing patched code.
 
-This document is the catalogue. The crate's rustdoc covers the type
+This document is the catalogue. The crates' rustdocs cover the type
 shapes; this file covers the operator-facing concepts and the recipes
-for using them.
+for using them. The diagnostic-code taxonomy is unified across both
+crates (every failure on either side maps to one of the same nine
+codes); the span catalogue is split by emitting crate so the layer
+boundary is visible at the log line.
 
 ## Diagnostic codes
 
@@ -70,10 +76,9 @@ and `Some(Elaboration)` on the other two failure shapes (which carry a
 
 ## Tracing quick start
 
-`lean-rs` declares spans against the `lean_rs` target. The crate
-itself does **not** install a subscriber — pick one downstream, or use
-the in-process [`DiagnosticCapture`](#capturing-diagnostics-in-tests)
-for tests.
+Both crates declare spans against the `lean_rs` target. Neither crate
+installs a subscriber — pick one downstream, or use the in-process
+[`DiagnosticCapture`](#capturing-diagnostics-in-tests) for tests.
 
 Recommended `RUST_LOG` scopes:
 
@@ -90,7 +95,15 @@ acquire/release). `trace` adds per-dispatch (`LeanExported::call`) and
 per-decoder (`Vec`, `String`, `ByteArray` from-Lean conversions)
 events.
 
-The span catalogue:
+The single `lean_rs` `RUST_LOG` target covers both crates: spans from
+both `lean-rs` and `lean-rs-host` use the same target so one
+`tracing-subscriber` filter scope catches the full call cascade.
+
+### Emitted by `lean-rs` (L1)
+
+The FFI-primitive spans — init, library open, module initializer,
+typed-export dispatch, and the ABI decoder events. These fire whether
+the caller is `lean-rs-host` or any other downstream of `lean-rs`.
 
 | Span | Level | Fields |
 | --- | --- | --- |
@@ -100,6 +113,15 @@ The span catalogue:
 | `lean_rs.module.initializer.call` | debug | `initializer` |
 | `lean_rs.module.exported.call` | trace | `arity` |
 | `lean_rs.abi.decode` (event) | trace | `shape`, `len` |
+
+### Emitted by `lean-rs-host` (L2)
+
+The host-stack session and pool spans. These only fire if the caller
+opted in to the L2 stack by depending on `lean-rs-host` and driving a
+session.
+
+| Span | Level | Fields |
+| --- | --- | --- |
 | `lean_rs.host.session.import` | info | `imports_len` |
 | `lean_rs.host.session.query_declaration` | debug | `name` |
 | `lean_rs.host.session.list_declarations` | debug | (none) |
@@ -138,7 +160,8 @@ thread-local and bounded; the guard restores the previous subscriber
 on `Drop`.
 
 ```rust
-use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanHost, LeanRuntime};
+use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
+use lean_rs_host::LeanHost;
 
 #[test]
 fn rebuild_advice_fires_on_missing_dylib() {
@@ -311,10 +334,15 @@ relevant fields.
 
 ## Cross-references
 
-- [`crate::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)
-  — the enum.
-- [`crate::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)
-  — the in-process capture.
+- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)
+  — the enum, defined on the L1 crate; both crates project to it.
+- [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)
+  — the in-process capture, also on L1 (captures spans from both
+  crates against the shared `lean_rs` target).
+- [Host stack surface](architecture/04-host-stack.md) — the
+  `lean-rs-host` crate's curated surface; spans listed under
+  *Emitted by `lean-rs-host`* originate from the methods on
+  `LeanSession` and `SessionPool` described there.
 - [Concurrency contract](architecture/04-concurrency.md) — why
   spans are per-thread.
 - [Safety model](architecture/01-safety-model.md) — why messages are

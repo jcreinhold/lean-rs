@@ -261,8 +261,13 @@ deviations worth recording here so the doc matches what shipped:
 - Safety model: `docs/architecture/01-safety-model.md` (§"Unsafe boundary thesis").
 - Version compatibility: `docs/architecture/02-versioning-and-compatibility.md` (§"Header digest", §"Bumping the Lean
     version: process").
-- Host-API surface: `docs/architecture/03-host-api.md` — what gets built on top of this crate.
+- L1 safe surface: the `lean-rs` crate (typed FFI primitive — runtime, library, module, typed `@[export]` dispatch,
+    handles, structured error). Crate docs at `https://docs.rs/lean-rs`.
+- L2 opinionated stack: `docs/architecture/04-host-stack.md` — the `lean-rs-host` crate, what gets built on top of the
+    L1 safe surface (`LeanHost` / `LeanCapabilities` / `LeanSession` plus elaboration / evidence / meta / pool surfaces
+    and the 13 + 3 `lean_rs_host_*` Lean shim contract).
 - Live contract state: `prompts/lean-rs/00-current-state.md` — `RAW-SYS`, `WORKSPACE-LAYERS`, `VERSION-COMPATIBILITY`,
     `SAFETY-MODEL`.
 - Replanning deltas: `RD-2026-05-17-005` (publication + opaque types + pure-Rust mirrors), `RD-2026-05-17-003` (in-tree
-    raw FFI), `RD-2026-05-17-004` (lean-rs internal compression).
+    raw FFI), `RD-2026-05-17-004` (lean-rs internal compression), `RD-2026-05-18-001` (L1/L2 split into `lean-rs` and
+    `lean-rs-host`).
