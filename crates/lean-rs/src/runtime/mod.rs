@@ -1,11 +1,11 @@
-//! Process-wide Lean runtime anchor (`pub(crate)` infrastructure).
+//! Process-wide Lean runtime anchor.
 //!
-//! The `runtime` module is `pub(crate)` per
-//! `docs/architecture/03-host-api.md`. [`LeanRuntime`] and
-//! [`LeanThreadGuard`] are re-exported at the crate root; every other
-//! item in this module is internal scaffolding (init cell, panic
-//! boundary, thread attach RAII, and the lifetime-bound object handles
-//! `Obj<'lean>` / `ObjRef<'lean, 'a>`).
+//! The L1 lifetime-bound owned-object handle [`obj::Obj`] (with its
+//! borrowed view [`obj::ObjRef`]) is `pub` here so the sibling
+//! `lean-rs-host` crate can wrap them inside its host-defined handle
+//! types. The init cell and thread-attach helpers stay `pub(crate)` —
+//! callers reach them through [`LeanRuntime::init`] and
+//! [`LeanThreadGuard::attach`] re-exported at the crate root.
 //!
 //! What this layer hides from the rest of the crate:
 //!
@@ -15,10 +15,10 @@
 //! - the `catch_unwind` boundary that keeps Rust panics from unwinding
 //!   into Lean or C frames;
 //! - the `lean_inc` / `lean_dec` discipline behind every owned or
-//!   borrowed Lean object handle (see [`obj`]).
+//!   borrowed Lean object handle.
 
 pub(crate) mod init;
-pub(crate) mod obj;
+pub mod obj;
 pub(crate) mod thread;
 
 pub use init::LeanRuntime;

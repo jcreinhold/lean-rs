@@ -7,7 +7,7 @@
 //! the public API does not link MPZ readers that could faithfully decode
 //! a value wider than `u64` / `usize`.
 //!
-//! The trait impls in [`crate::abi::scalar`] for `u64` / `usize` produce
+//! The trait impls in `crate::abi::scalar` for `u64` / `usize` produce
 //! *polymorphic-boxed* values (ctor-wrapped `UInt64` / `USize`). The
 //! helpers here produce values of Lean type `Nat`, which is a different
 //! object shape (scalar tag or heap MPZ). Use [`from_u64`] / [`from_usize`]
@@ -29,7 +29,7 @@ use crate::runtime::obj::Obj;
 /// Scalar-tagged for values up to `LEAN_MAX_SMALL_NAT`; falls back to a
 /// heap MPZ via `lean_big_uint64_to_nat` otherwise.
 #[must_use]
-pub(crate) fn from_u64(runtime: &LeanRuntime, n: u64) -> Obj<'_> {
+pub fn from_u64(runtime: &LeanRuntime, n: u64) -> Obj<'_> {
     // SAFETY: `lean_uint64_to_nat` returns an owned `lean_obj_res` (refcount
     // = 1) — scalar-tagged or heap-allocated as appropriate.
     unsafe { Obj::from_owned_raw(runtime, lean_uint64_to_nat(n)) }
@@ -37,7 +37,7 @@ pub(crate) fn from_u64(runtime: &LeanRuntime, n: u64) -> Obj<'_> {
 
 /// Construct a Lean `Nat` from a Rust `usize`.
 #[must_use]
-pub(crate) fn from_usize(runtime: &LeanRuntime, n: usize) -> Obj<'_> {
+pub fn from_usize(runtime: &LeanRuntime, n: usize) -> Obj<'_> {
     // SAFETY: `lean_usize_to_nat` returns an owned `lean_obj_res`.
     unsafe { Obj::from_owned_raw(runtime, lean_usize_to_nat(n)) }
 }
@@ -54,7 +54,7 @@ pub(crate) fn from_usize(runtime: &LeanRuntime, n: usize) -> Obj<'_> {
     clippy::needless_pass_by_value,
     reason = "Obj is consumed by Drop on return; that releases the refcount"
 )]
-pub(crate) fn try_to_u64(obj: Obj<'_>) -> LeanResult<u64> {
+pub fn try_to_u64(obj: Obj<'_>) -> LeanResult<u64> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` reads pointer bits only.
     if unsafe { lean_is_scalar(ptr) } {
@@ -78,7 +78,7 @@ pub(crate) fn try_to_u64(obj: Obj<'_>) -> LeanResult<u64> {
     clippy::needless_pass_by_value,
     reason = "Obj is consumed by Drop on return; that releases the refcount"
 )]
-pub(crate) fn try_to_usize(obj: Obj<'_>) -> LeanResult<usize> {
+pub fn try_to_usize(obj: Obj<'_>) -> LeanResult<usize> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: pure pointer-bit math.
     if unsafe { lean_is_scalar(ptr) } {

@@ -53,7 +53,7 @@ use crate::runtime::LeanRuntime;
 /// both propagate the per-thread restriction. A negative-bound static
 /// assertion in `tests` fails to compile if either auto-trait is ever
 /// implemented.
-pub(crate) struct Obj<'lean> {
+pub struct Obj<'lean> {
     ptr: NonNull<lean_object>,
     _life: PhantomData<&'lean LeanRuntime>,
 }
@@ -64,7 +64,7 @@ pub(crate) struct Obj<'lean> {
 /// destruction are no-ops. The double phantom records both the runtime
 /// borrow (`'lean`) and the borrow of the owning `Obj<'lean>` (`'a`);
 /// the latter prevents a view from outliving its source.
-pub(crate) struct ObjRef<'lean, 'a> {
+pub struct ObjRef<'lean, 'a> {
     ptr: NonNull<lean_object>,
     _life: PhantomData<(&'lean LeanRuntime, &'a Obj<'lean>)>,
 }
@@ -87,7 +87,7 @@ impl<'lean> Obj<'lean> {
     ///   by `_runtime`. The borrow is a type-level proof that Lean is
     ///   initialised and pins the `'lean` lifetime of the returned
     ///   handle; it carries no payload of its own.
-    pub(crate) unsafe fn from_owned_raw(_runtime: &'lean LeanRuntime, ptr: *mut lean_object) -> Self {
+    pub unsafe fn from_owned_raw(_runtime: &'lean LeanRuntime, ptr: *mut lean_object) -> Self {
         // SAFETY: caller guarantees `ptr` is non-null (documented above);
         // `NonNull::new_unchecked` then carries the invariant in the
         // type. Pointer provenance and refcount transfer are the
@@ -106,7 +106,7 @@ impl<'lean> Obj<'lean> {
     /// this `Obj` held. Whoever receives it inherits the obligation to
     /// release it (via `lean_dec`, or by reconstructing an `Obj` with
     /// [`Obj::from_owned_raw`]).
-    pub(crate) fn into_raw(self) -> *mut lean_object {
+    pub fn into_raw(self) -> *mut lean_object {
         // `ManuallyDrop` blocks the destructor so we do not decrement
         // the count on the way out — the caller takes ownership.
         ManuallyDrop::new(self).ptr.as_ptr()
@@ -118,12 +118,12 @@ impl<'lean> Obj<'lean> {
     /// The returned pointer must not be passed where a Lean function
     /// expects to consume one reference count; that is what
     /// [`Obj::into_raw`] is for.
-    pub(crate) fn as_raw_borrowed(&self) -> *mut lean_object {
+    pub fn as_raw_borrowed(&self) -> *mut lean_object {
         self.ptr.as_ptr()
     }
 
     /// Produce a borrowed view tied to this `Obj`.
-    pub(crate) fn borrow(&self) -> ObjRef<'lean, '_> {
+    pub fn borrow(&self) -> ObjRef<'lean, '_> {
         ObjRef {
             ptr: self.ptr,
             _life: PhantomData,
@@ -143,7 +143,7 @@ impl<'lean> Obj<'lean> {
     /// pins the inferred `'lean` lifetime to this `Obj`'s lifetime —
     /// callers do not need to spell the parameter out at the call site.
     #[allow(clippy::unused_self, reason = "`&self` pins the inferred 'lean lifetime parameter")]
-    pub(crate) fn runtime(&self) -> &'lean LeanRuntime {
+    pub fn runtime(&self) -> &'lean LeanRuntime {
         // SAFETY: `LeanRuntime` is zero-sized; `NonNull::dangling()`
         // produces an aligned non-null pointer suitable for a ZST borrow.
         // The Lean runtime is alive whenever `'lean` is alive, so the
@@ -156,7 +156,7 @@ impl<'lean> Obj<'lean> {
 impl ObjRef<'_, '_> {
     /// Borrow the underlying raw pointer for a borrowed-argument FFI
     /// call (`b_lean_obj_arg`).
-    pub(crate) fn as_raw_borrowed(&self) -> *mut lean_object {
+    pub fn as_raw_borrowed(&self) -> *mut lean_object {
         self.ptr.as_ptr()
     }
 }

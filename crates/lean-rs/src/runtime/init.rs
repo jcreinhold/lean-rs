@@ -31,7 +31,7 @@ use crate::error::{LeanError, LeanResult};
 /// a `'lean` lifetime tied to this borrow, so a value derived from Lean
 /// cannot outlive the runtime that produced it. This is the
 /// type-system anchor for the `'lean` cascade described in
-/// `docs/architecture/03-host-api.md`.
+/// `docs/architecture/04-host-stack.md`.
 ///
 /// Neither [`Send`] nor [`Sync`]. The Lean runtime is per-thread, and
 /// shipping a Lean-derived handle to another OS thread is a soundness

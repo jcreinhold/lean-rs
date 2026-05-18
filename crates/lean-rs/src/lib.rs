@@ -1,138 +1,114 @@
-//! Safe Rust bindings for hosting Lean 4 capabilities.
+//! Safe Rust FFI primitive for embedding Lean 4 from a host application.
 //!
-//! The single safe front door of the `lean-rs` project. Lean owns
-//! elaboration, kernel checking, proof objects, universes, `MetaM`, and
-//! dependent-type meaning; this crate owns linking, runtime
-//! initialization, ABI conversion, module loading, error and panic
-//! boundaries, scheduling, diagnostics, batching, and packaging. Raw Lean
-//! 4 C ABI symbols enter the workspace via the in-tree `lean-rs-sys`
-//! crate; this crate consumes them inside `pub(crate)` modules and never
-//! re-exports them.
+//! `lean-rs` is the L1 typed-FFI binding to the Lean 4 runtime — the
+//! minimum surface every (β)-binding Rust crate needs to drive a
+//! compiled Lean library: bring the runtime up, open a Lake-built
+//! dylib, initialise a module, and call typed `@[export]` functions
+//! with first-class type marshalling. Per `RD-2026-05-18-001` the
+//! opinionated theorem-prover-host stack (`LeanHost` /
+//! `LeanCapabilities` / `LeanSession` plus the evidence and meta
+//! surfaces) lives in the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
+//! crate, with its own 13+3 `lean_rs_host_*` Lean shim contract; this
+//! crate has no Lean-side shim contract and ships zero target-language
+//! code.
 //!
-//! ## Happy path
+//! ## Happy path (L1)
 //!
-//! Bring the runtime up once, open a Lake project, load a capability
-//! module, import a Lean library, and query a declaration:
+//! Bring the runtime up once, open the Lake-built dylib, initialise the
+//! module, look up a typed export, and call it:
 //!
 //! ```ignore
-//! let runtime  = lean_rs::LeanRuntime::init()?;
-//! let host     = lean_rs::LeanHost::from_lake_project(runtime, lake_root)?;
-//! let caps     = host.load_capabilities("my_pkg", "MyLib")?;
-//! let mut sess = caps.session(&["MyLib.SomeModule"])?;
-//! let decl     = sess.query_declaration("MyLib.SomeModule.myDef")?;
+//! let runtime = lean_rs::LeanRuntime::init()?;
+//! let library = lean_rs::LeanLibrary::open(runtime, "./.lake/build/lib/libMyLib_MyMod.dylib")?;
+//! let module  = library.initialize_module("my_pkg", "MyMod")?;
+//! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;
+//! let sum     = add.call((3, 4))?;
 //! ```
 //!
-//! [`LeanRuntime::init`] is the single doorway into the safe surface.
-//! Calling it brings the Lean runtime up (idempotently, process-once) and
-//! returns a `'static` borrow that anchors the `'lean` lifetime carried by
-//! every later handle. Use-before-init is structurally impossible: the
-//! constructors of every handle take a `&'lean LeanRuntime` (or a value
-//! derived from one) as input.
+//! [`LeanRuntime::init`] is the single doorway. It brings Lean up
+//! (process-once, idempotent) and returns a `'static` borrow that
+//! anchors the `'lean` lifetime every later handle carries; use-before-
+//! init is structurally impossible.
 //!
-//! Worker threads that did not start inside Lean must be attached for the
-//! duration of their Lean work via [`LeanThreadGuard::attach`]; see
-//! `docs/architecture/04-concurrency.md` for the contract.
+//! Worker threads that did not start inside Lean must be attached for
+//! the duration of their Lean work via [`LeanThreadGuard::attach`];
+//! see `docs/architecture/04-concurrency.md` for the contract.
 //!
 //! ## Module map
 //!
-//! - [`error`] — typed error boundary. The single public enum
-//!   [`LeanError`] has two variants: [`LeanError::LeanException`] for
-//!   Lean-thrown `IO` errors (the `kind` is in [`LeanExceptionKind`], the
-//!   message bounded to [`LEAN_ERROR_MESSAGE_LIMIT`]) and
-//!   [`LeanError::Host`] for any host-stack failure (the `stage` is in
-//!   [`HostStage`]). Payload structs ([`LeanException`], [`HostFailure`])
-//!   have private fields, so the bounded-message invariant is structural.
-//!   Every error-bearing type also projects to [`LeanDiagnosticCode`] via
-//!   `.code()`, and the crate emits structured `tracing` spans against
-//!   the `lean_rs` target. The in-process [`DiagnosticCapture`] RAII
-//!   guard lets tests assert on emitted events without installing a
-//!   global subscriber.
+//! - [`error`] — typed error boundary. [`LeanError`] is a two-variant
+//!   `#[non_exhaustive]` enum (`LeanException` for Lean-thrown `IO`
+//!   errors, `Host` for host-stack failures); payload structs
+//!   ([`LeanException`], [`HostFailure`]) have private fields so the
+//!   bounded-message invariant is structural. Every error projects to a
+//!   [`LeanDiagnosticCode`] via `.code()`. The in-process
+//!   [`DiagnosticCapture`] RAII guard lets tests assert on `tracing`
+//!   events without installing a global subscriber.
 //! - [`module`] — load a Lake-built Lean shared object and call typed
-//!   exported functions. [`module::LeanLibrary`] is an RAII handle over
-//!   the dylib; [`module::LeanModule`] proves a module's initializer
-//!   succeeded; [`module::LeanExported`] is a single generic typed
-//!   function handle whose `.call` impl is macro-stamped per arity
-//!   `0..=12`. Used directly by embedders that need a Lean export not
-//!   already wrapped by [`LeanSession`].
-//! - [`host`] — high-level surface for hosting Lean capabilities. The
-//!   [`LeanHost`] → [`LeanCapabilities`] → [`LeanSession`] cascade is the
-//!   happy path. The session exposes read-only environment queries
-//!   ([`LeanSession::query_declaration`], [`LeanSession::list_declarations`],
-//!   `declaration_type` / `declaration_kind` / `declaration_name`),
-//!   elaboration and kernel checking ([`LeanSession::elaborate`],
-//!   [`LeanSession::kernel_check`]) using the typed
-//!   [`LeanElabOptions`] / [`LeanElabFailure`] / [`LeanDiagnostic`] /
-//!   [`LeanSeverity`] / [`LeanPosition`] diagnostic surface, evidence
-//!   re-validation ([`LeanSession::check_evidence`],
-//!   [`LeanSession::summarize_evidence`] returning [`EvidenceStatus`] and
-//!   [`ProofSummary`]), bulk operations
-//!   ([`LeanSession::query_declarations_bulk`],
-//!   [`LeanSession::elaborate_bulk`],
-//!   [`LeanSession::call_capability`]), and per-session metrics
-//!   ([`LeanSession::stats`] returning [`SessionStats`]). The four opaque
-//!   semantic handle types ([`LeanName`], [`LeanLevel`], [`LeanExpr`],
-//!   [`LeanDeclaration`]) carry the `'lean` lifetime so they cannot
-//!   outlive the runtime borrow. [`SessionPool`] + [`PooledSession`]
-//!   amortise import cost across calls. The bounded `MetaM` surface
-//!   ([`host::meta::LeanMetaService`], [`host::meta::LeanMetaResponse`],
-//!   [`host::meta::LeanMetaOptions`], the three pinned service constructors
-//!   [`host::meta::infer_type`] / [`host::meta::whnf`] /
-//!   [`host::meta::heartbeat_burn`]) lives at [`host::meta`] — see
-//!   `docs/architecture/03-host-api.md` for why it is not at the crate
-//!   root.
-//! - `runtime` (`pub(crate)`) — process-wide [`LeanRuntime`], thread
-//!   attach RAII, and the lifetime-bound owned/borrowed object handles
-//!   (`Obj<'lean>`, `ObjRef<'lean, '_>`) that own every `lean_inc` /
-//!   `lean_dec` inside the crate.
-//! - `abi` (`pub(crate)`) — typed first-order ABI conversions
-//!   (`IntoLean`, `TryFromLean`) for scalars, `Nat` / `Int`, `String`,
-//!   `ByteArray`, `Option`, `Vec`, and the `Except` value type used to
-//!   decode `IO`-returning Lean exports.
+//!   exported functions. [`LeanLibrary`] is the RAII dylib handle;
+//!   [`LeanModule`] proves a module's initializer succeeded;
+//!   [`LeanExported`] is a single generic typed function handle whose
+//!   `.call` impl is macro-stamped per arity `0..=12`.
+//! - [`handle`] — opaque, lifetime-bound receipts for the four core
+//!   Lean semantic values ([`LeanName`], [`LeanLevel`], [`LeanExpr`],
+//!   [`LeanDeclaration`]). Construction and inspection happen Lean-side
+//!   through [`LeanModule::exported`] against caller-authored shims.
+//! - [`runtime`] — process-wide [`LeanRuntime`] anchor,
+//!   [`LeanThreadGuard`] attach RAII, and the lifetime-bound owned /
+//!   borrowed object handles [`Obj`] / [`ObjRef`].
+//! - [`abi`] — sealed [`LeanAbi`] trait + per-Lean-type C-ABI
+//!   representation impls. The trait is the bound on
+//!   [`LeanExported`]'s argument and return types; the impls are
+//!   crate-internal (sealing prevents downstream `LeanAbi for MyType`).
 //!
 //! ## Layering
 //!
-//! `lean-rs-sys → lean-toolchain → lean-rs`. The first two crates expose
-//! raw FFI and toolchain metadata; this crate is the only safe surface
-//! Rust applications should depend on. Embedders that genuinely need the
-//! raw `lean_*` symbols may depend on `lean-rs-sys` directly, accepting
-//! its full `unsafe` discipline.
+//! `lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`. The first
+//! two crates expose raw FFI and toolchain metadata; this crate is the
+//! L1 safe surface every (β)-binding consumer depends on. The
+//! opinionated theorem-prover-host stack lives in `lean-rs-host`.
+//! Embedders that genuinely need the raw `lean_*` symbols can depend
+//! on `lean-rs-sys` directly, accepting its full `unsafe` discipline.
 //!
 //! ## Curation policy
 //!
-//! The crate root names entry points and mandatory session capabilities
-//! only. Items at `lean_rs::*` are the curated semver surface; refactors
-//! that reshape internal modules are free as long as those re-exports
-//! stay stable. Specialized or optional capabilities live at their
-//! sub-module path: the bounded `MetaM` surface at [`host::meta`], the
-//! typed exported-function loader at [`module`]. Path-shortening
-//! re-exports are not added — every name at the crate root must
-//! correspond to a happy-path entry point or a type that appears in a
-//! crate-root method's signature. The full classification is pinned in
-//! `docs/architecture/03-host-api.md`; the frozen public-surface
-//! baseline lives at `docs/api-review/lean-rs-public.txt`.
+//! Items at `lean_rs::*` are the curated semver surface. The crate
+//! root re-exports the typed-FFI primitive plus the four handle types
+//! and the L1 error model. Refactors that reshape internal modules
+//! are free as long as those re-exports stay stable. The public-
+//! surface baseline lives at `docs/api-review/lean-rs-public.txt`.
 
-pub(crate) mod abi;
+pub mod abi;
 pub mod error;
-pub mod host;
+pub mod handle;
 pub mod module;
-pub(crate) mod runtime;
+pub mod runtime;
+
+/// **Internal extension point.** Not part of the public API; not covered
+/// by semver. Exists so the sibling `lean-rs-host` crate can implement
+/// the sealed `LeanAbi` / `TryFromLean` / `IntoLean` traits for its
+/// host-defined types and reach the small set of error helpers it needs.
+/// External crates must not depend on anything under this path.
+#[doc(hidden)]
+#[allow(unused_imports, reason = "L1→L2 boundary re-exports consumed by lean-rs-host")]
+pub mod __host_internals {
+    pub use crate::error::{
+        bound_message, host_callback_panic, host_internal, host_linking, host_module_init, host_module_init_panic,
+        host_symbol_lookup, lean_exception,
+    };
+}
 
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_entry;
 
+pub use crate::abi::traits::LeanAbi;
 pub use crate::error::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
     LEAN_ERROR_MESSAGE_LIMIT, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanResult,
 };
-pub use crate::host::elaboration::{
-    LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
-    LEAN_HEARTBEAT_LIMIT_MAX, LeanDiagnostic, LeanElabFailure, LeanElabOptions, LeanPosition, LeanSeverity,
-};
-pub use crate::host::evidence::{
-    EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
-};
-pub use crate::host::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
-pub use crate::host::{LeanCapabilities, LeanHost, LeanSession, PoolStats, PooledSession, SessionPool, SessionStats};
+pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
+pub use crate::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary, LeanModule};
+pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.

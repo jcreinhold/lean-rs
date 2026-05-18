@@ -270,12 +270,12 @@ impl<'lean, Args, R> LeanExported<'lean, '_, Args, R> {
     /// address.
     ///
     /// `LeanModule::exported` is the normal lookup path; this constructor
-    /// exists so the crate-internal `host::capabilities` machinery can
-    /// pre-resolve a capability dylib's function symbols once at
-    /// `load_capabilities` time and then dispatch through cached
-    /// addresses without re-`dlsym`-ing per call. It always produces a
-    /// `Function`-targeted handle — global symbols still go through
-    /// `LeanModule::exported`.
+    /// exists so external opinionated host stacks (e.g. `lean-rs-host`'s
+    /// `LeanCapabilities`) can pre-resolve a capability dylib's function
+    /// symbols once at load time via [`LeanLibrary::resolve_function_symbol`]
+    /// and then dispatch through cached addresses without re-`dlsym`-ing
+    /// per call. It always produces a `Function`-targeted handle — global
+    /// symbols still go through `LeanModule::exported`.
     ///
     /// # Safety
     ///
@@ -287,7 +287,9 @@ impl<'lean, Args, R> LeanExported<'lean, '_, Args, R> {
     ///   under Lake's emission conventions (per-arg `LeanAbi::CRepr`,
     ///   per-result `DecodeCallResult::CRepr`).
     /// - `runtime` is the witness for `'lean`.
-    pub(crate) unsafe fn from_function_address(runtime: &'lean LeanRuntime, address: *mut c_void) -> Self {
+    ///
+    /// [`LeanLibrary::resolve_function_symbol`]: crate::module::LeanLibrary::resolve_function_symbol
+    pub unsafe fn from_function_address(runtime: &'lean LeanRuntime, address: *mut c_void) -> Self {
         Self {
             target: CallableTarget::Function(address),
             runtime,

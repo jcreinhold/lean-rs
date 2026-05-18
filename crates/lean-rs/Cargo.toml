@@ -87,10 +87,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 name = "hot_paths"
 harness = false
 
-[[bench]]
-name = "session"
-harness = false
-
 [[example]]
 name = "cold_probe"
 

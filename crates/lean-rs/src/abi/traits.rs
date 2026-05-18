@@ -24,7 +24,7 @@
 //! Borrowed conversions do not introduce a new trait. Where a Rust
 //! borrowed type appears in a Lean export's argument tuple, the per-type
 //! module adds an `impl LeanAbi for &T` rather than a new
-//! `BorrowedLeanAbi` trait. The `&str` impl in [`super::string`] is the
+//! `BorrowedLeanAbi` trait. The `&str` impl in `super::string` is the
 //! earned case: `LeanSession::elaborate`, `kernel_check`, `elaborate_bulk`,
 //! and `make_name` each accepted `&str` from callers and previously paid
 //! a `String::to_owned()` only to reach `LeanAbi<'lean> for String`.
@@ -44,7 +44,7 @@ use crate::runtime::obj::Obj;
 ///
 /// The returned [`Obj`] carries exactly one Lean reference count and is
 /// anchored to the `&'lean LeanRuntime` borrow that witnessed the call.
-pub(crate) trait IntoLean<'lean>: Sized {
+pub trait IntoLean<'lean>: Sized {
     /// Allocate (or scalar-box) a Lean representation of `self` and return
     /// the owned handle.
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean>;
@@ -57,7 +57,7 @@ pub(crate) trait IntoLean<'lean>: Sized {
 /// the Obj because the cases where the caller wants to recover the
 /// original `Obj` are rare; if they arise, we will add a `try_from_lean_ref`
 /// variant against an `ObjRef` rather than complicating this trait.
-pub(crate) trait TryFromLean<'lean>: Sized {
+pub trait TryFromLean<'lean>: Sized {
     /// Decode `obj` into `Self`, returning a
     /// [`LeanError::Host`](LeanError) with stage
     /// [`HostStage::Conversion`] if the object's kind or payload is
@@ -71,10 +71,12 @@ pub(crate) trait TryFromLean<'lean>: Sized {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self>;
 }
 
-/// Build a `LeanError::Host { stage: Conversion, code: AbiConversion, .. }`
-/// carrying a uniform diagnostic. Centralised so per-type impls share
-/// the wording and so a future log/sink can hook one site instead of N.
-pub(crate) fn conversion_error(message: impl Into<String>) -> LeanError {
+/// Build a `LeanError::Host { stage: Conversion, .. }` carrying a uniform
+/// diagnostic.
+///
+/// Centralised so per-type ABI impls share the wording and so a future
+/// log/sink can hook one site instead of N.
+pub fn conversion_error(message: impl Into<String>) -> LeanError {
     LeanError::abi_conversion(message)
 }
 
@@ -86,9 +88,8 @@ pub(crate) fn conversion_error(message: impl Into<String>) -> LeanError {
 /// nameable from downstream crates (the orphan rule alone is not enough
 /// — downstream could implement `LeanAbi` for a downstream type without
 /// implementing `SealedAbi`, which the sealed bound rejects).
-pub(crate) mod sealed {
+pub mod sealed {
     /// Sealed supertrait for [`super::LeanAbi`].
-    #[allow(unreachable_pub, reason = "sealed trait pattern — pub inside a pub(crate) module")]
     pub trait SealedAbi {}
 }
 
@@ -157,6 +158,10 @@ impl<'lean> LeanAbi<'lean> for Obj<'lean> {
     fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
         self.into_raw()
     }
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — called only by LeanExported"
+    )]
     fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned reference count returned from
         // an extern Lean function (per Lake's `lean_obj_res` contract).

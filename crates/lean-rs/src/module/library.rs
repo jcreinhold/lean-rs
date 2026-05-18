@@ -181,14 +181,17 @@ impl<'lean> LeanLibrary<'lean> {
     ///
     /// Returns the raw symbol address. The caller is responsible for
     /// casting to the right `unsafe extern "C" fn(...) -> ...`
-    /// signature.
+    /// signature, typically by handing the address to
+    /// [`LeanExported::from_function_address`].
     ///
     /// # Errors
     ///
     /// Returns [`LeanError::Host`] with stage [`HostStage::Link`] if
     /// the symbol is not exported by this library. The diagnostic
     /// embeds the symbol name and the library path.
-    pub(crate) fn resolve_function_symbol(&self, name: &str) -> LeanResult<*mut c_void> {
+    ///
+    /// [`LeanExported::from_function_address`]: crate::module::LeanExported::from_function_address
+    pub fn resolve_function_symbol(&self, name: &str) -> LeanResult<*mut c_void> {
         // SAFETY: `libloading::Library::get::<*mut c_void>` is the raw
         // address lookup; the returned `Symbol<'_, *mut c_void>` borrows
         // from `self.library`, so dereferencing it inside this scope is
@@ -208,18 +211,18 @@ impl<'lean> LeanLibrary<'lean> {
     /// Resolve `name` as a function-pointer symbol, tolerating a missing
     /// symbol.
     ///
-    /// Returns `Ok(Some(address))` when the symbol resolves, `Ok(None)`
-    /// when it is absent from this library. Used by the host stack to
-    /// pre-resolve *optional* capability symbols at
-    /// [`crate::host::LeanCapabilities::new`] time without failing
-    /// capability load when an older fixture omits a service.
+    /// Returns `Some(address)` when the symbol resolves, `None` when it
+    /// is absent from this library. The opinionated `lean-rs-host` stack
+    /// uses this to pre-resolve *optional* capability symbols at
+    /// `LeanCapabilities::new` time without failing capability load when
+    /// a fixture omits a service.
     ///
     /// Symbol resolution at the dlsym level only fails with "symbol not
     /// present" — the dynamic linker has already accepted the library at
     /// [`Self::open`], so a per-symbol lookup error is either "missing"
-    /// or a `\0` in the name (which the host stack never passes). Both
-    /// are collapsed into the `Ok(None)` branch by design.
-    pub(crate) fn resolve_optional_function_symbol(&self, name: &str) -> Option<*mut c_void> {
+    /// or a `\0` in the name (which a sane caller never passes). Both
+    /// are collapsed into the `None` branch by design.
+    pub fn resolve_optional_function_symbol(&self, name: &str) -> Option<*mut c_void> {
         // SAFETY: identical to `resolve_function_symbol`; the symbol
         // borrow does not escape this scope.
         match unsafe { self.library.get::<*mut c_void>(name.as_bytes()) } {

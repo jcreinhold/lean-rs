@@ -10,7 +10,7 @@
 //! The module is the only place in `abi` that knows how
 //! [`lean_alloc_ctor`], [`lean_ctor_obj_cptr`], and the constructor's
 //! `tag`/`num_objs` invariants line up; container modules
-//! ([`crate::abi::option`], [`crate::abi::except`]) and downstream
+//! (`crate::abi::option`, `crate::abi::except`) and downstream
 //! handlers ship through these primitives instead of repeating the
 //! pointer arithmetic. That keeps a single audited copy of the
 //! ctor-allocation rules and centralises the `lean_inc`/`lean_dec`
@@ -65,7 +65,7 @@ use crate::runtime::obj::Obj;
 /// Panics only via `lean_alloc_ctor`'s `strict_*` arithmetic overflow
 /// guard — unreachable for the constructor shapes Lean emits
 /// (`LEAN_MAX_CTOR_FIELDS` = 256).
-pub(crate) fn alloc_ctor_with_objects<'lean, const N: usize>(
+pub fn alloc_ctor_with_objects<'lean, const N: usize>(
     runtime: &'lean LeanRuntime,
     tag: u8,
     objects: [Obj<'lean>; N],
@@ -107,7 +107,7 @@ pub(crate) fn alloc_ctor_with_objects<'lean, const N: usize>(
 /// if `obj` is scalar-tagged, has a non-constructor heap tag, has a
 /// different tag from `expected_tag`, or carries a different
 /// object-slot count from `N`.
-pub(crate) fn take_ctor_objects<'lean, const N: usize>(
+pub fn take_ctor_objects<'lean, const N: usize>(
     obj: Obj<'lean>,
     expected_tag: u8,
     label: &str,
@@ -142,7 +142,7 @@ pub(crate) fn take_ctor_objects<'lean, const N: usize>(
 
 /// Read the tag byte of a constructor object.
 ///
-/// Used by sum-type decoders ([`Option`], [`except::Except`](super::except::Except))
+/// Used by sum-type decoders (`Option` and `except::Except` (sibling-module sum-type carriers))
 /// that need to pick a variant before they know the arity. Borrow-only:
 /// leaves the refcount untouched.
 ///
@@ -150,7 +150,7 @@ pub(crate) fn take_ctor_objects<'lean, const N: usize>(
 ///
 /// Returns [`HostStage::Conversion`](crate::error::HostStage::Conversion)
 /// if `obj` is not a heap-allocated constructor.
-pub(crate) fn ctor_tag(obj: &Obj<'_>) -> LeanResult<u8> {
+pub fn ctor_tag(obj: &Obj<'_>) -> LeanResult<u8> {
     let ptr = obj.as_raw_borrowed();
     // SAFETY: `lean_is_scalar` is pure pointer-bit math.
     if unsafe { lean_is_scalar(ptr) } {

@@ -10,7 +10,7 @@
 //!   | ok    : α → Except ε α   -- tag 1, num_objs 1
 //! ```
 //!
-//! Per `RD-2026-05-17-004` and `docs/architecture/03-host-api.md`
+//! Per `RD-2026-05-17-004` and `docs/architecture/04-host-stack.md`
 //! §"Error model", `Except<E, T>` is **a value type, not part of the
 //! `LeanError` boundary**. Runtime / host failures cross as
 //! `LeanError::LeanException`; application-level success-or-error
