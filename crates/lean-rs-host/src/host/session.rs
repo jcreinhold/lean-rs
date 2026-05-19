@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export sixteen **mandatory** `@[export]` symbols and may
+//! loads must export eighteen **mandatory** `@[export]` symbols and may
 //! export four **optional** meta-service symbols (matched at
 //! `LeanCapabilities::load_capabilities` time):
 //!
@@ -22,6 +22,8 @@
 //! | `lean_rs_host_env_query_declaration`           | yes        | `Environment -> Name -> IO (Option Declaration)`                                                              |
 //! | `lean_rs_host_env_query_declarations_bulk`     | yes        | `Environment -> Array Name -> IO (Array (Option Declaration))`                                                |
 //! | `lean_rs_host_env_list_declarations`           | yes        | `Environment -> IO (Array Name)`                                                                              |
+//! | `lean_rs_host_env_list_declarations_filtered`  | yes        | `Environment -> DeclarationFilter -> IO (Array Name)`                                                         |
+//! | `lean_rs_host_env_declaration_source_range`    | yes        | `Environment -> Name -> Array String -> IO (Option SourceRange)`                                              |
 //! | `lean_rs_host_env_declaration_type`            | yes        | `Environment -> Name -> IO (Option Expr)`                                                                     |
 //! | `lean_rs_host_env_declaration_type_bulk`       | yes        | `Environment -> Array String -> IO (Array (Option Expr))`                                                     |
 //! | `lean_rs_host_env_declaration_kind`            | yes        | `Environment -> Name -> IO String`                                                                            |
@@ -114,11 +116,13 @@ use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use lean_rs::Obj;
-use lean_rs::abi::traits::TryFromLean;
+use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
+use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 #[cfg(doc)]
 use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
 use lean_rs::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary};
+use lean_rs_sys::lean_object;
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionStats: per-session dispatch metrics --------------------------
@@ -152,6 +156,118 @@ pub struct SessionStats {
     pub elapsed_ns: u64,
 }
 
+// -- Public source-range / filter types ---------------------------------
+
+/// Source range Lean recorded for a declaration.
+///
+/// Coordinates are 1-based at every layer, matching the public
+/// convention of Lean declaration ranges. `file` is the path or module
+/// label Lean/Rust could resolve for the declaration; it is a label for
+/// consumers, not a normalized filesystem guarantee.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanSourceRange {
+    /// File path or module label recorded for the declaration.
+    pub file: String,
+    /// 1-based start line.
+    pub start_line: u32,
+    /// 1-based start column.
+    pub start_column: u32,
+    /// 1-based end line.
+    pub end_line: u32,
+    /// 1-based end column.
+    pub end_column: u32,
+}
+
+impl<'lean> TryFromLean<'lean> for LeanSourceRange {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        let [file_o, start_line_o, start_column_o, end_line_o, end_column_o] =
+            take_ctor_objects::<5>(obj, 0, "SourceRange")?;
+        Ok(Self {
+            file: String::try_from_lean(file_o)?,
+            start_line: u32::try_from_lean(start_line_o)?,
+            start_column: u32::try_from_lean(start_column_o)?,
+            end_line: u32::try_from_lean(end_line_o)?,
+            end_column: u32::try_from_lean(end_column_o)?,
+        })
+    }
+}
+
+/// Lean-side declaration-listing filter.
+///
+/// The default is tuned for user-facing declaration browsers: include
+/// private names because callers may be indexing the current project,
+/// but drop compiler-generated and internal-detail names that usually
+/// swamp the list with implementation artifacts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LeanDeclarationFilter {
+    /// Keep names Lean marks as private.
+    pub include_private: bool,
+    /// Keep generated names with numeric components.
+    pub include_generated: bool,
+    /// Keep Lean internal-detail names such as `_`, `match_`, `proof_`,
+    /// and similar implementation artifacts.
+    pub include_internal: bool,
+}
+
+impl Default for LeanDeclarationFilter {
+    fn default() -> Self {
+        Self {
+            include_private: true,
+            include_generated: false,
+            include_internal: false,
+        }
+    }
+}
+
+impl<'lean> IntoLean<'lean> for LeanDeclarationFilter {
+    fn into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.include_private.into_lean(runtime),
+                self.include_generated.into_lean(runtime),
+                self.include_internal.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for LeanDeclarationFilter {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        let [include_private_o, include_generated_o, include_internal_o] =
+            take_ctor_objects::<3>(obj, 0, "DeclarationFilter")?;
+        Ok(Self {
+            include_private: bool::try_from_lean(include_private_o)?,
+            include_generated: bool::try_from_lean(include_generated_o)?,
+            include_internal: bool::try_from_lean(include_internal_o)?,
+        })
+    }
+}
+
+impl sealed::SealedAbi for LeanDeclarationFilter {}
+
+impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
+    type CRepr = *mut lean_object;
+
+    fn into_c(self, runtime: &'lean lean_rs::LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+
+    #[allow(
+        clippy::not_unsafe_ptr_arg_deref,
+        reason = "sealed trait — called only by LeanExported"
+    )]
+    fn from_c(c: Self::CRepr, runtime: &'lean lean_rs::LeanRuntime) -> LeanResult<Self> {
+        if c.is_null() {
+            return Err(conversion_error("Lean DeclarationFilter returned a null pointer"));
+        }
+        // SAFETY: boxed C-ABI return values carry one owned refcount.
+        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+        Self::try_from_lean(obj)
+    }
+}
+
 // -- SessionSymbols: pre-resolved C-ABI function addresses ---------------
 
 /// The session function-symbol addresses [`LeanSession`] dispatches
@@ -172,6 +288,8 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_query_declaration: *mut c_void,
     pub(crate) env_query_declarations_bulk: *mut c_void,
     pub(crate) env_list_declarations: *mut c_void,
+    pub(crate) env_list_declarations_filtered: *mut c_void,
+    pub(crate) env_declaration_source_range: *mut c_void,
     pub(crate) env_declaration_type: *mut c_void,
     pub(crate) env_declaration_type_bulk: *mut c_void,
     pub(crate) env_declaration_kind: *mut c_void,
@@ -190,7 +308,7 @@ pub(crate) struct SessionSymbols {
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The sixteen
+    /// Resolve session function symbols from `library`. The eighteen
     /// baseline symbols are mandatory; the four meta-service symbols
     /// are optional.
     ///
@@ -210,6 +328,9 @@ impl SessionSymbols {
             env_query_declaration: library.resolve_function_symbol("lean_rs_host_env_query_declaration")?,
             env_query_declarations_bulk: library.resolve_function_symbol("lean_rs_host_env_query_declarations_bulk")?,
             env_list_declarations: library.resolve_function_symbol("lean_rs_host_env_list_declarations")?,
+            env_list_declarations_filtered: library
+                .resolve_function_symbol("lean_rs_host_env_list_declarations_filtered")?,
+            env_declaration_source_range: library.resolve_function_symbol("lean_rs_host_env_declaration_source_range")?,
             env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
             env_declaration_type_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_type_bulk")?,
             env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
@@ -457,6 +578,93 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let raw = list.call(self.environment.clone());
         self.record_call(0, t.elapsed());
         raw?.into_iter().map(LeanName::try_from_lean).collect()
+    }
+
+    /// Declaration names matching `filter`.
+    ///
+    /// Filtering runs inside Lean while traversing the environment
+    /// constants table, so Rust only allocates handles for names the
+    /// caller asked to keep.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch. Returns
+    /// [`lean_rs::LeanError::LeanException`] if the Lean-side query
+    /// raises.
+    pub fn list_declarations_filtered(
+        &mut self,
+        filter: &LeanDeclarationFilter,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<LeanName<'lean>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.list_declarations_filtered",
+            include_private = filter.include_private,
+            include_generated = filter.include_generated,
+            include_internal = filter.include_internal,
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let address = self.capabilities.symbols().env_list_declarations_filtered;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, DeclarationFilter) -> IO (Array Name)`.
+        let list: LeanExported<'lean, '_, (Obj<'lean>, LeanDeclarationFilter), LeanIo<Vec<Obj<'lean>>>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let raw = list.call(self.environment.clone(), *filter);
+        self.record_call(0, t.elapsed());
+        raw?.into_iter().map(LeanName::try_from_lean).collect()
+    }
+
+    /// Source range Lean recorded for `name`.
+    ///
+    /// Returns `Ok(None)` when the name is absent or Lean has no
+    /// declaration range for it. That is normal for synthetic,
+    /// runtime-created, and some compiler-generated declarations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch. Returns
+    /// [`lean_rs::LeanError::LeanException`] if the Lean-side query
+    /// raises.
+    pub fn declaration_source_range(
+        &mut self,
+        name: &str,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Option<LeanSourceRange>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_source_range",
+            name = name,
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let name_handle = self.make_name(name, cancellation)?;
+        check_cancellation(cancellation)?;
+        let source_roots = self
+            .capabilities
+            .host()
+            .project()
+            .source_roots()?
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        check_cancellation(cancellation)?;
+        let address = self.capabilities.symbols().env_declaration_source_range;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Name, Array String) -> IO (Option SourceRange)`.
+        let query: LeanExported<
+            'lean,
+            '_,
+            (Obj<'lean>, LeanName<'lean>, Vec<String>),
+            LeanIo<Option<LeanSourceRange>>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), name_handle, source_roots);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// The declared type of `name`, as an opaque [`LeanExpr`] handle.

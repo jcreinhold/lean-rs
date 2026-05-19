@@ -11,6 +11,20 @@ namespace LeanRsFixture.Environment
 
 open Lean
 
+structure SourceRange where
+  file : String
+  startLine : Nat
+  startColumn : Nat
+  endLine : Nat
+  endColumn : Nat
+  deriving Inhabited
+
+structure DeclarationFilter where
+  includePrivate : Bool
+  includeGenerated : Bool
+  includeInternal : Bool
+  deriving Inhabited
+
 /-- Initialise the Lean search path and import the named modules into a
     fresh environment. The Rust caller passes the resolved
     `.lake/build/lib/lean` search-path entries (one per Lake package
@@ -22,7 +36,7 @@ open Lean
 def sessionImport (searchPaths : Array String) (importNames : Array String) : IO Environment := do
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
-  let imports := importNames.map fun n => { module := n.toName : Import }
+  let imports := importNames.map fun n => { module := n.toName, importAll := true : Import }
   -- `loadExts := true` activates scoped environment extensions on
   -- import — including the parser extension. Without it, the
   -- imported environment has only the bootstrap-level builtin
@@ -61,6 +75,71 @@ def envQueryDeclaration (env : Environment) (name : Name) : IO (Option Declarati
 @[export lean_rs_host_env_list_declarations]
 def envListDeclarations (env : Environment) : IO (Array Name) := do
   pure <| env.constants.fold (init := #[]) fun acc name _ => acc.push name
+
+private def isGeneratedName (name : Name) : Bool :=
+  name.hasNum && !isPrivateName name
+
+private def isInternalName (name : Name) : Bool :=
+  name.isInternalDetail && !isPrivateName name && !isGeneratedName name
+
+private def keepDeclaration (filter : DeclarationFilter) (name : Name) : Bool :=
+  (filter.includePrivate || !isPrivateName name)
+    && (filter.includeGenerated || !isGeneratedName name)
+    && (filter.includeInternal || !isInternalName name)
+
+@[export lean_rs_host_env_list_declarations_filtered]
+def envListDeclarationsFiltered (env : Environment) (filter : DeclarationFilter) : IO (Array Name) := do
+  pure <| env.constants.fold (init := #[]) fun acc name _ =>
+    if keepDeclaration filter name then acc.push name else acc
+
+private def moduleSourcePath (moduleName : Name) : System.FilePath :=
+  System.FilePath.mk <| moduleName.toString.replace "." System.FilePath.pathSeparator.toString ++ ".lean"
+
+private def declarationModule? (env : Environment) (declName : Name) : Option Name :=
+  match env.getModuleIdxFor? declName with
+  | none => none
+  | some moduleIdx => some env.allImportedModuleNames[moduleIdx.toNat]!
+
+private def findDeclarationFile? (sourceRoots : Array String) (moduleName : Name) : IO (Option String) := do
+  let rel := moduleSourcePath moduleName
+  for root in sourceRoots do
+    let candidate := System.FilePath.mk root / rel
+    if ← candidate.pathExists then
+      return some (← IO.FS.realPath candidate).toString
+  return none
+
+private def findDeclarationRangesInEnv? (env : Environment) (name : Name) : IO (Option DeclarationRanges) := do
+  let coreCtx : Core.Context := { fileName := "<declaration-source-range>", fileMap := default, options := {} }
+  let coreState : Core.State := { env }
+  let action : CoreM (Option DeclarationRanges) := findDeclarationRanges? name
+  let eio : EIO Exception (Option DeclarationRanges) := (action coreCtx).run' coreState
+  match ← eio.toBaseIO with
+  | .ok range? => pure range?
+  | .error ex =>
+    let msg ← ex.toMessageData.toString
+    throw <| IO.userError msg
+
+@[export lean_rs_host_env_declaration_source_range]
+def envDeclarationSourceRange (env : Environment) (name : Name) (sourceRoots : Array String)
+    : IO (Option SourceRange) := do
+  if (env.find? name).isNone then
+    return none
+  let some ranges ← findDeclarationRangesInEnv? env name
+    | return none
+  let moduleName? := declarationModule? env name
+  let moduleLabel := moduleName?.map Name.toString |>.getD "<unknown>"
+  let file ← match moduleName? with
+    | none => pure moduleLabel
+    | some moduleName =>
+      pure <| (← findDeclarationFile? sourceRoots moduleName).getD moduleLabel
+  let range := ranges.range
+  pure <| some {
+    file
+    startLine := range.pos.line
+    startColumn := range.pos.column + 1
+    endLine := range.endPos.line
+    endColumn := range.endPos.column + 1
+  }
 
 @[export lean_rs_host_env_declaration_type]
 def envDeclarationType (env : Environment) (name : Name) : IO (Option Expr) := do

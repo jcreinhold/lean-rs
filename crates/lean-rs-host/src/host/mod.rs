@@ -63,7 +63,7 @@ pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;
 pub use self::host::LeanHost;
 pub use self::pool::{PoolStats, PooledSession, SessionPool};
-pub use self::session::{LeanSession, SessionStats};
+pub use self::session::{LeanDeclarationFilter, LeanSession, LeanSourceRange, SessionStats};
 
 #[cfg(test)]
 mod tests;

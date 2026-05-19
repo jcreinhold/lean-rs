@@ -12,7 +12,7 @@
 //!   dispatches here).
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
 //!   built by the consumer's `lake build` from the required
-//!   `lean-rs-host-shims` Lake package. It contains the 16 mandatory +
+//!   `lean-rs-host-shims` Lake package. It contains the 18 mandatory +
 //!   4 optional `lean_rs_host_*` `@[export]` symbols that every typed
 //!   `LeanSession` method dispatches through. Lake does *not*
 //!   transitively bundle the shim's `@[export]` symbols into the
@@ -78,7 +78,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// through Lean's `_G_initialized` short-circuit), opens the shim
     /// dylib located via the Lake manifest, initializes the
     /// `LeanRsHostShims` root module, and resolves the
-    /// session-dispatch symbol addresses from the **shim** dylib: 16
+    /// session-dispatch symbol addresses from the **shim** dylib: 18
     /// mandatory baseline symbols (load failure on miss) and 4
     /// optional meta-service symbols (missing entries stored as
     /// `None`). Both [`lean_rs::module::LeanModule`] handles are
@@ -94,7 +94,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// `lean_rs_host_shims` entry, missing built dylib — the consumer
     /// likely forgot `require lean_rs_host_shims` or didn't run
     /// `lake build`). Returns [`lean_rs::HostStage::Link`] if the
-    /// initializer or any of the 16 **mandatory** symbols is missing
+    /// initializer or any of the 18 **mandatory** symbols is missing
     /// from the shim dylib. Missing optional meta-service symbols
     /// never fail capability load.
     pub(crate) fn new(
@@ -130,7 +130,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         // shim-defined transitives through the global namespace.
         let _user_module = user_library.initialize_module(package, lib_name)?;
 
-        // The 16 mandatory + 4 optional `lean_rs_host_*` symbols live
+        // The 18 mandatory + 4 optional `lean_rs_host_*` symbols live
         // in the shim dylib; resolve them there.
         // `LeanSession::call_capability` (separately) routes ad-hoc
         // user-authored `@[export]` symbols through `user_library`.

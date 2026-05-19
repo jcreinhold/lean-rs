@@ -6,6 +6,7 @@ import LeanRsFixture.Evidence
 import LeanRsFixture.Capability
 import LeanRsFixture.Handles
 import LeanRsFixture.Meta
+import LeanRsFixture.SourceRanges
 
 /-! Roll-up module for the `LeanRsFixture` Lake library.
 

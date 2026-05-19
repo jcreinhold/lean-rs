@@ -10,7 +10,7 @@
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 16 mandatory + 4 optional
+//! - The capability contract: 18 mandatory + 4 optional
 //!   `lean_rs_host_*` `@[export]` Lean shims this stack expects in the
 //!   capability dylib it loads.
 //!
@@ -35,4 +35,7 @@ pub use crate::host::elaboration::{
 pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
-pub use crate::host::{LeanCapabilities, LeanHost, LeanSession, PoolStats, PooledSession, SessionPool, SessionStats};
+pub use crate::host::{
+    LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange, PoolStats, PooledSession,
+    SessionPool, SessionStats,
+};

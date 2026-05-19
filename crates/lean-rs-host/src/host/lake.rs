@@ -120,6 +120,30 @@ impl LakeProject {
         Ok(package_dir.join(".lake").join("build").join("lib").join("lean"))
     }
 
+    /// Source roots passed to the source-range shim.
+    ///
+    /// Lean's declaration-range extension stores positions, not a stable
+    /// absolute path. The host keeps Lake layout knowledge here and lets
+    /// the Lean shim resolve a declaration's module against these roots
+    /// when it needs a user-facing file label.
+    pub(crate) fn source_roots(&self) -> LeanResult<Vec<PathBuf>> {
+        let manifest_path = self.root.join("lake-manifest.json");
+        let manifest_bytes = std::fs::read(&manifest_path).map_err(|err| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "Lake manifest at '{}' could not be read ({err})",
+                manifest_path.display()
+            ))
+        })?;
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|err| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "Lake manifest at '{}' is not valid JSON: {err}",
+                manifest_path.display()
+            ))
+        })?;
+        let shim_package_dir = shim_package_dir_from_manifest(&self.root, &manifest, &manifest_path)?;
+        Ok(vec![self.root.clone(), shim_package_dir])
+    }
+
     /// Resolve the on-disk dylib path for the required
     /// [`SHIM_PACKAGE_NAME`] Lake package by reading this project's
     /// `lake-manifest.json`. The consumer must have a `require` line
