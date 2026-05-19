@@ -14,6 +14,21 @@ open System Lake DSL
     host-side `dlsym` resolver. -/
 package «lean_rs_host_shims»
 
+input_file interop_callback.c where
+  path := "c" / "interop_callback.c"
+  text := true
+
+target interop_callback.o pkg : FilePath := do
+  let srcJob ← interop_callback.c.fetch
+  let oFile := pkg.buildDir / "c" / "interop_callback.o"
+  buildO oFile srcJob #[] #["-fPIC"] "cc" getLeanTrace
+
+target libleanrsinterop_callback pkg : FilePath := do
+  let ffiO ← interop_callback.o.fetch
+  let name := nameToStaticLib "leanrsinterop_callback"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
 @[default_target]
 lean_lib «LeanRsHostShims» where
   defaultFacets := #[LeanLib.sharedFacet]
+  moreLinkObjs := #[libleanrsinterop_callback]
