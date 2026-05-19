@@ -12,7 +12,7 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling r
 
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The L1 FFI primitive `lean-rs`
 ships the typed `@[export]`-calling machinery and the structured error boundary; this L2 crate
-adds the opinionated capability/session/pool stack, and depends on the 13 + 3
+adds the opinionated capability/session/pool stack, and depends on the 13 + 4
 `lean_rs_host_*` `@[export]` Lean shims that capabilities load into the dylib it opens.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed
@@ -49,7 +49,7 @@ The crate root names mandatory session capabilities and entry points only. Sub-m
 host **specialised or optional** capabilities so the layer difference is visible at the import
 site (Ousterhout ch. 7—different layer, different abstraction).
 
-- **`lean_rs_host::meta`**—the bounded `MetaM` capability. Three of the fourteen `SessionSymbols` (`meta_infer_type`, `meta_whnf`, `meta_heartbeat_burn`) are optional, and `run_meta` is the only call site that touches the meta types. Surfacing `LeanMetaOptions`, `LeanMetaResponse`, `LeanMetaService`, `LeanMetaTransparency`, `MetaCallStatus`, and the three factories (`infer_type`, `whnf`, `heartbeat_burn`) at the crate root would pollute the namespace of every caller for the benefit of the subset that opts into `MetaM`. Meta callers write `use lean_rs_host::meta::{...}`; everyone else is undisturbed.
+- **`lean_rs_host::meta`**—the bounded `MetaM` capability. Four of the seventeen `SessionSymbols` (`meta_infer_type`, `meta_whnf`, `meta_heartbeat_burn`, `meta_is_def_eq`) are optional, and `run_meta` is the only call site that touches the meta types. Surfacing `LeanMetaOptions`, `LeanMetaResponse`, `LeanMetaService`, `LeanMetaTransparency`, `MetaCallStatus`, and the four factories (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`) at the crate root would pollute the namespace of every caller for the benefit of the subset that opts into `MetaM`. Meta callers write `use lean_rs_host::meta::{...}`; everyone else is undisturbed.
 
 ## Mandatory entry points
 
@@ -93,7 +93,7 @@ site (Ousterhout ch. 7—different layer, different abstraction).
 | Item | Module path | Notes |
 | --- | --- | --- |
 | `LakeProject` | `lean_rs_host::host::lake::LakeProject` | `pub(crate)`: Lake discovery helper used by `LeanHost`. |
-| `meta::{LeanMetaOptions, LeanMetaService, LeanMetaResponse, LeanMetaTransparency, MetaCallStatus, infer_type, whnf, heartbeat_burn}` | `lean_rs_host::meta::*` (re-exports `host::meta::*`) | Opt-in `MetaM` surface—see *Specialised sub-module surfaces*. |
+| `meta::{LeanMetaOptions, LeanMetaService, LeanMetaResponse, LeanMetaTransparency, MetaCallStatus, infer_type, whnf, heartbeat_burn, is_def_eq}` | `lean_rs_host::meta::*` (re-exports `host::meta::*`) | Opt-in `MetaM` surface—see *Specialised sub-module surfaces*. |
 
 ## Methods on the curated types (happy-path shape)
 
@@ -182,7 +182,7 @@ blocked by the orphan rule plus the `#[doc(hidden)]` marker on the parent module
 - **Re-export every `pub` item from every internal module at the crate root.** Path-shortening dressed up as curation; gives mandatory and specialised items equal status. Violates Ousterhout ch. 17 (consistency requires dissimilar things to be done differently).
 - **One `LeanHost` god-type with every operation as a method.** The canonical "complect" case (Ousterhout ch. 4 + Hickey): runtime, modules, sessions, semantic handles, and error policy braided into one mechanism. Kills the `'lean` cascade—`LeanExpr<'lean>` cannot outlive its session, but a god type would have to be `'static` to host every method—and forces caller code to thread one large `&mut` through every layer.
 - **Hide `lean-rs-host`'s internal modules behind a top-level façade.** Over-encapsulates for hypothetical safety wins. Advanced users already have a clean escape hatch via `lean-rs-sys`, but that drops them to raw FFI. Keeping `lean-rs::module` visible at module paths preserves the middle tier: typed handles, no raw `lean_*` symbols.
-- **Keep `LeanHost` / `LeanCapabilities` / `LeanSession` in `lean-rs` itself.** Conflated two layers behind one default entry point and made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without satisfying the 13 + 3 `lean_rs_host_*` shim contract that ships nowhere outside the test fixture.
+- **Keep `LeanHost` / `LeanCapabilities` / `LeanSession` in `lean-rs` itself.** Conflated two layers behind one default entry point and made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without satisfying the 13 + 4 `lean_rs_host_*` shim contract that ships nowhere outside the test fixture.
 
 ## Naming convention
 

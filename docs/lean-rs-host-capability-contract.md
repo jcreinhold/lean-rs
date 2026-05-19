@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 13 mandatory + 3 optional `@[export] lean_rs_host_*` symbols
+The 13 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The shim package
 [`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
@@ -60,7 +60,7 @@ the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (3 symbols—bounded `MetaM`)
+## Optional contract (4 symbols—bounded `MetaM`)
 
 If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for
 that slot; `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for any
@@ -71,6 +71,7 @@ service mapped to the missing address.
 | `lean_rs_host_meta_infer_type` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::infer_type(), expr, options, cancellation)` |
 | `lean_rs_host_meta_whnf` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options, cancellation)` |
 | `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
+| `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
 
 ## Forking the shim package
 
@@ -79,7 +80,7 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` finds the dylib at the conventional path.
 - Same 13 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
-- The 3 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
+- The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this
 is why the shim package isn't framed as "compatibility shims" but as the **implementation** of

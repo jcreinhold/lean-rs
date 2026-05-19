@@ -1,17 +1,18 @@
 import Lean
 import LeanRsHostShims.Elaboration
 
-/-! Capability category: bounded `MetaM` services. Three `@[export]`
+/-! Capability category: bounded `MetaM` services. Four `@[export]`
     shims run pre-registered MetaM actions (`Meta.inferType`,
-    `Meta.whnf`, and a deliberate heartbeat-burner) under a heartbeat
-    ceiling + diagnostic byte budget + reducibility setting threaded
-    from Rust. Each shim returns a four-variant `MetaResponse` that
+    `Meta.whnf`, `Meta.isDefEq`, and a deliberate heartbeat-burner)
+    under a heartbeat ceiling + diagnostic byte budget + reducibility
+    setting threaded from Rust. Each shim returns a four-variant
+    `MetaResponse` that
     classifies the outcome as `ok` / `failed` / `timeoutOrHeartbeat` /
     `unsupported`; Rust mirrors the inductive with a typed payload sum.
 
     The Lean side owns all `MetaM` plumbing; Rust never constructs or
     schedules a MetaM program. The closed set of services is fixed by
-    the three `@[export]`s here plus the matching Rust constants. -/
+    the four `@[export]`s here plus the matching Rust constants. -/
 
 namespace LeanRsFixture.Meta
 
@@ -32,7 +33,7 @@ open LeanRsFixture.Elaboration (ElabFailure singleErrorFailure)
                                  ceiling tripped before the action could
                                  finish;
     * `unsupported`            — reserved for a service that classifies its
-                                 input as out-of-domain. The three landed
+                                 input as out-of-domain. The landed
                                  services never produce this; the Rust
                                  dispatcher also synthesises an
                                  `Unsupported` response when a service's
@@ -106,6 +107,23 @@ def metaWhnf (env : Environment) (expr : Expr)
     (heartbeats : UInt64) (diagBytes : USize) (transparency : UInt8)
     : IO (MetaResponse Expr) :=
   runMetaBounded env heartbeats diagBytes transparency (Meta.whnf expr)
+
+/-- Service: decide whether two `Expr`s are definitionally equal.
+
+    The request is a Lean product `(lhs, rhs, transparency)`. The final
+    `UInt8` parameter is still present because Rust dispatches every
+    registered meta service through the same `(env, request, heartbeats,
+    diagBytes, optionsTransparency)` shape; this service uses the
+    request-local transparency so callers can compare several pairs
+    under different modes without rebuilding the option bundle. -/
+@[export lean_rs_host_meta_is_def_eq]
+def metaIsDefEq (env : Environment) (request : Expr × Expr × UInt8)
+    (heartbeats : UInt64) (diagBytes : USize) (_optionsTransparency : UInt8)
+    : IO (MetaResponse Bool) :=
+  let lhs := request.1
+  let rhs := request.2.1
+  let transparency := request.2.2
+  runMetaBounded env heartbeats diagBytes transparency (Meta.isDefEq lhs rhs)
 
 /-- Non-terminating recursion guarded only by the heartbeat check.
     `partial` because it does not reduce structurally — termination

@@ -225,6 +225,10 @@ impl core::fmt::Debug for lean_rs_host::meta::LeanMetaTransparency
 pub fn lean_rs_host::meta::LeanMetaTransparency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::StructuralPartialEq for lean_rs_host::meta::LeanMetaTransparency
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::meta::LeanMetaTransparency
+pub fn lean_rs_host::meta::LeanMetaTransparency::into_lean(self, runtime: &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::meta::LeanMetaTransparency
+pub fn lean_rs_host::meta::LeanMetaTransparency::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::Send for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::Sync for lean_rs_host::meta::LeanMetaTransparency
@@ -291,6 +295,7 @@ impl<Req, Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::
 impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaService<Req, Resp>
 pub fn lean_rs_host::host::meta::heartbeat_burn<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::host::meta::infer_type<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
+pub fn lean_rs_host::host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanMetaService<(lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::meta::LeanMetaTransparency), bool>
 pub fn lean_rs_host::host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub mod lean_rs_host::host::pool
 pub struct lean_rs_host::host::pool::PoolStats
@@ -541,6 +546,10 @@ impl core::fmt::Debug for lean_rs_host::meta::LeanMetaTransparency
 pub fn lean_rs_host::meta::LeanMetaTransparency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::StructuralPartialEq for lean_rs_host::meta::LeanMetaTransparency
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::meta::LeanMetaTransparency
+pub fn lean_rs_host::meta::LeanMetaTransparency::into_lean(self, runtime: &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::meta::LeanMetaTransparency
+pub fn lean_rs_host::meta::LeanMetaTransparency::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::Send for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::Sync for lean_rs_host::meta::LeanMetaTransparency
@@ -607,6 +616,7 @@ impl<Req, Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::
 impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaService<Req, Resp>
 pub fn lean_rs_host::meta::heartbeat_burn<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::meta::infer_type<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
+pub fn lean_rs_host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanMetaService<(lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::meta::LeanMetaTransparency), bool>
 pub fn lean_rs_host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 #[non_exhaustive] pub enum lean_rs_host::EvidenceStatus
 pub lean_rs_host::EvidenceStatus::Checked

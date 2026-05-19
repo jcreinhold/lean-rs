@@ -66,10 +66,11 @@ impl<'lean> LeanHost<'lean> {
     /// Returns [`lean_rs::LeanError::Host`] with stage
     /// [`lean_rs::HostStage::Load`] if the dylib does not exist or fails
     /// to open, [`lean_rs::HostStage::Link`] if the initializer symbol or
-    /// any of the eleven mandatory session symbols is missing. The
-    /// three optional `MetaM` symbols (`infer_type`, `whnf`,
-    /// `heartbeat_burn`) are looked up lazily and their absence does
-    /// not fail loading; `run_meta` reports `Unsupported` at call time.
+    /// any of the thirteen mandatory session symbols is missing. The
+    /// four optional `MetaM` symbols (`infer_type`, `whnf`,
+    /// `heartbeat_burn`, `is_def_eq`) are looked up lazily and their
+    /// absence does not fail loading; `run_meta` reports `Unsupported`
+    /// at call time.
     pub fn load_capabilities<'h>(&'h self, package: &str, lib_name: &str) -> LeanResult<LeanCapabilities<'lean, 'h>> {
         let dylib_path = self.project.capability_dylib(package, lib_name);
         let library = LeanLibrary::open(self.runtime, &dylib_path)?;

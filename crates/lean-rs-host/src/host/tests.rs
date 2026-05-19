@@ -3,10 +3,10 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves
-//! eleven mandatory session symbols — seven environment queries plus
+//! thirteen mandatory session symbols — seven environment queries plus
 //! the prompt-15 `elaborate` and `kernel_check` pair plus the
 //! prompt-17 `check_evidence` and `evidence_summary` pair — and the
-//! three optional prompt-16 meta-service symbols), starts a session
+//! four optional meta-service symbols), starts a session
 //! over an import list, and exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
@@ -14,10 +14,13 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, MetaCallStatus, heartbeat_burn, infer_type, whnf};
+use crate::host::meta::{
+    LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
+    infer_type, is_def_eq, whnf,
+};
 use crate::{
-    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanElabOptions, LeanHost,
-    LeanKernelOutcome, LeanSession, LeanSeverity,
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
+    LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
 use lean_rs::LeanRuntime;
 use lean_rs::error::{HostStage, LeanError};
@@ -637,13 +640,57 @@ fn session_reuse_amortises_import() {
 //
 // Each test imports `LeanRsHostShims.Meta` (which also pulls in
 // `LeanRsHostShims.Elaboration` via the dependency edge). The fixture
-// dylib exports the three optional meta-service symbols, so the
+// dylib exports the four optional meta-service symbols, so the
 // `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
 // dispatches through cached addresses.
 
 fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Meta"], None)
+    caps.session(&["LeanRsFixture.Meta", "LeanRsHostShims.Meta"], None)
         .expect("session imports cleanly")
+}
+
+fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, symbol: &str) -> lean_rs::LeanExpr<'lean> {
+    session
+        .call_capability::<((),), lean_rs::LeanExpr<'lean>>(symbol, ((),), None)
+        .expect("fixture expression export dispatches cleanly")
+}
+
+fn assert_is_def_eq_response(response: &LeanMetaResponse<bool>, expected: bool) {
+    assert_eq!(
+        response.status(),
+        MetaCallStatus::Ok,
+        "isDefEq must return Ok({expected}), got {response:?}",
+    );
+    match response {
+        LeanMetaResponse::Ok(actual) => assert_eq!(*actual, expected),
+        LeanMetaResponse::Failed(_) | LeanMetaResponse::TimeoutOrHeartbeat(_) | LeanMetaResponse::Unsupported(_) => {
+            panic!("expected Ok({expected}) variant");
+        }
+    }
+}
+
+#[test]
+fn meta_registry_exposes_four_pinned_services() {
+    let services = [
+        infer_type().name(),
+        whnf().name(),
+        heartbeat_burn().name(),
+        is_def_eq().name(),
+    ];
+    assert_eq!(
+        services,
+        [
+            "lean_rs_host_meta_infer_type",
+            "lean_rs_host_meta_whnf",
+            "lean_rs_host_meta_heartbeat_burn",
+            "lean_rs_host_meta_is_def_eq",
+        ],
+    );
+    assert_eq!(
+        is_def_eq().required_imports(),
+        ["LeanRsHostShims.Meta"],
+        "new service must use the existing meta shim module",
+    );
 }
 
 #[test]
@@ -750,4 +797,164 @@ fn meta_heartbeat_burn_yields_timeout_status() {
             panic!("expected TimeoutOrHeartbeat variant");
         }
     }
+}
+
+#[test]
+fn meta_is_def_eq_reducible_alias_matches_nat() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_reducible_nat_alias");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let outcome = session
+        .run_meta(
+            &is_def_eq(),
+            (lhs, rhs, LeanMetaTransparency::Reducible),
+            &LeanMetaOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    assert_is_def_eq_response(&outcome, true);
+}
+
+#[test]
+fn meta_is_def_eq_distinguishes_nat_and_bool() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_bool");
+    let outcome = session
+        .run_meta(
+            &is_def_eq(),
+            (lhs, rhs, LeanMetaTransparency::Reducible),
+            &LeanMetaOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    assert_is_def_eq_response(&outcome, false);
+}
+
+#[test]
+fn meta_is_def_eq_default_does_not_unfold_irreducible_alias() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let outcome = session
+        .run_meta(
+            &is_def_eq(),
+            (lhs, rhs, LeanMetaTransparency::Default),
+            &LeanMetaOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    assert_is_def_eq_response(&outcome, false);
+}
+
+#[test]
+fn meta_is_def_eq_all_unfolds_irreducible_alias() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let outcome = session
+        .run_meta(
+            &is_def_eq(),
+            (lhs, rhs, LeanMetaTransparency::All),
+            &LeanMetaOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    assert_is_def_eq_response(&outcome, true);
+}
+
+#[test]
+fn meta_is_def_eq_surfaces_heartbeat_exhaustion() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_large_nat_left");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_large_nat_right");
+    let opts = LeanMetaOptions::new().heartbeat_limit(1);
+    let outcome = session
+        .run_meta(&is_def_eq(), (lhs, rhs, LeanMetaTransparency::All), &opts, None)
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::TimeoutOrHeartbeat,
+        "large equality with heartbeat budget 1 must surface TimeoutOrHeartbeat, got {outcome:?}",
+    );
+}
+
+#[test]
+fn meta_is_def_eq_pre_cancelled_token_returns_cancelled() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let before = session.stats();
+    let token = LeanCancellationToken::new();
+    token.cancel();
+    let err = session
+        .run_meta(
+            &is_def_eq(),
+            (lhs, rhs, LeanMetaTransparency::Reducible),
+            &LeanMetaOptions::new(),
+            Some(&token),
+        )
+        .expect_err("pre-cancelled token must return Cancelled");
+    match err {
+        LeanError::Cancelled(_) => {}
+        LeanError::LeanException(exc) => panic!("expected Cancelled, got LeanException {exc:?}"),
+        LeanError::Host(failure) => panic!("expected Cancelled, got Host {failure:?}"),
+        _ => panic!("expected Cancelled, got future LeanError variant"),
+    }
+    assert_eq!(
+        session.stats().ffi_calls,
+        before.ffi_calls,
+        "pre-cancelled run_meta must not enter another FFI call",
+    );
+}
+
+#[test]
+fn meta_missing_optional_symbol_returns_unsupported() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let expr = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let missing: LeanMetaService<lean_rs::LeanExpr<'_>, lean_rs::LeanExpr<'_>> =
+        LeanMetaService::new("lean_rs_host_meta_missing_for_test", &["LeanRsHostShims.Meta"]);
+    let outcome = session
+        .run_meta(&missing, expr, &LeanMetaOptions::new(), None)
+        .expect("missing optional service is classified, not a load failure");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::Unsupported,
+        "missing optional meta symbol must return Unsupported, got {outcome:?}",
+    );
 }

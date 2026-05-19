@@ -3,7 +3,7 @@
 //! Rust can invoke a **closed registry** of Lean-authored meta services
 //! through [`crate::LeanSession::run_meta`]. Each service is a sealed
 //! [`LeanMetaService`] descriptor pinning a name, the `.olean` modules
-//! required in the session, and a typed `(Req, Resp)` shape. Three
+//! required in the session, and a typed `(Req, Resp)` shape. Four
 //! services are pinned:
 //!
 //! - [`infer_type`] — runs `Meta.inferType` on a supplied `Expr`.
@@ -11,6 +11,8 @@
 //!   reducibility setting.
 //! - [`heartbeat_burn`] — a diagnostic loop that consumes a heartbeat
 //!   per step, exercising the heartbeat-exhaustion classification path.
+//! - [`is_def_eq`] — runs `Meta.isDefEq` on two supplied expressions
+//!   under a request-supplied transparency setting.
 //!
 //! Rust cannot assemble arbitrary `MetaM` programs: the only services
 //! that exist are the ones with a `LeanMetaService` constructor in this
@@ -50,4 +52,4 @@ mod service;
 
 pub use self::options::{LeanMetaOptions, LeanMetaTransparency};
 pub use self::response::{LeanMetaResponse, MetaCallStatus};
-pub use self::service::{LeanMetaService, heartbeat_burn, infer_type, whnf};
+pub use self::service::{LeanMetaService, heartbeat_burn, infer_type, is_def_eq, whnf};

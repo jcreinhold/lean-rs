@@ -12,7 +12,7 @@
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
 //! loads must export thirteen **mandatory** `@[export]` symbols and may
-//! export three **optional** meta-service symbols (matched at
+//! export four **optional** meta-service symbols (matched at
 //! `LeanCapabilities::load_capabilities` time):
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
@@ -33,6 +33,7 @@
 //! | `lean_rs_host_meta_infer_type`                 | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //! | `lean_rs_host_meta_whnf`                       | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //! | `lean_rs_host_meta_heartbeat_burn`             | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
+//! | `lean_rs_host_meta_is_def_eq`                  | optional   | `Environment -> (Expr × Expr × UInt8) -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Bool)`                  |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`lean_rs::HostStage::Link`] — failures bind to the capability's load,
@@ -179,11 +180,12 @@ pub(crate) struct SessionSymbols {
     pub(crate) meta_infer_type: Option<*mut c_void>,
     pub(crate) meta_whnf: Option<*mut c_void>,
     pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
+    pub(crate) meta_is_def_eq: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The eleven
-    /// baseline symbols are mandatory; the three meta-service symbols
+    /// Resolve session function symbols from `library`. The thirteen
+    /// baseline symbols are mandatory; the four meta-service symbols
     /// are optional.
     ///
     /// # Errors
@@ -213,6 +215,7 @@ impl SessionSymbols {
             meta_infer_type: library.resolve_optional_function_symbol("lean_rs_host_meta_infer_type"),
             meta_whnf: library.resolve_optional_function_symbol("lean_rs_host_meta_whnf"),
             meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
+            meta_is_def_eq: library.resolve_optional_function_symbol("lean_rs_host_meta_is_def_eq"),
         })
     }
 
@@ -224,6 +227,7 @@ impl SessionSymbols {
             "lean_rs_host_meta_infer_type" => self.meta_infer_type,
             "lean_rs_host_meta_whnf" => self.meta_whnf,
             "lean_rs_host_meta_heartbeat_burn" => self.meta_heartbeat_burn,
+            "lean_rs_host_meta_is_def_eq" => self.meta_is_def_eq,
             _ => None,
         }
     }

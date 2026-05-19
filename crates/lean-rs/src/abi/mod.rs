@@ -32,6 +32,7 @@ pub(crate) mod scalar;
 pub(crate) mod string;
 pub mod structure;
 pub mod traits;
+pub(crate) mod tuple;
 
 #[cfg(test)]
 mod tests;

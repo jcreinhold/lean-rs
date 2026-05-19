@@ -16,7 +16,9 @@ use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,
 };
-use lean_rs::error::bound_message;
+use lean_rs::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use lean_rs::error::{LeanResult, bound_message};
+use lean_rs::{LeanRuntime, Obj};
 
 /// Reducibility setting threaded into the bounded `MetaM` runner.
 ///
@@ -54,6 +56,30 @@ impl LeanMetaTransparency {
             Self::Instances => 2,
             Self::All => 3,
         }
+    }
+
+    fn from_byte(byte: u8) -> LeanResult<Self> {
+        match byte {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::Reducible),
+            2 => Ok(Self::Instances),
+            3 => Ok(Self::All),
+            other => Err(conversion_error(format!(
+                "expected LeanMetaTransparency byte 0..=3, found {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> IntoLean<'lean> for LeanMetaTransparency {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        self.as_byte().into_lean(runtime)
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for LeanMetaTransparency {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        Self::from_byte(u8::try_from_lean(obj)?)
     }
 }
 

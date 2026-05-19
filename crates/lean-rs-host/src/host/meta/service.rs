@@ -11,7 +11,7 @@
 //!   parameters must agree with.
 //!
 //! The struct has no public constructor — the only `LeanMetaService`
-//! values downstream code can name are returned by the three free
+//! values downstream code can name are returned by the four free
 //! functions in this module, which form the closed registry. Adding a
 //! new service requires landing a Lean `@[export]` *and* a Rust-side
 //! constructor here.
@@ -19,6 +19,8 @@
 use core::marker::PhantomData;
 
 use lean_rs::LeanExpr;
+
+use super::LeanMetaTransparency;
 
 /// Sealed descriptor for one registered `MetaM` service.
 ///
@@ -70,7 +72,7 @@ impl<Req, Resp> core::fmt::Debug for LeanMetaService<Req, Resp> {
     }
 }
 
-// -- The three pinned services -----------------------------------------
+// -- The four pinned services ------------------------------------------
 //
 // Each constructor returns the typed descriptor `'lean`-parameterised
 // over the request/response payload. The Lean-side symbol names and
@@ -110,4 +112,15 @@ pub fn whnf<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>> {
 #[must_use]
 pub fn heartbeat_burn<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>> {
     LeanMetaService::new("lean_rs_host_meta_heartbeat_burn", REQUIRED_IMPORTS)
+}
+
+/// Register the `Meta.isDefEq` service.
+///
+/// The request is the Lean product `(lhs, rhs, transparency)`. The
+/// response remains a [`super::LeanMetaResponse<bool>`], so heartbeat
+/// exhaustion and Lean exceptions stay distinct from a successful
+/// `false`.
+#[must_use]
+pub fn is_def_eq<'lean>() -> LeanMetaService<(LeanExpr<'lean>, LeanExpr<'lean>, LeanMetaTransparency), bool> {
+    LeanMetaService::new("lean_rs_host_meta_is_def_eq", REQUIRED_IMPORTS)
 }

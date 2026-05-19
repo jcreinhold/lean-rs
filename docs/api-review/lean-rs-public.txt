@@ -12,6 +12,10 @@ pub fn lean_rs::abi::structure::take_ctor_objects<'lean, const N: usize>(obj: le
 pub mod lean_rs::abi::traits
 pub trait lean_rs::abi::traits::IntoLean<'lean>: core::marker::Sized
 pub fn lean_rs::abi::traits::IntoLean::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean, A, B, C> lean_rs::abi::traits::IntoLean<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean>
+pub fn (A, B, C)::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean, A, B> lean_rs::abi::traits::IntoLean<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean>
+pub fn (A, B)::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean, T, E> lean_rs::abi::traits::IntoLean<'lean> for core::result::Result<T, E> where E: lean_rs::abi::traits::IntoLean<'lean>, T: lean_rs::abi::traits::IntoLean<'lean>
 pub fn core::result::Result<T, E>::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean, T> lean_rs::abi::traits::IntoLean<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean>
@@ -54,6 +58,10 @@ impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for usize
 pub fn usize::into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 pub trait lean_rs::abi::traits::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::abi::traits::LeanAbi::CRepr: core::marker::Copy
+impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
@@ -104,6 +112,10 @@ impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for usize
 pub type usize::CRepr = usize
 pub trait lean_rs::abi::traits::TryFromLean<'lean>: core::marker::Sized
 pub fn lean_rs::abi::traits::TryFromLean::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean, A, B, C> lean_rs::abi::traits::TryFromLean<'lean> for (A, B, C) where A: lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn (A, B, C)::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl<'lean, A, B> lean_rs::abi::traits::TryFromLean<'lean> for (A, B) where A: lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn (A, B)::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean, T, E> lean_rs::abi::traits::TryFromLean<'lean> for core::result::Result<T, E> where E: lean_rs::abi::traits::TryFromLean<'lean>, T: lean_rs::abi::traits::TryFromLean<'lean>
 pub fn core::result::Result<T, E>::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean, T> lean_rs::abi::traits::TryFromLean<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
@@ -519,6 +531,10 @@ pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
 pub trait lean_rs::module::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::module::LeanAbi::CRepr: core::marker::Copy
+impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
@@ -1082,6 +1098,10 @@ pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
 pub trait lean_rs::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
 pub type lean_rs::LeanAbi::CRepr: core::marker::Copy
+impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
+pub type (A, B)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T, E> lean_rs::abi::traits::LeanAbi<'lean> for core::result::Result<T, E> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, E: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type core::result::Result<T, E>::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, T> lean_rs::abi::traits::LeanAbi<'lean> for alloc::vec::Vec<T> where T: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
