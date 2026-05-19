@@ -171,6 +171,11 @@ impl LeanError {
         )
     }
 
+    /// Build an internal host failure for a `pub(crate)` invariant breach.
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Internal, LeanDiagnosticCode::Internal, message)
+    }
+
     /// Build a cooperative cancellation report.
     pub(crate) fn cancelled() -> Self {
         Self::Cancelled(LeanCancelled {

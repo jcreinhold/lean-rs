@@ -15,9 +15,9 @@
 
 use lean_rs::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DecodeCallResult, DiagnosticCapture, HostFailure, HostStage,
-    LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException,
-    LeanExceptionKind, LeanExported, LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanResult,
-    LeanRuntime, LeanThreadGuard, Obj, ObjRef, VERSION,
+    LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackEvent, LeanCallbackHandle, LeanCallbackStatus,
+    LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanExported, LeanExpr, LeanIo,
+    LeanLevel, LeanLibrary, LeanModule, LeanName, LeanResult, LeanRuntime, LeanThreadGuard, Obj, ObjRef, VERSION,
 };
 
 #[test]
@@ -50,6 +50,9 @@ fn l1_curated_surface_is_reachable_from_crate_root() {
         _stage: HostStage,
         _kind: LeanExceptionKind,
         _code: LeanDiagnosticCode,
+        _callback_event: LeanCallbackEvent,
+        _callback_handle: LeanCallbackHandle,
+        _callback_status: LeanCallbackStatus,
         _capture: DiagnosticCapture,
         _event: CapturedEvent,
     ) where

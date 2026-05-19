@@ -132,9 +132,9 @@ own build scripts (`emit_lean_link_directives` and `build_lake_target`, used abo
 
 **`lean-rs` is the L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime),
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported
-functions, semantic handles (`LeanName`/`LeanLevel`/`LeanExpr`/`LeanDeclaration`), and a
-structured error/diagnostic boundary. Ships zero Lean-side code; the Rust-to-Lean analog of
-`ocaml-rs`.
+functions, semantic handles (`LeanName`/`LeanLevel`/`LeanExpr`/`LeanDeclaration`), RAII
+callback registrations for Lean-to-Rust calls, and a structured error/diagnostic boundary.
+Ships zero Lean-side code; the Rust-to-Lean analog of `ocaml-rs`.
 
 **`lean-rs-host` is the L2 opinionated host stack.** The `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, the bounded `MetaM`
@@ -163,6 +163,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md)—the token-based cancellation contract and its non-preemptive limits.
 - [`08-reusable-interop.md`](docs/architecture/08-reusable-interop.md)—the reusable Lean/Rust interop boundary below `lean-rs-host`.
 - [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md)—the test-only callback ABI proof before a public callback registry.
+- [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

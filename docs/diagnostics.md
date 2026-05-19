@@ -34,6 +34,11 @@ are stable across patch releases.
 mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
 boundary.
 
+L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. A stale
+callback handle is reported as `LeanCallbackStatus::StaleHandle`; a contained callback panic is
+reported as `LeanCallbackStatus::Panic` and recorded on the live handle as `LeanError::Host`
+with code `Internal` and stage `CallbackPanic`.
+
 `Cancelled` is cooperative. It is returned only when `lean-rs-host` regains
 control and checks the token; it does not pre-empt an in-flight Lean call.
 See [`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-cancellation.md).
@@ -187,3 +192,4 @@ that drops the relevant fields.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
 - [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.
 - [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what they cannot interrupt.
+- [Callback registry](architecture/10-callback-registry.md)—how L1 callback statuses relate to the error taxonomy.

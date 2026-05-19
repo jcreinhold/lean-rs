@@ -74,6 +74,14 @@ jobs:
           cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
             --test callback_trampoline -- --test-threads=1
 
+      - name: ASan callback registry fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
+            --test callback_registry -- --test-threads=1
+
   fuzz:
     name: ABI fuzz smoke
     runs-on: ubuntu-latest

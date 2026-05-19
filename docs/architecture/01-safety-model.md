@@ -74,3 +74,7 @@ panic, generated `unreachable`, `std::exit`, or `abort` during a `LeanSession` c
 terminate the process; see [`06-panic-containment.md`](06-panic-containment.md). No `unwrap()`,
 `expect()`, or `panic!` in non-test code unless a comment names a proof obligation that makes
 the call infallible.
+
+Lean-to-Rust callbacks go through `LeanCallbackHandle`, not raw user-provided function
+pointers. The registry catches unwinding Rust panics before the C boundary and reports them as
+callback status plus a bounded `LeanError`; see [`10-callback-registry.md`](10-callback-registry.md).

@@ -17,8 +17,8 @@ Lake wiring from downstream crates.
 The interop stack has five layers:
 
 - `lean-rs-sys` owns raw Lean C runtime symbols and opaque raw types.
-- `lean-rs` owns typed object ownership, exported-function calls, and future
-  callback handles.
+- `lean-rs` owns typed object ownership, exported-function calls, and callback
+  handles.
 - Generic Lean interop shims own reusable ABI helpers for callbacks, strings,
   names, and object plumbing.
 - `lean-rs-host` owns theorem-prover host policy: sessions, declaration
@@ -75,6 +75,5 @@ New interop surfaces must pass the deep-module test:
 - Performance claims name the workload and measurement command.
 
 The host shim ABI remains unchanged by this architecture record. The next
-implementation steps are the Lake helper, the callback ABI spike, the callback
-registry, generic interop shims, downstream examples, and then structured host
-progress.
+implementation steps are generic interop shims, downstream examples, and then
+structured host progress.

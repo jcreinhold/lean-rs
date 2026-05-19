@@ -1,7 +1,8 @@
 # Callback ABI Spike
 
-Prompt 40 proves the minimum Lean-to-Rust callback ABI. It does not add a
-public callback registry.
+Prompt 40 proved the minimum Lean-to-Rust callback ABI. The public registry
+that uses this ABI is documented in
+[`10-callback-registry.md`](10-callback-registry.md).
 
 ## ABI Shape
 
@@ -33,8 +34,8 @@ The callback runs synchronously on the Lean-bound thread. It must not re-enter a
 public callback handles must preserve that rule at the API boundary.
 
 The handle is opaque to Lean. In the spike it is a pointer to a test-local Rust
-probe whose lifetime covers the whole Lean call. Prompt 41 will replace that
-test-local pointer with an RAII registry handle.
+probe whose lifetime covers the whole Lean call. The public registry replaces
+that test-local pointer with an RAII registration handle.
 
 ## Panic Boundary
 
@@ -59,11 +60,7 @@ foreign unwinds. Lean's FFI model still uses explicit `@[extern]` and
 ## Status
 
 The spike proves event order and panic-boundary behavior. It deliberately leaves
-these items out of scope:
+these items to the public registry and later interop prompts:
 
-- public callback registration;
-- callback handle ownership and drop semantics;
 - object payload conversion beyond `(current, total)` integers;
 - host progress events.
-
-Those belong to the callback registry and progress prompts.
