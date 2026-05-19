@@ -355,6 +355,7 @@ dependencies = [
  "criterion",
  "lean-rs",
  "lean-rs-sys",
+ "lean-toolchain",
  "libloading",
  "object 0.36.7",
  "serde_json",
@@ -375,6 +376,7 @@ name = "lean-toolchain"
 version = "0.1.0"
 dependencies = [
  "lean-rs-sys",
+ "serde_json",
  "sha2",
 ]
 

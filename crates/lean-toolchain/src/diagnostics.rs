@@ -60,6 +60,33 @@ pub enum LinkDiagnostics {
         /// rendered as `["4.23.0", "4.24.0", "4.24.1"], ["4.25.0", ...], ...`.
         supported_window: String,
     },
+    /// The requested Lake target was not declared in the project's lakefile.
+    LakeTargetMissing {
+        /// Directory expected to contain the project's lakefile.
+        project_root: PathBuf,
+        /// Requested Lake target name.
+        target_name: String,
+    },
+    /// `lake build <target>:shared` exited unsuccessfully.
+    LakeBuildFailed {
+        /// Directory where the Lake command ran.
+        project_root: PathBuf,
+        /// Requested Lake target name.
+        target_name: String,
+        /// Process exit status rendered for diagnostics.
+        status: String,
+        /// Bounded one-line stdout/stderr summary from Lake.
+        detail: String,
+    },
+    /// Lake completed, but `lean-toolchain` could not resolve the expected dylib path.
+    LakeOutputUnresolved {
+        /// Directory expected to contain the Lake project.
+        project_root: PathBuf,
+        /// Requested Lake target name.
+        target_name: String,
+        /// One-line reason, including the path or manifest field that was missing.
+        reason: String,
+    },
 }
 
 impl fmt::Display for LinkDiagnostics {
@@ -105,6 +132,39 @@ impl fmt::Display for LinkDiagnostics {
                 write!(
                     f,
                     "lean-toolchain: active Lean toolchain {active} is not in the supported window: {supported_window}"
+                )
+            }
+            Self::LakeTargetMissing {
+                project_root,
+                target_name,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: Lake target `{target_name}` is not declared in {}",
+                    project_root.display()
+                )
+            }
+            Self::LakeBuildFailed {
+                project_root,
+                target_name,
+                status,
+                detail,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: `lake build {target_name}:shared` failed in {} with {status}: {detail}",
+                    project_root.display()
+                )
+            }
+            Self::LakeOutputUnresolved {
+                project_root,
+                target_name,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: could not resolve Lake output for target `{target_name}` in {}: {reason}",
+                    project_root.display()
                 )
             }
         }

@@ -19,7 +19,7 @@ does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
 ## Run the worked examples
 
-Six runnable end-to-end examples live under [`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture once, then run any of them:
+Seven runnable examples live under [`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture once, then run any of them:
 
 ```sh
 (cd fixtures/lean && lake build)
@@ -53,12 +53,18 @@ lean-rs = "0.1"  # pre-publish: also set `path = "../lean-rs/crates/lean-rs"`
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—one call covers link-search, link-lib, and the runtime rpath into the
-Lean toolchain's `lib/lean` directory:
+**`build.rs`**—one helper covers link-search, link-lib, and the runtime rpath into the
+Lean toolchain's `lib/lean` directory; the other builds the Lake shared-library target
+and records the dylib path for `main.rs`:
 
 ```rust
-fn main() {
+use std::path::Path;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     lean_toolchain::emit_lean_link_directives();
+    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
+    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    Ok(())
 }
 ```
 
@@ -85,17 +91,11 @@ def add (a b : UInt64) : UInt64 := a + b
 **`src/main.rs`**—open the dylib, dispatch typed:
 
 ```rust
-use std::path::PathBuf;
 use lean_rs::{LeanLibrary, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
-    let dylib_ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let dylib = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("lean").join(".lake").join("build").join("lib")
-        .join(format!("libmy__app_MyCapability.{dylib_ext}"));
-
     let runtime = LeanRuntime::init()?;
-    let library = LeanLibrary::open(runtime, &dylib)?;
+    let library = LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
     let module = library.initialize_module("my_app", "MyCapability")?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
@@ -107,15 +107,11 @@ fn main() -> LeanResult<()> {
 Build and run:
 
 ```sh
-(cd lean && lake build)
 cargo run
 ```
 
-The Lake mangling rule turns each underscore in the package name into a double underscore in
-the dylib filename, so `package «my_app»` + `lean_lib «MyCapability»` produces
-`libmy__app_MyCapability.{dylib,so}` under `lean/.lake/build/lib/`. The same rule applies in
-`initialize_module(package, lib_name)`: pass the unmangled names, the loader resolves the
-mangled symbol.
+`build_lake_target` hides Lake's shared-library facet, cache, and filename convention.
+`initialize_module(package, lib_name)` still takes the unmangled Lake names.
 
 For the L2 path (the `LeanHost` / `LeanCapabilities` / `LeanSession` stack with kernel
 checking and `MetaM`), add `lean-rs-host = "0.1"` and follow
@@ -132,7 +128,7 @@ path.
 
 `lean-toolchain` provides Lean toolchain discovery, the typed `ToolchainFingerprint`, fixture
 digest, layered link diagnostics, and `build.rs` helpers downstream embedders call from their
-own build scripts (`emit_lean_link_directives`, used above).
+own build scripts (`emit_lean_link_directives` and `build_lake_target`, used above).
 
 **`lean-rs` is the L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime),
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported

@@ -4,9 +4,9 @@
 `lean_rs_host::*` surfaces end to end against the in-tree fixture; reading them is the
 fastest path from a blank consumer project to a working integration.
 
-Four focused single-concern examples plus one end-to-end tour. Each focused example sticks
-to one verb so a reader can scan it in a minute and reach for the matching crate API by
-analogy.
+Five focused single-concern examples, one end-to-end tour, and one RSS reproducer. Each
+focused example sticks to one verb so a reader can scan it in a minute and reach for the
+matching crate API by analogy.
 
 | Example | What it teaches |
 | --- | --- |
@@ -15,6 +15,7 @@ analogy.
 | [`proof_check`](#proof_check) | Kernel-check a theorem, re-validate the evidence, project a bounded summary. |
 | [`meta_query`](#meta_query) | Run a bounded `MetaM` service and branch on every status. |
 | [`tour`](#tour) | All four flows composed end to end in one process. |
+| [`lake_build_helper`](#lake_build_helper) | Build a Lake shared-library target through `lean-toolchain` without hand-written dylib path mangling. |
 | [`long_session_memory`](#long_session_memory) | RSS checkpoints for a long-lived process using fresh imports, pooled reuse, introspection, and elaboration. |
 
 ## Prerequisites
@@ -184,8 +185,8 @@ ok
 
 - `status=Unsupported: ...`—the capability dylib lacks the
   `lean_rs_host_meta_infer_type` shim. Rebuild the fixture; the
-  in-tree fixture exports all three meta services
-  (`infer_type`, `whnf`, `heartbeat_burn`).
+  in-tree fixture exports all four meta services
+  (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`).
 - `status=TimeoutOrHeartbeat: ...`—the heartbeat ceiling tripped
   before `infer_type` finished. Raise `LeanMetaOptions::new()
   .heartbeat_limit(N)`.
@@ -207,6 +208,28 @@ cargo run -p lean-rs --example tour
 **Expected output:** one `name=<stage> elapsed_us=<u64>` line per
 stage, suitable for `grep`/`awk`. The exact `elapsed_us` values are
 machine-dependent.
+
+### lake_build_helper
+
+**Goal:** demonstrate the downstream `build.rs` helper that runs
+`lake build <target>:shared`, caches the result, and returns the produced
+dylib path.
+
+**Run:**
+
+```sh
+cargo run -p lean-rs-host --example lake_build_helper
+```
+
+**Expected output:** `cargo:rerun-if-changed=...` lines from the helper,
+followed by:
+
+```text
+dylib=.../.lake/build/lib/liblean__rs__fixture_LeanRsFixture.dylib
+```
+
+The extension is `.so` on Linux. This example intentionally prints Cargo
+directives because the helper is meant for build scripts.
 
 ### long_session_memory
 

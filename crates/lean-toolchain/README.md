@@ -21,12 +21,13 @@ lean-toolchain = "0.1"
 ```
 
 ```rust,ignore
+use std::path::Path;
+
 fn main() {
-    // Print bounded link diagnostics if Lean discovery fails; succeed otherwise.
-    if let Err(diag) = lean_toolchain::discover() {
-        eprintln!("{diag}");
-        std::process::exit(1);
-    }
+    lean_toolchain::emit_lean_link_directives();
+    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
+    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    Ok::<(), Box<dyn std::error::Error>>(())
 }
 ```
 

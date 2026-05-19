@@ -38,6 +38,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+lean-toolchain = { path = "../lean-toolchain" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
 trybuild = "1"
 
