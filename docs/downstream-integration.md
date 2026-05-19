@@ -4,8 +4,8 @@ What an external Rust application needs to know to depend on the published `lean
 `lean-rs-host` crates. Two external proof apps exercise the full integration end to end and
 serve as worked examples:
 
-- `lean-rs-downstream` — L1 only, depends on `lean-rs` and exercises the `LeanRuntime` → `LeanLibrary` → `LeanModule` → `LeanExported<Args, R>::call` cascade against the consumer's own `@[export]` Lean declarations. No `lean-rs-host` node in the dependency graph.
-- `lean-rs-host-downstream` — L2, depends on both `lean-rs` and `lean-rs-host`, adds the shim `require` to its `lakefile.lean`, and drives `LeanHost::from_lake_project` → `LeanCapabilities::load_capabilities` → `LeanSession` (`query_declaration`, `kernel_check`, `summarize_evidence`, `call_capability`).
+- `lean-rs-downstream`—L1 only, depends on `lean-rs` and exercises the `LeanRuntime` → `LeanLibrary` → `LeanModule` → `LeanExported<Args, R>::call` cascade against the consumer's own `@[export]` Lean declarations. No `lean-rs-host` node in the dependency graph.
+- `lean-rs-host-downstream`—L2, depends on both `lean-rs` and `lean-rs-host`, adds the shim `require` to its `lakefile.lean`, and drives `LeanHost::from_lake_project` → `LeanCapabilities::load_capabilities` → `LeanSession` (`query_declaration`, `kernel_check`, `summarize_evidence`, `call_capability`).
 
 The L1 proof confirms the typed-FFI primitive surface drives a consumer-authored Lake-built
 Lean library end to end with zero `lean_rs_host_*` shims involved. The L2 proof exercises the
@@ -41,26 +41,31 @@ at runtime by naming them in `caps.session(&["LeanRsHostShims.…"])`.
 
 ## Caveats every consumer hits
 
-### Downstream `build.rs` needs to re-emit the Lean rpath
+### Downstream `build.rs` must emit the Lean link + rpath directives
 
-`lean-rs-sys`'s `build.rs` emits `cargo:rustc-link-arg=-Wl,-rpath,...` for the active Lean
-toolchain's `lib/lean` directory, but `cargo:rustc-link-arg` does not propagate to dependent
-crates. `lean-rs` and `lean-rs-host` each carry their own `build.rs` with the same
-Lean-discovery + rpath logic. The downstream app needs the same.
+`cargo:rustc-link-arg` and `cargo:rustc-link-*` directives do not propagate to dependent
+crates, so each consumer that produces a binary loading Lean must emit them itself.
+`lean-toolchain::emit_lean_link_directives()` covers both—link-search, link-lib, and the
+runtime rpath into the active toolchain's `lib/lean` directory—so the consumer's `build.rs`
+is one call:
 
-`lean-rs-downstream/build.rs` re-implements the ~30-line Lean-prefix discovery + rpath
-emission. It works but is a copy-paste of `lean-rs/build.rs`. A `lean_toolchain::emit_rpath()`
-build-script helper would let downstream `build.rs` scripts shrink to a two-line `fn main()`;
-see *Open issues* below.
+```rust
+// build.rs
+fn main() {
+    lean_toolchain::emit_lean_link_directives();
+}
+```
+
+Add `lean-toolchain = "0.1"` under `[build-dependencies]` in `Cargo.toml`.
 
 ### Nullary unboxed-scalar globals trip the function-path dispatch
 
-Declaring a nullary `@[export]` that returns an unboxed scalar — e.g.,
-`@[export downstream_app_decide_true] def decideTrue : Bool := decide (1 + 1 = 2)` — produces
+Declaring a nullary `@[export]` that returns an unboxed scalar—e.g.,
+`@[export downstream_app_decide_true] def decideTrue : Bool := decide (1 + 1 = 2)`—produces
 a Lake-compiled persistent global (the standard optimisation for nullary constants).
 `LeanModule::exported`'s function-path dispatch then reads the global's stored scalar-tagged
 value as if it were an aligned function pointer; `LeanExported::call` panics with
-`misaligned pointer dereference: address must be a multiple of 0x8 but is 0x104954031` — a
+`misaligned pointer dereference: address must be a multiple of 0x8 but is 0x104954031`—a
 scalar-boxed `Bool` value being treated as a pointer.
 
 **Workaround:** add a `Unit` argument so Lake emits a function symbol:
@@ -88,7 +93,6 @@ constraint at build time; once `lean-rs 0.1.0` is published, drop the `path =` a
 
 ## Open issues
 
-- A `lean_toolchain::emit_rpath()` build-script helper that lets a downstream `build.rs` shrink to a two-line `fn main()`. Closes the rpath copy-paste caveat above.
 - A `LeanModule::exported` change that handles nullary unboxed-scalar globals cleanly: either (a) detect at lookup time and return a `Linking` diagnostic naming the `Unit`-argument workaround, or (b) provide a separate typed-global accessor that handles the scalar-tagged-pointer decode.
 - Promote `lake/lean-rs-host-shims/` to a public Lake registry entry (Reservoir or the GitHub Lake registry) so external consumers can write `require lean_rs_host_shims @ "0.1"` without a git URL. The hybrid layout works today with `from git "…" @ "v0.1.0"` once `lean-rs` is tagged.
 - v1.0 compatibility-promise scope split per crate.

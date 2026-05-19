@@ -31,11 +31,11 @@ done
 
 Every public item maps to one of five categories:
 
-1. **Raw FFI entry point** (`lean-rs-sys` only) — opaque `lean_object` plus `pub unsafe fn` helpers; every item carries a `# Safety` section.
+1. **Raw FFI entry point** (`lean-rs-sys` only)—opaque `lean_object` plus `pub unsafe fn` helpers; every item carries a `# Safety` section.
 2. **Toolchain metadata / build helper** (`lean-toolchain` only).
-3. **Curated entry point** at a crate root — items promoted by the `pub use` blocks at the crate root.
-4. **Module-level escape hatch** at a sub-module path — visible to power users, not promoted to the crate root.
-5. **Internal-but-accidentally-public** — items that should be `pub(crate)`.
+3. **Curated entry point** at a crate root—items promoted by the `pub use` blocks at the crate root.
+4. **Module-level escape hatch** at a sub-module path—visible to power users, not promoted to the crate root.
+5. **Internal-but-accidentally-public**—items that should be `pub(crate)`.
 
 The per-crate placement is documented inline:
 [`docs/architecture/04-host-stack.md`](architecture/04-host-stack.md) for the L2 surface; the
@@ -51,7 +51,7 @@ reviewer reconfirms; the example after each is what to look for.
 or is it a file-per-symbol split? `lean-rs-sys` splits ~100 symbols across 12 files (`array`,
 `closure`, `consts`, `ctor`, `external`, `io`, `init`, `nat_int`, `object`, `refcount`,
 `scalar`, `string`, `types`); each is a category, not a single symbol. In `lean-rs`,
-`LeanSession` is the only way to invoke a typed capability call — not a transparent wrapper
+`LeanSession` is the only way to invoke a typed capability call—not a transparent wrapper
 over `LeanModule::exported`.
 
 **Pass-through wrapper.** Does the wrapper add transformation, or just rename? Three current
@@ -63,7 +63,7 @@ candidates each add real work:
 
 **Temporal decomposition.** Are error variants modelling lifecycle stages rather than
 independent failure classes? The host-failure path collapses init / link / load / conversion
-/ internal into a single `LeanError::Host(HostFailure { stage: HostStage })` — five
+/ internal into a single `LeanError::Host(HostFailure { stage: HostStage })`—five
 lifecycle stages of one concern (host setup), not five independent failure classes (Ousterhout
 ch. 5.3). The `LeanDiagnosticCode` projection gives callers a stable caller-facing taxonomy
 without re-introducing per-stage variants.
@@ -87,7 +87,7 @@ choose between? The kernel-check / evidence split is deliberate. `LeanSession::k
 parses + elaborates + checks and returns a `LeanKernelOutcome` carrying a `LeanEvidence`
 handle; `summarize_evidence` and `check_evidence` are on-demand. Eagerly bundling
 `ProofSummary` into the `Checked` variant would force every `kernel_check` caller to pay the
-pretty-print cost — non-trivial for realistic `Lean.Expr` values — even though most callers
+pretty-print cost—non-trivial for realistic `Lean.Expr` values—even though most callers
 only inspect the `EvidenceStatus` tag.
 
 **Hard-to-describe API.** Can a new reader reduce the surface to a single sentence? Yes:
@@ -98,8 +98,8 @@ one classification table ([`04-host-stack.md`](architecture/04-host-stack.md)).
 **Implementation details contaminating comments.** Are doc comments naming the work that
 produced the code instead of describing the abstraction? `rg -nE
 "(land(s|ed|ing)|follow(s|ed)|scheduled).*\b(prompt|RD-[0-9])" crates/` should return no
-matches. (The lone surviving "lands in" in `lean-rs-sys/src/ctor.rs:132` — "when a `UInt32`
-value lands in a constructor field" — is a literal value/field reference, not staleness.)
+matches. (The lone surviving "lands in" in `lean-rs-sys/src/ctor.rs:132`—"when a `UInt32`
+value lands in a constructor field"—is a literal value/field reference, not staleness.)
 
 ## Documentation rules
 
@@ -112,7 +112,7 @@ value lands in a constructor field" — is a literal value/field reference, not 
 ## Out of scope
 
 - Changes to `lean-rs-sys`'s extern declarations or `REQUIRED_SYMBOLS` allowlist (go through their own review).
-- Sealed-trait constructors that have to be public for the seal to take effect (`LeanArgs`, `DecodeCallResult`, `LeanAbi`) — these stay public; their `# Safety` and trait-bound discipline is reviewed elsewhere.
+- Sealed-trait constructors that have to be public for the seal to take effect (`LeanArgs`, `DecodeCallResult`, `LeanAbi`)—these stay public; their `# Safety` and trait-bound discipline is reviewed elsewhere.
 - Performance or refactoring changes that don't touch the public surface.
 
 ## Verification

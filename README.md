@@ -11,26 +11,116 @@ meaning. This project owns hosting: linking, runtime initialization, ABI convers
 loading, error and panic boundaries, scheduling, diagnostics, batching, and packaging. Rust
 does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
-## Quick start
+## Prerequisites
 
-Most embedders depend on `lean-rs` and write their own `@[export]` Lean declarations:
+- [`elan`](https://github.com/leanprover/elan) and a Lean 4 toolchain in the [supported window](docs/version-matrix.md) (currently 4.26.0–4.29.1). `elan` ships `lean` and `lake` together.
+- Rust stable (MSRV 1.91).
+- macOS or Linux. Windows is not supported.
+
+## Run the worked examples
+
+Six runnable end-to-end examples live under [`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture once, then run any of them:
+
+```sh
+(cd fixtures/lean && lake build)
+cargo run -p lean-rs-host --example tour
+```
+
+`tour` composes the full host-stack flow (open → load capabilities → import session →
+elaborate → kernel-check → bulk query → `Meta.whnf`) in one process; four focused examples
+(`theorem_query`, `evaluate`, `proof_check`, `meta_query`) each isolate one verb. See
+[`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md) for the
+per-example walkthrough—what each one teaches, expected output, and common failures.
+
+## Build your own consumer
+
+The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean
+function from Rust without depending on `lean-rs-host`.
+
+**`Cargo.toml`**—`lean-rs` for the API; `lean-toolchain` is a build-dep that emits link
+directives and the runtime rpath:
 
 ```toml
+[package]
+name = "my_app"
+version = "0.1.0"
+edition = "2024"
+
 [dependencies]
-lean-rs = "0.1"
+lean-rs = "0.1"  # pre-publish: also set `path = "../lean-rs/crates/lean-rs"`
+
+[build-dependencies]
+lean-toolchain = "0.1"
 ```
 
-Add `lean-rs-host` on top **only** if you want the curated theorem-prover-host capability
-stack (`LeanHost`, `LeanCapabilities`, `LeanSession`, `SessionPool`, plus the elaboration /
-evidence / `MetaM` surfaces). That stack requires a 13 + 3 `lean_rs_host_*` `@[export]` Lean
-shim contract; the [`lean-rs-host-shims`](lake/lean-rs-host-shims/) Lake package provides one.
+**`build.rs`**—one call covers link-search, link-lib, and the runtime rpath into the
+Lean toolchain's `lib/lean` directory:
 
-```toml
-lean-rs-host = "0.1"
+```rust
+fn main() {
+    lean_toolchain::emit_lean_link_directives();
+}
 ```
 
-`lean-toolchain` and `lean-rs-sys` are direct-dep escape hatches for `build.rs` integration
-and raw FFI respectively; most application code never depends on them directly.
+**`lean/lakefile.lean`**—minimal Lake package emitting a shared library:
+
+```lean
+import Lake
+open Lake DSL
+
+package «my_app»
+
+@[default_target]
+lean_lib «MyCapability» where
+  defaultFacets := #[LeanLib.sharedFacet]
+```
+
+**`lean/MyCapability.lean`**—one Rust-callable export:
+
+```lean
+@[export my_app_add]
+def add (a b : UInt64) : UInt64 := a + b
+```
+
+**`src/main.rs`**—open the dylib, dispatch typed:
+
+```rust
+use std::path::PathBuf;
+use lean_rs::{LeanLibrary, LeanResult, LeanRuntime};
+
+fn main() -> LeanResult<()> {
+    let dylib_ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    let dylib = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("lean").join(".lake").join("build").join("lib")
+        .join(format!("libmy__app_MyCapability.{dylib_ext}"));
+
+    let runtime = LeanRuntime::init()?;
+    let library = LeanLibrary::open(runtime, &dylib)?;
+    let module = library.initialize_module("my_app", "MyCapability")?;
+
+    let add = module.exported::<(u64, u64), u64>("my_app_add")?;
+    println!("{}", add.call((40, 2))?);  // 42
+    Ok(())
+}
+```
+
+Build and run:
+
+```sh
+(cd lean && lake build)
+cargo run
+```
+
+The Lake mangling rule turns each underscore in the package name into a double underscore in
+the dylib filename, so `package «my_app»` + `lean_lib «MyCapability»` produces
+`libmy__app_MyCapability.{dylib,so}` under `lean/.lake/build/lib/`. The same rule applies in
+`initialize_module(package, lib_name)`: pass the unmangled names, the loader resolves the
+mangled symbol.
+
+For the L2 path (the `LeanHost` / `LeanCapabilities` / `LeanSession` stack with kernel
+checking and `MetaM`), add `lean-rs-host = "0.1"` and follow
+[`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). That path also requires a
+`require lean_rs_host_shims from ...` line in your `lakefile.lean`.
 
 ## The four published crates
 
@@ -41,8 +131,8 @@ layout is `pub(crate)`. Opt-in unsafe raw FFI; the safe layers in `lean-rs` are 
 path.
 
 `lean-toolchain` provides Lean toolchain discovery, the typed `ToolchainFingerprint`, fixture
-digest, layered link diagnostics, and `build.rs` helpers downstream embedders can call from
-their own build scripts.
+digest, layered link diagnostics, and `build.rs` helpers downstream embedders call from their
+own build scripts (`emit_lean_link_directives`, used above).
 
 **`lean-rs` is the L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime),
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported
@@ -87,7 +177,9 @@ crates emit structured `tracing` spans against the `lean_rs` target. See
 recommended `RUST_LOG` scopes, and recipes for the in-process `DiagnosticCapture` test
 affordance.
 
-## Build
+## Contributing
+
+Workspace gates:
 
 ```sh
 cargo fmt --check
@@ -97,6 +189,9 @@ cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules, including unsafe-code and
+Lean-version-compatibility expectations.
+
 ## License
 
 Dual-licensed under either of
@@ -104,5 +199,4 @@ Dual-licensed under either of
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
-at your option. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules, including
-unsafe-code and Lean-version-compatibility expectations.
+at your option.

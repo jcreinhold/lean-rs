@@ -2,7 +2,7 @@
 
 The safety thesis the `lean-rs` workspace is built to honour. Every change that adds an
 unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
-here. If a planned API cannot be made consistent, stop and rethink — don't weaken the thesis.
+here. If a planned API cannot be made consistent, stop and rethink—don't weaken the thesis.
 
 ## Unsafe boundary
 

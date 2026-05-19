@@ -1,9 +1,12 @@
 # lean-rs examples
 
-Four focused single-concern examples plus one end-to-end tour, all
-driving the curated `lean_rs::*` surface. Each focused example sticks
-to one verb so a reader can scan it in a minute and reach for the
-matching crate API by analogy.
+**New to this project? Start here.** The examples below drive the curated `lean_rs::*` and
+`lean_rs_host::*` surfaces end to end against the in-tree fixture; reading them is the
+fastest path from a blank consumer project to a working integration.
+
+Four focused single-concern examples plus one end-to-end tour. Each focused example sticks
+to one verb so a reader can scan it in a minute and reach for the matching crate API by
+analogy.
 
 | Example | What it teaches |
 | --- | --- |
@@ -86,13 +89,13 @@ toolchain prelude and will drift with the version pinned in
 **Common failures:**
 
 - `[lean_rs.module_init] ... 'fixtures/lean' does not exist or is not
-  a directory` — run from a directory other than the workspace root.
+  a directory`—run from a directory other than the workspace root.
   Either `cd` to the workspace root or set `CARGO_MANIFEST_DIR`
   appropriately.
-- `[lean_rs.module_init] ... failed to open Lean library` — the Lake
+- `[lean_rs.module_init] ... failed to open Lean library`—the Lake
   fixture has not been built. See *Prerequisites*.
 - `[lean_rs.abi_conversion] declaration 'Nat.add_zero' not found in
-  imported environment` — the imported module set excludes the
+  imported environment`—the imported module set excludes the
   prelude; only happens if the example's import list is edited.
 
 ### evaluate
@@ -118,10 +121,10 @@ ok
 **Common failures:**
 
 - `[lean_rs.symbol_lookup] unknown exported symbol
-  'lean_rs_fixture_string_identity' in ...` — the capability dylib
+  'lean_rs_fixture_string_identity' in ...`—the capability dylib
   was built without the `LeanRsFixture.Strings` module's
   `@[export]`. Re-run `lake build`.
-- `[lean_rs.abi_conversion] ...` — the example's hardcoded argument
+- `[lean_rs.abi_conversion] ...`—the example's hardcoded argument
   type drifted from the Lean signature. Re-check the Rust
   `(args), R` triple against `fixtures/lean/LeanRsFixture/Strings.lean`
   and `Scalars.lean`.
@@ -147,15 +150,13 @@ summary: name=demo_proof_check kind=theorem type=Eq.{1} Nat ...
 ```
 
 The `type=` rendering is Lean's pretty printer and tracks the active
-toolchain — the prefix `Eq.{1} Nat ...` is stable for this theorem
+toolchain—the prefix `Eq.{1} Nat ...` is stable for this theorem
 but the exact bytes will drift with Lean version.
 
 **Common failures:**
 
-- The kernel-check outcome prints `kernel rejected the proof: ...` —
-  the proof term is bad. Edit the source string in
-  `examples/proof_check.rs` and re-run.
-- `[lean_rs.lean_exception] Lean threw ...` — the elaboration shim
+- The kernel-check outcome prints `kernel rejected the proof: ...`—the proof term is bad. Edit the source string in `examples/proof_check.rs` and re-run.
+- `[lean_rs.lean_exception] Lean threw ...`—the elaboration shim
   raised through IO before the kernel saw the term. The bounded
   message names the cause.
 
@@ -180,11 +181,11 @@ ok
 
 **Common failures:**
 
-- `status=Unsupported: ...` — the capability dylib lacks the
+- `status=Unsupported: ...`—the capability dylib lacks the
   `lean_rs_host_meta_infer_type` shim. Rebuild the fixture; the
   in-tree fixture exports all three meta services
   (`infer_type`, `whnf`, `heartbeat_burn`).
-- `status=TimeoutOrHeartbeat: ...` — the heartbeat ceiling tripped
+- `status=TimeoutOrHeartbeat: ...`—the heartbeat ceiling tripped
   before `infer_type` finished. Raise `LeanMetaOptions::new()
   .heartbeat_limit(N)`.
 

@@ -20,31 +20,107 @@ The capability loader transparently handles the Lake naming-convention change be
 4.26 and 4.27 (dylib filename and module-initializer symbol shape), so consumer
 `lakefile.lean`s do not need version-conditional logic.
 
-## Capability contract
+## Quick start
 
-`LeanCapabilities::load_capabilities` opens two dylibs and resolves a fixed contract of 13
-mandatory + 3 optional `@[export] lean_rs_host_*` symbols. The contract is satisfied by a
-separately-distributed Lake package,
-[**`lean-rs-host-shims`**](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims),
-that ships from the same repository as this crate. Add to your `lakefile.lean`:
+The L2 setup adds a `require lean_rs_host_shims from ...` to the consumer's `lakefile.lean`
+and a `lean-rs-host` dependency to `Cargo.toml`. Everything else mirrors the L1 setup in
+[`lean-rs`'s README](https://docs.rs/lean-rs).
+
+**`Cargo.toml`**:
+
+```toml
+[package]
+name = "my_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lean-rs = "0.1"
+lean-rs-host = "0.1"
+
+[build-dependencies]
+lean-toolchain = "0.1"
+```
+
+**`build.rs`**—unchanged from the L1 setup; the helper covers both crates:
+
+```rust
+fn main() {
+    lean_toolchain::emit_lean_link_directives();
+}
+```
+
+**`lean/lakefile.lean`**—adds the shim require so `LeanCapabilities::load_capabilities`
+can find the 13 + 3 `lean_rs_host_*` shim symbols at runtime:
 
 ```lean
 import Lake
-open System Lake DSL
+open Lake DSL
 
 package «my_app»
 
-require «lean_rs_host_shims» from "../lean-rs/lake/lean-rs-host-shims"
+-- Pre-publish: path-require against a sibling checkout of this repository.
+require «lean_rs_host_shims» from "../path/to/lean-rs/lake/lean-rs-host-shims"
+-- Post-publish: git-require by tag.
+-- require «lean_rs_host_shims» from git "https://github.com/jcreinhold/lean-rs" @ "v0.1.0" / "lake/lean-rs-host-shims"
 
 @[default_target]
 lean_lib «MyCapability» where
   defaultFacets := #[LeanLib.sharedFacet]
 ```
 
-Lake builds two dylibs (yours plus the shim package's). At runtime,
-`LeanCapabilities::load_capabilities` opens the shim dylib first with `RTLD_GLOBAL` (so your
-dylib's transitive references resolve) and then opens your dylib. Both dylibs share one Lean
-runtime; per-module `initialize_*` functions are idempotent.
+**`lean/MyCapability.lean`**—one Rust-callable export (the host stack also exposes the
+shim contract's `@[export]` symbols, but you don't need to write any of those yourself):
+
+```lean
+@[export my_app_square]
+def square (n : UInt64) : UInt64 := n * n
+```
+
+**`src/main.rs`**—open the Lake project as a `LeanHost`, load capabilities, drive a session:
+
+```rust
+use std::path::PathBuf;
+use lean_rs::LeanResult;
+use lean_rs::LeanRuntime;
+use lean_rs_host::{LeanElabOptions, LeanHost};
+
+fn main() -> LeanResult<()> {
+    let lake_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lean");
+
+    let runtime = LeanRuntime::init()?;
+    let host = LeanHost::from_lake_project(runtime, &lake_root)?;
+    let caps = host.load_capabilities("my_app", "MyCapability")?;
+    let mut session = caps.session(&["MyCapability"])?;
+
+    // Elaborate a Lean term in the session's environment.
+    let opts = LeanElabOptions::new();
+    let elaborated = session.elaborate("(1 + 2 : Nat)", None, &opts)?;
+    println!("elaborate ok: {}", elaborated.is_ok());
+
+    // Call your own typed @[export] through the instrumented session dispatch.
+    let n = session.call_capability::<(u64,), u64>("my_app_square", (7u64,))?;
+    println!("square(7) = {n}");  // 49
+
+    Ok(())
+}
+```
+
+Build and run:
+
+```sh
+(cd lean && lake build)
+cargo run
+```
+
+Lake produces two dylibs (your `libmy__app_MyCapability.{dylib,so}` plus the shim package's
+`liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`). `load_capabilities` opens both,
+sharing one Lean runtime; per-module `initialize_*` functions are idempotent.
+
+Pre-publish, pin against the workspace by adding `path =` lines alongside the `version`
+constraints in `Cargo.toml` (same as the L1 setup).
+
+## Capability contract
 
 The full per-symbol contract—each Lean signature, the Rust call site it maps to, and the
 typed `LeanSession::*` method on top—lives at
@@ -52,10 +128,21 @@ typed `LeanSession::*` method on top—lives at
 Your `lean_lib` does **not** need to `import LeanRsHostShims`; Lake's two-package build
 handles the dylib-level wiring and the Rust side does the runtime dispatch.
 
-A standalone external-consumer proof—`lean-rs-host-downstream`—exercises
-`LeanHost` → `LeanCapabilities` → `LeanSession` end to end, including `query_declaration`,
-`kernel_check`, `summarize_evidence`, and `LeanSession::call_capability` for a user-authored
-`@[export]` symbol.
+## Worked examples
+
+Six runnable examples under
+[`crates/lean-rs-host/examples/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/examples)
+drive `lean_rs_host::*` end to end against the in-tree fixture:
+
+- `theorem_query`—open a session, contrast a definition's `kind` with a theorem's.
+- `evaluate`—call a typed `@[export]` through `LeanSession::call_capability`.
+- `proof_check`—kernel-check a theorem, re-validate the evidence, render the summary.
+- `meta_query`—run a bounded `MetaM` service and branch on every status.
+- `tour`—the four flows composed end to end in one process.
+
+See the
+[examples README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/examples/README.md)
+for the per-example walkthrough, expected output, and common failures.
 
 ## License
 
