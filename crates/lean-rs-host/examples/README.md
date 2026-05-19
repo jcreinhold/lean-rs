@@ -15,6 +15,7 @@ analogy.
 | [`proof_check`](#proof_check) | Kernel-check a theorem, re-validate the evidence, project a bounded summary. |
 | [`meta_query`](#meta_query) | Run a bounded `MetaM` service and branch on every status. |
 | [`tour`](#tour) | All four flows composed end to end in one process. |
+| [`long_session_memory`](#long_session_memory) | RSS checkpoints for a long-lived process using fresh imports, pooled reuse, introspection, and elaboration. |
 
 ## Prerequisites
 
@@ -206,6 +207,29 @@ cargo run -p lean-rs --example tour
 **Expected output:** one `name=<stage> elapsed_us=<u64>` line per
 stage, suitable for `grep`/`awk`. The exact `elapsed_us` values are
 machine-dependent.
+
+### long_session_memory
+
+**Goal:** characterize retained RSS across long-session lifetime boundaries:
+runtime initialization, capability loading, repeated fresh imports,
+bounded `SessionPool` reuse, bulk declaration queries, elaboration, and
+session/pool drops.
+
+**Run:**
+
+```sh
+LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
+```
+
+**Expected output:** stable `key=value` lines including `lean_version`,
+`lean_resolved_version`, workload parameters, `pool_stats=...`, and
+`checkpoint=<stage> rss_kib=<u64>`.
+
+This example is intentionally not a Criterion bench. It answers a
+retained-memory question over minutes and lifetime boundaries; Criterion
+answers per-iteration latency questions. The measured model and consumer
+guidance live in
+[`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
 ## Why no `callbacks` example?
 

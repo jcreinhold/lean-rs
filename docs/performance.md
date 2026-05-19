@@ -24,6 +24,22 @@ for i in $(seq 1 25); do ./target/release/examples/cold_probe; done
 
 Output is one `name=<workload> elapsed_us=<u64>` line per stage.
 
+## Long-session RSS reproducer
+
+`long_session_memory` is the retained-memory counterpart to the latency benches. It runs one
+long-lived process through fresh imports, pooled reuse, bulk introspection, and elaboration,
+printing RSS checkpoints and `SessionPool` counters:
+
+```sh
+LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
+```
+
+This is deliberately not a Criterion bench. Criterion answers per-iteration latency questions;
+this workload answers whether RSS returns at lifetime boundaries after `LeanSession`,
+`SessionPool`, and `Obj<'lean>` drops. See
+[`docs/safety/long-session-memory.md`](safety/long-session-memory.md) for the measured
+`LEAN_RESOLVED_VERSION` result and consumer guidance.
+
 ## Detect a regression
 
 Save a baseline before any change you suspect of moving the numbers:
