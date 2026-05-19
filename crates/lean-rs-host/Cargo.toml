@@ -5,16 +5,16 @@ description = "Opinionated Rust host stack for embedding Lean 4 as a theorem-pro
 documentation = "https://docs.rs/lean-rs-host"
 edition.workspace = true
 include = [
-  "src/**/*.rs",
+  "Cargo.toml",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "README.md",
+  "benches/**/*.rs",
   "build.rs",
+  "examples/**/*.rs",
+  "src/**/*.rs",
   "tests/**/*.rs",
   "tests/compile_fail/**",
-  "examples/**/*.rs",
-  "benches/**/*.rs",
-  "Cargo.toml",
-  "README.md",
-  "LICENSE-MIT",
-  "LICENSE-APACHE",
 ]
 keywords = ["bindings", "embedding", "host", "lean", "lean4"]
 license.workspace = true
@@ -33,17 +33,17 @@ object = { version = "0.36", default-features = false, features = ["read", "std"
 # package's dylib for the two-dylib load in `LeanCapabilities`. Default
 # features (std + serde, no preserve_order) are enough; the manifest is small.
 serde_json = "1"
-tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 [dev-dependencies]
-trybuild = "1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+trybuild = "1"
 
 [[bench]]
-name = "session"
 harness = false
+name = "session"
 
 [lints]
 workspace = true

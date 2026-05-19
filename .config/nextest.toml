@@ -35,5 +35,5 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # CI inherits all default thresholds and adds a single automatic retry
 # so transient flakes from CI runner noise (network blips during
 # capability dylib open, etc.) don't break the build.
-retries = 1
 fail-fast = false
+retries = 1

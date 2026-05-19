@@ -5,16 +5,16 @@ description = "Safe Rust bindings for hosting Lean 4 capabilities: runtime initi
 documentation = "https://docs.rs/lean-rs"
 edition.workspace = true
 include = [
-  "src/**/*.rs",
+  "Cargo.toml",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "README.md",
+  "benches/**/*.rs",
   "build.rs",
+  "examples/**/*.rs",
+  "src/**/*.rs",
   "tests/**/*.rs",
   "tests/compile_fail/**",
-  "examples/**/*.rs",
-  "benches/**/*.rs",
-  "Cargo.toml",
-  "README.md",
-  "LICENSE-MIT",
-  "LICENSE-APACHE",
 ]
 keywords = ["bindings", "embedding", "host", "lean", "lean4"]
 license.workspace = true
@@ -38,7 +38,7 @@ object = { version = "0.36", default-features = false, features = ["read", "std"
 # the crate; downstream consumers attach their own (or `DiagnosticCapture`
 # for in-process tests). Cost is one atomic load per span entry when no
 # subscriber is attached.
-tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
 # `tracing-subscriber` powers `DiagnosticCapture` (always present, no
 # feature gate). Only the `registry` plumbing is needed; the `fmt`
 # stack is intentionally absent so downstream applications choose their
@@ -81,11 +81,11 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 # dependency carries only `registry` + `std` (enough for
 # `DiagnosticCapture`); the dev override layers `fmt` + `env-filter`
 # on top so production builds don't pull either.
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
 
 [[bench]]
-name = "hot_paths"
 harness = false
+name = "hot_paths"
 
 [[example]]
 name = "cold_probe"

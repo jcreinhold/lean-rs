@@ -4,15 +4,7 @@ categories = ["api-bindings", "external-ffi-bindings"]
 description = "Raw FFI bindings for the Lean 4 C ABI. See `lean-rs` for the safe front door."
 documentation = "https://docs.rs/lean-rs-sys"
 edition.workspace = true
-include = [
-  "src/**/*.rs",
-  "build.rs",
-  "tests/**/*.rs",
-  "Cargo.toml",
-  "README.md",
-  "LICENSE-MIT",
-  "LICENSE-APACHE",
-]
+include = ["Cargo.toml", "LICENSE-APACHE", "LICENSE-MIT", "README.md", "build.rs", "src/**/*.rs", "tests/**/*.rs"]
 keywords = ["bindings", "ffi", "lean", "lean4", "sys"]
 license.workspace = true
 links = "leanshared"
