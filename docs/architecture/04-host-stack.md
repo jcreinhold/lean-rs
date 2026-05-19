@@ -72,10 +72,10 @@ site (Ousterhout ch. 7—different layer, different abstraction).
 
 | Item | Module path | Notes |
 | --- | --- | --- |
-| `SessionPool<'lean>` | `lean_rs_host::host::pool::SessionPool` | Capacity-bounded reuse pool. `with_capacity(runtime, capacity)`; `acquire(caps, imports) -> PooledSession`. `!Send + !Sync`. |
+| `SessionPool<'lean>` | `lean_rs_host::host::pool::SessionPool` | Capacity-bounded reuse pool. `with_capacity(runtime, capacity)`; `acquire(caps, imports) -> PooledSession`; `drain()` drops cached environments. `!Send + !Sync`. |
 | `PooledSession<'lean, 'p, 'c>` | `lean_rs_host::host::pool::PooledSession` | `Deref`/`DerefMut` to `LeanSession`; `Drop` returns the environment to the pool (or releases at capacity). |
 | `SessionStats` | `lean_rs_host::host::session::SessionStats` | Per-session metrics (`ffi_calls`, `batch_items`, `elapsed_ns`). `Copy + Default + PartialEq`; snapshot semantics. |
-| `PoolStats` | `lean_rs_host::host::pool::PoolStats` | Per-pool reuse metrics. `Copy + Default + PartialEq`. |
+| `PoolStats` | `lean_rs_host::host::pool::PoolStats` | Per-pool reuse and drain metrics. `Copy + Default + PartialEq`. |
 
 ## Limits
 
@@ -113,7 +113,8 @@ Each requires doc comments and `# Errors` / `# Panics` sections.
 - `LeanSession::stats(&self) -> SessionStats`—snapshot of per-session dispatch metrics.
 - `SessionPool::with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self`
 - `SessionPool::acquire<'p, 'c>(&'p self, caps: &'c LeanCapabilities<'lean, 'c>, imports: &[&str]) -> LeanResult<PooledSession<'lean, 'p, 'c>>`—capability-agnostic storage; entries are bare `Obj<'lean>` environments rewrapped under the supplied capability borrow at acquire time. FIFO on take, LIFO on push.
-- `SessionPool::stats(&self) -> PoolStats`, `len()`, `is_empty()`, `capacity()`—observability.
+- `SessionPool::drain(&self) -> usize`—drops every cached free-list environment and returns the number removed. Checked-out `PooledSession`s remain valid and may return to the pool later. This releases Rust-owned environment refs only; it does not reset Lean's process-global import/runtime state.
+- `SessionPool::stats(&self) -> PoolStats`, `len()`, `is_empty()`, `capacity()`—observability. `PoolStats` tracks imports, reuse, release-at-capacity drops, explicit drain calls, and entries removed by drains.
 
 None leak raw `lean_*` types, raw refcount obligations, or initializer-symbol order.
 

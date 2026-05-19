@@ -295,6 +295,8 @@ pub fn lean_rs_host::host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaSe
 pub mod lean_rs_host::host::pool
 pub struct lean_rs_host::host::pool::PoolStats
 pub lean_rs_host::host::pool::PoolStats::acquired: u64
+pub lean_rs_host::host::pool::PoolStats::drained: u64
+pub lean_rs_host::host::pool::PoolStats::drains: u64
 pub lean_rs_host::host::pool::PoolStats::imports_performed: u64
 pub lean_rs_host::host::pool::PoolStats::released_dropped: u64
 pub lean_rs_host::host::pool::PoolStats::released_to_pool: u64
@@ -338,6 +340,7 @@ pub struct lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats
@@ -401,6 +404,8 @@ impl<'lean, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanS
 impl<'lean, 'c> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSession<'lean, 'c>
 pub struct lean_rs_host::host::PoolStats
 pub lean_rs_host::host::PoolStats::acquired: u64
+pub lean_rs_host::host::PoolStats::drained: u64
+pub lean_rs_host::host::PoolStats::drains: u64
 pub lean_rs_host::host::PoolStats::imports_performed: u64
 pub lean_rs_host::host::PoolStats::released_dropped: u64
 pub lean_rs_host::host::PoolStats::released_to_pool: u64
@@ -444,6 +449,7 @@ pub struct lean_rs_host::host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats
@@ -796,6 +802,8 @@ impl<'lean, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanS
 impl<'lean, 'c> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSession<'lean, 'c>
 pub struct lean_rs_host::PoolStats
 pub lean_rs_host::PoolStats::acquired: u64
+pub lean_rs_host::PoolStats::drained: u64
+pub lean_rs_host::PoolStats::drains: u64
 pub lean_rs_host::PoolStats::imports_performed: u64
 pub lean_rs_host::PoolStats::released_dropped: u64
 pub lean_rs_host::PoolStats::released_to_pool: u64
@@ -857,6 +865,7 @@ pub struct lean_rs_host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats

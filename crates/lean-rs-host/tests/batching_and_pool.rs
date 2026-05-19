@@ -370,6 +370,77 @@ fn session_pool_zero_capacity_never_reuses() {
     assert_eq!(pool.len(), 0, "free list never holds anything");
 }
 
+#[test]
+fn session_pool_drain_drops_cached_entries() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_capacity(runtime, 4);
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(pool.acquire(&caps, &imports).expect("warm pool"));
+    assert_eq!(pool.len(), 1, "warm pool has one cached environment");
+
+    let drained = pool.drain();
+    assert_eq!(drained, 1, "drain returns the cached-entry count");
+    assert_eq!(pool.len(), 0, "drain empties the free list");
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 0);
+    assert_eq!(stats.released_to_pool, 1);
+    assert_eq!(stats.released_dropped, 0);
+    assert_eq!(stats.drains, 1);
+    assert_eq!(stats.drained, 1);
+
+    drop(
+        pool.acquire(&caps, &imports)
+            .expect("drained pool must import fresh on next acquire"),
+    );
+    let stats = pool.stats();
+    assert_eq!(
+        stats.imports_performed, 2,
+        "drain removes the only reusable entry, so the next acquire imports fresh",
+    );
+    assert_eq!(stats.reused, 0);
+    assert_eq!(stats.released_to_pool, 2);
+    assert_eq!(pool.len(), 1, "the second release repopulates the pool");
+}
+
+#[test]
+fn session_pool_drain_leaves_checked_out_sessions_valid() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_capacity(runtime, 2);
+    let imports = ["LeanRsFixture.Handles"];
+
+    let mut sess = pool.acquire(&caps, &imports).expect("checked-out session");
+    assert_eq!(pool.drain(), 0, "no free-list entries while the session is checked out");
+
+    let kind = sess
+        .declaration_kind("LeanRsFixture.Handles.nameAnonymous")
+        .expect("checked-out session remains usable after drain");
+    assert_eq!(kind, "definition");
+
+    drop(sess);
+    assert_eq!(pool.len(), 1, "dropping the checked-out session returns it to the pool");
+    assert_eq!(pool.drain(), 1, "a later drain can release the returned entry");
+    assert_eq!(pool.len(), 0);
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 0);
+    assert_eq!(stats.released_to_pool, 1);
+    assert_eq!(stats.released_dropped, 0);
+    assert_eq!(stats.drains, 2);
+    assert_eq!(stats.drained, 1);
+}
+
 // -- timing note: bulk vs singular --------------------------------------
 //
 // Informational only. Per the project's "no performance claim without

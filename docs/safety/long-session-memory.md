@@ -23,7 +23,7 @@ to those boundaries; it does not reset Lean's process-global runtime state.
 | `LeanCapabilities` | User and shim libraries plus resolved capability symbols | Library handles and symbol table storage | Lean-side initialized module state |
 | `LeanSession` | One imported `Lean.Environment` as `Obj<'lean>` | One Lean refcount on the environment via `Obj::Drop` / `lean_dec` | Anything Lean retained globally while importing modules |
 | `Obj<'lean>` | One owned Lean reference count | That count via `lean_dec`; clones balance with `lean_inc` | Persistent or compacted Lean objects whose refcount is not used |
-| `SessionPool` entry | A retained `Obj<'lean>` environment keyed by imports | Dropped when evicted or when the pool is dropped | Process-global Lean import/module state already created |
+| `SessionPool` entry | A retained `Obj<'lean>` environment keyed by imports | Dropped when evicted, drained, or when the pool is dropped | Process-global Lean import/module state already created |
 
 Lean source supports the split. The public runtime reference says foreign code must initialize the Lean runtime before
 calling Lean code, and the FFI reference describes Lean-owned objects as reference-counted. The local Lean source at
@@ -108,9 +108,9 @@ completed:
 `PoolStats` for the completed run:
 
 ```text
-pool_stats=fresh_import_drop imports_performed=64 reused=0 acquired=64 released_to_pool=0 released_dropped=64
-pool_stats=bounded_pool imports_performed=4 reused=64 acquired=68 released_to_pool=68 released_dropped=0
-pool_stats=mixed_pool_before_drop imports_performed=1 reused=0 acquired=1 released_to_pool=1 released_dropped=0
+pool_stats=fresh_import_drop imports_performed=64 reused=0 acquired=64 released_to_pool=0 released_dropped=64 drains=0 drained=0
+pool_stats=bounded_pool imports_performed=4 reused=64 acquired=68 released_to_pool=68 released_dropped=0 drains=0 drained=0
+pool_stats=mixed_pool_before_drop imports_performed=1 reused=0 acquired=1 released_to_pool=1 released_dropped=0 drains=0 drained=0
 ```
 
 Conclusion: the per-test pathology is not only a test-suite artefact. It reproduces in a single long-lived process when
@@ -142,7 +142,26 @@ Open questions:
 - macOS RSS is noisy under memory pressure and compression, so the exact KiB values are local. The phase-level shape is
   the useful signal.
 
-## Consumer Pattern Until Prompt 32
+## Recycling API Decision
+
+Prompt 32 intentionally does **not** add `LeanRuntime::recycle()`. The safe Rust lifetime model treats
+`LeanRuntime::init()` as a process-once anchor: every `Obj<'lean>`, `LeanSession<'lean, '_>`, `LeanCapabilities<'lean,
+'_>`, and `SessionPool<'lean>` value is tied to that borrow. An in-process runtime recycle would have to prove that no
+Lean-derived value, cached symbol address, thread-local runtime attachment, task, initializer global, or Lean-owned
+persistent object from the old runtime can be observed after reinitialization. The current Lean embedding surface does
+not provide a safe global stop-the-world/finalize/reinitialize contract for that claim.
+
+Prompt 32 also does **not** add `LeanCapabilities::reopen()`. The prompt-31 workload did not attribute cumulative growth
+to loaded dylib handles or symbol-resolution caches. Reopening capabilities would add public surface without bounding
+the measured import growth.
+
+The shipped recycle surface is `SessionPool::drain()`. It drops every cached free-list environment currently retained
+by the pool, increments `PoolStats::{drains, drained}`, and leaves checked-out `PooledSession` values valid. It is useful
+at idle boundaries when a worker wants to release Rust-owned cached `Lean.Environment` references without discarding the
+pool object. It is not an RSS reset: the process-global Lean state listed in the retention model remains live until
+process exit.
+
+## Consumer Pattern
 
 For long-lived consumers, reuse imported environments. Keep a small `SessionPool` keyed by the import set and run
 introspection, elaboration, kernel checks, and `MetaM` calls against pooled sessions. The measured workload shows those
@@ -153,6 +172,7 @@ sets, put a process boundary around the sweep: restart the worker after a bounde
 machine, 64 fresh imports of the fixture workload were already enough to push RSS into multi-GiB territory; use a lower
 limit for larger module sets.
 
-Pool draining can release Rust-owned environment references, but it should not be treated as an RSS reset. Prompt 32
-should therefore narrow toward documented pool-drain/process-cycling support unless it finds a Lean-supported way to
-reclaim process-global import state safely.
+Use `SessionPool::drain()` when a worker is idle, when a project closes, or before handing a worker to a different
+stable import set. Drain cadence should be policy-driven by the embedding application: it releases cached environments,
+but it cannot bound workloads that continuously create fresh import sets. For those, cycle the worker process after a
+bounded number of fresh imports or a measured RSS ceiling.

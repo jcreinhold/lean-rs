@@ -35,6 +35,12 @@
 //! caches stay warm. There is no eviction-by-age or eviction-by-distinct-key
 //! policy beyond the capacity bound.
 //!
+//! [`SessionPool::drain`] explicitly drops every cached free-list entry
+//! without discarding the pool itself. It releases the Rust-owned
+//! environment references the pool is holding; it does not reset Lean's
+//! process-global runtime state, module initializer flags, interned
+//! names, compacted `.olean` regions, or allocator arenas.
+//!
 //! ## Threading
 //!
 //! [`SessionPool`] is `!Send + !Sync` (inherited from the contained
@@ -63,8 +69,9 @@ use lean_rs::error::LeanResult;
 /// [`SessionPool::acquire`] call increments `acquired` exactly once
 /// plus either `imports_performed` (cache miss) or `reused` (cache
 /// hit). Similarly, `released_to_pool + released_dropped` counts every
-/// [`PooledSession::drop`] firing — they only diverge in proportion
-/// once the pool exceeds capacity.
+/// [`PooledSession::drop`] firing. `released_to_pool` is cumulative:
+/// an entry counted there may later be removed by [`SessionPool::drain`],
+/// which records the removal in `drained`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PoolStats {
     /// Number of fresh `Lean.importModules` calls performed because no
@@ -81,6 +88,10 @@ pub struct PoolStats {
     /// Number of release events that dropped the environment because
     /// the pool was at capacity.
     pub released_dropped: u64,
+    /// Number of explicit [`SessionPool::drain`] calls.
+    pub drains: u64,
+    /// Number of cached environments dropped by explicit drains.
+    pub drained: u64,
 }
 
 // -- ImportsKey: hashable cache key for the imports list -----------------
@@ -240,10 +251,10 @@ impl<'lean> SessionPool<'lean> {
 
     /// Number of environments currently sitting on the free list.
     ///
-    /// Equals `acquired - released_to_pool` adjusted for outstanding
-    /// [`PooledSession`] handles — i.e. the count of warm imports
-    /// available for the next [`Self::acquire`] without going through
-    /// `Lean.importModules`.
+    /// This is the count of warm imports available for the next
+    /// [`Self::acquire`] without going through `Lean.importModules`.
+    /// Explicit drains and cache hits both remove entries from this
+    /// count; releases may add entries back up to [`Self::capacity`].
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.borrow().free.len()
@@ -265,6 +276,39 @@ impl<'lean> SessionPool<'lean> {
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Drop every cached environment currently retained by the pool.
+    ///
+    /// Returns the number of free-list entries removed. Each removed
+    /// entry drops its owned `Obj<'lean>` environment, which releases
+    /// one Lean refcount via `lean_dec`.
+    ///
+    /// Checked-out [`PooledSession`] values are not affected: they own
+    /// their sessions until drop, and may return their environments to
+    /// this same pool later if capacity permits. A later [`Self::drain`]
+    /// call can remove those returned entries.
+    ///
+    /// This is a cache-eviction API, not a runtime recycle API. It does
+    /// not reset Lean's process-global runtime state, initialized module
+    /// flags, interned names, compacted `.olean` regions, or allocator
+    /// arenas, and should not be treated as an RSS reset.
+    pub fn drain(&self) -> usize {
+        let mut inner = self.inner.borrow_mut();
+        let drained = inner.free.len();
+        inner.free.clear();
+
+        let mut s = self.stats.get();
+        s.drains = s.drains.saturating_add(1);
+        s.drained = s.drained.saturating_add(u64::try_from(drained).unwrap_or(u64::MAX));
+        self.stats.set(s);
+
+        tracing::debug!(
+            target: "lean_rs",
+            drained = drained,
+            "lean_rs.host.pool.drain",
+        );
+        drained
     }
 
     fn bump_reused(&self) {

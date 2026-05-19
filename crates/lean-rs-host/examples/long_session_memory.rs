@@ -244,7 +244,13 @@ fn rss_kib() -> std::io::Result<u64> {
 
 fn report_pool_stats(label: &str, stats: PoolStats) {
     println!(
-        "pool_stats={label} imports_performed={} reused={} acquired={} released_to_pool={} released_dropped={}",
-        stats.imports_performed, stats.reused, stats.acquired, stats.released_to_pool, stats.released_dropped
+        "pool_stats={label} imports_performed={} reused={} acquired={} released_to_pool={} released_dropped={} drains={} drained={}",
+        stats.imports_performed,
+        stats.reused,
+        stats.acquired,
+        stats.released_to_pool,
+        stats.released_dropped,
+        stats.drains,
+        stats.drained
     );
 }
