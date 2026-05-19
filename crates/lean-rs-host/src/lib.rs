@@ -10,11 +10,9 @@
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 13 mandatory + 3 optional
+//! - The capability contract: 16 mandatory + 4 optional
 //!   `lean_rs_host_*` `@[export]` Lean shims this stack expects in the
-//!   capability dylib it loads. Today the shims ship as test scaffolding
-//!   only; an external-consumer packaging story (Lake-require vs.
-//!   bundled dylib) is the prompt-30 deliverable per `RD-2026-05-18-001`.
+//!   capability dylib it loads.
 //!
 //! Downstream applications that want the (β)-binding minimum — call any
 //! `@[export]` Lean function with typed arguments, no shim contract —

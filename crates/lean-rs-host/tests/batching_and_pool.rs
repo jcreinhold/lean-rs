@@ -11,11 +11,13 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use lean_rs::module::LeanIo;
-use lean_rs::{HostStage, LeanError, LeanRuntime};
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool};
+use lean_rs::{HostStage, LeanDiagnosticCode, LeanError, LeanRuntime};
+use lean_rs_host::{LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool};
 
 // -- fixture setup -------------------------------------------------------
 
@@ -44,6 +46,16 @@ fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> Lea
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
     caps.session(&["LeanRsHostShims.Elaboration"], None)
         .expect("session imports cleanly")
+}
+
+fn assert_cancelled(err: LeanError) {
+    assert_eq!(err.code(), LeanDiagnosticCode::Cancelled);
+    match err {
+        LeanError::Cancelled(_) => {}
+        LeanError::Host(failure) => panic!("expected LeanError::Cancelled, got Host {failure:?}"),
+        LeanError::LeanException(exc) => panic!("expected LeanError::Cancelled, got LeanException {exc:?}"),
+        _ => panic!("expected LeanError::Cancelled, got future LeanError variant"),
+    }
 }
 
 // -- query_declarations_bulk --------------------------------------------
@@ -137,6 +149,221 @@ fn query_declarations_bulk_empty_input_is_no_op() {
         .expect("empty input returns empty vec");
     assert!(decls.is_empty(), "empty input yields empty output");
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
+}
+
+// -- declaration_*_bulk -------------------------------------------------
+
+#[test]
+fn declaration_type_bulk_returns_present_and_missing_slots_in_one_dispatch() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+    let names = [
+        "LeanRsFixture.Handles.nameAnonymous",
+        "LeanRsFixture.Handles.nameMkStr",
+        "LeanRsFixture.Handles.exprConstNat",
+        "Nat",
+        "Nat.zero",
+        "This.Name.Does.Not.Exist",
+    ];
+
+    let baseline = session.stats();
+    let types = session
+        .declaration_type_bulk(&names, None)
+        .expect("bulk type query succeeds");
+
+    assert_eq!(types.len(), names.len(), "one output slot per input");
+    assert!(types[0].is_some(), "fixture definition has a type");
+    assert!(types[1].is_some(), "fixture definition has a type");
+    assert!(types[2].is_some(), "fixture definition has a type");
+    assert!(types[3].is_some(), "Nat has a type");
+    assert!(types[4].is_some(), "Nat.zero has a type");
+    assert!(types[5].is_none(), "missing declaration yields None");
+
+    let after = session.stats();
+    assert_eq!(
+        after.ffi_calls - baseline.ffi_calls,
+        1,
+        "uncancelled declaration_type_bulk must dispatch once",
+    );
+    assert_eq!(
+        after.batch_items - baseline.batch_items,
+        names.len() as u64,
+        "batch_items records the type batch length",
+    );
+}
+
+#[test]
+fn declaration_kind_bulk_returns_expected_kinds_and_missing_slot() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+    let names = [
+        "LeanRsFixture.Handles.nameAnonymous",
+        "LeanRsFixture.Handles.nameMkStr",
+        "LeanRsFixture.Handles.exprConstNat",
+        "Nat",
+        "Nat.zero",
+        "This.Name.Does.Not.Exist",
+    ];
+
+    let baseline = session.stats();
+    let kinds = session
+        .declaration_kind_bulk(&names, None)
+        .expect("bulk kind query succeeds");
+
+    assert_eq!(
+        kinds,
+        [
+            "definition",
+            "definition",
+            "definition",
+            "inductive",
+            "constructor",
+            "missing"
+        ],
+    );
+    let after = session.stats();
+    assert_eq!(
+        after.ffi_calls - baseline.ffi_calls,
+        1,
+        "uncancelled declaration_kind_bulk must dispatch once",
+    );
+    assert_eq!(
+        after.batch_items - baseline.batch_items,
+        names.len() as u64,
+        "batch_items records the kind batch length",
+    );
+}
+
+#[test]
+fn declaration_name_bulk_round_trips_names_including_missing() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+    let names = [
+        "LeanRsFixture.Handles.nameAnonymous",
+        "LeanRsFixture.Handles.nameMkStr",
+        "Nat.zero",
+        "This.Name.Does.Not.Exist",
+        "LeanRsFixture.Handles.exprConstNat",
+    ];
+
+    let baseline = session.stats();
+    let rendered = session
+        .declaration_name_bulk(&names, None)
+        .expect("bulk name query succeeds");
+
+    assert_eq!(rendered, names, "name bulk round-trips the dotted form");
+    let after = session.stats();
+    assert_eq!(
+        after.ffi_calls - baseline.ffi_calls,
+        1,
+        "uncancelled declaration_name_bulk must dispatch once",
+    );
+    assert_eq!(
+        after.batch_items - baseline.batch_items,
+        names.len() as u64,
+        "batch_items records the name batch length",
+    );
+}
+
+#[test]
+fn declaration_bulk_empty_inputs_are_no_ops() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+
+    let baseline = session.stats();
+    assert!(
+        session
+            .declaration_type_bulk(&[], None)
+            .expect("empty type bulk succeeds")
+            .is_empty(),
+    );
+    assert!(
+        session
+            .declaration_kind_bulk(&[], None)
+            .expect("empty kind bulk succeeds")
+            .is_empty(),
+    );
+    assert!(
+        session
+            .declaration_name_bulk(&[], None)
+            .expect("empty name bulk succeeds")
+            .is_empty(),
+    );
+    assert_eq!(session.stats(), baseline, "empty bulk calls must not record FFI work");
+}
+
+#[test]
+fn declaration_bulk_pre_cancelled_token_returns_cancelled_without_ffi() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+    let token = LeanCancellationToken::new();
+    token.cancel();
+
+    let baseline = session.stats();
+    let err = session
+        .declaration_kind_bulk(&["LeanRsFixture.Handles.nameAnonymous"], Some(&token))
+        .expect_err("pre-cancelled bulk call should stop before dispatch");
+
+    assert_cancelled(err);
+    assert_eq!(
+        session.stats(),
+        baseline,
+        "pre-cancelled bulk call must not record an FFI dispatch",
+    );
+}
+
+#[test]
+fn declaration_bulk_observes_cancellation_between_items() {
+    const ITEMS: usize = 100_000;
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+    let names = vec!["LeanRsFixture.Handles.nameAnonymous"; ITEMS];
+    let token = LeanCancellationToken::new();
+    let canceller = token.clone();
+    let (tx, rx) = mpsc::channel();
+
+    let handle = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(2));
+        let cancelled_at = Instant::now();
+        canceller.cancel();
+        tx.send(cancelled_at).expect("parent still receives cancellation time");
+    });
+
+    let err = session
+        .declaration_kind_bulk(&names, Some(&token))
+        .expect_err("token-present declaration bulk should observe cancellation between items");
+    let observed_at = Instant::now();
+    handle.join().expect("canceller thread exits cleanly");
+    let cancelled_at = rx.recv().expect("canceller sent timestamp");
+
+    assert_cancelled(err);
+    assert!(
+        session.stats().ffi_calls > 0,
+        "canceller sleeps briefly so the worker should complete at least one FFI dispatch first",
+    );
+    assert!(
+        observed_at.duration_since(cancelled_at) < Duration::from_secs(2),
+        "cooperative cancellation should be observed at the next per-item check",
+    );
 }
 
 // -- elaborate_bulk -----------------------------------------------------

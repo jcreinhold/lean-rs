@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export thirteen **mandatory** `@[export]` symbols and may
+//! loads must export sixteen **mandatory** `@[export]` symbols and may
 //! export four **optional** meta-service symbols (matched at
 //! `LeanCapabilities::load_capabilities` time):
 //!
@@ -23,8 +23,11 @@
 //! | `lean_rs_host_env_query_declarations_bulk`     | yes        | `Environment -> Array Name -> IO (Array (Option Declaration))`                                                |
 //! | `lean_rs_host_env_list_declarations`           | yes        | `Environment -> IO (Array Name)`                                                                              |
 //! | `lean_rs_host_env_declaration_type`            | yes        | `Environment -> Name -> IO (Option Expr)`                                                                     |
+//! | `lean_rs_host_env_declaration_type_bulk`       | yes        | `Environment -> Array String -> IO (Array (Option Expr))`                                                     |
 //! | `lean_rs_host_env_declaration_kind`            | yes        | `Environment -> Name -> IO String`                                                                            |
+//! | `lean_rs_host_env_declaration_kind_bulk`       | yes        | `Environment -> Array String -> IO (Array String)`                                                            |
 //! | `lean_rs_host_env_declaration_name`            | yes        | `Environment -> Name -> IO String`                                                                            |
+//! | `lean_rs_host_env_declaration_name_bulk`       | yes        | `Environment -> Array String -> IO (Array String)`                                                            |
 //! | `lean_rs_host_elaborate`                       | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
 //! | `lean_rs_host_elaborate_bulk`                  | yes        | `Environment -> Array String -> String -> String -> UInt64 -> USize -> IO (Array (Except ElabFailure Expr))`  |
 //! | `lean_rs_host_kernel_check`                    | yes        | `Environment -> String -> String -> String -> UInt64 -> USize -> IO KernelOutcome`                            |
@@ -170,8 +173,11 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_query_declarations_bulk: *mut c_void,
     pub(crate) env_list_declarations: *mut c_void,
     pub(crate) env_declaration_type: *mut c_void,
+    pub(crate) env_declaration_type_bulk: *mut c_void,
     pub(crate) env_declaration_kind: *mut c_void,
+    pub(crate) env_declaration_kind_bulk: *mut c_void,
     pub(crate) env_declaration_name: *mut c_void,
+    pub(crate) env_declaration_name_bulk: *mut c_void,
     pub(crate) elaborate: *mut c_void,
     pub(crate) elaborate_bulk: *mut c_void,
     pub(crate) kernel_check: *mut c_void,
@@ -184,7 +190,7 @@ pub(crate) struct SessionSymbols {
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The thirteen
+    /// Resolve session function symbols from `library`. The sixteen
     /// baseline symbols are mandatory; the four meta-service symbols
     /// are optional.
     ///
@@ -205,8 +211,11 @@ impl SessionSymbols {
             env_query_declarations_bulk: library.resolve_function_symbol("lean_rs_host_env_query_declarations_bulk")?,
             env_list_declarations: library.resolve_function_symbol("lean_rs_host_env_list_declarations")?,
             env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
+            env_declaration_type_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_type_bulk")?,
             env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
+            env_declaration_kind_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_kind_bulk")?,
             env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
+            env_declaration_name_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_name_bulk")?,
             elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
             elaborate_bulk: library.resolve_function_symbol("lean_rs_host_elaborate_bulk")?,
             kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
@@ -353,6 +362,34 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         self.stats.set(s);
     }
 
+    fn decode_strings_cached(raw: Vec<Obj<'lean>>) -> LeanResult<Vec<String>> {
+        if raw.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(first_key) = raw.first().map(Obj::as_raw_borrowed) else {
+            return Ok(Vec::new());
+        };
+        if raw.iter().all(|obj| obj.as_raw_borrowed() == first_key) {
+            let len = raw.len();
+            let mut raw_iter = raw.into_iter();
+            let Some(first) = raw_iter.next() else {
+                return Ok(Vec::new());
+            };
+            let value = String::try_from_lean(first)?;
+            return Ok(vec![value; len]);
+        }
+        let mut out = Vec::with_capacity(raw.len());
+        for obj in raw {
+            out.push(String::try_from_lean(obj)?);
+        }
+        Ok(out)
+    }
+
+    fn all_equal_name<'a>(names: &'a [&str]) -> Option<&'a str> {
+        let first = *names.first()?;
+        names.iter().all(|name| *name == first).then_some(first)
+    }
+
     /// Look up a declaration by full Lean name (e.g. `"Nat.zero"`).
     ///
     /// # Errors
@@ -455,6 +492,70 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         result
     }
 
+    /// The declared types of `names`, preserving input order.
+    ///
+    /// Returns `None` in each slot whose name is not present in the
+    /// environment. With `cancellation = None`, the whole batch crosses
+    /// the FFI boundary once and Lean converts the input strings to
+    /// names internally. With `Some(token)`, this loops through
+    /// [`Self::declaration_type`] so cancellation can be observed
+    /// between items; partial results are discarded when cancellation
+    /// fires.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side
+    /// bulk shim raises through `IO`.
+    pub fn declaration_type_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<Option<LeanExpr<'lean>>>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_type_bulk",
+            batch_size = names.len(),
+        )
+        .entered();
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        check_cancellation(cancellation)?;
+        if cancellation.is_some() {
+            let mut out = Vec::with_capacity(names.len());
+            for name in names {
+                check_cancellation(cancellation)?;
+                out.push(self.declaration_type(name, cancellation)?);
+            }
+            return Ok(out);
+        }
+        if let Some(name) = Self::all_equal_name(names) {
+            let names_owned = vec![name.to_owned()];
+            let address = self.capabilities.symbols().env_declaration_type_bulk;
+            // SAFETY: per the SessionSymbols::resolve invariant; signature
+            // is `(Environment, Array String) -> IO (Array (Option Expr))`.
+            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Option<LeanExpr<'lean>>>>> =
+                unsafe { LeanExported::from_function_address(self.runtime(), address) };
+            let t = Instant::now();
+            let mut result = query.call(self.environment.clone(), names_owned)?;
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            let value = result.pop().unwrap_or(None);
+            return Ok(vec![value; names.len()]);
+        }
+        let names_owned: Vec<String> = names.iter().map(|&name| name.to_owned()).collect();
+        let address = self.capabilities.symbols().env_declaration_type_bulk;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Array String) -> IO (Array (Option Expr))`.
+        let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Option<LeanExpr<'lean>>>>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), names_owned);
+        let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+        self.record_call(batch_len, t.elapsed());
+        result
+    }
+
     /// The kind of `name` as a Lean-rendered string
     /// (`"axiom"`, `"definition"`, `"theorem"`, `"opaque"`, `"quot"`,
     /// `"inductive"`, `"constructor"`, `"recursor"`), or `"missing"`
@@ -483,6 +584,69 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let result = query.call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         result
+    }
+
+    /// The declaration kinds of `names`, preserving input order.
+    ///
+    /// Each output slot is the same string that [`Self::declaration_kind`]
+    /// would return for the corresponding input, including `"missing"`
+    /// for absent declarations. With `cancellation = None`, this is one
+    /// Lean-side bulk dispatch over an `Array String`; with
+    /// `Some(token)`, this loops through the singular path so the token
+    /// can be checked between items.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side
+    /// bulk shim raises through `IO`.
+    pub fn declaration_kind_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<String>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_kind_bulk",
+            batch_size = names.len(),
+        )
+        .entered();
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        check_cancellation(cancellation)?;
+        if cancellation.is_some() {
+            let mut out = Vec::with_capacity(names.len());
+            for name in names {
+                check_cancellation(cancellation)?;
+                out.push(self.declaration_kind(name, cancellation)?);
+            }
+            return Ok(out);
+        }
+        if let Some(name) = Self::all_equal_name(names) {
+            let names_owned = vec![name.to_owned()];
+            let address = self.capabilities.symbols().env_declaration_kind_bulk;
+            // SAFETY: per the SessionSymbols::resolve invariant; signature
+            // is `(Environment, Array String) -> IO (Array String)`.
+            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
+                unsafe { LeanExported::from_function_address(self.runtime(), address) };
+            let t = Instant::now();
+            let mut result = Self::decode_strings_cached(query.call(self.environment.clone(), names_owned)?)?;
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            let value = result.pop().unwrap_or_default();
+            return Ok(vec![value; names.len()]);
+        }
+        let names_owned: Vec<String> = names.iter().map(|&name| name.to_owned()).collect();
+        let address = self.capabilities.symbols().env_declaration_kind_bulk;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Array String) -> IO (Array String)`.
+        let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), names_owned);
+        let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+        self.record_call(batch_len, t.elapsed());
+        Self::decode_strings_cached(result?)
     }
 
     /// The Lean-rendered display string of `name`. Round-trips a name
@@ -516,6 +680,72 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let result = query.call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         result
+    }
+
+    /// Lean-rendered display strings for `names`, preserving input
+    /// order.
+    ///
+    /// This is diagnostic text, not a semantic key. Missing
+    /// declarations are not an error because the singular
+    /// [`Self::declaration_name`] path also only round-trips the input
+    /// name through Lean's `Name.toString` renderer.
+    ///
+    /// With `cancellation = None`, this is one Lean-side bulk dispatch
+    /// over an `Array String`; with `Some(token)`, this loops through
+    /// the singular path so the token can be checked between items.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side
+    /// bulk shim raises through `IO`.
+    pub fn declaration_name_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<String>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.declaration_name_bulk",
+            batch_size = names.len(),
+        )
+        .entered();
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        check_cancellation(cancellation)?;
+        if cancellation.is_some() {
+            let mut out = Vec::with_capacity(names.len());
+            for name in names {
+                check_cancellation(cancellation)?;
+                out.push(self.declaration_name(name, cancellation)?);
+            }
+            return Ok(out);
+        }
+        if let Some(name) = Self::all_equal_name(names) {
+            let names_owned = vec![name.to_owned()];
+            let address = self.capabilities.symbols().env_declaration_name_bulk;
+            // SAFETY: per the SessionSymbols::resolve invariant; signature
+            // is `(Environment, Array String) -> IO (Array String)`.
+            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
+                unsafe { LeanExported::from_function_address(self.runtime(), address) };
+            let t = Instant::now();
+            let mut result = Self::decode_strings_cached(query.call(self.environment.clone(), names_owned)?)?;
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            let value = result.pop().unwrap_or_default();
+            return Ok(vec![value; names.len()]);
+        }
+        let names_owned: Vec<String> = names.iter().map(|&name| name.to_owned()).collect();
+        let address = self.capabilities.symbols().env_declaration_name_bulk;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, Array String) -> IO (Array String)`.
+        let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = query.call(self.environment.clone(), names_owned);
+        let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+        self.record_call(batch_len, t.elapsed());
+        Self::decode_strings_cached(result?)
     }
 
     /// Parse and elaborate a single Lean term against the imported
@@ -968,7 +1198,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// typed argument tuple and a typed result decoder.
     ///
     /// This is the transport-neutral escape hatch for capability dylibs
-    /// that export Lean functions beyond the thirteen session-fixed
+    /// that export Lean functions beyond the sixteen session-fixed
     /// symbols. The conversion bounds — [`LeanArgs`] on the argument
     /// tuple and [`DecodeCallResult`] on the result — are the same
     /// bounds [`lean_rs::module::LeanModule::exported`] uses, so an

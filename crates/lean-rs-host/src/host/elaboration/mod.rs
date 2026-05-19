@@ -20,7 +20,7 @@
 //!
 //! The capability contract names two Lean-side fixture exports
 //! (`lean_rs_host_elaborate`, `lean_rs_host_kernel_check`) alongside the
-//! seven environment-query symbols. [`crate::host::LeanCapabilities`]
+//! ten environment-query symbols. [`crate::host::LeanCapabilities`]
 //! caches both addresses at load time so the per-call cost is one
 //! struct-field read plus one FFI call.
 

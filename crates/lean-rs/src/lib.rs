@@ -8,7 +8,7 @@
 //! opinionated theorem-prover-host stack (`LeanHost` /
 //! `LeanCapabilities` / `LeanSession` plus the evidence and meta
 //! surfaces) lives in the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
-//! crate, with its own 13+4 `lean_rs_host_*` Lean shim contract; this
+//! crate, with its own 16+4 `lean_rs_host_*` Lean shim contract; this
 //! crate has no Lean-side shim contract and ships zero target-language
 //! code.
 //!

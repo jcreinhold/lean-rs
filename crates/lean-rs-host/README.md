@@ -51,7 +51,7 @@ fn main() {
 ```
 
 **`lean/lakefile.lean`**—adds the shim require so `LeanCapabilities::load_capabilities`
-can find the 13 + 4 `lean_rs_host_*` shim symbols at runtime:
+can find the 16 + 4 `lean_rs_host_*` shim symbols at runtime:
 
 ```lean
 import Lake

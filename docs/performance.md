@@ -12,7 +12,8 @@ cargo bench -p lean-rs-host --bench session
 
 `hot_paths` covers `lean_rs::module` and `lean_rs::abi` — `LeanExported::call` and the
 `String`/`Vec<String>` round-trip decoders. `session` covers `LeanSession::*` —
-`query_declarations_bulk`, `elaborate_small`, `run_meta_whnf`, and `SessionPool` hits.
+`query_declarations_bulk`, the three `declaration_*_bulk` 5k-vs-loop comparisons,
+`elaborate_small`, `run_meta_whnf`, and `SessionPool` hits.
 
 The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion
 benches because they only fire once per process. Run them via:

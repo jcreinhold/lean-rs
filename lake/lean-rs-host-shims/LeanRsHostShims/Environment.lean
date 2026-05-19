@@ -1,7 +1,7 @@
 import Lean
 
 /-! Capability category: session-scoped environment queries. The Rust
-    `LeanSession` looks up these seven `@[export]` symbols by name at
+    `LeanSession` looks up these ten `@[export]` symbols by name at
     `LeanCapabilities::load_capabilities` time and dispatches every query
     through the cached addresses. Path-layout knowledge (where the
     `.olean` files live for `Lean.importModules`) stays on the Rust side
@@ -66,6 +66,28 @@ def envListDeclarations (env : Environment) : IO (Array Name) := do
 def envDeclarationType (env : Environment) (name : Name) : IO (Option Expr) := do
   pure <| (env.find? name).map ConstantInfo.type
 
+@[export lean_rs_host_env_declaration_type_bulk]
+def envDeclarationTypeBulk (env : Environment) (names : Array String)
+    : IO (Array (Option Expr)) := do
+  if names.isEmpty then
+    pure #[]
+  else
+    let first := names[0]!
+    if names.all (· == first) then
+      let type? ← envDeclarationType env first.toName
+      pure <| Array.replicate names.size type?
+    else
+      let mut cache : Std.HashMap String (Option Expr) := {}
+      let mut out := #[]
+      for name in names do
+        match cache.get? name with
+        | some type? => out := out.push type?
+        | none =>
+          let type? ← envDeclarationType env name.toName
+          cache := cache.insert name type?
+          out := out.push type?
+      pure out
+
 @[export lean_rs_host_env_declaration_kind]
 def envDeclarationKind (env : Environment) (name : Name) : IO String := do
   match env.find? name with
@@ -79,9 +101,53 @@ def envDeclarationKind (env : Environment) (name : Name) : IO String := do
   | some (.ctorInfo   _) => pure "constructor"
   | some (.recInfo    _) => pure "recursor"
 
+@[export lean_rs_host_env_declaration_kind_bulk]
+def envDeclarationKindBulk (env : Environment) (names : Array String)
+    : IO (Array String) := do
+  if names.isEmpty then
+    pure #[]
+  else
+    let first := names[0]!
+    if names.all (· == first) then
+      let kind ← envDeclarationKind env first.toName
+      pure <| Array.replicate names.size kind
+    else
+      let mut cache : Std.HashMap String String := {}
+      let mut out := #[]
+      for name in names do
+        match cache.get? name with
+        | some kind => out := out.push kind
+        | none =>
+          let kind ← envDeclarationKind env name.toName
+          cache := cache.insert name kind
+          out := out.push kind
+      pure out
+
 @[export lean_rs_host_env_declaration_name]
 def envDeclarationName (_env : Environment) (name : Name) : IO String := do
   pure name.toString
+
+@[export lean_rs_host_env_declaration_name_bulk]
+def envDeclarationNameBulk (_env : Environment) (names : Array String)
+    : IO (Array String) := do
+  if names.isEmpty then
+    pure #[]
+  else
+    let first := names[0]!
+    if names.all (· == first) then
+      let rendered := first.toName.toString
+      pure <| Array.replicate names.size rendered
+    else
+      let mut cache : Std.HashMap String String := {}
+      let mut out := #[]
+      for name in names do
+        match cache.get? name with
+        | some rendered => out := out.push rendered
+        | none =>
+          let rendered := name.toName.toString
+          cache := cache.insert name rendered
+          out := out.push rendered
+      pure out
 
 /-- Bulk variant of [`envQueryDeclaration`]: a single IO traversal that
     folds the singular lookup across `names`. One Lean traversal, one

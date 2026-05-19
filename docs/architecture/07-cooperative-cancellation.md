@@ -35,11 +35,11 @@ Every host operation that can enter Lean accepts
 - `SessionPool::acquire`
 - `LeanSession::{query_declaration,list_declarations,declaration_type,declaration_kind,declaration_name}`
 - `LeanSession::{elaborate,kernel_check,check_evidence,summarize_evidence}`
-- `LeanSession::{run_meta,query_declarations_bulk,elaborate_bulk,call_capability}`
+- `LeanSession::{run_meta,query_declarations_bulk,declaration_type_bulk,declaration_kind_bulk,declaration_name_bulk,elaborate_bulk,call_capability}`
 
 `None` preserves the existing non-cancellable path. In particular,
-`query_declarations_bulk(..., None)` and `elaborate_bulk(..., None)` keep their
-single Lean-side bulk dispatch.
+`query_declarations_bulk(..., None)`, `declaration_*_bulk(..., None)`, and
+`elaborate_bulk(..., None)` keep their single Lean-side bulk dispatch.
 
 `Some(token)` enables cancellation checks. For singular methods, the token is
 checked before each FFI dispatch point the Rust side controls. For bulk

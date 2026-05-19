@@ -1,5 +1,5 @@
 //! Session-level benchmarks for `lean_rs::host`: bulk environment
-//! query, elaboration, bounded `MetaM` (`whnf`), and `SessionPool`
+//! query, bulk introspection, elaboration, bounded `MetaM` (`whnf`), and `SessionPool`
 //! reuse. Each workload names the user-visible code path it represents.
 //!
 //! All four workloads share one process and one `LeanRuntime` — Lean's
@@ -82,6 +82,128 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
             });
         });
     }
+    group.finish();
+}
+
+// -- declaration_*_bulk -------------------------------------------------
+//
+// Workload: `host::session::declaration_*_bulk_vs_loop/5000` — each
+// method over 5k declaration names, compared against the singular
+// per-name loop with the same output allocation shape. The batch uses
+// repeated fixture names so the measurement isolates FFI round-trips and
+// result decoding instead of import or environment construction.
+
+const INTROSPECTION_NAME: &str = "LeanRsFixture.Handles.nameAnonymous";
+
+fn introspection_names_5k() -> Vec<&'static str> {
+    vec![INTROSPECTION_NAME; 5_000]
+}
+
+fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let names = introspection_names_5k();
+    let mut bulk_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+    let mut loop_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+
+    let mut group = c.benchmark_group("host::session::declaration_type_bulk_vs_loop");
+    group.throughput(Throughput::Elements(names.len() as u64));
+    group.sample_size(10);
+    group.bench_function("bulk_5000", |b| {
+        b.iter(|| {
+            let types = bulk_session
+                .declaration_type_bulk(black_box(names.as_slice()), None)
+                .expect("bulk type query");
+            black_box(types);
+        });
+    });
+    group.bench_function("loop_5000", |b| {
+        b.iter(|| {
+            let types: Vec<_> = names
+                .iter()
+                .map(|name| {
+                    loop_session
+                        .declaration_type(black_box(*name), None)
+                        .expect("type query")
+                })
+                .collect();
+            black_box(types);
+        });
+    });
+    group.finish();
+}
+
+fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let names = introspection_names_5k();
+    let mut bulk_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+    let mut loop_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+
+    let mut group = c.benchmark_group("host::session::declaration_kind_bulk_vs_loop");
+    group.throughput(Throughput::Elements(names.len() as u64));
+    group.sample_size(10);
+    group.bench_function("bulk_5000", |b| {
+        b.iter(|| {
+            let kinds = bulk_session
+                .declaration_kind_bulk(black_box(names.as_slice()), None)
+                .expect("bulk kind query");
+            black_box(kinds);
+        });
+    });
+    group.bench_function("loop_5000", |b| {
+        b.iter(|| {
+            let kinds: Vec<_> = names
+                .iter()
+                .map(|name| {
+                    loop_session
+                        .declaration_kind(black_box(*name), None)
+                        .expect("kind query")
+                })
+                .collect();
+            black_box(kinds);
+        });
+    });
+    group.finish();
+}
+
+fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let names = introspection_names_5k();
+    let mut bulk_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+    let mut loop_session = caps
+        .session(&["LeanRsFixture.Handles"], None)
+        .expect("Handles imports cleanly");
+
+    let mut group = c.benchmark_group("host::session::declaration_name_bulk_vs_loop");
+    group.throughput(Throughput::Elements(names.len() as u64));
+    group.sample_size(10);
+    group.bench_function("bulk_5000", |b| {
+        b.iter(|| {
+            let rendered = bulk_session
+                .declaration_name_bulk(black_box(names.as_slice()), None)
+                .expect("bulk name query");
+            black_box(rendered);
+        });
+    });
+    group.bench_function("loop_5000", |b| {
+        b.iter(|| {
+            let rendered: Vec<_> = names
+                .iter()
+                .map(|name| {
+                    loop_session
+                        .declaration_name(black_box(*name), None)
+                        .expect("name query")
+                })
+                .collect();
+            black_box(rendered);
+        });
+    });
     group.finish();
 }
 
@@ -180,6 +302,9 @@ fn criterion_benchmarks(c: &mut Criterion) {
         .expect("capabilities load");
 
     bench_query_declarations_bulk(c, &caps);
+    bench_declaration_type_bulk_vs_loop(c, &caps);
+    bench_declaration_kind_bulk_vs_loop(c, &caps);
+    bench_declaration_name_bulk_vs_loop(c, &caps);
     bench_elaborate(c, &caps);
     bench_run_meta_whnf(c, &caps);
     bench_session_pool_reuse_hit(c, runtime, &caps);
