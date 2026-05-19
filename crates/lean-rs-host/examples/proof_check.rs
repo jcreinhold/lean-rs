@@ -49,13 +49,13 @@ fn run() -> LeanResult<()> {
     // `LeanRsHostShims.Elaboration` brings in the Lean shim that
     // `kernel_check` dispatches through; the Lean prelude is
     // imported transitively, so `1 + 1 = 2 := rfl` elaborates.
-    let mut session = caps.session(&["LeanRsHostShims.Elaboration"])?;
+    let mut session = caps.session(&["LeanRsHostShims.Elaboration"], None)?;
 
     let source = "theorem demo_proof_check : 1 + 1 = 2 := rfl";
     let options = LeanElabOptions::new();
 
     println!("kernel_check source: {source}");
-    let outcome = session.kernel_check(source, &options)?;
+    let outcome = session.kernel_check(source, &options, None)?;
 
     // The outcome is a four-tag enum. Only `Checked` carries a
     // `LeanEvidence` handle for re-validation; the other three carry
@@ -86,13 +86,13 @@ fn run() -> LeanResult<()> {
     // session environment. `check_evidence` runs the kernel fresh —
     // useful when you cached evidence and want to confirm it still
     // holds.
-    let status = session.check_evidence(&evidence)?;
+    let status = session.check_evidence(&evidence, None)?;
     assert_eq!(status, EvidenceStatus::Checked, "evidence must re-validate");
     println!("check_evidence: {status:?}");
 
     // Project the evidence into a bounded `ProofSummary` for
     // logging. The strings are display text, not semantic keys.
-    let summary = session.summarize_evidence(&evidence)?;
+    let summary = session.summarize_evidence(&evidence, None)?;
     println!(
         "summary: name={} kind={} type={}",
         summary.declaration_name(),

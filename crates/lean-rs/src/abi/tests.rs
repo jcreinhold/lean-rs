@@ -17,7 +17,12 @@
 //! incantation per call site, no `extern "C"` declaration block, no
 //! reliance on the throwaway `lean_rs_test_support::fixture` loader.
 
-#![allow(clippy::expect_used, clippy::float_cmp, clippy::panic)]
+#![allow(
+    clippy::expect_used,
+    clippy::float_cmp,
+    clippy::panic,
+    clippy::wildcard_enum_match_arm
+)]
 
 use std::path::PathBuf;
 
@@ -1025,6 +1030,7 @@ fn arity_one_lookup_against_global_rejects_with_link_diagnostic() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link), got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 
@@ -1047,6 +1053,7 @@ fn lean_io_against_global_rejects_at_lookup() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link), got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 
@@ -1069,5 +1076,6 @@ fn unknown_symbol_lookup_surfaces_host_link_diagnostic() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link), got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }

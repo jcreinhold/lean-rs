@@ -99,6 +99,7 @@ fn missing_symbol_is_link_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 
@@ -117,6 +118,7 @@ fn missing_library_is_load_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 
@@ -137,6 +139,7 @@ fn invalid_module_name_is_link_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 
@@ -150,6 +153,7 @@ fn invalid_package_name_is_link_error() {
     match err {
         LeanError::Host(failure) => assert_eq!(failure.stage(), HostStage::Link),
         LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),
+        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
     }
 }
 

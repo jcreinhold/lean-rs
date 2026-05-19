@@ -38,6 +38,8 @@ structural rejection of an entire shape of misuse. Decision: keep it.
 Data types—types that carry information *about* a Lean result but no Lean refcount—are
 `Send + Sync` by auto-trait derivation and may travel freely:
 
+- `LeanCancellationToken` (contains only `Arc<AtomicBool>`; it carries no Lean handle and is
+  checked cooperatively by the worker thread).
 - `LeanError`, `LeanResult<T>` (per `LeanError`'s `Clone + Send + Sync` derivation, with `T: Send + Sync` as the usual constraint).
 - `EvidenceStatus`, `LeanKernelOutcome<'lean>` (the `'lean` argument is a marker; the type carries no Lean refcount).
 - `ProofSummary` (a bounded byte buffer).
@@ -47,6 +49,11 @@ Data types—types that carry information *about* a Lean result but no Lean refc
 Typical workflow: a worker runs Lean work to completion inside its `LeanThreadGuard` scope,
 projects the result to one of these plain Rust types, and sends the projection back to a
 coordinator thread over a channel. Lean handles never leave the worker.
+
+Cancellation is the asymmetric exception to "results travel back": the coordinator sends a
+`LeanCancellationToken` clone into the worker before the operation starts, then may call
+`cancel()` from another thread. The session itself still stays on the worker. See
+[`07-cooperative-cancellation.md`](07-cooperative-cancellation.md).
 
 ## Thread attach and detach
 

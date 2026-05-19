@@ -66,7 +66,7 @@ const HANDLES_NAMES: [&str; 16] = [
 
 fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"])
+        .session(&["LeanRsFixture.Handles"], None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::query_declarations_bulk");
@@ -75,7 +75,9 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &names, |b, names| {
             b.iter(|| {
-                let decls = session.query_declarations_bulk(black_box(names)).expect("bulk query");
+                let decls = session
+                    .query_declarations_bulk(black_box(names), None)
+                    .expect("bulk query");
                 black_box(decls);
             });
         });
@@ -95,14 +97,14 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"])
+        .session(&["LeanRsHostShims.Elaboration"], None)
         .expect("Elaboration imports cleanly");
     let opts = LeanElabOptions::new();
 
     c.bench_function("host::session::elaborate_small", |b| {
         b.iter(|| {
             let outcome = session
-                .elaborate(black_box("(1 + 1 : Nat)"), None, &opts)
+                .elaborate(black_box("(1 + 1 : Nat)"), None, &opts, None)
                 .expect("host stack reports no exception");
             let expr = outcome.expect("elaboration succeeds");
             black_box(expr);
@@ -120,9 +122,11 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 // construction.
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
-    let mut session = caps.session(&["LeanRsHostShims.Meta"]).expect("Meta imports cleanly");
+    let mut session = caps
+        .session(&["LeanRsHostShims.Meta"], None)
+        .expect("Meta imports cleanly");
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let opts = LeanMetaOptions::new();
@@ -131,7 +135,7 @@ fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     c.bench_function("host::meta::run_meta_whnf", |b| {
         b.iter(|| {
             let outcome = session
-                .run_meta(black_box(&service), expr.clone(), black_box(&opts))
+                .run_meta(black_box(&service), expr.clone(), black_box(&opts), None)
                 .expect("host stack reports no exception");
             black_box(outcome);
         });
@@ -153,11 +157,13 @@ fn bench_session_pool_reuse_hit(c: &mut Criterion, runtime: &'static LeanRuntime
 
     // Warm the pool: one acquire + drop seeds the free list with a
     // ready-to-reuse environment.
-    drop(pool.acquire(caps, &imports).expect("warm-up acquire"));
+    drop(pool.acquire(caps, &imports, None).expect("warm-up acquire"));
 
     c.bench_function("host::pool::session_reuse_hit", |b| {
         b.iter(|| {
-            let sess = pool.acquire(black_box(caps), black_box(&imports)).expect("acquire");
+            let sess = pool
+                .acquire(black_box(caps), black_box(&imports), None)
+                .expect("acquire");
             black_box(&sess);
             drop(sess);
         });

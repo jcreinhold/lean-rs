@@ -76,7 +76,7 @@ fn main() {
     // declarations the bulk query exercises.
     let t = Instant::now();
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"])
+        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None)
         .expect("session imports");
     report("session_import", t.elapsed().as_micros());
 
@@ -86,14 +86,14 @@ fn main() {
     // warm-vs-second-call drift inside one session.
     let t = Instant::now();
     let outcome = session
-        .elaborate("(1 + 2 : Nat)", None, &elab_opts)
+        .elaborate("(1 + 2 : Nat)", None, &elab_opts, None)
         .expect("host stack");
     drop(outcome.expect("(1 + 2 : Nat) elaborates"));
     report("elaborate_1", t.elapsed().as_micros());
 
     let t = Instant::now();
     let outcome = session
-        .elaborate("(1 * 7 : Nat)", None, &elab_opts)
+        .elaborate("(1 * 7 : Nat)", None, &elab_opts, None)
         .expect("host stack");
     drop(outcome.expect("(1 * 7 : Nat) elaborates"));
     report("elaborate_2", t.elapsed().as_micros());
@@ -103,7 +103,11 @@ fn main() {
     // a fresh process and a fresh environment.
     let t = Instant::now();
     let outcome = session
-        .kernel_check("theorem lean_rs_session_workflow_rfl : 1 + 1 = 2 := rfl", &elab_opts)
+        .kernel_check(
+            "theorem lean_rs_session_workflow_rfl : 1 + 1 = 2 := rfl",
+            &elab_opts,
+            None,
+        )
         .expect("host stack");
     match outcome {
         LeanKernelOutcome::Checked(evidence) => drop(evidence),
@@ -119,11 +123,14 @@ fn main() {
     // that intervention A (borrowed `&str` `LeanAbi`) optimised.
     let t = Instant::now();
     let decls = session
-        .query_declarations_bulk(&[
-            "LeanRsFixture.Handles.nameAnonymous",
-            "LeanRsFixture.Handles.nameMkStr",
-            "LeanRsFixture.Handles.exprConstNat",
-        ])
+        .query_declarations_bulk(
+            &[
+                "LeanRsFixture.Handles.nameAnonymous",
+                "LeanRsFixture.Handles.nameMkStr",
+                "LeanRsFixture.Handles.exprConstNat",
+            ],
+            None,
+        )
         .expect("bulk query");
     assert_eq!(decls.len(), 3, "bulk query returns one declaration per name");
     drop(decls);
@@ -132,12 +139,12 @@ fn main() {
     // Stage 8: one Meta.whnf invocation on `Nat.zero`'s type. Exercises
     // the `run_meta` shim through the `whnf` service descriptor.
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("type query")
         .expect("Nat.zero has a type");
     let meta_opts = LeanMetaOptions::new();
     let t = Instant::now();
-    let outcome = session.run_meta(&whnf(), expr, &meta_opts).expect("host stack");
+    let outcome = session.run_meta(&whnf(), expr, &meta_opts, None).expect("host stack");
     match outcome {
         LeanMetaResponse::Ok(payload) => drop(payload),
         LeanMetaResponse::Failed(failure)

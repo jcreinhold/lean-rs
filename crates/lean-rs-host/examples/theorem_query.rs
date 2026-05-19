@@ -46,13 +46,13 @@ fn run() -> LeanResult<()> {
     // `LeanRsFixture.Handles` is the smallest fixture module that
     // demonstrates a Lake-built import; the Lean prelude (where
     // `Nat.add` and `Nat.add_zero` live) is imported transitively.
-    let mut session = caps.session(&["LeanRsFixture.Handles"])?;
+    let mut session = caps.session(&["LeanRsFixture.Handles"], None)?;
 
     // The environment carries the full Lean prelude plus the
     // fixture's own declarations. Many thousands of entries even for
     // a small project — print only the count, then ask about names
     // the caller already knows.
-    let names = session.list_declarations()?;
+    let names = session.list_declarations(None)?;
     println!("total_declarations={}", names.len());
 
     // Contrast a definition and a theorem by name.
@@ -61,8 +61,8 @@ fn run() -> LeanResult<()> {
     // `declaration_name` round-trips a name through Lean's pretty
     // printer (diagnostic only, not a semantic key).
     for name in ["Nat.add", "Nat.add_zero"] {
-        let kind = session.declaration_kind(name)?;
-        let rendered = session.declaration_name(name)?;
+        let kind = session.declaration_kind(name, None)?;
+        let rendered = session.declaration_name(name, None)?;
         println!("{name}: kind={kind} rendered={rendered}");
     }
 

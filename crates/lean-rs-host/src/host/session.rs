@@ -61,6 +61,16 @@
 //! — pool reuse vs. fresh import is tracked at the
 //! [`crate::host::pool::SessionPool`] level instead.
 //!
+//! ## Cancellation
+//!
+//! Every public method that can enter Lean accepts a final
+//! `Option<&LeanCancellationToken>`. `None` keeps the fastest path and,
+//! for bulk methods, keeps the single Lean-side bulk dispatch. `Some`
+//! checks the token before host-controlled FFI dispatches; the bulk
+//! methods switch to per-item dispatch so they can also check between
+//! items. Cancellation is cooperative and cannot interrupt a Lean call
+//! already in progress.
+//!
 //! The Rust side passes the `.olean` search path (resolved by
 //! [`crate::host::lake::LakeProject`]) as the first argument to
 //! `lean_rs_host_session_import`; the Lean shim only has to call
@@ -94,6 +104,7 @@ use core::cell::Cell;
 use core::ffi::c_void;
 use std::time::Instant;
 
+use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
@@ -250,13 +261,18 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// directory) and the module-name list, and returns the resulting
     /// environment. Failures surface as
     /// [`lean_rs::LeanError::LeanException`] with the message Lean produced.
-    pub(crate) fn import(capabilities: &'c LeanCapabilities<'lean, 'c>, imports: &[&str]) -> LeanResult<Self> {
+    pub(crate) fn import(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        imports: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Self> {
         let _span = tracing::info_span!(
             target: "lean_rs",
             "lean_rs.host.session.import",
             imports_len = imports.len(),
         )
         .entered();
+        check_cancellation(cancellation)?;
         let runtime = capabilities.host().runtime();
         let address = capabilities.symbols().session_import;
         // SAFETY: `address` was resolved by `SessionSymbols::resolve`
@@ -340,14 +356,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns [`lean_rs::LeanError::Host`] with stage [`HostStage::Conversion`]
     /// if the name is not present in the imported environment. Returns
     /// [`lean_rs::LeanError::LeanException`] if the Lean-side query raises.
-    pub fn query_declaration(&mut self, name: &str) -> LeanResult<LeanDeclaration<'lean>> {
+    pub fn query_declaration(
+        &mut self,
+        name: &str,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<LeanDeclaration<'lean>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.query_declaration",
             name = name,
         )
         .entered();
-        let name_handle = self.make_name(name)?;
+        check_cancellation(cancellation)?;
+        let name_handle = self.make_name(name, cancellation)?;
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_query_declaration;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Name) -> IO (Option Declaration)`.
@@ -375,12 +397,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side query
     /// raises.
-    pub fn list_declarations(&mut self) -> LeanResult<Vec<LeanName<'lean>>> {
+    pub fn list_declarations(
+        &mut self,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<LeanName<'lean>>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.list_declarations",
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_list_declarations;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `Environment -> IO (Array Name)`.
@@ -400,14 +426,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side query
     /// raises.
-    pub fn declaration_type(&mut self, name: &str) -> LeanResult<Option<LeanExpr<'lean>>> {
+    pub fn declaration_type(
+        &mut self,
+        name: &str,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Option<LeanExpr<'lean>>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.declaration_type",
             name = name,
         )
         .entered();
-        let name_handle = self.make_name(name)?;
+        check_cancellation(cancellation)?;
+        let name_handle = self.make_name(name, cancellation)?;
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_declaration_type;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Name) -> IO (Option Expr)`.
@@ -428,14 +460,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side query
     /// raises.
-    pub fn declaration_kind(&mut self, name: &str) -> LeanResult<String> {
+    pub fn declaration_kind(&mut self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<String> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.declaration_kind",
             name = name,
         )
         .entered();
-        let name_handle = self.make_name(name)?;
+        check_cancellation(cancellation)?;
+        let name_handle = self.make_name(name, cancellation)?;
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_declaration_kind;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Name) -> IO String`.
@@ -459,14 +493,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side query
     /// raises.
-    pub fn declaration_name(&mut self, name: &str) -> LeanResult<String> {
+    pub fn declaration_name(&mut self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<String> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.declaration_name",
             name = name,
         )
         .entered();
-        let name_handle = self.make_name(name)?;
+        check_cancellation(cancellation)?;
+        let name_handle = self.make_name(name, cancellation)?;
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_declaration_name;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Name) -> IO String`.
@@ -507,6 +543,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         source: &str,
         expected_type: Option<&LeanExpr<'lean>>,
         options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -516,6 +553,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().elaborate;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, String, Option Expr, String, String,
@@ -559,7 +597,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// itself a rejection / unavailable diagnostic). Returns
     /// [`lean_rs::LeanError::Host`] with stage [`HostStage::Conversion`] if the
     /// Lean return value does not decode into [`LeanKernelOutcome`].
-    pub fn kernel_check(&mut self, source: &str, options: &LeanElabOptions) -> LeanResult<LeanKernelOutcome<'lean>> {
+    pub fn kernel_check(
+        &mut self,
+        source: &str,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<LeanKernelOutcome<'lean>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.kernel_check",
@@ -568,6 +611,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().kernel_check;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, String, String, String, UInt64, USize) ->
@@ -619,12 +663,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`lean_rs::LeanError::Host`] with stage [`HostStage::Conversion`] if the
     /// return value does not decode as a four-tag
     /// [`EvidenceStatus`] inductive.
-    pub fn check_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<EvidenceStatus> {
+    pub fn check_evidence(
+        &mut self,
+        handle: &LeanEvidence<'lean>,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<EvidenceStatus> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.check_evidence",
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().check_evidence;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Evidence) -> IO EvidenceStatus`.
@@ -657,12 +706,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// through `IO`. Returns [`lean_rs::LeanError::Host`] with stage
     /// [`HostStage::Conversion`] if the return value does not decode
     /// as a three-field [`ProofSummary`] structure.
-    pub fn summarize_evidence(&mut self, handle: &LeanEvidence<'lean>) -> LeanResult<ProofSummary> {
+    pub fn summarize_evidence(
+        &mut self,
+        handle: &LeanEvidence<'lean>,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<ProofSummary> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.summarize_evidence",
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().evidence_summary;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Evidence) -> IO ProofSummary`.
@@ -702,6 +756,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         service: &LeanMetaService<Req, Resp>,
         request: Req,
         options: &LeanMetaOptions,
+        cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<LeanMetaResponse<Resp>>
     where
         Req: lean_rs::abi::traits::LeanAbi<'lean>,
@@ -715,6 +770,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
         )
         .entered();
+        check_cancellation(cancellation)?;
         let Some(address) = self.capabilities.symbols().meta_address_by_name(service.name()) else {
             let message = format!(
                 "meta service '{}' is not exported by the loaded capability",
@@ -769,7 +825,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// environment, with the missing name in the diagnostic. Returns
     /// [`lean_rs::LeanError::LeanException`] if the Lean-side bulk shim raises
     /// through `IO`.
-    pub fn query_declarations_bulk(&mut self, names: &[&str]) -> LeanResult<Vec<LeanDeclaration<'lean>>> {
+    pub fn query_declarations_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<Vec<LeanDeclaration<'lean>>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.session.query_declarations_bulk",
@@ -779,7 +839,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         if names.is_empty() {
             return Ok(Vec::new());
         }
-        let name_handles: Vec<LeanName<'lean>> = names.iter().map(|n| self.make_name(n)).collect::<LeanResult<_>>()?;
+        check_cancellation(cancellation)?;
+        if cancellation.is_some() {
+            let mut out = Vec::with_capacity(names.len());
+            for name in names {
+                check_cancellation(cancellation)?;
+                out.push(self.query_declaration(name, cancellation)?);
+            }
+            return Ok(out);
+        }
+        let name_handles: Vec<LeanName<'lean>> = names
+            .iter()
+            .map(|n| self.make_name(n, cancellation))
+            .collect::<LeanResult<_>>()?;
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().env_query_declarations_bulk;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `(Environment, Array Name) -> IO (Array (Option Declaration))`.
@@ -840,6 +913,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         &mut self,
         sources: &[&str],
         options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -851,6 +925,15 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         .entered();
         if sources.is_empty() {
             return Ok(Vec::new());
+        }
+        check_cancellation(cancellation)?;
+        if cancellation.is_some() {
+            let mut out = Vec::with_capacity(sources.len());
+            for source in sources {
+                check_cancellation(cancellation)?;
+                out.push(self.elaborate(source, None, options, cancellation)?);
+            }
+            return Ok(out);
         }
         let address = self.capabilities.symbols().elaborate_bulk;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
@@ -907,7 +990,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// `R = LeanIo<_>`). Returns [`lean_rs::LeanError::Host`] with stage
     /// [`HostStage::Conversion`] when the return value does not decode
     /// into the declared `R::Output`.
-    pub fn call_capability<Args, R>(&mut self, name: &str, args: Args) -> LeanResult<R::Output>
+    pub fn call_capability<Args, R>(
+        &mut self,
+        name: &str,
+        args: Args,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<R::Output>
     where
         Args: LeanArgs<'lean>,
         R: DecodeCallResult<'lean>,
@@ -919,7 +1007,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             arity = Args::ARITY,
         )
         .entered();
+        check_cancellation(cancellation)?;
         let address = self.capabilities.library().resolve_function_symbol(name)?;
+        check_cancellation(cancellation)?;
         // SAFETY: `resolve_function_symbol` resolved an address inside
         // the capability's `LeanLibrary<'lean>` (the dylib outlives the
         // session via the `'c` borrow). `Args: LeanArgs<'lean>` and
@@ -940,7 +1030,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
 
     /// Build a `LeanName` from a dotted Rust string via the capability's
     /// `Name.toName` shim.
-    fn make_name(&self, name: &str) -> LeanResult<LeanName<'lean>> {
+    fn make_name(&self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<LeanName<'lean>> {
+        check_cancellation(cancellation)?;
         let address = self.capabilities.symbols().name_from_string;
         // SAFETY: per the SessionSymbols::resolve invariant; signature
         // is `String -> Name` (pure, not IO).

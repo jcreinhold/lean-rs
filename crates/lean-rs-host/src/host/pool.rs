@@ -52,6 +52,7 @@
 
 use core::cell::{Cell, RefCell};
 
+use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::session::LeanSession;
 use lean_rs::LeanRuntime;
@@ -165,7 +166,7 @@ impl<'lean> SessionPool<'lean> {
     /// imports fresh and every release drops the environment. This is
     /// useful for tests that want metrics without recycling, and as the
     /// degenerate point that proves the pool's metrics agree with
-    /// repeated `caps.session(...)` calls.
+    /// repeated `caps.session(..., None)` calls.
     ///
     /// The `runtime` borrow witnesses `'lean` and is stored so the pool
     /// itself outlives every entry on its free list — even after every
@@ -199,6 +200,10 @@ impl<'lean> SessionPool<'lean> {
     ///
     /// # Errors
     ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before the pool can reuse or import an
+    /// environment.
+    ///
     /// Returns [`lean_rs::LeanError::LeanException`] if a fresh import is
     /// required and the Lean-side `lean_rs_host_session_import` shim
     /// raises through `IO`. Cached environments never re-fail.
@@ -206,6 +211,7 @@ impl<'lean> SessionPool<'lean> {
         &'p self,
         caps: &'c LeanCapabilities<'lean, 'c>,
         imports: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -214,6 +220,7 @@ impl<'lean> SessionPool<'lean> {
             imports_first = imports.first().copied().unwrap_or("<empty>"),
         )
         .entered();
+        check_cancellation(cancellation)?;
         debug_assert!(
             core::ptr::eq(self.runtime, caps.host().runtime()),
             "pool runtime and capability runtime must agree; the shared 'lean parameter normally enforces this",
@@ -226,7 +233,7 @@ impl<'lean> SessionPool<'lean> {
                 (LeanSession::from_environment(caps, env), true)
             } else {
                 drop(inner);
-                let session = caps.session(imports)?;
+                let session = caps.session(imports, cancellation)?;
                 self.bump_imported();
                 (session, false)
             }
@@ -369,8 +376,8 @@ impl core::fmt::Debug for SessionPool<'_> {
 ///
 /// ```ignore
 /// let pool = lean_rs::SessionPool::with_capacity(runtime, 4);
-/// let mut sess = pool.acquire(&caps, &["MyLib"])?;
-/// let kind = sess.declaration_kind("MyLib.thing")?;
+/// let mut sess = pool.acquire(&caps, &["MyLib"], None)?;
+/// let kind = sess.declaration_kind("MyLib.thing", None)?;
 /// // dropping `sess` returns the imported environment to the pool
 /// ```
 ///

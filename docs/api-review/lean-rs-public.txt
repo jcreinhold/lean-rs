@@ -177,6 +177,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostStage
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostStage
 #[non_exhaustive] pub enum lean_rs::error::LeanDiagnosticCode
 pub lean_rs::error::LeanDiagnosticCode::AbiConversion
+pub lean_rs::error::LeanDiagnosticCode::Cancelled
 pub lean_rs::error::LeanDiagnosticCode::Elaboration
 pub lean_rs::error::LeanDiagnosticCode::Internal
 pub lean_rs::error::LeanDiagnosticCode::LeanException
@@ -209,6 +210,7 @@ impl core::marker::UnsafeUnpin for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanDiagnosticCode
 #[non_exhaustive] pub enum lean_rs::error::LeanError
+pub lean_rs::error::LeanError::Cancelled(lean_rs::error::LeanCancelled)
 pub lean_rs::error::LeanError::Host(lean_rs::error::HostFailure)
 pub lean_rs::error::LeanError::LeanException(lean_rs::error::LeanException)
 impl lean_rs::error::LeanError
@@ -321,6 +323,22 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
+pub struct lean_rs::error::LeanCancelled
+impl lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::message(&self) -> &str
+impl core::clone::Clone for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::clone(&self) -> lean_rs::error::LeanCancelled
+impl core::fmt::Debug for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs::error::LeanCancelled
+impl core::marker::Send for lean_rs::error::LeanCancelled
+impl core::marker::Sync for lean_rs::error::LeanCancelled
+impl core::marker::Unpin for lean_rs::error::LeanCancelled
+impl core::marker::UnsafeUnpin for lean_rs::error::LeanCancelled
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanCancelled
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
 pub struct lean_rs::error::LeanException
 impl lean_rs::error::LeanException
 pub fn lean_rs::error::LeanException::kind(&self) -> lean_rs::error::LeanExceptionKind
@@ -664,6 +682,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostStage
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostStage
 #[non_exhaustive] pub enum lean_rs::LeanDiagnosticCode
 pub lean_rs::LeanDiagnosticCode::AbiConversion
+pub lean_rs::LeanDiagnosticCode::Cancelled
 pub lean_rs::LeanDiagnosticCode::Elaboration
 pub lean_rs::LeanDiagnosticCode::Internal
 pub lean_rs::LeanDiagnosticCode::LeanException
@@ -696,6 +715,7 @@ impl core::marker::UnsafeUnpin for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanDiagnosticCode
 #[non_exhaustive] pub enum lean_rs::LeanError
+pub lean_rs::LeanError::Cancelled(lean_rs::error::LeanCancelled)
 pub lean_rs::LeanError::Host(lean_rs::error::HostFailure)
 pub lean_rs::LeanError::LeanException(lean_rs::error::LeanException)
 impl lean_rs::error::LeanError
@@ -808,6 +828,22 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
+pub struct lean_rs::LeanCancelled
+impl lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::message(&self) -> &str
+impl core::clone::Clone for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::clone(&self) -> lean_rs::error::LeanCancelled
+impl core::fmt::Debug for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs::error::LeanCancelled
+pub fn lean_rs::error::LeanCancelled::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs::error::LeanCancelled
+impl core::marker::Send for lean_rs::error::LeanCancelled
+impl core::marker::Sync for lean_rs::error::LeanCancelled
+impl core::marker::Unpin for lean_rs::error::LeanCancelled
+impl core::marker::UnsafeUnpin for lean_rs::error::LeanCancelled
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanCancelled
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
 pub struct lean_rs::LeanDeclaration<'lean>
 impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self

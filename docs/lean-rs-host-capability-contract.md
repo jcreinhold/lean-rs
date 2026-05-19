@@ -41,24 +41,24 @@ the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
-| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports)` |
+| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation)` |
 | `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
-| `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name)` |
-| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names)` |
-| `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations()` |
-| `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name)` |
-| `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name)` |
-| `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name)` |
+| `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
+| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation)` |
+| `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations(cancellation)` |
+| `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` |
+| `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` |
+| `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` |
 
 ### Elaboration, kernel check, evidence (5)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
-| `lean_rs_host_elaborate` | `(env) (src : String) (expectedType : Option Expr) (opts : ElabOpts) : IO ElabResult` | `elaborate(source, expected_type, options)` |
-| `lean_rs_host_elaborate_bulk` | `(env) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options)` |
-| `lean_rs_host_kernel_check` | `(env) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options)` |
-| `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence)` |
-| `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence)` |
+| `lean_rs_host_elaborate` | `(env) (src : String) (expectedType : Option Expr) (opts : ElabOpts) : IO ElabResult` | `elaborate(source, expected_type, options, cancellation)` |
+| `lean_rs_host_elaborate_bulk` | `(env) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options, cancellation)` |
+| `lean_rs_host_kernel_check` | `(env) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options, cancellation)` |
+| `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
+| `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
 ## Optional contract (3 symbols—bounded `MetaM`)
 
@@ -68,9 +68,9 @@ service mapped to the missing address.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
-| `lean_rs_host_meta_infer_type` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::infer_type(), expr, options)` |
-| `lean_rs_host_meta_whnf` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options)` |
-| `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options)` |
+| `lean_rs_host_meta_infer_type` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::infer_type(), expr, options, cancellation)` |
+| `lean_rs_host_meta_whnf` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options, cancellation)` |
+| `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
 
 ## Forking the shim package
 

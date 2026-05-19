@@ -35,8 +35,8 @@
 //! let runtime  = lean_rs::LeanRuntime::init()?;
 //! let host     = lean_rs::LeanHost::from_lake_project(runtime, lake_root)?;
 //! let caps     = host.load_capabilities("my_pkg", "MyLib")?;
-//! let mut sess = caps.session(&["MyLib.SomeModule"])?;
-//! let decl     = sess.query_declaration("MyLib.SomeModule.myDef")?;
+//! let mut sess = caps.session(&["MyLib.SomeModule"], None)?;
+//! let decl     = sess.query_declaration("MyLib.SomeModule.myDef", None)?;
 //! ```
 //!
 //! Construction or inspection of the handle types in [`lean_rs::handle`]
@@ -50,6 +50,7 @@ pub mod pool;
 
 pub(crate) mod lake;
 
+mod cancellation;
 mod capabilities;
 #[allow(
     clippy::module_inception,
@@ -58,6 +59,7 @@ mod capabilities;
 mod host;
 mod session;
 
+pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;
 pub use self::host::LeanHost;
 pub use self::pool::{PoolStats, PooledSession, SessionPool};

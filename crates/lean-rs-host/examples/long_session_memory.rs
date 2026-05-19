@@ -114,10 +114,10 @@ fn run(config: &Config) -> LeanResult<()> {
         snapshot("after_bounded_pool");
 
         let pool = SessionPool::with_capacity(runtime, config.pool_capacity);
-        let mut session = pool.acquire(&caps, &MIXED_IMPORTS)?;
+        let mut session = pool.acquire(&caps, &MIXED_IMPORTS, None)?;
 
         for iteration in 1..=config.bulk {
-            let decls = session.query_declarations_bulk(&BULK_NAMES)?;
+            let decls = session.query_declarations_bulk(&BULK_NAMES, None)?;
             assert_eq!(decls.len(), BULK_NAMES.len());
             drop(decls);
             maybe_checkpoint("bulk_introspection", iteration, config.checkpoint_every);
@@ -129,7 +129,7 @@ fn run(config: &Config) -> LeanResult<()> {
         let mut ok = 0usize;
         let mut err = 0usize;
         for (iteration, term) in (1..=config.elab).zip(ELAB_TERMS.iter().cycle()) {
-            match session.elaborate(term, None, &opts)? {
+            match session.elaborate(term, None, &opts, None)? {
                 Ok(expr) => {
                     ok = ok.saturating_add(1);
                     drop(expr);
@@ -182,7 +182,7 @@ fn run_fresh_import_drop_loop(
 ) -> LeanResult<PoolStats> {
     let pool = SessionPool::with_capacity(runtime, 0);
     for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &IMPORTS)?;
+        let session = pool.acquire(caps, &IMPORTS, None)?;
         drop(session);
         maybe_checkpoint("fresh_import_drop", iteration, config.checkpoint_every);
     }
@@ -198,14 +198,14 @@ fn run_bounded_pool_loop(
     if config.pool_capacity > 0 {
         let mut warm = Vec::with_capacity(config.pool_capacity);
         for _ in 0..config.pool_capacity {
-            warm.push(pool.acquire(caps, &IMPORTS)?);
+            warm.push(pool.acquire(caps, &IMPORTS, None)?);
         }
         drop(warm);
     }
     snapshot("after_bounded_pool_warm");
 
     for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &IMPORTS)?;
+        let session = pool.acquire(caps, &IMPORTS, None)?;
         drop(session);
         maybe_checkpoint("bounded_pool", iteration, config.checkpoint_every);
     }

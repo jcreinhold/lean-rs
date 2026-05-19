@@ -55,7 +55,7 @@ fn run() -> LeanResult<()> {
     // `Meta` carries the `MetaM` shims `run_meta` dispatches to;
     // `Elaboration` carries the elaborator we use to build a
     // `LeanExpr` to feed `infer_type`.
-    let mut session = caps.session(&["LeanRsHostShims.Meta", "LeanRsHostShims.Elaboration"])?;
+    let mut session = caps.session(&["LeanRsHostShims.Meta", "LeanRsHostShims.Elaboration"], None)?;
 
     // Build an expression to query. `Nat.succ 0` elaborates against
     // the prelude without needing any extra imports. A failure here
@@ -64,14 +64,14 @@ fn run() -> LeanResult<()> {
     // surface directly.
     let elab_opts = LeanElabOptions::new();
     let expr = session
-        .elaborate("(Nat.succ 0 : Nat)", None, &elab_opts)?
+        .elaborate("(Nat.succ 0 : Nat)", None, &elab_opts, None)?
         .expect("(Nat.succ 0 : Nat) elaborates against the prelude");
 
     // Dispatch `infer_type` with default options (the published
     // heartbeat ceiling, the published diagnostic byte limit). The
     // typed return is `LeanMetaResponse<LeanExpr<'lean>>`.
     let meta_opts = LeanMetaOptions::new();
-    let response = session.run_meta(&infer_type(), expr, &meta_opts)?;
+    let response = session.run_meta(&infer_type(), expr, &meta_opts, None)?;
 
     match response {
         LeanMetaResponse::Ok(_inferred_expr) => {

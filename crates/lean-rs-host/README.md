@@ -91,15 +91,15 @@ fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
     let host = LeanHost::from_lake_project(runtime, &lake_root)?;
     let caps = host.load_capabilities("my_app", "MyCapability")?;
-    let mut session = caps.session(&["MyCapability"])?;
+    let mut session = caps.session(&["MyCapability"], None)?;
 
     // Elaborate a Lean term in the session's environment.
     let opts = LeanElabOptions::new();
-    let elaborated = session.elaborate("(1 + 2 : Nat)", None, &opts)?;
+    let elaborated = session.elaborate("(1 + 2 : Nat)", None, &opts, None)?;
     println!("elaborate ok: {}", elaborated.is_ok());
 
     // Call your own typed @[export] through the instrumented session dispatch.
-    let n = session.call_capability::<(u64,), u64>("my_app_square", (7u64,))?;
+    let n = session.call_capability::<(u64,), u64>("my_app_square", (7u64,), None)?;
     println!("square(7) = {n}");  // 49
 
     Ok(())

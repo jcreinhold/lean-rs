@@ -33,22 +33,22 @@ fn curated_surface_drives_full_happy_path() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("fixture capability loads cleanly");
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"])
+        .session(&["LeanRsHostShims.Elaboration"], None)
         .expect("LeanRsHostShims.Elaboration module imports cleanly");
 
     let _decl = session
-        .query_declaration("Nat.add")
+        .query_declaration("Nat.add", None)
         .expect("Nat.add is in the imported environment");
 
     let opts = LeanElabOptions::new();
 
     let elab = session
-        .elaborate("(1 + 1 : Nat)", None, &opts)
+        .elaborate("(1 + 1 : Nat)", None, &opts, None)
         .expect("host stack reports no exception while elaborating");
     elab.expect("elaboration succeeds for a well-typed Nat term");
 
     let outcome = session
-        .kernel_check("theorem lean_rs_curated : 1 + 1 = 2 := rfl", &opts)
+        .kernel_check("theorem lean_rs_curated : 1 + 1 = 2 := rfl", &opts, None)
         .expect("host stack reports no exception while kernel-checking");
 
     let LeanKernelOutcome::Checked(evidence) = outcome else {
@@ -56,12 +56,12 @@ fn curated_surface_drives_full_happy_path() {
     };
 
     let status = session
-        .check_evidence(&evidence)
+        .check_evidence(&evidence, None)
         .expect("re-validation dispatches cleanly");
     assert_eq!(status, EvidenceStatus::Checked, "evidence must re-validate as Checked");
 
     let summary = session
-        .summarize_evidence(&evidence)
+        .summarize_evidence(&evidence, None)
         .expect("summary projection dispatches cleanly");
     assert_eq!(
         summary.declaration_name(),

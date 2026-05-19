@@ -164,6 +164,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md)—the `!Send + !Sync` contract and worker-thread attach discipline.
 - [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md)—per-decision rationale behind `lean-rs-sys`.
 - [`06-panic-containment.md`](docs/architecture/06-panic-containment.md)—why Lean internal panics are contained by process boundaries, not `LeanSession` poisoning.
+- [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md)—the token-based cancellation contract and its non-preemptive limits.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

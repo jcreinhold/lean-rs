@@ -87,16 +87,16 @@ fn independent_worker_sessions_run_in_parallel() {
             // do Lean work simultaneously.
             barrier.wait();
             let mut session = caps
-                .session(&["LeanRsFixture.Handles"])
+                .session(&["LeanRsFixture.Handles"], None)
                 .expect("worker imports its own session");
 
             let decl = session
-                .query_declaration("LeanRsFixture.Handles.nameAnonymous")
+                .query_declaration("LeanRsFixture.Handles.nameAnonymous", None)
                 .expect("query_declaration on a fixture name succeeds");
             drop(decl);
 
             let names = session
-                .list_declarations()
+                .list_declarations(None)
                 .expect("list_declarations succeeds on imported session");
             assert!(
                 !names.is_empty(),
@@ -137,10 +137,10 @@ fn per_worker_session_pool_under_concurrency() {
             barrier.wait();
             for _ in 0..CHECKOUTS_PER_WORKER {
                 let mut session = pool
-                    .acquire(&caps, &["LeanRsFixture.Handles"])
+                    .acquire(&caps, &["LeanRsFixture.Handles"], None)
                     .expect("pool acquire returns a session");
                 let kind = session
-                    .declaration_kind("LeanRsFixture.Handles.nameAnonymous")
+                    .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
                     .expect("declaration_kind succeeds");
                 drop(kind);
             }

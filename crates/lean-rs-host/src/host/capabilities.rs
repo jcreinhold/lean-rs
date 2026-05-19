@@ -36,6 +36,7 @@
 
 use core::fmt;
 
+use crate::host::cancellation::LeanCancellationToken;
 use crate::host::host::LeanHost;
 use crate::host::session::{LeanSession, SessionSymbols};
 use lean_rs::error::LeanResult;
@@ -151,11 +152,18 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// # Errors
     ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before import dispatch.
+    ///
     /// Returns [`lean_rs::LeanError::LeanException`] if the Lean-side
     /// import raises (missing `.olean`, malformed module name, …),
     /// with the bounded message Lean surfaced.
-    pub fn session<'c>(&'c self, imports: &[&str]) -> LeanResult<LeanSession<'lean, 'c>> {
-        LeanSession::import(self, imports)
+    pub fn session<'c>(
+        &'c self,
+        imports: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<LeanSession<'lean, 'c>> {
+        LeanSession::import(self, imports, cancellation)
     }
 
     /// The capability's parent host (for runtime + project access by

@@ -32,10 +32,10 @@ fn run_child_workload() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = caps
-        .session(&["LeanRsFixture.Effects"])
+        .session(&["LeanRsFixture.Effects"], None)
         .expect("session imports cleanly");
 
-    let returned = session.call_capability::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,));
+    let returned = session.call_capability::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None);
     panic!("Lean panic export returned instead of terminating: {returned:?}");
 }
 

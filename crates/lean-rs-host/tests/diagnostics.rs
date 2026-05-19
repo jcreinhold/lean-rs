@@ -58,12 +58,12 @@ fn fixture_caps<'lean, 'h>(host: &'h LeanHost<'lean>) -> LeanCapabilities<'lean,
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"])
+    caps.session(&["LeanRsHostShims.Elaboration"], None)
         .expect("session imports cleanly")
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"])
+    caps.session(&["LeanRsFixture.Handles"], None)
         .expect("session imports cleanly")
 }
 
@@ -124,7 +124,7 @@ fn symbol_lookup_code_on_missing_capability_export() {
     // No symbol with this name is exported by the fixture; the
     // `resolve_function_symbol` path tags it as `SymbolLookup`.
     let err = session
-        .call_capability::<(), LeanIo<u64>>("lean_rs_no_such_capability_export", ())
+        .call_capability::<(), LeanIo<u64>>("lean_rs_no_such_capability_export", (), None)
         .expect_err("missing capability symbol must fail");
     assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup, "got {err:?}");
 }
@@ -135,7 +135,7 @@ fn abi_conversion_code_on_missing_declaration() {
     let caps = fixture_caps(&host);
     let mut session = session_over_handles(&caps);
     let err = session
-        .query_declaration("LeanRsFixture.Handles.definitely_does_not_exist")
+        .query_declaration("LeanRsFixture.Handles.definitely_does_not_exist", None)
         .expect_err("unknown name must fail at the conversion boundary");
     assert_eq!(err.code(), LeanDiagnosticCode::AbiConversion, "got {err:?}");
 }
@@ -148,10 +148,10 @@ fn lean_exception_code_from_lean_throw() {
     // channel; `call_capability` projects the `IO Nat` return as
     // `LeanIo<u64>` so the failure surfaces as `LeanError::LeanException`.
     let mut session = caps
-        .session(&["LeanRsFixture.Effects"])
+        .session(&["LeanRsFixture.Effects"], None)
         .expect("session imports cleanly");
     let err = session
-        .call_capability::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", ())
+        .call_capability::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", (), None)
         .expect_err("fixture export raises through IO");
     assert_eq!(err.code(), LeanDiagnosticCode::LeanException, "got {err:?}");
     let LeanError::LeanException(exc) = err else {
@@ -171,7 +171,7 @@ fn elaboration_code_on_parse_error() {
     let mut session = session_over_elaboration(&caps);
     let opts = LeanElabOptions::new();
     let outcome = session
-        .elaborate("(1 +", None, &opts)
+        .elaborate("(1 +", None, &opts, None)
         .expect("host stack reports no exception while elaborating a malformed term");
     let failure = outcome.expect_err("malformed term must elaborate to a failure");
     assert_eq!(failure.code(), LeanDiagnosticCode::Elaboration);
@@ -207,14 +207,14 @@ fn unsupported_code_on_absent_meta_service() {
     // path — the response is `Ok` here, but `code()` on `Ok` is
     // `None`, which is part of the contract surface this test pins.
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"])
+        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None)
         .expect("session imports cleanly");
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("Nat.zero is available")
         .expect("Nat.zero has a type");
     let response = session
-        .run_meta(&infer_type(), expr, &lean_rs_host::meta::LeanMetaOptions::new())
+        .run_meta(&infer_type(), expr, &lean_rs_host::meta::LeanMetaOptions::new(), None)
         .expect("run_meta dispatches cleanly");
     // Happy path: `Ok` projects to `None`.
     if matches!(response.status(), MetaCallStatus::Ok) {

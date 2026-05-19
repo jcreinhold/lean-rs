@@ -7,7 +7,7 @@ emit structured `tracing` spans against the `lean_rs` target. A downstream calle
 - visibility into where time is spent and where failures originate, without rebuilding the crates.
 
 The taxonomy is unified across both crates (every recoverable failure on either side maps to
-one of nine codes); the span catalogue is split by emitting crate so the layer boundary is
+a stable code); the span catalogue is split by emitting crate so the layer boundary is
 visible at the log line. Lean internal panics are outside this error taxonomy: there is no
 `SessionPoisoned` code. A Lean runtime panic during a `LeanSession` call may terminate the
 process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md).
@@ -20,10 +20,11 @@ process; see [`architecture/06-panic-containment.md`](architecture/06-panic-cont
 | `Linking` | `lean_rs.linking` | A linkable artefact was missing or mismatched: invalid Lake package/module identifier, missing initializer symbol, header-digest mismatch. | Verify the `lib_name` matches what `lake build` emitted (inspect `.lake/build/lib/`). Rebuild the capability against the same `lean-toolchain` as the host process. |
 | `ModuleInit` | `lean_rs.module_init` | A capability dylib could not be opened, parsed, or its root initializer raised. Includes Lake project root not existing. | Re-run `lake build`. Add the directory of any missing transitive shared dependency to `DYLD_LIBRARY_PATH` (macOS) / `LD_LIBRARY_PATH` (Linux). Verify the path passed to `LeanHost::from_lake_project` contains the `lakefile.lean` / `lakefile.toml`. |
 | `SymbolLookup` | `lean_rs.symbol_lookup` | A function or global symbol was not present in the loaded dylib (`dlsym` miss or arity mismatch). | Add the Lean module exporting the symbol to the capability's `lean_lib`. Check `@[export]` on the Lean side. Check that the Rust call site's expected arity matches the export. |
-| `AbiConversion` | `lean_rs.abi_conversion` | Wrong Lean kind for the requested Rust type, integer out of range, invalid UTF-8, or a queried declaration was missing from the environment. | For `query_declaration`: compare against `session.list_declarations()`. For numeric overflow: widen the Rust target type or split the call. For `String`/`ByteArray`: check the Lean encoder. |
+| `AbiConversion` | `lean_rs.abi_conversion` | Wrong Lean kind for the requested Rust type, integer out of range, invalid UTF-8, or a queried declaration was missing from the environment. | For `query_declaration`: compare against `session.list_declarations(None)`. For numeric overflow: widen the Rust target type or split the call. For `String`/`ByteArray`: check the Lean encoder. |
 | `LeanException` | `lean_rs.lean_exception` | Lean raised through its `IO` error channel. Inspect `LeanException::kind()` for the `IO.Error` constructor. | Branch on `exc.kind()`. For `noFileOrDirectory` / `permissionDenied`, adjust the path or working directory of the Lean code. |
 | `Elaboration` | `lean_rs.elaboration` | Term parsing or elaboration produced diagnostics. Payload is `LeanElabFailure` with typed diagnostics. | Walk `failure.diagnostics()`: each carries a `severity`, bounded `message`, optional `position`, and `file_label`. If `failure.truncated() == true`, raise `LeanElabOptions::diagnostic_byte_limit` and rerun. |
 | `Unsupported` | `lean_rs.unsupported` | Loaded capability lacks the requested service (Lean shim returned `unsupported` or the optional symbol was absent at load). | Rebuild the capability with the missing shim. The fixture in this repo exports all three meta services (`infer_type`, `whnf`, `heartbeat_burn`); this code typically signals a missing rebuild. |
+| `Cancelled` | `lean_rs.cancelled` | A `lean-rs-host` cooperative cancellation token was observed before a host-controlled FFI dispatch. | Treat the operation as aborted and discard partial work. Create a fresh token before retrying. |
 | `Internal` | `lean_rs.internal` | A `pub(crate)` invariant tripped, or a callback panicked inside the safe boundary. | File a bug; include the bounded message and the `as_str()` id. |
 
 The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids
@@ -32,6 +33,10 @@ are stable across patch releases.
 `Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not
 mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
 boundary.
+
+`Cancelled` is cooperative. It is returned only when `lean-rs-host` regains
+control and checks the token; it does not pre-empt an in-flight Lean call.
+See [`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-cancellation.md).
 
 ## Matching on codes
 
@@ -50,6 +55,7 @@ fn report(err: &LeanError) {
                 eprintln!("Lean raised {:?}: {}", exc.kind(), exc.message());
             }
         }
+        LeanDiagnosticCode::Cancelled => eprintln!("caller cancelled the operation"),
         other => eprintln!("unhandled {other}: {err}"),
     }
 }
@@ -177,3 +183,4 @@ that drops the relevant fields.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
 - [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.
+- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what they cannot interrupt.

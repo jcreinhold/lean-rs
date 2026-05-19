@@ -57,7 +57,8 @@ fn from_lake_project_missing_path_is_load_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
-        other => panic!("expected Host(Load) failure, got {other:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected Host(Load) failure, got cancellation {cancelled:?}"),
+        _ => panic!("expected Host(Load) failure, got future LeanError variant"),
     }
 }
 
@@ -91,14 +92,15 @@ fn load_capabilities_missing_dylib_is_load_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
-        other => panic!("expected Host(Load) failure, got {other:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected Host(Load) failure, got cancellation {cancelled:?}"),
+        _ => panic!("expected Host(Load) failure, got future LeanError variant"),
     }
 }
 
 // -- session import + query ---------------------------------------------
 
 fn session_over_handles<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"])
+    caps.session(&["LeanRsFixture.Handles"], None)
         .expect("session imports cleanly")
 }
 
@@ -113,7 +115,7 @@ fn session_import_then_query_fixture_definition() {
     // `LeanRsFixture.Handles.nameAnonymous` is the first fixture export
     // in Handles.lean and is reachable through the imported environment.
     let decl = session
-        .query_declaration("LeanRsFixture.Handles.nameAnonymous")
+        .query_declaration("LeanRsFixture.Handles.nameAnonymous", None)
         .expect("query existing fixture declaration");
     // Returned LeanDeclaration is opaque; the test passes if no error
     // surfaced. Render-checks happen via declaration_name.
@@ -129,18 +131,18 @@ fn session_declaration_kind_discriminates() {
     let mut session = session_over_handles(&caps);
 
     let fixture_def_kind = session
-        .declaration_kind("LeanRsFixture.Handles.nameAnonymous")
+        .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
         .expect("kind for fixture def");
     assert_eq!(
         fixture_def_kind, "definition",
         "fixture `def` must classify as definition"
     );
 
-    let nat_kind = session.declaration_kind("Nat").expect("kind for Nat");
+    let nat_kind = session.declaration_kind("Nat", None).expect("kind for Nat");
     assert_eq!(nat_kind, "inductive", "prelude `Nat` must classify as inductive");
 
     let missing_kind = session
-        .declaration_kind("This.Name.Does.Not.Exist")
+        .declaration_kind("This.Name.Does.Not.Exist", None)
         .expect("kind query for absent name");
     assert_eq!(missing_kind, "missing", "absent name must classify as missing");
 }
@@ -154,7 +156,7 @@ fn session_declaration_type_round_trips_as_expr() {
     let mut session = session_over_handles(&caps);
 
     let type_handle = session
-        .declaration_type("LeanRsFixture.Handles.nameAnonymous")
+        .declaration_type("LeanRsFixture.Handles.nameAnonymous", None)
         .expect("type query for fixture def")
         .expect("fixture def has a type");
     // Returned LeanExpr is opaque; passing it through any of the
@@ -173,7 +175,7 @@ fn session_declaration_type_returns_none_for_missing() {
     let mut session = session_over_handles(&caps);
 
     let absent = session
-        .declaration_type("This.Name.Does.Not.Exist")
+        .declaration_type("This.Name.Does.Not.Exist", None)
         .expect("type query for absent name");
     assert!(absent.is_none(), "missing name must yield None");
 }
@@ -187,7 +189,7 @@ fn session_declaration_name_renders_dotted_form() {
     let mut session = session_over_handles(&caps);
 
     let rendered = session
-        .declaration_name("LeanRsFixture.Handles.nameAnonymous")
+        .declaration_name("LeanRsFixture.Handles.nameAnonymous", None)
         .expect("render name");
     assert!(
         rendered.contains("nameAnonymous"),
@@ -204,7 +206,7 @@ fn session_query_missing_declaration_is_host_error() {
     let mut session = session_over_handles(&caps);
 
     let err = session
-        .query_declaration("This.Name.Does.Not.Exist")
+        .query_declaration("This.Name.Does.Not.Exist", None)
         .expect_err("missing declaration must surface a host error");
     match err {
         LeanError::Host(failure) => {
@@ -216,7 +218,8 @@ fn session_query_missing_declaration_is_host_error() {
             );
         }
         LeanError::LeanException(exc) => panic!("expected Host(Conversion) failure, got LeanException {exc:?}"),
-        other => panic!("expected Host(Conversion) failure, got {other:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected Host(Conversion) failure, got cancellation {cancelled:?}"),
+        _ => panic!("expected Host(Conversion) failure, got future LeanError variant"),
     }
 }
 
@@ -228,7 +231,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
         .expect("load caps");
     let mut session = session_over_handles(&caps);
 
-    let names = session.list_declarations().expect("list declarations");
+    let names = session.list_declarations(None).expect("list declarations");
     // The Lean prelude alone contributes thousands; the fixture import
     // is a thin slice on top. Just assert the result is non-empty.
     assert!(
@@ -240,7 +243,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
 // -- elaborate + kernel_check (prompt 15) -------------------------------
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"])
+    caps.session(&["LeanRsHostShims.Elaboration"], None)
         .expect("session imports cleanly")
 }
 
@@ -253,7 +256,7 @@ fn elaborate_success_returns_expr() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new())
+        .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     let expr = outcome.expect("elaboration succeeds for a well-typed Nat term");
     // Returned LeanExpr is opaque; success path is asserted by Ok.
@@ -269,7 +272,7 @@ fn elaborate_syntax_failure_reports_diagnostic() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .elaborate("1 +", None, &LeanElabOptions::new())
+        .elaborate("1 +", None, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     let failure = outcome.expect_err("trailing operator must fail to parse");
     let first = failure
@@ -294,7 +297,7 @@ fn elaborate_type_failure_reports_position() {
     // Mixing `String` with arithmetic against `Nat` triggers an
     // elaborator type error that carries a position.
     let outcome = session
-        .elaborate("(1 + \"hi\" : Nat)", None, &LeanElabOptions::new())
+        .elaborate("(1 + \"hi\" : Nat)", None, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     let failure = outcome.expect_err("type-mismatched term must fail to elaborate");
     let diag = failure
@@ -329,7 +332,7 @@ fn kernel_check_small_theorem_returns_evidence() {
 
     let src = "theorem lean_rs_smoke : 1 + 1 = 2 := rfl";
     let outcome = session
-        .kernel_check(src, &LeanElabOptions::new())
+        .kernel_check(src, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -357,7 +360,7 @@ fn kernel_check_rejects_bad_proof() {
 
     let src = "theorem lean_rs_bad : 1 = 2 := rfl";
     let outcome = session
-        .kernel_check(src, &LeanElabOptions::new())
+        .kernel_check(src, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -405,7 +408,7 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .kernel_check("theorem :=", &LeanElabOptions::new())
+        .kernel_check("theorem :=", &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     assert!(
         matches!(outcome.status(), EvidenceStatus::Rejected | EvidenceStatus::Unavailable),
@@ -436,7 +439,7 @@ fn kernel_check_unsupported_on_non_declaration() {
     // constant to the environment, so the classifier returns
     // `Unsupported` (no new theorem/definition).
     let outcome = session
-        .kernel_check("#check Nat", &LeanElabOptions::new())
+        .kernel_check("#check Nat", &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -454,7 +457,11 @@ fn check_evidence_revalidates_checked_evidence() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .kernel_check("theorem lean_rs_recheck : 1 + 1 = 2 := rfl", &LeanElabOptions::new())
+        .kernel_check(
+            "theorem lean_rs_recheck : 1 + 1 = 2 := rfl",
+            &LeanElabOptions::new(),
+            None,
+        )
         .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
@@ -467,7 +474,7 @@ fn check_evidence_revalidates_checked_evidence() {
     // bumped refcount cleanly.
     let cloned = evidence.clone();
     let status = session
-        .check_evidence(&cloned)
+        .check_evidence(&cloned, None)
         .expect("re-validation routes through the host stack cleanly");
     assert_eq!(
         status,
@@ -476,7 +483,9 @@ fn check_evidence_revalidates_checked_evidence() {
     );
 
     // Original handle also re-validates; addDecl does not consume it.
-    let status_again = session.check_evidence(&evidence).expect("re-validation is idempotent");
+    let status_again = session
+        .check_evidence(&evidence, None)
+        .expect("re-validation is idempotent");
     assert_eq!(
         status_again,
         EvidenceStatus::Checked,
@@ -493,7 +502,11 @@ fn summarize_evidence_exposes_declaration_name() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .kernel_check("theorem lean_rs_summary : 1 + 1 = 2 := rfl", &LeanElabOptions::new())
+        .kernel_check(
+            "theorem lean_rs_summary : 1 + 1 = 2 := rfl",
+            &LeanElabOptions::new(),
+            None,
+        )
         .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
@@ -503,7 +516,7 @@ fn summarize_evidence_exposes_declaration_name() {
     };
 
     let summary = session
-        .summarize_evidence(&evidence)
+        .summarize_evidence(&evidence, None)
         .expect("summary routes through the host stack cleanly");
     assert_eq!(
         summary.declaration_name(),
@@ -551,7 +564,7 @@ fn diagnostic_byte_limit_truncates() {
     // truncated.
     let opts = LeanElabOptions::new().diagnostic_byte_limit(1);
     let outcome = session
-        .elaborate("(foo + bar + baz : Nat)", None, &opts)
+        .elaborate("(foo + bar + baz : Nat)", None, &opts, None)
         .expect("host stack reports no exception");
     let failure = outcome.expect_err("unbound identifiers must fail to elaborate");
     assert!(
@@ -582,11 +595,11 @@ fn session_reuse_amortises_import() {
     let start_reuse = Instant::now();
     {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"])
+            .session(&["LeanRsFixture.Handles"], None)
             .expect("session imports cleanly");
         for _ in 0..QUERIES {
             let kind = session
-                .declaration_kind("LeanRsFixture.Handles.nameAnonymous")
+                .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
                 .expect("query");
             assert_eq!(kind, "definition");
         }
@@ -597,10 +610,10 @@ fn session_reuse_amortises_import() {
     let start_per_query = Instant::now();
     for _ in 0..QUERIES {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"])
+            .session(&["LeanRsFixture.Handles"], None)
             .expect("session imports cleanly");
         let kind = session
-            .declaration_kind("LeanRsFixture.Handles.nameAnonymous")
+            .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
             .expect("query");
         assert_eq!(kind, "definition");
     }
@@ -629,7 +642,7 @@ fn session_reuse_amortises_import() {
 // dispatches through cached addresses.
 
 fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Meta"])
+    caps.session(&["LeanRsHostShims.Meta"], None)
         .expect("session imports cleanly")
 }
 
@@ -645,11 +658,11 @@ fn meta_infer_type_returns_ok_for_nat_type() {
     // Using a Lean-produced Expr keeps the test honest — Rust never
     // constructs an Expr directly.
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let outcome = session
-        .run_meta(&infer_type(), expr, &LeanMetaOptions::new())
+        .run_meta(&infer_type(), expr, &LeanMetaOptions::new(), None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -676,11 +689,11 @@ fn meta_whnf_returns_ok_for_nat_type() {
     let mut session = session_over_meta(&caps);
 
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let outcome = session
-        .run_meta(&whnf(), expr, &LeanMetaOptions::new())
+        .run_meta(&whnf(), expr, &LeanMetaOptions::new(), None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -709,12 +722,12 @@ fn meta_heartbeat_burn_yields_timeout_status() {
 
     // Any Expr will do — heartbeat_burn ignores its argument.
     let expr = session
-        .declaration_type("Nat.zero")
+        .declaration_type("Nat.zero", None)
         .expect("type query for Nat.zero")
         .expect("Nat.zero has a type");
     let opts = LeanMetaOptions::new().heartbeat_limit(1);
     let outcome = session
-        .run_meta(&heartbeat_burn(), expr, &opts)
+        .run_meta(&heartbeat_burn(), expr, &opts, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),

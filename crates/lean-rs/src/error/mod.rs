@@ -2,7 +2,7 @@
 //!
 //! Every fallible public function returns [`LeanResult<T>`]. [`LeanError`]
 //! is the single error type that crosses the boundary; per
-//! `RD-2026-05-17-006` it has two variants:
+//! `RD-2026-05-17-006` it has three variants:
 //!
 //! - [`LeanError::LeanException`] when Lean threw through its `IO` error
 //!   channel. The payload reports the `IO.Error` constructor as
@@ -12,13 +12,17 @@
 //!   contained callback panic, future link/load, internal invariant). The
 //!   payload reports the [`HostStage`] and a bounded developer-facing
 //!   `message()`.
+//! - [`LeanError::Cancelled`] when a `lean-rs-host` cooperative
+//!   cancellation token was observed before an FFI dispatch or between
+//!   bulk dispatches.
 //!
 //! Bounded messages are a *structural* invariant: [`LeanException`] and
 //! [`HostFailure`] have private fields, and the only constructors are
 //! `pub(crate)`; both run a shared helper that truncates the message at
-//! [`LEAN_ERROR_MESSAGE_LIMIT`] on a UTF-8 char boundary. External
-//! callers receive `LeanError` values but cannot mint one with an
-//! unbounded message.
+//! [`LEAN_ERROR_MESSAGE_LIMIT`] on a UTF-8 char boundary. [`LeanCancelled`]
+//! also has private fields and carries a fixed host-authored message.
+//! External callers receive `LeanError` values but cannot mint one with
+//! an unbounded message.
 //!
 //! The rule callers learn: **runtime / host failures are [`LeanError`];
 //! application semantics are values.** A Lean function returning
@@ -63,7 +67,7 @@ pub type LeanResult<T> = Result<T, LeanError>;
 ///
 /// `#[non_exhaustive]` so future toolchain or platform refinements can add
 /// new diagnostic tags inside [`HostStage`] / [`LeanExceptionKind`]
-/// without breaking pattern-matching code that already handles the two
+/// without breaking pattern-matching code that already handles the
 /// top-level variants.
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -72,6 +76,8 @@ pub enum LeanError {
     LeanException(LeanException),
     /// The host stack failed at a particular stage; see [`HostFailure`].
     Host(HostFailure),
+    /// A cooperative cancellation token was observed before dispatch.
+    Cancelled(LeanCancelled),
 }
 
 impl LeanError {
@@ -84,6 +90,7 @@ impl LeanError {
         match self {
             Self::LeanException(_) => LeanDiagnosticCode::LeanException,
             Self::Host(failure) => failure.code,
+            Self::Cancelled(_) => LeanDiagnosticCode::Cancelled,
         }
     }
 
@@ -164,6 +171,13 @@ impl LeanError {
         )
     }
 
+    /// Build a cooperative cancellation report.
+    pub(crate) fn cancelled() -> Self {
+        Self::Cancelled(LeanCancelled {
+            message: "operation cancelled by LeanCancellationToken".to_owned(),
+        })
+    }
+
     /// Shared host-failure constructor. Private — every call site uses
     /// the typed wrappers above so the [`HostStage`] / [`LeanDiagnosticCode`]
     /// pair cannot drift.
@@ -181,11 +195,36 @@ impl fmt::Display for LeanError {
         match self {
             Self::LeanException(e) => write!(f, "lean-rs: {e}"),
             Self::Host(e) => write!(f, "lean-rs: {e}"),
+            Self::Cancelled(e) => write!(f, "lean-rs: {e}"),
         }
     }
 }
 
 impl std::error::Error for LeanError {}
+
+/// A cooperative cancellation observed by `lean-rs-host`.
+///
+/// Constructed only by the crate through the hidden host boundary helper.
+/// The payload is intentionally small and stable: cancellation is a caller
+/// decision, not a Lean diagnostic.
+#[derive(Clone, Debug)]
+pub struct LeanCancelled {
+    message: String,
+}
+
+impl LeanCancelled {
+    /// Caller-facing cancellation message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for LeanCancelled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 /// A Lean exception thrown through the `IO` error channel.
 ///
@@ -358,6 +397,8 @@ pub enum LeanDiagnosticCode {
     /// shape, or the optional capability symbol was absent at load
     /// time.
     Unsupported,
+    /// A cooperative cancellation token was observed before dispatch.
+    Cancelled,
     /// A `pub(crate)` invariant tripped, or a callback panicked inside
     /// the safe boundary. Indicates a bug in `lean-rs`.
     Internal,
@@ -380,6 +421,7 @@ impl LeanDiagnosticCode {
             Self::LeanException => "lean_rs.lean_exception",
             Self::Elaboration => "lean_rs.elaboration",
             Self::Unsupported => "lean_rs.unsupported",
+            Self::Cancelled => "lean_rs.cancelled",
             Self::Internal => "lean_rs.internal",
         }
     }
@@ -397,6 +439,7 @@ impl LeanDiagnosticCode {
             Self::LeanException => "Lean raised through its IO error channel",
             Self::Elaboration => "term parsing or elaboration produced diagnostics",
             Self::Unsupported => "the loaded capability does not expose the requested service",
+            Self::Cancelled => "a cooperative cancellation token was observed before dispatch",
             Self::Internal => "a pub(crate) invariant tripped — likely a bug in lean-rs",
         }
     }
@@ -494,8 +537,9 @@ pub fn bound_message(mut s: String) -> String {
 // `LeanError`'s constructors are `pub(crate)` to preserve the structural
 // bounding invariant: external crates cannot mint `LeanError` values
 // directly (per RD-2026-05-17-006). The sibling `lean-rs-host` crate
-// needs to construct host failures when it dispatches capability shims;
-// it reaches the one constructor it actually uses through this
+// needs to construct host failures and cooperative cancellation reports
+// when it dispatches capability shims; it reaches the constructors it
+// actually uses through this
 // `#[doc(hidden)] pub fn` wrapper, re-exported at
 // [`crate::__host_internals`].
 //
@@ -503,15 +547,22 @@ pub fn bound_message(mut s: String) -> String {
 // (`host_linking`, `host_module_init_panic`, `host_symbol_lookup`,
 // `host_callback_panic`, `host_internal`, `lean_exception`, plus
 // `bound_message`); the post-RD-2026-05-18-001 audit confirmed only
-// `host_module_init` (called from `lake.rs`) was wired up. Carrying
-// the dead seven was 87% speculative surface; they were removed. Add
-// them back the same way (single-call wrapper + re-export in
-// `crate::__host_internals`) if a future call site needs one.
+// `host_module_init` (called from `lake.rs`) was wired up. Prompt 34
+// added `host_cancelled` for the sibling crate's cancellation token.
+// Carrying the dead seven was 87% speculative surface; they were
+// removed. Add them back the same way (single-call wrapper + re-export
+// in `crate::__host_internals`) if a future call site needs one.
 
 /// Construct a `ModuleInit` host failure. See [`LeanError::module_init`].
 #[doc(hidden)]
 pub fn host_module_init(message: impl Into<String>) -> LeanError {
     LeanError::module_init(message)
+}
+
+/// Construct a cooperative cancellation report. See [`LeanError::cancelled`].
+#[doc(hidden)]
+pub fn host_cancelled() -> LeanError {
+    LeanError::cancelled()
 }
 
 /// Render an arbitrary panic payload as a human-readable string. Strings

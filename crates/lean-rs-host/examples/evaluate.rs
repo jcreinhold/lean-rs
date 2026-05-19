@@ -51,7 +51,7 @@ fn run() -> LeanResult<()> {
     // dispatch through. The import list affects what's in the Lean
     // environment, not which dylib symbols are reachable, so a small
     // import keeps the cold path fast.
-    let mut session = caps.session(&["LeanRsFixture.Strings"])?;
+    let mut session = caps.session(&["LeanRsFixture.Strings"], None)?;
 
     let input = "hello, lean";
 
@@ -60,7 +60,8 @@ fn run() -> LeanResult<()> {
     // argument tuple `(&str,)` and return type `String`; `lean-rs`
     // wires the typed FFI through borrowed-string marshalling (no
     // Rust-side copy on the way in).
-    let echoed: String = session.call_capability::<(&str,), String>("lean_rs_fixture_string_identity", (input,))?;
+    let echoed: String =
+        session.call_capability::<(&str,), String>("lean_rs_fixture_string_identity", (input,), None)?;
     println!("string_identity({input:?}) = {echoed:?}");
 
     // Non-trivial computation on unboxed scalars:
@@ -68,7 +69,7 @@ fn run() -> LeanResult<()> {
     // parameters and the return as unboxed C `uint32_t`, so the
     // `u32` `LeanAbi` impl carries the raw values across without
     // boxing.
-    let sum: u32 = session.call_capability::<(u32, u32), u32>("lean_rs_fixture_u32_add", (1_000, 2_500))?;
+    let sum: u32 = session.call_capability::<(u32, u32), u32>("lean_rs_fixture_u32_add", (1_000, 2_500), None)?;
     println!("u32_add(1000, 2500) = {sum}");
 
     Ok(())

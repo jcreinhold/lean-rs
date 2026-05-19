@@ -338,7 +338,7 @@ impl<'lean, 'p, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::h
 impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>
 pub struct lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
-pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
@@ -354,9 +354,27 @@ impl<'lean> core::marker::Unpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
+pub struct lean_rs_host::host::LeanCancellationToken
+impl lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::cancel(&self)
+pub fn lean_rs_host::LeanCancellationToken::is_cancelled(&self) -> bool
+pub fn lean_rs_host::LeanCancellationToken::new() -> Self
+impl core::clone::Clone for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::clone(&self) -> lean_rs_host::LeanCancellationToken
+impl core::default::Default for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::default() -> lean_rs_host::LeanCancellationToken
+impl core::fmt::Debug for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::LeanCancellationToken
+impl core::marker::Send for lean_rs_host::LeanCancellationToken
+impl core::marker::Sync for lean_rs_host::LeanCancellationToken
+impl core::marker::Unpin for lean_rs_host::LeanCancellationToken
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanCancellationToken
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationToken
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
-pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 impl core::fmt::Debug for lean_rs_host::LeanCapabilities<'_, '_>
 pub fn lean_rs_host::LeanCapabilities<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'h> core::marker::Freeze for lean_rs_host::LeanCapabilities<'lean, 'h>
@@ -381,20 +399,20 @@ impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHost<'
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHost<'lean>
 pub struct lean_rs_host::host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str]) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
-pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Send for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Sync for lean_rs_host::LeanSession<'lean, 'c>
@@ -447,7 +465,7 @@ impl<'lean, 'p, 'c> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::h
 impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>
 pub struct lean_rs_host::host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
-pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
@@ -651,9 +669,27 @@ impl core::marker::Unpin for lean_rs_host::LeanSeverity
 impl core::marker::UnsafeUnpin for lean_rs_host::LeanSeverity
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanSeverity
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSeverity
+pub struct lean_rs_host::LeanCancellationToken
+impl lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::cancel(&self)
+pub fn lean_rs_host::LeanCancellationToken::is_cancelled(&self) -> bool
+pub fn lean_rs_host::LeanCancellationToken::new() -> Self
+impl core::clone::Clone for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::clone(&self) -> lean_rs_host::LeanCancellationToken
+impl core::default::Default for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::default() -> lean_rs_host::LeanCancellationToken
+impl core::fmt::Debug for lean_rs_host::LeanCancellationToken
+pub fn lean_rs_host::LeanCancellationToken::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::LeanCancellationToken
+impl core::marker::Send for lean_rs_host::LeanCancellationToken
+impl core::marker::Sync for lean_rs_host::LeanCancellationToken
+impl core::marker::Unpin for lean_rs_host::LeanCancellationToken
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanCancellationToken
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationToken
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
-pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, imports: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 impl core::fmt::Debug for lean_rs_host::LeanCapabilities<'_, '_>
 pub fn lean_rs_host::LeanCapabilities<'_, '_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'h> core::marker::Freeze for lean_rs_host::LeanCapabilities<'lean, 'h>
@@ -779,20 +815,20 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanPosition
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanPosition
 pub struct lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str) -> lean_rs::error::LeanResult<alloc::string::String>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str]) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, name: &str, args: Args, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
-pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, handle: &lean_rs_host::LeanEvidence<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Send for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Sync for lean_rs_host::LeanSession<'lean, 'c>
@@ -863,7 +899,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofSummary
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofSummary
 pub struct lean_rs_host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
-pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str]) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool

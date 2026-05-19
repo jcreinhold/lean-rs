@@ -36,10 +36,11 @@
 //!
 //! ## Module map
 //!
-//! - [`error`] — typed error boundary. [`LeanError`] is a two-variant
+//! - [`error`] — typed error boundary. [`LeanError`] is a three-variant
 //!   `#[non_exhaustive]` enum (`LeanException` for Lean-thrown `IO`
-//!   errors, `Host` for host-stack failures); payload structs
-//!   ([`LeanException`], [`HostFailure`]) have private fields so the
+//!   errors, `Host` for host-stack failures, `Cancelled` for cooperative
+//!   host cancellation); payload structs ([`LeanException`],
+//!   [`HostFailure`], [`LeanCancelled`]) have private fields so the
 //!   bounded-message invariant is structural. Every error projects to a
 //!   [`LeanDiagnosticCode`] via `.code()`. The in-process
 //!   [`DiagnosticCapture`] RAII guard lets tests assert on `tracing`
@@ -86,17 +87,18 @@ pub mod runtime;
 
 /// **Internal extension point.** Not part of the public API; not covered
 /// by semver. Exists so the sibling `lean-rs-host` crate can construct
-/// `LeanError::Host(...)` values via the one constructor wrapper it
+/// `LeanError` values via the narrow constructor wrappers it
 /// uses without bypassing the structural bounding invariant
 /// (`RD-2026-05-17-006`: external callers cannot mint `LeanError`
 /// values with unbounded messages). The seam stays narrow on purpose:
 /// every extra re-export here is interface surface external readers
-/// might mistake for a stable API. Add a wrapper back only when a real
-/// call site needs it.
+/// might mistake for a stable API. Add a wrapper only when a real call
+/// site needs it.
 ///
 /// External crates must not depend on anything under this path.
 #[doc(hidden)]
 pub mod __host_internals {
+    pub use crate::error::host_cancelled;
     pub use crate::error::host_module_init;
 }
 
@@ -106,7 +108,8 @@ pub mod fuzz_entry;
 pub use crate::abi::traits::LeanAbi;
 pub use crate::error::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
-    LEAN_ERROR_MESSAGE_LIMIT, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanResult,
+    LEAN_ERROR_MESSAGE_LIMIT, LeanCancelled, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind,
+    LeanResult,
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary, LeanModule};
