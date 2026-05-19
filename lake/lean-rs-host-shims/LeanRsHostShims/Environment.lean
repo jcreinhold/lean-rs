@@ -1,7 +1,7 @@
 import Lean
 
 /-! Capability category: session-scoped environment queries. The Rust
-    `LeanSession` looks up these ten `@[export]` symbols by name at
+    `LeanSession` looks up these thirteen `@[export]` symbols by name at
     `LeanCapabilities::load_capabilities` time and dispatches every query
     through the cached addresses. Path-layout knowledge (where the
     `.olean` files live for `Lean.importModules`) stays on the Rust side
@@ -20,9 +20,9 @@ structure SourceRange where
   deriving Inhabited
 
 structure DeclarationFilter where
-  includePrivate : Bool
-  includeGenerated : Bool
-  includeInternal : Bool
+  includePrivate : Nat
+  includeGenerated : Nat
+  includeInternal : Nat
   deriving Inhabited
 
 /-- Initialise the Lean search path and import the named modules into a
@@ -77,18 +77,19 @@ def envListDeclarations (env : Environment) : IO (Array Name) := do
   pure <| env.constants.fold (init := #[]) fun acc name _ => acc.push name
 
 private def isGeneratedName (name : Name) : Bool :=
-  name.hasNum && !isPrivateName name
+  (name.hasMacroScopes || name.hasNum) && !isPrivateName name
 
 private def isInternalName (name : Name) : Bool :=
   name.isInternalDetail && !isPrivateName name && !isGeneratedName name
 
 private def keepDeclaration (filter : DeclarationFilter) (name : Name) : Bool :=
-  (filter.includePrivate || !isPrivateName name)
-    && (filter.includeGenerated || !isGeneratedName name)
-    && (filter.includeInternal || !isInternalName name)
+  (filter.includePrivate != 0 || !isPrivateName name)
+    && (filter.includeGenerated != 0 || !isGeneratedName name)
+    && (filter.includeInternal != 0 || !isInternalName name)
 
 @[export lean_rs_host_env_list_declarations_filtered]
 def envListDeclarationsFiltered (env : Environment) (filter : DeclarationFilter) : IO (Array Name) := do
+  let env := if filter.includePrivate != 0 then env.setExporting false else env
   pure <| env.constants.fold (init := #[]) fun acc name _ =>
     if keepDeclaration filter name then acc.push name else acc
 

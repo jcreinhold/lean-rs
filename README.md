@@ -142,7 +142,7 @@ structured error/diagnostic boundary. Ships zero Lean-side code; the Rust-to-Lea
 
 **`lean-rs-host` is the L2 opinionated host stack.** The `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, the bounded `MetaM`
-service registry, and `SessionPool` / `PooledSession`. Requires the 16 + 4 `lean_rs_host_*`
+service registry, and `SessionPool` / `PooledSession`. Requires the 18 + 4 `lean_rs_host_*`
 Lean shim contract in the capability dylib it loads.
 
 The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. Raw

@@ -3,7 +3,7 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves
-//! sixteen mandatory session symbols — ten environment queries plus
+//! eighteen mandatory session symbols — thirteen environment queries plus
 //! the prompt-15 `elaborate` and `kernel_check` pair plus the
 //! prompt-17 `check_evidence` and `evidence_summary` pair — and the
 //! four optional meta-service symbols), starts a session

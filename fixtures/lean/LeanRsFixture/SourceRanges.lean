@@ -21,11 +21,13 @@ run_cmd do
       hints := .abbrev
       safety := .safe
     }
+  let addCoreDecl (decl : Declaration) : CoreM Unit := do
+    let env ← getEnv
+    let env ← ofExceptKernelException <| env.addDeclCore 0 decl none
+    setEnv env
   let privateName := mkPrivateNameCore `LeanRsFixture.SourceRanges (ns ++ `privateSynthetic)
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (ns ++ `syntheticNoRange) 0
-  Lean.Elab.Command.liftCoreM <|
-    withOptions (ResolveName.backward.privateInPublic.set · true) <|
-      addDecl <| mkDef privateName 1
+  Lean.Elab.Command.liftCoreM <| addCoreDecl <| mkDef privateName 1
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (.num (ns ++ `generatedFixture) 0) 1
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (ns ++ `_internalFixture) 2
 

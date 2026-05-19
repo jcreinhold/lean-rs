@@ -33,7 +33,7 @@ Every host operation that can enter Lean accepts
 
 - `LeanCapabilities::session`
 - `SessionPool::acquire`
-- `LeanSession::{query_declaration,list_declarations,declaration_type,declaration_kind,declaration_name}`
+- `LeanSession::{query_declaration,list_declarations,list_declarations_filtered,declaration_source_range,declaration_type,declaration_kind,declaration_name}`
 - `LeanSession::{elaborate,kernel_check,check_evidence,summarize_evidence}`
 - `LeanSession::{run_meta,query_declarations_bulk,declaration_type_bulk,declaration_kind_bulk,declaration_name_bulk,elaborate_bulk,call_capability}`
 

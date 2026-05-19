@@ -14,7 +14,7 @@ import LeanRsFixture.SourceRanges
     workspace-internal test fixtures (containers, effects, scalars, …)
     that the in-tree integration and codegen tests drive.
 
-    The 16 mandatory + 4 optional `@[export] lean_rs_host_*` shims live
+    The 18 mandatory + 4 optional `@[export] lean_rs_host_*` shims live
     in the sibling Lake package `lean-rs-host-shims` at
     `/lake/lean-rs-host-shims/`; the `require` line in
     `fixtures/lean/lakefile.lean` builds the shim package and places

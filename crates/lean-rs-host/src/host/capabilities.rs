@@ -56,7 +56,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// [`crate::LeanSession::call_capability`] for ad-hoc dispatch on
     /// user-authored `@[export]` symbols.
     user_library: LeanLibrary<'lean>,
-    /// Shim dylib carrying the 16+4 `lean_rs_host_*` `@[export]`
+    /// Shim dylib carrying the 18+4 `lean_rs_host_*` `@[export]`
     /// symbols. RAII anchor only — the addresses inside `symbols`
     /// outlive any direct read of this field.
     #[allow(dead_code, reason = "Drop releases the dylib; field is structurally required")]
@@ -183,7 +183,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// resolve ad-hoc function symbols on the user's dylib without
     /// holding a separate library borrow. Ad-hoc calls always go to
     /// the user's dylib, not the shim dylib: the shim dylib hosts a
-    /// fixed contract (the 16+4 `lean_rs_host_*` symbols pre-resolved
+    /// fixed contract (the 18+4 `lean_rs_host_*` symbols pre-resolved
     /// in `symbols`); arbitrary user `@[export]` symbols live in the
     /// user's dylib.
     pub(crate) fn library(&self) -> &LeanLibrary<'lean> {

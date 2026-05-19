@@ -18,9 +18,7 @@ fn fixture_lake_root() -> PathBuf {
 }
 
 fn source_fixture_path() -> PathBuf {
-    fixture_lake_root()
-        .join("LeanRsFixture")
-        .join("SourceRanges.lean")
+    fixture_lake_root().join("LeanRsFixture").join("SourceRanges.lean")
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -42,7 +40,7 @@ fn expected_known_theorem_line() -> u32 {
         .lines()
         .position(|line| line == "theorem knownTheorem : True := by")
         .expect("known theorem line is present");
-    u32::try_from(line + 1).expect("fixture line fits u32")
+    u32::try_from(line.checked_add(1).expect("fixture line index fits usize")).expect("fixture line fits u32")
 }
 
 fn assert_cancelled(err: LeanError) {
@@ -90,7 +88,10 @@ fn declaration_source_range_returns_none_for_synthetic_and_missing_names() {
     let synthetic = session
         .declaration_source_range("LeanRsFixture.SourceRanges.syntheticNoRange", None)
         .expect("synthetic range query succeeds");
-    assert!(synthetic.is_none(), "run_cmd-added synthetic declaration has no source range");
+    assert!(
+        synthetic.is_none(),
+        "run_cmd-added synthetic declaration has no source range"
+    );
 
     let missing = session
         .declaration_source_range("LeanRsFixture.SourceRanges.missingNoRange", None)
@@ -125,7 +126,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
         .len();
     assert!(
         without_private < default,
-        "turning off private names must remove the private fixture declaration",
+        "turning off private names must exclude private fixture declarations",
     );
 
     let with_generated = session
@@ -193,11 +194,19 @@ fn pre_cancelled_token_cancels_before_source_range_or_filter_dispatch() {
         .declaration_source_range("LeanRsFixture.SourceRanges.knownTheorem", Some(&token))
         .expect_err("pre-cancelled source-range query must fail");
     assert_cancelled(err);
-    assert_eq!(session.stats(), before, "pre-cancelled source range records no FFI call");
+    assert_eq!(
+        session.stats(),
+        before,
+        "pre-cancelled source range records no FFI call"
+    );
 
     let err = session
         .list_declarations_filtered(&LeanDeclarationFilter::default(), Some(&token))
         .expect_err("pre-cancelled filtered listing must fail");
     assert_cancelled(err);
-    assert_eq!(session.stats(), before, "pre-cancelled filtered list records no FFI call");
+    assert_eq!(
+        session.stats(),
+        before,
+        "pre-cancelled filtered list records no FFI call"
+    );
 }

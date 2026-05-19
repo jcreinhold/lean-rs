@@ -118,6 +118,8 @@ driving a session.
 | `lean_rs.host.session.import` | info | `imports_len` (count of `&str` imports) |
 | `lean_rs.host.session.query_declaration` | debug | `name` |
 | `lean_rs.host.session.list_declarations` | debug |—|
+| `lean_rs.host.session.list_declarations_filtered` | debug | `include_private`, `include_generated`, `include_internal` |
+| `lean_rs.host.session.declaration_source_range` | debug | `name` |
 | `lean_rs.host.session.declaration_type` / `_kind` / `_name` | debug | `name` |
 | `lean_rs.host.session.declaration_type_bulk` / `_kind_bulk` / `_name_bulk` | debug | `batch_size` |
 | `lean_rs.host.session.elaborate` | debug | `source_len` (chars), `heartbeats`, `diagnostic_byte_limit` |

@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 16 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
+The 18 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The shim package
 [`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
@@ -28,16 +28,20 @@ missing optional meta-service symbol stores `None` in `SessionSymbols`;
 `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that service at dispatch
 time.
 
-## Mandatory contract (16 symbols)
+## Mandatory contract (18 symbols)
 
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
-`KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`) live in
+`KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
+`SourceRange`) live in
 [`lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
 and [`Meta.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and
 the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 `crates/lean-rs-host/src/host/{elaboration,evidence,meta}/`.
+`DeclarationFilter` is a private wire record whose three flags are Nat-backed
+`0`/`1` values so it uses the same object-slot structure ABI as the rest of the
+host-defined records; Rust callers see ordinary `bool` fields.
 
-### Environment and declaration queries (11)
+### Environment and declaration queries (13)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -46,6 +50,8 @@ the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 | `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
 | `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation)` |
 | `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations(cancellation)` |
+| `lean_rs_host_env_list_declarations_filtered` | `(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` | `list_declarations_filtered(filter, cancellation)` |
+| `lean_rs_host_env_declaration_source_range` | `(env : Environment) (name : Name) (sourceRoots : Array String) : IO (Option SourceRange)` | `declaration_source_range(name, cancellation)` |
 | `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` |
 | `lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` | `declaration_type_bulk(names, cancellation)` |
 | `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` |
@@ -82,7 +88,7 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` finds the dylib at the conventional path.
-- Same 16 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
+- Same 18 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
 - The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this

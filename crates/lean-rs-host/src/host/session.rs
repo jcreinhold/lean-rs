@@ -122,8 +122,8 @@ use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sea
 use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
 use lean_rs::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary};
-use lean_rs_sys::lean_object;
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
+use lean_rs_sys::lean_object;
 
 // -- SessionStats: per-session dispatch metrics --------------------------
 
@@ -330,7 +330,8 @@ impl SessionSymbols {
             env_list_declarations: library.resolve_function_symbol("lean_rs_host_env_list_declarations")?,
             env_list_declarations_filtered: library
                 .resolve_function_symbol("lean_rs_host_env_list_declarations_filtered")?,
-            env_declaration_source_range: library.resolve_function_symbol("lean_rs_host_env_declaration_source_range")?,
+            env_declaration_source_range: library
+                .resolve_function_symbol("lean_rs_host_env_declaration_source_range")?,
             env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
             env_declaration_type_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_type_bulk")?,
             env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
@@ -1406,7 +1407,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// typed argument tuple and a typed result decoder.
     ///
     /// This is the transport-neutral escape hatch for capability dylibs
-    /// that export Lean functions beyond the sixteen session-fixed
+    /// that export Lean functions beyond the eighteen session-fixed
     /// symbols. The conversion bounds — [`LeanArgs`] on the argument
     /// tuple and [`DecodeCallResult`] on the result — are the same
     /// bounds [`lean_rs::module::LeanModule::exported`] uses, so an
