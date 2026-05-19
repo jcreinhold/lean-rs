@@ -1,81 +1,83 @@
 # Adding a Lean release to the supported window
 
-Checklist for extending `lean-rs`'s supported toolchain window with a new Lean release. Takes
-~30 minutes plus CI time. The end state is a workspace that builds + tests cleanly against the
-new release on every CI cell.
+Extends `lean-rs`'s supported toolchain window with a new Lean release. ~30 minutes plus CI
+time. End state: workspace builds and tests cleanly against the new release on every CI cell.
 
-The single source of truth for the supported window is
+Single source of truth is
 [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs). Everything
 below either updates that file or follows from it.
 
 ## Steps
 
-### 1. Install the toolchain locally
+### 1. Install the toolchain
 
 ```sh
 elan toolchain install leanprover/lean4:vX.Y.Z
 ```
 
-This downloads ~500 MB. Skip if already installed.
+~500 MB download. Skip if already installed.
 
 ### 2. Capture the `lean.h` SHA-256
 
 ```sh
-shasum -a 256 ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h \
-  | cut -d' ' -f1
+shasum -a 256 \
+  ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h | cut -d' ' -f1
 ```
 
 Compare against the existing entries in [`SUPPORTED_TOOLCHAINS`](../crates/lean-rs-sys/src/supported.rs):
 
-- **If the digest matches an existing entry**, append `"X.Y.Z"` to that entry's `versions`
-  array. This is the common case: Lean often ships point releases without touching `lean.h`.
-- **If the digest is new**, you also need step 3.
+- **Digest matches an existing entry** → append `"X.Y.Z"` to that entry's `versions` array, then jump to step 4. Common case; Lean often ships point releases without touching `lean.h`.
+- **New digest** → do step 3 first.
 
-### 3. (If the digest is new) Verify layout + symbol compatibility
+### 3. (New digest only) Verify layout + symbol compatibility
 
-Quick check — the load-bearing assertions for adding a new digest entry:
+Two checks. Both must pass; either failure means do **not** silently add the entry.
+
+**Layout check.** The 10 `#[repr(C)]` struct definitions in `lean-rs-sys/src/repr.rs` must be
+byte-identical to the active release's header. Extract the relevant block from each header and
+diff:
 
 ```sh
-# (a) The 10 #[repr(C)] struct definitions in lean-rs-sys/src/repr.rs must be byte-identical
-# to the active release's header. Diff the relevant lines:
+EXTRACT='/^typedef struct lean_object \{|^} lean_(ctor|array|sarray|string|closure|ref|thunk|task|promise|external)_object/{p=1} p{print} /^} lean_external_object/{p=0}'
+
 diff \
-  <(awk '/^typedef struct lean_object \{|^} lean_(ctor|array|sarray|string|closure|ref|thunk|task|promise|external)_object/{p=1} p{print} /^} lean_external_object/{p=0}' \
-    ~/.elan/toolchains/leanprover--lean4---v$EXISTING_VERSION/include/lean/lean.h) \
-  <(awk '/^typedef struct lean_object \{|^} lean_(ctor|array|sarray|string|closure|ref|thunk|task|promise|external)_object/{p=1} p{print} /^} lean_external_object/{p=0}' \
-    ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h)
+  <(awk "$EXTRACT" ~/.elan/toolchains/leanprover--lean4---v$EXISTING_VERSION/include/lean/lean.h) \
+  <(awk "$EXTRACT" ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h)
+```
 
-# Empty diff = layouts unchanged = safe to add as another window entry. Non-empty
-# diff = file a Replanning Delta per docs/architecture/02-versioning-and-compatibility.md;
-# do not silently add the entry.
+Empty diff = layouts unchanged, safe to add as another window entry. Non-empty diff = stop
+and revisit the supported-window policy in
+[`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md)
+before proceeding.
 
-# (b) Every REQUIRED_SYMBOLS entry must resolve in the new libleanshared:
+**Symbol check.** Every `REQUIRED_SYMBOLS` entry must resolve in the new `libleanshared`:
+
+```sh
 awk '/^pub const REQUIRED_SYMBOLS/,/^];/' crates/lean-rs-sys/src/lib.rs \
   | grep -oE '"lean_[a-z0-9_]+"' | tr -d '"' | sort -u > /tmp/required.txt
+
 nm -gU ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/lib/lean/libleanshared.dylib \
   | awk '{print $NF}' | sed 's/^_//' | grep -E '^lean_' | sort -u > /tmp/syms.txt
-comm -23 /tmp/required.txt /tmp/syms.txt   # expect empty
 
-# If non-empty: a symbol disappeared upstream. Either add it to that entry's
-# missing_symbols list (and update consumer call sites to tolerate absence), or
-# file a Replanning Delta.
+comm -23 /tmp/required.txt /tmp/syms.txt   # expect empty
 ```
+
+Non-empty output = a symbol disappeared upstream. Two paths: add it to the entry's
+`missing_symbols` list (and update consumer call sites to tolerate absence), or file an
+upstream issue and stop.
 
 ### 4. Update the `SUPPORTED_TOOLCHAINS` table
 
 Edit [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs):
 
-- Add a new `SupportedToolchain { versions: &["X.Y.Z"], header_digest: "<digest>", missing_symbols: &[] }`
-  entry in version order, OR append `"X.Y.Z"` to an existing entry's `versions` array (when
-  the digest matches).
-- Update the mirror entries in
-  [`crates/lean-rs-sys/digests/manifest.json`](../crates/lean-rs-sys/digests/manifest.json) and
-  [`docs/version-matrix.md`](version-matrix.md).
+- Add a new `SupportedToolchain { versions: &["X.Y.Z"], header_digest: "<digest>", missing_symbols: &[] }` entry in version order, **or** append `"X.Y.Z"` to an existing entry's `versions` array when the digest matched.
+- Update the mirror entries in [`crates/lean-rs-sys/digests/manifest.json`](../crates/lean-rs-sys/digests/manifest.json) and [`docs/version-matrix.md`](version-matrix.md).
 
 ### 5. Update the CI matrix
 
-Edit [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): add `"X.Y.Z"` to the
-`matrix.lean_version` list. If `X.Y.Z` is the new highest version, also update the head version
-in [`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml).
+Edit [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): add `"X.Y.Z"` to
+`matrix.lean_version`. If `X.Y.Z` is the new highest version, also update the head version in
+[`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml).
 
 ### 6. Run the local sweep
 
@@ -83,34 +85,26 @@ in [`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml).
 scripts/test-all-toolchains.sh
 ```
 
-This iterates every version in `digests/manifest.json`, repoints the workspace
-`lean-toolchain` files (root + `lake/lean-rs-host-shims/` + `fixtures/lean/`), rebuilds the
-Lake packages, runs `cargo nextest run --workspace`, and prints a per-version pass/fail
-summary. The script restores the original `lean-toolchain` files on exit (even on failure).
+Iterates every version in `digests/manifest.json`, repoints the workspace `lean-toolchain` files
+(root + `lake/lean-rs-host-shims/` + `fixtures/lean/`), rebuilds the Lake packages, runs
+`cargo nextest run --workspace`, and prints a per-version pass/fail summary. The script restores
+the original `lean-toolchain` files on exit (even on failure).
 
-### 7. Commit + PR
+### 7. Commit and PR
 
-Commit message convention: `Add Lean X.Y.Z to the supported toolchain window`. PR description
-includes:
+Commit message: `Add Lean X.Y.Z to the supported toolchain window`. PR description includes:
 
-- The new digest (and whether it matched an existing entry).
+- New digest (and whether it matched an existing entry).
 - Output of step 6 (passed/failed columns).
 - Any `missing_symbols` updates and why.
 
 ## When the bump fails
 
-If the local sweep surfaces a test failure on the new version, **do not pin around it** with
-brittle wrappers or version-specific test allowlists. Two acceptable resolutions:
+A test failure on the new version does **not** justify pinning around it with brittle wrappers
+or version-specific test allowlists. The right resolution depends on what broke:
 
-1. **Real regression upstream** — file an issue on the Lean repo with a minimal repro; consider
-   whether to skip the version pending an upstream fix (i.e. exclude it from the table for
-   now).
-2. **Naming-convention or signature change** — extend the relevant probe (e.g. the dylib
-   filename probe in `crates/lean-rs-host/src/host/lake.rs`, the initializer-symbol probe in
-   `crates/lean-rs/src/module/initializer.rs`) to handle the new shape alongside the existing
-   ones. Tests must pass against every version in the window.
-
-For shifts in the C ABI itself (layout, ownership conventions, header digest with non-additive
-diff), follow [`00-recovery-protocol.md`](../../prompts/lean-rs/00-recovery-protocol.md) and
-file a Replanning Delta. Do not silently bump `EXPECTED_HEADER_DIGEST` without updating the
-mirrors.
+| Failure shape | Action |
+| --- | --- |
+| Test fails on the new version, passes on every other version in the window | Real upstream regression. File an issue on the Lean repo with a minimal repro; consider skipping the version (exclude from the table) pending the fix. |
+| Naming or signature change in Lake's emitted artifacts (dylib filename, initializer symbol shape) | Extend the relevant probe (`crates/lean-rs-host/src/host/lake.rs` for the dylib filename; `crates/lean-rs/src/module/initializer.rs` for initializer symbols) to handle the new shape alongside existing ones. Tests must pass against every version in the window. |
+| C ABI shift (layout, ownership conventions, non-additive header diff) | Stop and discuss with maintainers before patching around the diff. Do not silently bump `EXPECTED_HEADER_DIGEST` without updating the mirrors. |
