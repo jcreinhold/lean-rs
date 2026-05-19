@@ -26,6 +26,10 @@ thread::spawn(move || {
 Already-collected bulk results are discarded. There is no partial-output
 return shape.
 
+Cancellation is a control signal checked at host-owned boundaries. Future
+progress events are observability signals and will be layered on the reusable
+interop callback substrate rather than on this token.
+
 ## What Is Checked
 
 Every host operation that can enter Lean accepts

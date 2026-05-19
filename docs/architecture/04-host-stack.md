@@ -19,6 +19,11 @@ Downstream applications that just need to call a `@[export]` Lean function with 
 arguments—the norm for Rust bindings to GC-hosted languages—depend on `lean-rs` directly
 and skip this crate.
 
+Reusable interop machinery belongs below this crate; see
+[`08-reusable-interop.md`](08-reusable-interop.md). The `lean_rs_host_*` shim
+contract remains the theorem-prover host policy layer, not the generic callback
+or build substrate.
+
 ## Curated crate-root surface
 
 ```rust
