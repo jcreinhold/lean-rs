@@ -37,10 +37,10 @@
 //! let n: u64 = g.call()?;
 //! ```
 //!
-//! ## Design rationale (`RD-2026-05-17-007`)
+//! ## Design rationale
 //!
-//! A single tuple-`Args` handle replaces the originally-prescribed
-//! `LeanExported0..LeanExported12` arity family. Arity lives in the tuple
+//! A single tuple-`Args` handle replaces an arity-stamped
+//! `LeanExported0..LeanExported12` family. Arity lives in the tuple
 //! type, not in the method name. IO-ness lives in the return type rather
 //! than in a `.call_io()` method. Per-type C-ABI representation (unboxed
 //! scalar vs boxed `lean_object*`) is hidden behind [`crate::abi::traits::LeanAbi`]
@@ -51,6 +51,31 @@
 //! the C ABI; the "world" is a Lean-level abstraction the compiler
 //! optimises away for top-level IO exports, so `.call` synthesises no
 //! world token.
+//!
+//! ## Why no declarative macro
+//!
+//! The dispatch sites in `crates/lean-rs-host/src/host/session.rs` each
+//! spell out an address read, a `// SAFETY:` comment, a typed
+//! `LeanExported<...>` annotation, and the
+//! `unsafe { from_function_address(...) }` construction — about four
+//! source lines per site. A declarative macro could compress this to one
+//! line, but at the cost of hiding the type annotation that is the
+//! safety contract, breaking grep over
+//! `LeanExported<'lean, '_, (...), LeanIo<...>>`, and adding one more
+//! abstraction every reader has to learn. Total complexity rises for a
+//! cosmetic gain. Reopen the decision when any of these holds:
+//!
+//! - Five or more new dispatch sites in `host/session.rs` (or a sibling
+//!   module) share the same arity and return shape.
+//! - A bulk-method or `SessionPool` helper introduces an arity-uniform
+//!   batch pattern the manual shape obscures.
+//! - A larger registry-and-dispatch macro becomes viable that subsumes
+//!   both `SessionSymbols::resolve()` and per-site typed-handle
+//!   construction in one declaration.
+//! - A typed `SessionSymbols<'lean>` carries per-field phantom
+//!   signatures so `from_function_address` becomes safe at the type
+//!   level; the per-site `// SAFETY:` comments then lose their per-site
+//!   content and a macro becomes information-preserving.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the

@@ -11,7 +11,6 @@ their `lakefile.lean`. Expected on-disk dylib name:
 This document covers the **wire-level contract**: each Lean signature, the typed Rust shape
 `LeanSession::*` exposes on top, and the Rust call-site mapping. The architectural rationale
 (two dylibs, `RTLD_GLOBAL`, the consumer `lakefile.lean` shape) lives in
-[`downstream-integration.md`](downstream-integration.md) and
 [`architecture/04-host-stack.md`](architecture/04-host-stack.md).
 
 ## Resolution

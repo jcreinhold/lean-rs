@@ -163,7 +163,6 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`04-host-stack.md`](docs/architecture/04-host-stack.md)—the curated `lean-rs-host` surface and its semver boundary.
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md)—the `!Send + !Sync` contract and worker-thread attach discipline.
 - [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md)—per-decision rationale behind `lean-rs-sys`.
-- [`06-codegen-rationale.md`](docs/architecture/06-codegen-rationale.md)—the no-codegen decision for typed exported function handles, and the triggers that would re-open it.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

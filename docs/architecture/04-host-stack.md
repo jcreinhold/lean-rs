@@ -16,9 +16,8 @@ adds the opinionated capability/session/pool stack, and depends on the 13 + 3
 `lean_rs_host_*` `@[export]` Lean shims that capabilities load into the dylib it opens.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed
-arguments—the norm for Rust bindings to GC-hosted languages—depend on `lean-rs` directly and skip this crate. See
-[`../downstream-integration.md`](../downstream-integration.md) for the landed L1 proof and
-deferred L2 packaging.
+arguments—the norm for Rust bindings to GC-hosted languages—depend on `lean-rs` directly
+and skip this crate.
 
 ## Curated crate-root surface
 

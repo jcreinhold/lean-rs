@@ -64,6 +64,6 @@ Explicitly unsupported (do not file as bugs without a compatibility-decision pro
 
 ## See also
 
-For the baseline build context of the v0.1.0 release artefacts (commit, allocator, fixture
-digest, per-bench Lean version), see [`docs/performance/baseline.md`](performance/baseline.md).
-For the frozen public API of each crate, see [`docs/api-review/`](api-review/).
+For how to run the benchmarks and detect regressions, see
+[`docs/performance.md`](performance.md). For the frozen public API of each crate, see
+[`docs/api-review/`](api-review/).

@@ -128,6 +128,26 @@ typed `LeanSession::*` method on top—lives at
 Your `lean_lib` does **not** need to `import LeanRsHostShims`; Lake's two-package build
 handles the dylib-level wiring and the Rust side does the runtime dispatch.
 
+## Caveats
+
+**Nullary unboxed-scalar globals trip the function-path dispatch.** A nullary `@[export]`
+returning an unboxed scalar (e.g., `def decideTrue : Bool := decide (1 + 1 = 2)`) is
+compiled by Lake as a persistent global, not a function symbol. `LeanModule::exported`'s
+function-path dispatch then reads the global's stored scalar-tagged value as if it were a
+function pointer, and `.call(...)` panics with `misaligned pointer dereference`. Workaround:
+add a `Unit` argument so Lake emits a function symbol:
+
+```lean
+def decideTrue (_ : Unit) : Bool := decide (1 + 1 = 2)
+```
+
+The Rust call site then becomes `module.exported::<((),), bool>(...).call(())`.
+
+**Pre-publish `lean-rs = "0.1"` and `lean-rs-host = "0.1"` need path pins.** Until the crates
+land on crates.io, the consumer's `Cargo.toml` pins both `version = "0.1"` and
+`path = "..."`. Cargo enforces the version constraint at build time; once published, drop
+the `path =` attribute.
+
 ## Worked examples
 
 Six runnable examples under

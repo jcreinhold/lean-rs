@@ -195,8 +195,7 @@ ok
 end-to-end workflow: host open → capability load → session import →
 two `elaborate` calls → one `kernel_check` → one bulk declaration
 query → one `Meta.whnf`. Output is per-stage wall-clock for
-performance triage (see
-[`docs/performance/interventions.md`](../../../docs/performance/interventions.md)).
+performance triage (see [`docs/performance.md`](../../../docs/performance.md)).
 
 **Run:**
 
@@ -228,4 +227,4 @@ four above.
 - Diagnostic catalogue: [`docs/diagnostics.md`](../../../docs/diagnostics.md)
 - Concurrency contract: [`docs/architecture/04-concurrency.md`](../../../docs/architecture/04-concurrency.md)
 - Curated public surface: [`docs/architecture/04-host-stack.md`](../../../docs/architecture/04-host-stack.md)
-- Performance baseline: [`docs/performance/baseline.md`](../../../docs/performance/baseline.md)
+- Performance: [`docs/performance.md`](../../../docs/performance.md)
