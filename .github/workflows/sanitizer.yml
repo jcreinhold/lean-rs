@@ -1,0 +1,99 @@
+name: Sanitizer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '24 8 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: sanitizer-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  LEAN_VERSION_HEAD: '4.29.1'
+  RUST_BACKTRACE: '0'
+
+jobs:
+  asan:
+    name: Linux ASan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sanitizer-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Build Lake packages
+        run: |
+          (cd lake/lean-rs-host-shims && lake build)
+          (cd fixtures/lean && lake build)
+
+      - name: ASan Rust and Lean object stress
+        working-directory: crates/lean-rs
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+          LEAN_RS_REFCOUNT_STRESS_ITERS: '20000'
+        run: |
+          cargo +nightly test --target x86_64-unknown-linux-gnu --tests \
+            -- --include-ignored --test-threads=1
+
+      - name: ASan panic-containment fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs-host --target x86_64-unknown-linux-gnu \
+            --test panic_containment -- --test-threads=1
+
+  fuzz:
+    name: ABI fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sanitizer-fuzz-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run ABI fuzz smoke
+        working-directory: crates/lean-rs/fuzz
+        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120

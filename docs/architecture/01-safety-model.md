@@ -67,7 +67,10 @@ Per-file opt-outs require, in order:
 ## Panic discipline
 
 Rust panics must not unwind across a C or Lean frame. The `error` module of `lean-rs` is the
-typed conversion point: it catches panics at the FFI boundary, converts Lean exceptions to
-typed Rust errors, and converts ABI-shape violations to typed errors. No `unwrap()`, `expect()`,
-or `panic!` in non-test code unless a comment names a proof obligation that makes the call
-infallible.
+typed conversion point for Rust-owned boundaries: it catches Rust panics before they cross into
+Lean callbacks, converts Lean `IO` exceptions to typed Rust errors, and converts ABI-shape
+violations to typed errors. It is not a Lean-runtime panic recovery layer. A Lean internal
+panic, generated `unreachable`, `std::exit`, or `abort` during a `LeanSession` call may
+terminate the process; see [`06-panic-containment.md`](06-panic-containment.md). No `unwrap()`,
+`expect()`, or `panic!` in non-test code unless a comment names a proof obligation that makes
+the call infallible.

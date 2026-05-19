@@ -6,9 +6,11 @@ emit structured `tracing` spans against the `lean_rs` target. A downstream calle
 - a stable identifier (`err.code()`) to react by family, independent of internal stage tags that may grow new variants;
 - visibility into where time is spent and where failures originate, without rebuilding the crates.
 
-The taxonomy is unified across both crates (every failure on either side maps to one of nine
-codes); the span catalogue is split by emitting crate so the layer boundary is visible at the
-log line.
+The taxonomy is unified across both crates (every recoverable failure on either side maps to
+one of nine codes); the span catalogue is split by emitting crate so the layer boundary is
+visible at the log line. Lean internal panics are outside this error taxonomy: there is no
+`SessionPoisoned` code. A Lean runtime panic during a `LeanSession` call may terminate the
+process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md).
 
 ## Diagnostic codes
 
@@ -26,6 +28,10 @@ log line.
 
 The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids
 are stable across patch releases.
+
+`Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not
+mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
+boundary.
 
 ## Matching on codes
 
@@ -170,3 +176,4 @@ that drops the relevant fields.
 - [Host stack surface](architecture/04-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
+- [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.

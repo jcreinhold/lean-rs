@@ -25,4 +25,12 @@ def ioFailure : IO (Except String Nat) :=
 def ioThrow : IO Nat :=
   throw <| IO.userError "lean_rs_fixture: deliberate IO exception"
 
+/-- Triggers Lean's panic path. Rust uses this only from a child process:
+    with `LEAN_ABORT_ON_PANIC=1`, the process terminates instead of returning
+    a default value. The `UInt8` argument keeps the export in the function
+    path rather than the nullary global path. -/
+@[export lean_rs_fixture_panic_unit]
+def panicUnit (_ : UInt8) : Unit :=
+  panic! "lean_rs_fixture: deliberate Lean panic"
+
 end LeanRsFixture.Effects
