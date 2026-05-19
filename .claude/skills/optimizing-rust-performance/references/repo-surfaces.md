@@ -1,91 +1,68 @@
 # Repo Measurement Surfaces
 
-Kan already has useful measurement support. Use it before inventing new infrastructure.
+Your workspace likely already has useful measurement support. Use it before inventing new infrastructure.
 
-## Criterion Benches
+## Look For Existing Criterion Benches
 
-### Kernel Core
+The conventions are stable across Rust workspaces. Look for:
 
-- `crates/kernel/core/benches/normalization_bench.rs` Focus: beta reduction, normalization, nested lets, simple value
-    checks.
-- `crates/kernel/core/benches/traversal_bench.rs` Focus: iterative traversal and term erasure under deep structures.
-- `crates/kernel/core/benches/registry_cache_bench.rs` Focus: cold vs cached `DefRegistry` lookup.
-- `crates/kernel/core/benches/pattern_compilation_bench.rs` Focus: case-tree and constructor-pattern matching behavior.
+- `benches/` directories under each crate (`crates/<name>/benches/*.rs`).
+- A `[[bench]]` table in each crate's `Cargo.toml`.
+- Names that hint at scope: `*_bench.rs`, `unification_bench.rs`, `pipeline_bench.rs`, `regression_bench.rs`, `dhat_profile.rs`.
 
-### Kernel Eval / Typecheck
+The fastest way to enumerate benches is:
 
-- `crates/kernel/core-eval/benches/eval_bench.rs` Focus: eval-and-quote and quote-only paths.
-- `crates/kernel/core-typecheck/benches/typecheck_bench.rs` Focus: usage info and context checkpoint operations.
+```bash
+rg --files crates | rg '/benches/'
+cargo bench --workspace --list 2>/dev/null
+```
 
-### Frontend Inference
+When narrowing to one bench, prefer the smallest crate that exercises the suspected hot path. End-to-end pipeline
+benches are useful for confirmation, not for fast iteration.
 
-- `crates/frontend/typecheck-infer/benches/typecheck_bench.rs` Focus: synthesis and checking microbenches.
-- `crates/frontend/typecheck-infer/benches/unification_bench.rs` Focus: unification, constraint queue, meta creation,
-    and definitions-map pressure.
-- `crates/frontend/typecheck-infer/benches/optimization_bench.rs` Focus: combined typechecker hot paths.
-- `crates/frontend/typecheck-infer/benches/regression_bench.rs` Focus: regression guards for equality, closure
-    instantiation, env lookup, neutral conversion.
-- `crates/frontend/typecheck-infer/benches/dhat_profile.rs` Focus: heap profiling for unification-heavy paths.
+## Look For A Shared Profiling Crate
 
-### Pipeline / Runtime / Backend
+Compiler-style workspaces often factor profiling into a dedicated crate (`profiling/`, `bench/`, `<name>-profiling/`)
+with one or more binaries that drive realistic workloads end to end. Common shapes:
 
-- `crates/pipeline/build/benches/pipeline_bench.rs` Focus: stdlib frontend throughput, stage comparison, scaling,
-    single-file latency.
-- `crates/execution/interpreter/benches/interpreter.rs` Focus: runtime interpreter arithmetic, closure application, env
-    lookup.
-- `crates/backend/llvm-backend/benches/performance.rs` Focus: LLVM backend compile-time behavior, not end-to-end runtime
-    of generated code.
+- `bin/profile_frontend.rs` — frontend-only flamegraph and pprof capture.
+- `bin/profile_full_build.rs` — full fixture build orchestration.
+- `bin/profile_interactive.rs` — single-file editor-latency style workload.
+- `bin/profile_parser.rs` — parse-only workload.
+- `bin/collect_baseline_quick.rs` — timing-oriented baseline.
+- `bin/collect_baseline_full.rs` — timing plus allocation-aware baseline via DHAT.
 
-## Profiling Crate
+Plus supporting shell scripts under `scripts/` for sample-based capture
+(`profile.sh`, `profile_with_samply.sh`, `analyze_profile.sh`).
 
-The `profiling/` workspace crate is the shared profiling surface for broader compiler workloads.
+## Look For Existing Profiling Hooks In Code
 
-- `profiling/src/bin/profile_frontend.rs` Frontend-only stdlib compile flamegraph and pprof capture.
-- `profiling/src/bin/profile_full_build.rs` Full fixture build orchestration.
-- `profiling/src/bin/profile_interactive.rs` Single-file editor-latency style workload.
-- `profiling/src/bin/profile_parser.rs` Parse-only workload.
-- `profiling/src/bin/collect_baseline_quick.rs` Timing-oriented baseline.
-- `profiling/src/bin/collect_baseline_full.rs` Timing plus allocation-aware baseline via DHAT.
-
-Supporting scripts:
-
-- `profiling/scripts/profile.sh`
-- `profiling/scripts/profile_with_samply.sh`
-- `profiling/scripts/analyze_profile.sh`
-
-Outputs go to `profiling_results/`.
-
-## Existing Profiling Hooks In Code
-
-- `crates/pipeline/build/src/pipeline/compiler.rs`
-- `crates/pipeline/build/src/compilation_pipeline.rs`
-- `crates/frontend/typecheck-infer/src/unification/dispatch.rs`
-- `crates/frontend/typecheck-infer/src/constraints/solving.rs`
-- `crates/kernel/core-eval/src/engine/trampoline.rs`
-- `crates/kernel/core-eval/src/semantics/store.rs`
-
-Search patterns:
+Many workspaces install profiling spans, observers, or stage-exit hooks at the natural boundaries of the compiler.
+Search for them before adding new ones:
 
 ```bash
 rg -n "profiling|with_profiling_observer|on_stage_exit|ProfilerGuard|dhat|criterion_group" crates profiling
-rg --files crates | rg '/benches/'
 ```
 
-## What Is Missing Or Fragmented
+Common attach points: the pipeline driver, unification dispatch, constraint-solving loops, the evaluation engine, and
+the term store.
 
-The repo has many good local benches, but they are fragmented by crate and level.
+## What Is Usually Missing Or Fragmented
 
-- Microbenches are stronger than throughput benchmarks today.
-- The shared profiling crate is stronger than `crates/tools/cli/src/profile.rs`; the CLI file is only build-profile
+The pattern across compiler-style workspaces:
+
+- Microbenches are stronger than throughput benchmarks. Crates ship per-crate benches that exercise inner loops well but
+    do not compose into an end-to-end story.
+- Profiling crates, when they exist, are usually richer than per-crate `tools/cli` shims — the CLI shim is build-profile
     selection, not a performance workflow.
-- Some hot areas still rely on comments or one-off benches rather than a shared regression suite.
+- Some hot areas rely on comments or one-off benches rather than a shared regression suite.
 
 Implication:
 
 - Start with the closest existing bench.
-- If the change might affect overall compile latency, also run `pipeline_bench` or a `kan-profiling` workload.
-- If a hot path lacks a stable reproducer, add one in the nearest crate bench first, then consider whether the profiling
-    crate needs a new shared workload.
+- If the change might affect overall compile latency, also run a broader pipeline or end-to-end workload.
+- If a hot path lacks a stable reproducer, add one in the nearest crate bench first, then consider whether the shared
+    profiling crate needs a new workload.
 
 ## When To Add Measurement Support
 

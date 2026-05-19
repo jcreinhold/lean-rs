@@ -1,11 +1,11 @@
 ---
 name: optimizing-rust-performance
-description: 'Use for Rust performance in Kan: throughput, allocations, memory footprint, cache locality, hot-path cloning, layout, hashing, pipeline latency, profiling, benches, regressions.'
+description: 'Use for measurement-driven Rust performance work: throughput, allocations, memory footprint, cache locality, hot-path cloning, layout, hashing, pipeline latency, profiling, benches, regressions.'
 ---
 
 # Optimizing Rust Performance
 
-Use this skill for measurement-driven Rust performance work in Kan. The default job is not "make it faster." The job is:
+Use this skill for measurement-driven Rust performance work. The default job is not "make it faster." The job is:
 pick a real workload, measure a baseline, localize the bottleneck, choose the right intervention level, change code, and
 re-measure.
 
@@ -46,16 +46,16 @@ re-measure.
 - Do not accept a performance-sensitive diff without asking what workload proves the win and what broader workload
     guards against regressions.
 
-## Kan-Specific Priorities
+## Workspace-specific priorities
 
 - Prefer fixing phase-local allocation, clone pressure, and redundant recomputation before micro-tuning instruction
     count.
 - Treat normalization/evaluation, typechecker/unifier paths, traversal code, registry/metadata lookup, and pipeline pass
-    boundaries as first-class performance surfaces.
-- Arena lifetime design matters here. Distinguish phase-local data from data that must survive across caches or pass
+    boundaries as first-class performance surfaces in compiler-style workloads.
+- Arena lifetime design matters. Distinguish phase-local data from data that must survive across caches or pass
     boundaries.
-- Many existing benches are microbenches. Use them to localize, then confirm with `pipeline_bench` or `kan-profiling`
-    when the change can affect end-to-end throughput.
+- Many existing benches are microbenches. Use them to localize, then confirm with a broader pipeline or end-to-end
+    workload when the change can affect end-to-end throughput.
 
 ## Review Mode
 

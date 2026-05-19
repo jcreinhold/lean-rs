@@ -302,9 +302,9 @@ ______________________________________________________________________
 
 **Complected:** Using a generic wrapper that discards known information.
 
-This is the most common complecting pattern in the kan codebase. When code knows it has a value type but wraps it in a
-generic `OpenTerm`, it braids the specific type information with a generic container — and every downstream consumer
-must re-discover what the code already knew.
+This is a common complecting pattern in Rust codebases that distinguish multiple value families. When code knows it has
+a value type but wraps it in a generic `OpenTerm`, it braids the specific type information with a generic container —
+and every downstream consumer must re-discover what the code already knew.
 
 ```rust
 // Complected: known value type wrapped in generic

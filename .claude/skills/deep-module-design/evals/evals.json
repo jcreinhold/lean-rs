@@ -3,19 +3,19 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "I'm about to create a new `kan-pipeline` crate that will hold the compilation pipeline stages (ANF, monadic, defunctionalization, simplify, liveness). Right now these are scattered across `crates/backend/`. How should I structure the public API?",
+      "prompt": "I'm about to create a new `compiler-pipeline` crate that will hold the compilation pipeline stages (ANF, monadic, defunctionalization, simplify, liveness). Right now these are scattered across `crates/backend/`. How should I structure the public API?",
       "expected_output": "A design recommendation that identifies volatile decisions to hide, proposes a deep interface (few public entry points serving many pipeline configurations), and avoids complecting pipeline stages with each other or with storage/caching concerns.",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "The `DefRegistry` in `crates/kernel/core-world` feels like it's doing too much — it handles storage, lookup, status tracking, and caching all in one type. I want to clean it up but I'm not sure where to start.",
+      "prompt": "A `DefRegistry` type in our kernel crate feels like it's doing too much — it handles storage, lookup, status tracking, and caching all in one type. I want to clean it up but I'm not sure where to start.",
       "expected_output": "A complecting diagnosis that names the independent concerns braided together, classifies the design pressure, and proposes separation along volatility lines — without just adding thin wrappers.",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "I've been adding pub methods to `WorldView` in `crates/kernel/core/src/world_view.rs` and it's getting unwieldy — 40+ public methods now. How do I decide what should stay and what should move?",
+      "prompt": "I've been adding pub methods to a `WorldView` type in `crates/kernel/core/src/world_view.rs` and it's getting unwieldy — 40+ public methods now. How do I decide what should stay and what should move?",
       "expected_output": "A surface area analysis that groups methods by concern, identifies methods that could be general-purpose (serving multiple callers), spots shallow delegation, and recommends which groups to extract as separate types or traits.",
       "files": []
     },

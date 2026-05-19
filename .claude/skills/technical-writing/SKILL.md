@@ -21,7 +21,6 @@ Help the reader understand. Everything else serves that.
 - Adversarial proof review — use `mathematical-proof-review`
 - `goal.md` or stable `proposal.md` when the mathematical center is being set or revised, not just its prose — use
     `mathematical-conjecture-design`
-- Kan language `.kan` files — use `writing-kan-code`
 
 ## What to read first
 
@@ -57,11 +56,6 @@ When asked to review without editing, report each problem in place — location,
 Reporting is the deliverable.
 
 ## Subagents
-
-For substantial editing work in this repository, dispatch the project editor:
-
-- [`.claude/agents/editor.md`](/Users/jcreinhold/Code/kan/.claude/agents/editor.md) — reads enough local context to
-    preserve technical meaning, then edits for consistency, coherence, clarity, and concision.
 
 For minimal prose-only edits, a local worker is available:
 

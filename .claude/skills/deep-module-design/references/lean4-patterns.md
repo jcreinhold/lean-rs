@@ -3,9 +3,7 @@
 Read this when you've identified complecting in a Lean 4 file or namespace and aren't sure how to separate the concerns.
 Each entry shows a complected pattern and its decomplected alternative.
 
-This file mirrors `rust-patterns.md` slot-for-slot so cross-language intuition transfers cleanly. For Lean
-proof-engineering discipline (search, tactics, mathlib lookup) see the `translating-proofs-to-lean4` skill — it is
-orthogonal to module design and should be loaded alongside this file when the change involves both shape and proofs.
+This file mirrors `rust-patterns.md` slot-for-slot so cross-language intuition transfers cleanly.
 
 ## Table of Contents
 

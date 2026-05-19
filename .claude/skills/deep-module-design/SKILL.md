@@ -432,8 +432,3 @@ Lean-side neighbors:
 - `writing-mathematical-proofs` — when the boundary in question is a theorem-and-its-proof rather than a code module.
     The same philosophy carries over (theorem statement = interface; lemma = function); the proof-side disciplines
     (Tao's "easy to use, not easy to prove"; Lamport's hierarchical method; Leron's level test) live there.
-- `translating-proofs-to-lean4` — Lean proof-engineering discipline (mathlib search, MCP tooling, tactic hygiene) and
-    the Lean tactical apparatus for structured proofs (`have` / `suffices` / `calc`, the Lamport-primitive ↔ Lean-tactic
-    mapping). Load alongside this skill when the change involves both. Lives in the Lean-side sibling repo.
-- `optimizing-lean-performance` — when reshaping a Lean module is motivated by elaboration or build cost. Lives in the
-    Lean-side sibling repo.

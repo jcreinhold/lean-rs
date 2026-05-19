@@ -1,4 +1,4 @@
 interface:
   display_name: "Optimizing Rust Performance"
-  short_description: "Measure-first Rust perf work for Kan"
-  default_prompt: "Use $optimizing-rust-performance to measure a Rust bottleneck in Kan, choose the right intervention, and verify the result against the right benchmarks or profiling workloads."
+  short_description: "Measure-first Rust perf work"
+  default_prompt: "Use $optimizing-rust-performance to measure a Rust bottleneck, choose the right intervention, and verify the result against the right benchmarks or profiling workloads."

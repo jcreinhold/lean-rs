@@ -1,6 +1,6 @@
 ---
 name: edit
-description: Use to improve prose for clarity, precision, and craft in the Kan project — docs, comments, exposition, design notes, and mixed mathematical text — without changing technical meaning.
+description: Use to improve prose for clarity, precision, and craft — docs, comments, exposition, design notes, and mixed mathematical text — without changing technical meaning.
 tools: Read, Edit, Grep, Glob
 ---
 

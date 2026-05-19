@@ -11,7 +11,7 @@ codebases.
 - `SmallVec` is only justified by measured short-length distributions.
 - Faster hashers help only when hashing is actually hot and keys are trusted.
 
-For Kan this means:
+Applying this:
 
 - treat clone pressure, transient vectors, and key choice as first-class suspects
 - use DHAT or allocation-aware baselines when CPU profiles show allocator frames
@@ -23,7 +23,7 @@ For Kan this means:
 - Use `--profile-time` when attaching profilers so the profiler sees the benchmarked code, not Criterion's adaptive
     measurement machinery.
 
-For Kan this means:
+Applying this:
 
 - store baselines around perf-sensitive changes
 - prefer repeatable Criterion workflows over ad hoc `Instant` timing
@@ -34,7 +34,7 @@ For Kan this means:
 - Allocation count, total bytes, and peak live bytes answer different questions.
 - Testing-style heap assertions can guard regressions when a path is stable enough.
 
-For Kan this means:
+Applying this:
 
 - use DHAT for typechecker and unifier allocation work, not just CPU hot spots
 - consider regression-style allocation assertions only for stable, non-noisy paths
@@ -46,9 +46,9 @@ For Kan this means:
 - Curated benchmark suites matter because local wins often regress another workload.
 - Scenario labels such as full, incremental, cached, and uncached change conclusions.
 
-For Kan this means:
+Applying this:
 
-- use both the local crate bench and a broader `kan-profiling` or `pipeline_bench` workload
+- use both the local crate bench and a broader pipeline or end-to-end workload
 - distinguish cold-cache, warm-cache, single-file, stdlib, and full-build claims
 
 ## From rust-analyzer
@@ -57,9 +57,9 @@ For Kan this means:
 - Performance debugging gets much faster when the codebase has command-driven workloads instead of IDE-only
     reproduction.
 
-For Kan this means:
+Applying this:
 
-- prefer command-line reproductions such as `pipeline_bench`, `profile_interactive`, and crate benches
+- prefer command-line reproductions over GUI-only ones
 - if a hot path only reproduces through a larger workflow, consider adding a dedicated workload rather than relying on
     manual reproduction
 
@@ -70,10 +70,10 @@ For Kan this means:
 - The right optimization may be choosing a strategy that better matches the input, not just making the current strategy
     cheaper.
 
-For Kan this means:
+Applying this:
 
-- avoid toy terms that miss the real traversal, normalization, or cache behavior
-- compare realistic term shapes and cache states
+- avoid toy inputs that miss the real traversal, normalization, or cache behavior
+- compare realistic input shapes and cache states
 
 ## From regex-automata
 
@@ -81,7 +81,7 @@ For Kan this means:
 - Dense representations, sparse representations, state ID size, and alphabet factoring each move different cost axes.
 - Compilation cost and runtime cost can trade hard against one another.
 
-For Kan this means:
+Applying this:
 
 - be explicit when choosing between arena slices, persistent vectors, hash tables, dense indices, or cached normalized
     forms
@@ -92,7 +92,7 @@ For Kan this means:
 - Table structure is only one part of map performance.
 - Hasher choice, key shape, load factor, and empty-map behavior can matter as much as the table implementation.
 
-For Kan this means:
+Applying this:
 
 - focus first on integer or interned keys and hot-path hasher choice
 - do not expect switching map type alone to solve a lookup problem

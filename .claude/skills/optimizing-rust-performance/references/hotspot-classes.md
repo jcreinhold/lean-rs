@@ -1,15 +1,17 @@
-# Kan Hotspot Classes
+# Rust Hotspot Classes
 
-These are the bottleneck classes that repeatedly matter in this codebase.
+These are the bottleneck classes that repeatedly matter in compiler-style Rust codebases. Each section names the
+class, lists the patterns to grep for, and calls out the typical failures inside that class.
 
 ## Arena And Phase-Local Allocation
 
 Start here when you see many short-lived vectors, slices, or strings.
 
-- `crates/util/arena/src/lib.rs`
-- `crates/kernel/core/src/arena.rs`
-- `crates/kernel/core/benches/util.rs`
-- `crates/frontend/typecheck-infer/benches/util.rs`
+Search:
+
+```bash
+rg -n "arena|Bump|scratch|fold_term|walk|visitor" crates
+```
 
 What to look for:
 
@@ -22,11 +24,7 @@ What to look for:
 
 These are core compiler hot paths.
 
-- `crates/kernel/core/benches/normalization_bench.rs`
-- `crates/kernel/core-eval/benches/eval_bench.rs`
-- `crates/kernel/core-eval/src/engine/normalize.rs`
-- `crates/kernel/core-eval/src/engine/trampoline.rs`
-- `crates/kernel/core-eval/src/engine/quote_split.rs`
+Look for files named `normalize.rs`, `eval.rs`, `quote.rs`, `whnf.rs`, `trampoline.rs`, and benches that exercise them.
 
 Typical bottlenecks:
 
@@ -39,8 +37,11 @@ Typical bottlenecks:
 
 Traversal shows up both directly and as overhead inside other passes.
 
-- `crates/kernel/core/benches/traversal_bench.rs`
-- search with `rg -n "fold_term|walk|visitor|travers" crates/kernel crates/frontend crates/pipeline`
+Search:
+
+```bash
+rg -n "fold_term|walk|visitor|travers" crates
+```
 
 Typical bottlenecks:
 
@@ -50,16 +51,10 @@ Typical bottlenecks:
 
 ## Typechecker, Unifier, Constraint Queue, Metas
 
-This is one of the most important hotspot families for Kan.
+One of the most important hotspot families in compiler workloads.
 
-- `crates/frontend/typecheck-infer/benches/typecheck_bench.rs`
-- `crates/frontend/typecheck-infer/benches/unification_bench.rs`
-- `crates/frontend/typecheck-infer/benches/regression_bench.rs`
-- `crates/frontend/typecheck-infer/benches/dhat_profile.rs`
-- `crates/frontend/typecheck-infer/src/constraints/queue.rs`
-- `crates/frontend/typecheck-infer/src/constraints/solving.rs`
-- `crates/frontend/typecheck-infer/src/meta/state.rs`
-- `crates/frontend/typecheck-infer/src/unification/dispatch.rs`
+Look for files named `unify.rs`, `unification/dispatch.rs`, `constraints/queue.rs`, `constraints/solving.rs`,
+`meta/state.rs`, and benches that exercise them.
 
 Typical bottlenecks:
 
@@ -73,11 +68,7 @@ Typical bottlenecks:
 
 These costs often hide behind "small" operations executed everywhere.
 
-- `crates/kernel/core/benches/registry_cache_bench.rs`
-- `crates/kernel/core-typecheck/src/metadata/table.rs`
-- `crates/kernel/core-typecheck/src/metadata/recording.rs`
-- `crates/pipeline/build/src/compilation_pipeline.rs`
-- `crates/pipeline/build/src/stdlib_build.rs`
+Look for `registry.rs`, `metadata/table.rs`, cache modules under the pipeline driver, and stdlib build orchestration.
 
 Typical bottlenecks:
 
@@ -88,11 +79,13 @@ Typical bottlenecks:
 
 ## Closure Capture And Environment Representation
 
-Kan uses closures and environments in multiple layers.
+Compilers and interpreters use closures and environments in multiple layers.
 
-- `crates/execution/interpreter/benches/interpreter.rs`
-- `crates/frontend/typecheck-infer/benches/regression_bench.rs`
-- search with `rg -n "CapturedEnv|closure|captured|imbl::Vector|push_back" crates`
+Search:
+
+```bash
+rg -n "CapturedEnv|closure|captured|imbl::Vector|push_back" crates
+```
 
 Typical bottlenecks:
 
@@ -104,11 +97,7 @@ Typical bottlenecks:
 
 Micro wins can lose here.
 
-- `crates/pipeline/build/benches/pipeline_bench.rs`
-- `profiling/src/bin/profile_frontend.rs`
-- `profiling/src/bin/profile_full_build.rs`
-- `crates/pipeline/build/src/compilation_pipeline.rs`
-- `crates/pipeline/build/src/pipeline/module_cache.rs`
+Look for the pipeline driver, the module cache, and any shared profiling crate's full-build / frontend binaries.
 
 Typical bottlenecks:
 
@@ -125,7 +114,7 @@ dominates.
 Search:
 
 ```bash
-rg -n "imbl::|Vector<|HashMap<|HashSet<|SmallVec<" crates/frontend crates/kernel crates/pipeline
+rg -n "imbl::|Vector<|HashMap<|HashSet<|SmallVec<" crates
 ```
 
 Questions to ask:
