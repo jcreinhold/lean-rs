@@ -41,8 +41,9 @@ cargo run -p lean-rs --example interop_callback
 ```
 
 It builds the generic interop shim package and a downstream-style Lake target through
-`lean-toolchain`, opens both dylibs, and lets Lean call back into a Rust
-`LeanCallbackHandle`.
+`lean-toolchain`, opens both dylibs, calls an ordinary Lean export from Rust, and lets
+Lean call back into a Rust `LeanCallbackHandle`. The worked recipe is
+[`docs/recipes/downstream-interop.md`](docs/recipes/downstream-interop.md).
 
 ## Build your own consumer
 
@@ -178,6 +179,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
+- [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

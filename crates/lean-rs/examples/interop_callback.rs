@@ -2,11 +2,13 @@
 //!
 //! The example stays below `lean-rs-host`: it builds the generic interop shim
 //! package and a downstream-style Lake target through `lean-toolchain`, opens
-//! both dylibs with `LeanLibrary`, and invokes a Lean loop that calls a Rust
-//! callback registered through `LeanCallbackHandle`.
+//! both dylibs with `LeanLibrary`, calls an ordinary Lean export from Rust, and
+//! invokes a Lean loop that calls a Rust callback registered through
+//! `LeanCallbackHandle`.
 
 #![allow(clippy::print_stdout)]
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -37,6 +39,14 @@ fn workspace_root() -> PathBuf {
         .unwrap_or(manifest_dir)
 }
 
+fn require(condition: bool, message: &'static str) -> Result<(), io::Error> {
+    if condition {
+        Ok(())
+    } else {
+        Err(io::Error::other(message))
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = workspace_root();
     let interop_shims =
@@ -52,8 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let consumer_library = LeanLibrary::open(runtime, &consumer)?;
     let consumer_module = consumer_library.initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")?;
+    let add = consumer_module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
     let callback_loop =
         consumer_module.exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")?;
+
+    let sum = add.call(20, 22)?;
+    require(sum == 42, "ordinary Lean export returned an unexpected value")?;
 
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
@@ -66,11 +80,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (handle, trampoline) = callback.abi_parts();
     let status = callback_loop.call(handle, trampoline, 4)?;
     let status = LeanCallbackStatus::from_abi(status).unwrap_or(LeanCallbackStatus::Panic);
-    println!("status={status:?}");
-    println!(
-        "events={:?}",
-        events.lock().map(|guard| guard.clone()).unwrap_or_default()
-    );
+    require(status == LeanCallbackStatus::Ok, status.description())?;
+    let observed = events.lock().map(|guard| guard.clone()).unwrap_or_default();
+    let expected = vec![
+        SeenEvent { current: 0, total: 4 },
+        SeenEvent { current: 1, total: 4 },
+        SeenEvent { current: 2, total: 4 },
+        SeenEvent { current: 3, total: 4 },
+    ];
+    require(observed == expected, "callback event sequence did not match")?;
+
+    println!("add={sum}");
+    println!("callback_status={status:?}");
+    println!("callback_events={observed:?}");
+    println!("downstream interop example completed");
 
     Ok(())
 }

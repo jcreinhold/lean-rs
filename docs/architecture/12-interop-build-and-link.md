@@ -74,8 +74,9 @@ builds two Lake targets through the helper:
 - `fixtures/interop-shims` target `LeanRsInteropConsumer`.
 
 The example opens the generic shim dylib globally, opens the downstream-style
-consumer dylib, and invokes a Lean callback loop through
-`LeanCallbackHandle`. It uses no `lean-rs-host` session API.
+consumer dylib, calls an ordinary Lean export from Rust, and invokes a Lean
+callback loop through `LeanCallbackHandle`. It uses no `lean-rs-host` session
+API.
 
 Run it twice to see the cache miss and cache hit paths:
 
@@ -83,6 +84,9 @@ Run it twice to see the cache miss and cache hit paths:
 cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example interop_callback
 ```
+
+The full consumer recipe is
+[`docs/recipes/downstream-interop.md`](../recipes/downstream-interop.md).
 
 ## Scope
 

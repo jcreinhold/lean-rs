@@ -9,6 +9,10 @@ import LeanRsInterop
 
 namespace LeanRsInteropConsumer.Callback
 
+@[export lean_rs_interop_consumer_add]
+def add (a b : UInt64) : UInt64 :=
+  a + b
+
 @[export lean_rs_interop_consumer_callback_loop]
 def callbackLoop (handle trampoline : USize) (total : UInt64) : IO UInt8 :=
   LeanRsInterop.Callback.loop handle trampoline total

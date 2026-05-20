@@ -93,6 +93,10 @@ cargo run
 `initialize_module(package, lib_name)` still takes unmangled names; the loader resolves the
 mangled initializer symbol internally.
 
+For a complete downstream-style example that also lets Lean call a Rust callback, run
+`cargo run -p lean-rs --example interop_callback` in the workspace and read
+[`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
+
 Pre-publish (`lean-rs 0.1.0` is not yet on crates.io), pin against the workspace by adding
 `path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.
 Same for `lean-toolchain`.

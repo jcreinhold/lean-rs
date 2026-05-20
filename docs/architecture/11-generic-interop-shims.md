@@ -65,9 +65,9 @@ moving the callback C helper source into the generic package.
 [`fixtures/interop-shims/`](../../fixtures/interop-shims/) is a small Lake
 package that depends on `lean-rs-interop-shims` without importing
 `lean-rs-host-shims`. Its `LeanRsInteropConsumer.Callback` module exports a
-callback loop through the generic helper. The fixture verifies that downstream
-capability packages can use the generic interop package without taking a host
-session dependency.
+plain addition function and a callback loop through the generic helper. The
+fixture verifies that downstream capability packages can use typed exports and
+generic callbacks without taking a host session dependency.
 
 Build commands:
 
@@ -80,6 +80,8 @@ Rust consumers should not compute the resulting dylib paths by hand. Use
 `lean_toolchain::build_lake_target` for both the generic shim target and the
 consumer target; see [`12-interop-build-and-link.md`](12-interop-build-and-link.md)
 and [`crates/lean-rs/examples/interop_callback.rs`](../../crates/lean-rs/examples/interop_callback.rs).
+The consumer-facing recipe is
+[`docs/recipes/downstream-interop.md`](../recipes/downstream-interop.md).
 
 ## Non-Goals
 

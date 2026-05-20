@@ -78,5 +78,7 @@ The host shim ABI remains unchanged by this architecture record. The generic
 shim package is documented in
 [`11-generic-interop-shims.md`](11-generic-interop-shims.md). The build-script
 helper path and cache contract are documented in
-[`12-interop-build-and-link.md`](12-interop-build-and-link.md). The next
-implementation steps are downstream examples and then structured host progress.
+[`12-interop-build-and-link.md`](12-interop-build-and-link.md). The downstream
+recipe is documented in
+[`../recipes/downstream-interop.md`](../recipes/downstream-interop.md). The next
+implementation step is structured host progress on the shared substrate.
