@@ -51,7 +51,9 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decis
 interop release contract. See [`16-production-boundary.md`](16-production-boundary.md) for the
 worker-process boundary around `lean-rs-host` and
 [`17-worker-session-adapter.md`](17-worker-session-adapter.md) for the narrow
-host-session subset available across that boundary.
+host-session subset available across that boundary. See
+[`18-worker-data-streaming.md`](18-worker-data-streaming.md) for arbitrary
+downstream row streams over the worker process boundary.
 
 ## Hidden knowledge
 
