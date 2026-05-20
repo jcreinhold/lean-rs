@@ -19,7 +19,9 @@ does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
 ## Run the worked examples
 
-Seven runnable examples live under [`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture once, then run any of them:
+Seven host-stack examples live under
+[`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture
+once, then run any of them:
 
 ```sh
 (cd fixtures/lean && lake build)
@@ -31,6 +33,16 @@ elaborate → kernel-check → bulk query → `Meta.whnf`) in one process; four 
 (`theorem_query`, `evaluate`, `proof_check`, `meta_query`) each isolate one verb. See
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md) for the
 per-example walkthrough—what each one teaches, expected output, and common failures.
+
+For L1 interop without `lean-rs-host`, run the generic callback example:
+
+```sh
+cargo run -p lean-rs --example interop_callback
+```
+
+It builds the generic interop shim package and a downstream-style Lake target through
+`lean-toolchain`, opens both dylibs, and lets Lean call back into a Rust
+`LeanCallbackHandle`.
 
 ## Build your own consumer
 
@@ -61,7 +73,7 @@ and records the dylib path for `main.rs`:
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::emit_lean_link_directives();
+    lean_toolchain::emit_lean_link_directives_checked()?;
     let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
     println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
     Ok(())
@@ -128,7 +140,7 @@ path.
 
 `lean-toolchain` provides Lean toolchain discovery, the typed `ToolchainFingerprint`, fixture
 digest, layered link diagnostics, and `build.rs` helpers downstream embedders call from their
-own build scripts (`emit_lean_link_directives` and `build_lake_target`, used above).
+own build scripts (`emit_lean_link_directives_checked` and `build_lake_target`, used above).
 
 **`lean-rs` is the L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime),
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported
@@ -165,6 +177,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md)—the test-only callback ABI proof before a public callback registry.
 - [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
+- [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

@@ -254,20 +254,18 @@ answers per-iteration latency questions. The measured model and consumer
 guidance live in
 [`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
-## Why no `callbacks` example?
+## L1 callback interop
 
-Rust-side callbacks invoked from Lean are intentionally not on the
-public surface today. The infrastructure for the panic-containment
-boundary exists (`LeanError::callback_panic`, the `CallbackPanic`
-host stage), but no registration path has landed: no fixture
-`@[export]` accepts a Rust function handle. Shipping a `callbacks`
-example would mean adding speculative public surface, which the
-project explicitly avoids.
+Callbacks are an L1 `lean-rs` feature, not a `lean-rs-host` session feature.
+Run the generic interop example from the workspace root:
 
-When a real downstream caller needs Rust callbacks, the
-panic-containment seam in `crates/lean-rs/src/error/panic.rs` is the
-attach point, and a focused example will follow the same shape as the
-four above.
+```sh
+cargo run -p lean-rs --example interop_callback
+```
+
+That example builds `lean-rs-interop-shims` and a downstream-style Lake target
+with `lean_toolchain::build_lake_target`, then invokes a Lean export that calls
+back into a Rust `LeanCallbackHandle`.
 
 ## Pointers
 

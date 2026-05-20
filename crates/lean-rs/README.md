@@ -32,13 +32,18 @@ lean-rs = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—one call covers link-search, link-lib, and the runtime rpath into the Lean
-toolchain's `lib/lean` directory, so the binary runs without
-`DYLD_FALLBACK_LIBRARY_PATH` / `LD_LIBRARY_PATH`:
+**`build.rs`**—one helper covers link-search, link-lib, and the runtime rpath into the Lean
+toolchain's `lib/lean` directory; the other builds the Lake shared-library target and records
+the dylib path for `main.rs`:
 
 ```rust
-fn main() {
-    lean_toolchain::emit_lean_link_directives();
+use std::path::Path;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    lean_toolchain::emit_lean_link_directives_checked()?;
+    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
+    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    Ok(())
 }
 ```
 
@@ -65,17 +70,11 @@ def add (a b : UInt64) : UInt64 := a + b
 **`src/main.rs`**—open the dylib, dispatch typed:
 
 ```rust
-use std::path::PathBuf;
 use lean_rs::{LeanLibrary, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
-    let dylib_ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let dylib = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("lean").join(".lake").join("build").join("lib")
-        .join(format!("libmy__app_MyCapability.{dylib_ext}"));
-
     let runtime = LeanRuntime::init()?;
-    let library = LeanLibrary::open(runtime, &dylib)?;
+    let library = LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
     let module = library.initialize_module("my_app", "MyCapability")?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
@@ -87,15 +86,12 @@ fn main() -> LeanResult<()> {
 Build and run:
 
 ```sh
-(cd lean && lake build)
 cargo run
 ```
 
-Lake mangles each underscore in the package name to a double underscore in the emitted dylib
-filename, so `package «my_app»` + `lean_lib «MyCapability»` produces
-`libmy__app_MyCapability.{dylib,so}`. The same rule applies in
-`initialize_module(package, lib_name)`: pass unmangled names; the loader resolves the mangled
-symbol.
+`build_lake_target` hides Lake's shared-library facet, cache, and filename convention.
+`initialize_module(package, lib_name)` still takes unmangled names; the loader resolves the
+mangled initializer symbol internally.
 
 Pre-publish (`lean-rs 0.1.0` is not yet on crates.io), pin against the workspace by adding
 `path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.

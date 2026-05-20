@@ -67,6 +67,15 @@ pub enum LinkDiagnostics {
         /// Requested Lake target name.
         target_name: String,
     },
+    /// The `lake` executable could not be started.
+    LakeUnavailable {
+        /// Directory where the Lake command would have run.
+        project_root: PathBuf,
+        /// Requested Lake target name.
+        target_name: String,
+        /// One-line process-spawn failure.
+        detail: String,
+    },
     /// `lake build <target>:shared` exited unsuccessfully.
     LakeBuildFailed {
         /// Directory where the Lake command ran.
@@ -141,6 +150,17 @@ impl fmt::Display for LinkDiagnostics {
                 write!(
                     f,
                     "lean-toolchain: Lake target `{target_name}` is not declared in {}",
+                    project_root.display()
+                )
+            }
+            Self::LakeUnavailable {
+                project_root,
+                target_name,
+                detail,
+            } => {
+                write!(
+                    f,
+                    "lean-toolchain: could not start `lake build {target_name}:shared` in {}: {detail}",
                     project_root.display()
                 )
             }

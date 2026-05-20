@@ -76,5 +76,7 @@ New interop surfaces must pass the deep-module test:
 
 The host shim ABI remains unchanged by this architecture record. The generic
 shim package is documented in
-[`11-generic-interop-shims.md`](11-generic-interop-shims.md). The next
+[`11-generic-interop-shims.md`](11-generic-interop-shims.md). The build-script
+helper path and cache contract are documented in
+[`12-interop-build-and-link.md`](12-interop-build-and-link.md). The next
 implementation steps are downstream examples and then structured host progress.

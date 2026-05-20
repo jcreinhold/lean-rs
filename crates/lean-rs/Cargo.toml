@@ -66,6 +66,7 @@ dhat-heap = ["dep:dhat"]
 fuzzing = []
 
 [dev-dependencies]
+lean-toolchain = { path = "../lean-toolchain" }
 # Compile-fail tests pinning the curated surface invariants (handles
 # cannot outlive their runtime borrow; runtime / session / handles are
 # !Send + !Sync). Each negative case lives under tests/compile_fail/.

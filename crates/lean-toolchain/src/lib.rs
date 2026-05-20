@@ -5,9 +5,9 @@
 //! allowlist, the header SHA-256 digest, and the link directives. This crate composes on top:
 //! a typed [`ToolchainFingerprint`], the Lake [`LAKE_FIXTURE_DIGEST`], a layered
 //! [`LinkDiagnostics`] error type, and reusable build-script helpers
-//! ([`emit_lean_link_directives`], [`build_lake_target`]) that downstream embedders can call
-//! from their own `build.rs` to get consistent link/rerun directives and Lake dylib paths
-//! without duplicating policy.
+//! ([`emit_lean_link_directives_checked`], [`build_lake_target`]) that downstream embedders
+//! can call from their own `build.rs` to get consistent link/rerun directives and Lake dylib
+//! paths without duplicating policy.
 //!
 //! ## Single typed entry point
 //!
@@ -26,7 +26,7 @@ mod diagnostics;
 mod discover;
 mod fingerprint;
 
-pub use build_helpers::{build_lake_target, emit_lean_link_directives};
+pub use build_helpers::{build_lake_target, emit_lean_link_directives, emit_lean_link_directives_checked};
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};

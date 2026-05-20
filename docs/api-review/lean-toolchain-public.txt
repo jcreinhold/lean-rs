@@ -42,6 +42,10 @@ pub lean_toolchain::LinkDiagnostics::LakeOutputUnresolved::target_name: alloc::s
 pub lean_toolchain::LinkDiagnostics::LakeTargetMissing
 pub lean_toolchain::LinkDiagnostics::LakeTargetMissing::project_root: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::LakeTargetMissing::target_name: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeUnavailable
+pub lean_toolchain::LinkDiagnostics::LakeUnavailable::detail: alloc::string::String
+pub lean_toolchain::LinkDiagnostics::LakeUnavailable::project_root: std::path::PathBuf
+pub lean_toolchain::LinkDiagnostics::LakeUnavailable::target_name: alloc::string::String
 pub lean_toolchain::LinkDiagnostics::MissingHeader
 pub lean_toolchain::LinkDiagnostics::MissingHeader::path: std::path::PathBuf
 pub lean_toolchain::LinkDiagnostics::MissingLean
@@ -139,4 +143,5 @@ pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::build_lake_target(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::discover_toolchain(opts: &lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()
+pub fn lean_toolchain::emit_lean_link_directives_checked() -> core::result::Result<(), lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::required_symbols() -> &'static [&'static str]

@@ -18,7 +18,7 @@
 //!
 //! ```ignore
 //! let runtime = lean_rs::LeanRuntime::init()?;
-//! let library = lean_rs::LeanLibrary::open(runtime, "./.lake/build/lib/libMyLib_MyMod.dylib")?;
+//! let library = lean_rs::LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
 //! let module  = library.initialize_module("my_pkg", "MyMod")?;
 //! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;
 //! let sum     = add.call((3, 4))?;

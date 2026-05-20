@@ -12,7 +12,7 @@
 //! use std::path::Path;
 //!
 //! fn main() {
-//!     lean_toolchain::emit_lean_link_directives();
+//!     lean_toolchain::emit_lean_link_directives_checked()?;
 //!     let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
 //!     println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
 //!     Ok::<(), Box<dyn std::error::Error>>(())
@@ -27,6 +27,7 @@
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -37,8 +38,9 @@ use sha2::{Digest, Sha256};
 use crate::diagnostics::LinkDiagnostics;
 use crate::discover::{DiscoverOptions, ToolchainInfo, discover_toolchain};
 
-/// Set once on the first call to make repeat calls (e.g. multiple
-/// `build.rs` invocations within one process) cheap and idempotent.
+/// Set once after a successful link-directive emission to make repeat calls
+/// (e.g. multiple `build.rs` invocations within one process) cheap and
+/// idempotent.
 static EMITTED: OnceLock<()> = OnceLock::new();
 
 /// Emit Lean link-search, link-lib, and runtime rpath directives plus
@@ -61,15 +63,42 @@ static EMITTED: OnceLock<()> = OnceLock::new();
 ///
 /// Subsequent calls within the same process are no-ops.
 pub fn emit_lean_link_directives() {
-    if EMITTED.set(()).is_err() {
-        return;
+    if let Err(diagnostic) = emit_lean_link_directives_checked() {
+        println!("cargo:warning={diagnostic}");
+    }
+}
+
+/// Emit Lean link-search, link-lib, and runtime rpath directives, returning
+/// typed diagnostics if the active Lean toolchain cannot be resolved.
+///
+/// This is the build-script helper to use when the consumer wants `main() ->
+/// Result<_, LinkDiagnostics>` or wants to map discovery failures into its own
+/// error type. It emits the same `cargo:rustc-link-*`, rpath, and rerun
+/// directives as [`emit_lean_link_directives`]. On failure, it still emits the
+/// environment-variable rerun triggers discovery consulted, then returns the
+/// [`LinkDiagnostics`] value instead of degrading it to `cargo:warning=`.
+///
+/// Subsequent successful calls within the same process are no-ops.
+///
+/// # Errors
+///
+/// Returns the diagnostics from [`discover_toolchain`] when Lean cannot be
+/// found, the discovered prefix is malformed, or the active Lean version is
+/// outside the supported window.
+pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
+    if EMITTED.get().is_some() {
+        return Ok(());
     }
 
     match discover_toolchain(&DiscoverOptions::default()) {
-        Ok(info) => emit_for(&info),
+        Ok(info) => {
+            emit_for(&info);
+            let _ = EMITTED.set(());
+            Ok(())
+        }
         Err(diagnostic) => {
-            println!("cargo:warning={diagnostic}");
             emit_rerun_triggers(None);
+            Err(diagnostic)
         }
     }
 }
@@ -203,15 +232,23 @@ fn build_lake_target_with_runner(
     let cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set);
     let cache_path = cache_path(&project_root, target_name);
     if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == cache_key) {
+        emit_lake_trace(format_args!(
+            "lean-toolchain: cache hit for Lake target `{target_name}` in {}; using {}",
+            project_root.display(),
+            dylib.display(),
+        ));
         return Ok(dylib);
     }
+    emit_lake_trace(format_args!(
+        "lean-toolchain: cache miss for Lake target `{target_name}` in {}; running `lake build {target_name}:shared`",
+        project_root.display(),
+    ));
 
     let run = runner
         .build_shared(&project_root, target_name)
-        .map_err(|err| LinkDiagnostics::LakeBuildFailed {
+        .map_err(|err| LinkDiagnostics::LakeUnavailable {
             project_root: project_root.clone(),
             target_name: target_name.to_owned(),
-            status: "failed to spawn".to_owned(),
             detail: err.to_string(),
         })?;
     if !run.success {
@@ -435,6 +472,12 @@ fn command_detail(stdout: &[u8], stderr: &[u8]) -> String {
     }
 }
 
+fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
+    let mut stderr = io::stderr().lock();
+    drop(stderr.write_fmt(args));
+    drop(stderr.write_all(b"\n"));
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
@@ -456,6 +499,7 @@ mod tests {
         SuccessModern,
         SuccessLegacy,
         Failure,
+        SpawnError,
     }
 
     impl FakeLake {
@@ -499,6 +543,7 @@ mod tests {
                     stdout: b"stdout detail\n".to_vec(),
                     stderr: b"stderr detail\n".to_vec(),
                 }),
+                FakeMode::SpawnError => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "lake missing")),
             }
         }
     }
@@ -591,6 +636,44 @@ mod tests {
             other => panic!("expected LakeBuildFailed, got {other:?}"),
         }
         assert!(!rendered.contains('\n'));
+    }
+
+    #[test]
+    fn missing_lake_is_typed() {
+        let root = make_project("spawn-error", "MyCapability");
+        let mut runner = FakeLake::new(FakeMode::SpawnError);
+        let err = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect_err("spawn error");
+
+        match err {
+            LinkDiagnostics::LakeUnavailable {
+                target_name, detail, ..
+            } => {
+                assert_eq!(target_name, "MyCapability");
+                assert!(detail.contains("lake missing"));
+            }
+            other => panic!("expected LakeUnavailable, got {other:?}"),
+        }
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[test]
+    fn cache_hit_skips_lake_invocation_for_interop_dependency_shape() {
+        let root = make_project("interop-cache-hit", "InteropConsumer");
+        write_file(
+            &root.join("lakefile.lean"),
+            "import Lake\nopen Lake DSL\npackage «my_pkg»\nrequire «lean_rs_interop_shims» from \"../../lake/lean-rs-interop-shims\"\n@[default_target]\nlean_lib «InteropConsumer» where\n  defaultFacets := #[LeanLib.sharedFacet]\n",
+        );
+        write_file(
+            &root.join("lake-manifest.json"),
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"../../lake/lean-rs-interop-shims","configFile":"lakefile.lean"}],"name":"my_pkg","lakeDir":".lake"}"#,
+        );
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+
+        let first = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner).expect("first build");
+        let second = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner).expect("cached build");
+
+        assert_eq!(first, second);
+        assert_eq!(runner.calls(), 1, "second call should use cache");
     }
 
     #[test]

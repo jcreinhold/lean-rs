@@ -24,12 +24,18 @@ lean-toolchain = "0.1"
 use std::path::Path;
 
 fn main() {
-    lean_toolchain::emit_lean_link_directives();
+    lean_toolchain::emit_lean_link_directives_checked()?;
     let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
     println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
     Ok::<(), Box<dyn std::error::Error>>(())
 }
 ```
+
+`build_lake_target` also covers Lake targets that depend on the generic
+`lean-rs-interop-shims` package. It reports cache hits and misses on stderr,
+emits only `cargo:` directives on stdout, and returns typed `LinkDiagnostics`
+for missing `lake`, target lookup failures, Lake build failures, and unresolved
+outputs.
 
 See the [workspace README](https://github.com/jcreinhold/lean-rs) for the four-crate
 architecture overview and [`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)

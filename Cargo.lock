@@ -341,6 +341,7 @@ dependencies = [
  "criterion",
  "dhat",
  "lean-rs-sys",
+ "lean-toolchain",
  "libloading",
  "object 0.36.7",
  "tracing",

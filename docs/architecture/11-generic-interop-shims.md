@@ -76,6 +76,11 @@ cd lake/lean-rs-interop-shims && lake build
 cd fixtures/interop-shims && lake build
 ```
 
+Rust consumers should not compute the resulting dylib paths by hand. Use
+`lean_toolchain::build_lake_target` for both the generic shim target and the
+consumer target; see [`12-interop-build-and-link.md`](12-interop-build-and-link.md)
+and [`crates/lean-rs/examples/interop_callback.rs`](../../crates/lean-rs/examples/interop_callback.rs).
+
 ## Non-Goals
 
 The package is not a broad Lean standard library for Rust interop. It should

@@ -44,11 +44,13 @@ lean-rs-host = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—unchanged from the L1 setup; the helper covers both crates:
+**`build.rs`**—unchanged from the L1 setup; the checked helper reports Lean
+toolchain failures as typed diagnostics:
 
 ```rust
-fn main() {
-    lean_toolchain::emit_lean_link_directives();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    lean_toolchain::emit_lean_link_directives_checked()?;
+    Ok(())
 }
 ```
 
