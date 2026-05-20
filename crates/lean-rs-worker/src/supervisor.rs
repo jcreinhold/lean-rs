@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult,
-    LeanWorkerProgressSink, LeanWorkerSessionConfig, check_cancelled, elapsed_event, report_parent_progress,
+    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig, check_cancelled, elapsed_event,
+    report_parent_data_row, report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -271,6 +272,8 @@ pub enum LeanWorkerError {
     Cancelled { operation: &'static str },
     /// A parent-side progress sink panicked while handling a worker event.
     ProgressPanic { message: String },
+    /// A parent-side data sink panicked while handling a worker row.
+    DataSinkPanic { message: String },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -296,6 +299,7 @@ impl fmt::Display for LeanWorkerError {
             }
             Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
+            Self::DataSinkPanic { message } => write!(f, "worker data sink panicked: {message}"),
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -317,6 +321,7 @@ impl std::error::Error for LeanWorkerError {
             | Self::Timeout { .. }
             | Self::Cancelled { .. }
             | Self::ProgressPanic { .. }
+            | Self::DataSinkPanic { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -670,6 +675,38 @@ impl LeanWorker {
         }
     }
 
+    #[doc(hidden)]
+    /// Emit synthetic worker data rows through the private protocol for row sink tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the sink panics,
+    /// cancellation is observed, or protocol communication fails.
+    pub fn __emit_test_rows(
+        &mut self,
+        streams: Vec<String>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        data: Option<&dyn LeanWorkerDataSink>,
+    ) -> Result<u64, LeanWorkerError> {
+        const OPERATION: &str = "emit_test_rows";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::EmitTestRows { streams })?;
+        self.record_request(false);
+        match self.read_response_with_events(OPERATION, None, cancellation, data)? {
+            Response::RowsComplete { count } => Ok(count),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
     pub(crate) fn open_worker_session(
         &mut self,
         config: &LeanWorkerSessionConfig,
@@ -922,6 +959,16 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<Response, LeanWorkerError> {
+        self.read_response_with_events(operation, progress, cancellation, None)
+    }
+
+    fn read_response_with_events(
+        &mut self,
+        operation: &'static str,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        data: Option<&dyn LeanWorkerDataSink>,
+    ) -> Result<Response, LeanWorkerError> {
         let started = Instant::now();
         loop {
             let Some(stdout) = self.stdout.as_mut() else {
@@ -944,6 +991,13 @@ impl LeanWorker {
                         return Err(LeanWorkerError::Cancelled { operation });
                     }
                 }
+                Message::DataRow(row) => {
+                    report_parent_data_row(data, row.into())?;
+                    if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
+                        self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
+                        return Err(LeanWorkerError::Cancelled { operation });
+                    }
+                }
                 Message::Response(Response::Error { code, message }) => {
                     return Err(LeanWorkerError::Worker { code, message });
                 }
@@ -951,7 +1005,6 @@ impl LeanWorker {
                 other @ (Message::Handshake { .. }
                 | Message::Request(_)
                 | Message::Diagnostic(_)
-                | Message::DataRow(_)
                 | Message::FatalExit(_)) => {
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),

@@ -6,6 +6,8 @@ pub lean_rs_worker::LeanWorkerError::ChildExited
 pub lean_rs_worker::LeanWorkerError::ChildExited::exit: lean_rs_worker::LeanWorkerExit
 pub lean_rs_worker::LeanWorkerError::ChildPanicOrAbort
 pub lean_rs_worker::LeanWorkerError::ChildPanicOrAbort::exit: lean_rs_worker::LeanWorkerExit
+pub lean_rs_worker::LeanWorkerError::DataSinkPanic
+pub lean_rs_worker::LeanWorkerError::DataSinkPanic::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::Handshake
 pub lean_rs_worker::LeanWorkerError::Handshake::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::ProgressPanic
@@ -170,6 +172,25 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerConfig
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerConfig
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerConfig
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerConfig
+pub struct lean_rs_worker::LeanWorkerDataRow
+pub lean_rs_worker::LeanWorkerDataRow::payload: serde_json::value::Value
+pub lean_rs_worker::LeanWorkerDataRow::sequence: u64
+pub lean_rs_worker::LeanWorkerDataRow::stream: alloc::string::String
+impl core::clone::Clone for lean_rs_worker::LeanWorkerDataRow
+pub fn lean_rs_worker::LeanWorkerDataRow::clone(&self) -> lean_rs_worker::LeanWorkerDataRow
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerDataRow
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerDataRow
+pub fn lean_rs_worker::LeanWorkerDataRow::eq(&self, other: &lean_rs_worker::LeanWorkerDataRow) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerDataRow
+pub fn lean_rs_worker::LeanWorkerDataRow::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerDataRow
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerDataRow
+impl core::marker::Send for lean_rs_worker::LeanWorkerDataRow
+impl core::marker::Sync for lean_rs_worker::LeanWorkerDataRow
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerDataRow
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDataRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDataRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDataRow
 pub struct lean_rs_worker::LeanWorkerDiagnostic
 pub lean_rs_worker::LeanWorkerDiagnostic::column: core::option::Option<u32>
 pub lean_rs_worker::LeanWorkerDiagnostic::end_column: core::option::Option<u32>
@@ -381,5 +402,7 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerStats
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerStats
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerStats
+pub trait lean_rs_worker::LeanWorkerDataSink: core::marker::Send + core::marker::Sync
+pub fn lean_rs_worker::LeanWorkerDataSink::report(&self, row: lean_rs_worker::LeanWorkerDataRow)
 pub trait lean_rs_worker::LeanWorkerProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_worker::LeanWorkerProgressSink::report(&self, event: lean_rs_worker::LeanWorkerProgressEvent)

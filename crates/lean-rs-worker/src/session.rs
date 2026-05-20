@@ -10,8 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 use crate::protocol::{
-    WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus,
+    DataRow, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus,
 };
 use crate::supervisor::{LeanWorker, LeanWorkerError};
 
@@ -167,6 +169,37 @@ pub struct LeanWorkerProgressEvent {
 /// Parent-side sink for worker progress events.
 pub trait LeanWorkerProgressSink: Send + Sync {
     fn report(&self, event: LeanWorkerProgressEvent);
+}
+
+/// One downstream-owned JSON row delivered over a worker request.
+///
+/// `stream` is a caller-defined channel name. `sequence` starts at zero per
+/// stream inside one request and is assigned by `lean-rs-worker`. `payload` is
+/// owned JSON; callers may keep it after `LeanWorkerDataSink::report` returns.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerDataRow {
+    pub stream: String,
+    pub sequence: u64,
+    pub payload: Value,
+}
+
+impl From<DataRow> for LeanWorkerDataRow {
+    fn from(value: DataRow) -> Self {
+        Self {
+            stream: value.stream,
+            sequence: value.sequence,
+            payload: value.payload,
+        }
+    }
+}
+
+/// Parent-side sink for downstream data rows produced by one worker request.
+///
+/// A sink is borrowed for one request. It receives owned rows and may store
+/// them. If `report` panics, the supervisor catches the panic and returns
+/// `LeanWorkerError::DataSinkPanic`.
+pub trait LeanWorkerDataSink: Send + Sync {
+    fn report(&self, row: LeanWorkerDataRow);
 }
 
 /// Serializable elaboration result returned over the worker boundary.
@@ -415,6 +448,27 @@ pub(crate) fn report_parent_progress(
             "worker progress sink panicked".to_owned()
         };
         LeanWorkerError::ProgressPanic { message }
+    })
+}
+
+pub(crate) fn report_parent_data_row(
+    sink: Option<&dyn LeanWorkerDataSink>,
+    row: LeanWorkerDataRow,
+) -> Result<(), LeanWorkerError> {
+    let Some(sink) = sink else {
+        return Err(LeanWorkerError::Protocol {
+            message: "worker sent data row for a request without a row sink".to_owned(),
+        });
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(row))).map_err(|payload| {
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            (*s).to_owned()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "worker data sink panicked".to_owned()
+        };
+        LeanWorkerError::DataSinkPanic { message }
     })
 }
 
