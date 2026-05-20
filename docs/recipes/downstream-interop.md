@@ -67,8 +67,9 @@ Rust registers a callback and passes the opaque handle plus crate-owned
 trampoline to Lean:
 
 ```rust
-let callback = LeanCallbackHandle::register(|event| {
+let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
     eprintln!("{} / {}", event.current, event.total);
+    LeanCallbackFlow::Continue
 })?;
 let (handle, trampoline) = callback.abi_parts();
 let status = callback_loop.call(handle, trampoline, 4)?;

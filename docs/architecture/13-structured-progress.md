@@ -72,8 +72,10 @@ host-controlled cancellation check.
 The host shims expose additive progress variants returning `IO (Except UInt8 α)`.
 The `UInt8` is the L1 `LeanCallbackStatus` byte. Rust decodes `Except.ok` as the
 method result, maps `Panic` through the callback handle's stored error, and maps
-`StaleHandle` to an internal host invariant failure. Existing no-progress shim
-symbols and signatures are unchanged.
+`StaleHandle`, `WrongPayload`, and `Stopped` to internal host invariant failures.
+Host progress is one-way: unlike a generic L1 callback loop, a progress sink
+does not define stop semantics. Existing no-progress shim symbols and signatures
+are unchanged.
 
 `LeanCapabilities` builds the crate-bundled generic interop and host shim Lake
 targets on demand, then opens the generic interop shim dylib globally before

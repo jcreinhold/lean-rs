@@ -33,9 +33,10 @@ exists, but the documents above are the release contract consumers should follow
 
 `lean-rs` provides the L1 primitive: a `LeanRuntime`, loaded `LeanLibrary` / `LeanModule`
 handles, typed `LeanExported` calls, semantic object handles, structured errors, and
-`LeanCallbackHandle` for synchronous Lean-to-Rust callbacks. Callback handles carry only opaque
-ABI values and a crate-owned trampoline; downstream code does not pass arbitrary function
-pointers to Lean.
+`LeanCallbackHandle<P>` for synchronous Lean-to-Rust callbacks. Callback handles carry only
+opaque ABI values and a crate-owned trampoline; downstream code does not pass arbitrary function
+pointers to Lean. Payloads are a sealed family owned by `lean-rs`; current payloads are
+`LeanProgressTick` and `LeanStringEvent`.
 
 `lean-toolchain` provides the build-script path: link directives for the active Lean toolchain
 and `build_lake_target` for Lake shared-library targets. It owns Lake dylib naming, cache

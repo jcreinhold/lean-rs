@@ -164,10 +164,31 @@ impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for usize
 pub fn usize::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::abi::traits::conversion_error(message: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanError
 pub mod lean_rs::callback
+pub enum lean_rs::callback::LeanCallbackFlow
+pub lean_rs::callback::LeanCallbackFlow::Continue
+pub lean_rs::callback::LeanCallbackFlow::Stop
+impl core::clone::Clone for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::clone(&self) -> lean_rs::callback::LeanCallbackFlow
+impl core::cmp::Eq for lean_rs::callback::LeanCallbackFlow
+impl core::cmp::PartialEq for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::eq(&self, other: &lean_rs::callback::LeanCallbackFlow) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs::callback::LeanCallbackFlow
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Freeze for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Send for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Sync for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Unpin for lean_rs::callback::LeanCallbackFlow
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackFlow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackFlow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackFlow
 #[repr(u8)] pub enum lean_rs::callback::LeanCallbackStatus
 pub lean_rs::callback::LeanCallbackStatus::Ok = 0
 pub lean_rs::callback::LeanCallbackStatus::Panic = 2
 pub lean_rs::callback::LeanCallbackStatus::StaleHandle = 1
+pub lean_rs::callback::LeanCallbackStatus::Stopped = 4
+pub lean_rs::callback::LeanCallbackStatus::WrongPayload = 3
 impl lean_rs::callback::LeanCallbackStatus
 pub const fn lean_rs::callback::LeanCallbackStatus::as_abi(self) -> u8
 pub const fn lean_rs::callback::LeanCallbackStatus::description(self) -> &'static str
@@ -188,43 +209,69 @@ impl core::marker::Unpin for lean_rs::callback::LeanCallbackStatus
 impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackStatus
-pub struct lean_rs::callback::LeanCallbackEvent
-pub lean_rs::callback::LeanCallbackEvent::current: u64
-pub lean_rs::callback::LeanCallbackEvent::total: u64
-impl core::clone::Clone for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::clone(&self) -> lean_rs::callback::LeanCallbackEvent
-impl core::cmp::Eq for lean_rs::callback::LeanCallbackEvent
-impl core::cmp::PartialEq for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::eq(&self, other: &lean_rs::callback::LeanCallbackEvent) -> bool
-impl core::fmt::Debug for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::callback::LeanCallbackEvent
-impl core::marker::StructuralPartialEq for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Freeze for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Send for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Sync for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Unpin for lean_rs::callback::LeanCallbackEvent
-impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackEvent
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackEvent
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackEvent
-pub struct lean_rs::callback::LeanCallbackHandle
-impl lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::abi_handle(&self) -> usize
-pub fn lean_rs::callback::LeanCallbackHandle::abi_parts(&self) -> (usize, usize)
-pub fn lean_rs::callback::LeanCallbackHandle::abi_trampoline(&self) -> usize
-pub fn lean_rs::callback::LeanCallbackHandle::last_error(&self) -> core::option::Option<lean_rs::error::LeanError>
-pub fn lean_rs::callback::LeanCallbackHandle::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanCallbackEvent) + core::marker::Send + core::marker::Sync + 'static
-impl core::fmt::Debug for lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::ops::drop::Drop for lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::drop(&mut self)
-impl core::marker::Freeze for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Send for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Sync for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Unpin for lean_rs::callback::LeanCallbackHandle
-impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackHandle
-impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackHandle
-impl !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackHandle
+pub struct lean_rs::callback::LeanCallbackHandle<P: lean_rs::callback::LeanCallbackPayload>
+impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>
+pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
+impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanStringEvent>
+pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanStringEvent>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanStringEvent) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
+impl<P: lean_rs::callback::LeanCallbackPayload> lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_handle(&self) -> usize
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_parts(&self) -> (usize, usize)
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_trampoline(&self) -> usize
+pub fn lean_rs::callback::LeanCallbackHandle<P>::last_error(&self) -> core::option::Option<lean_rs::error::LeanError>
+impl<P: lean_rs::callback::LeanCallbackPayload> core::fmt::Debug for lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<P: lean_rs::callback::LeanCallbackPayload> core::ops::drop::Drop for lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::drop(&mut self)
+impl<P> core::marker::Freeze for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Send for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Sync for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Unpin for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
+pub struct lean_rs::callback::LeanProgressTick
+pub lean_rs::callback::LeanProgressTick::current: u64
+pub lean_rs::callback::LeanProgressTick::total: u64
+impl core::clone::Clone for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::clone(&self) -> lean_rs::callback::LeanProgressTick
+impl core::cmp::Eq for lean_rs::callback::LeanProgressTick
+impl core::cmp::PartialEq for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::eq(&self, other: &lean_rs::callback::LeanProgressTick) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs::callback::LeanProgressTick
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanProgressTick
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
+impl core::marker::Freeze for lean_rs::callback::LeanProgressTick
+impl core::marker::Send for lean_rs::callback::LeanProgressTick
+impl core::marker::Sync for lean_rs::callback::LeanProgressTick
+impl core::marker::Unpin for lean_rs::callback::LeanProgressTick
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanProgressTick
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanProgressTick
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanProgressTick
+pub struct lean_rs::callback::LeanStringEvent
+pub lean_rs::callback::LeanStringEvent::value: alloc::string::String
+impl core::clone::Clone for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::clone(&self) -> lean_rs::callback::LeanStringEvent
+impl core::cmp::Eq for lean_rs::callback::LeanStringEvent
+impl core::cmp::PartialEq for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::eq(&self, other: &lean_rs::callback::LeanStringEvent) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanStringEvent
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
+impl core::marker::Freeze for lean_rs::callback::LeanStringEvent
+impl core::marker::Send for lean_rs::callback::LeanStringEvent
+impl core::marker::Sync for lean_rs::callback::LeanStringEvent
+impl core::marker::Unpin for lean_rs::callback::LeanStringEvent
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanStringEvent
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanStringEvent
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanStringEvent
+pub trait lean_rs::callback::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
+pub type lean_rs::callback::LeanCallbackEvent = lean_rs::callback::LeanProgressTick
 pub mod lean_rs::error
 #[non_exhaustive] pub enum lean_rs::error::HostStage
 pub lean_rs::error::HostStage::CallbackPanic
@@ -758,10 +805,31 @@ impl core::marker::Unpin for lean_rs::error::HostStage
 impl core::marker::UnsafeUnpin for lean_rs::error::HostStage
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostStage
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostStage
+pub enum lean_rs::LeanCallbackFlow
+pub lean_rs::LeanCallbackFlow::Continue
+pub lean_rs::LeanCallbackFlow::Stop
+impl core::clone::Clone for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::clone(&self) -> lean_rs::callback::LeanCallbackFlow
+impl core::cmp::Eq for lean_rs::callback::LeanCallbackFlow
+impl core::cmp::PartialEq for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::eq(&self, other: &lean_rs::callback::LeanCallbackFlow) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanCallbackFlow
+pub fn lean_rs::callback::LeanCallbackFlow::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs::callback::LeanCallbackFlow
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Freeze for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Send for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Sync for lean_rs::callback::LeanCallbackFlow
+impl core::marker::Unpin for lean_rs::callback::LeanCallbackFlow
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackFlow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackFlow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackFlow
 #[repr(u8)] pub enum lean_rs::LeanCallbackStatus
 pub lean_rs::LeanCallbackStatus::Ok = 0
 pub lean_rs::LeanCallbackStatus::Panic = 2
 pub lean_rs::LeanCallbackStatus::StaleHandle = 1
+pub lean_rs::LeanCallbackStatus::Stopped = 4
+pub lean_rs::LeanCallbackStatus::WrongPayload = 3
 impl lean_rs::callback::LeanCallbackStatus
 pub const fn lean_rs::callback::LeanCallbackStatus::as_abi(self) -> u8
 pub const fn lean_rs::callback::LeanCallbackStatus::description(self) -> &'static str
@@ -930,43 +998,27 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
-pub struct lean_rs::LeanCallbackEvent
-pub lean_rs::LeanCallbackEvent::current: u64
-pub lean_rs::LeanCallbackEvent::total: u64
-impl core::clone::Clone for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::clone(&self) -> lean_rs::callback::LeanCallbackEvent
-impl core::cmp::Eq for lean_rs::callback::LeanCallbackEvent
-impl core::cmp::PartialEq for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::eq(&self, other: &lean_rs::callback::LeanCallbackEvent) -> bool
-impl core::fmt::Debug for lean_rs::callback::LeanCallbackEvent
-pub fn lean_rs::callback::LeanCallbackEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs::callback::LeanCallbackEvent
-impl core::marker::StructuralPartialEq for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Freeze for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Send for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Sync for lean_rs::callback::LeanCallbackEvent
-impl core::marker::Unpin for lean_rs::callback::LeanCallbackEvent
-impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackEvent
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackEvent
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackEvent
-pub struct lean_rs::LeanCallbackHandle
-impl lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::abi_handle(&self) -> usize
-pub fn lean_rs::callback::LeanCallbackHandle::abi_parts(&self) -> (usize, usize)
-pub fn lean_rs::callback::LeanCallbackHandle::abi_trampoline(&self) -> usize
-pub fn lean_rs::callback::LeanCallbackHandle::last_error(&self) -> core::option::Option<lean_rs::error::LeanError>
-pub fn lean_rs::callback::LeanCallbackHandle::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanCallbackEvent) + core::marker::Send + core::marker::Sync + 'static
-impl core::fmt::Debug for lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::ops::drop::Drop for lean_rs::callback::LeanCallbackHandle
-pub fn lean_rs::callback::LeanCallbackHandle::drop(&mut self)
-impl core::marker::Freeze for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Send for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Sync for lean_rs::callback::LeanCallbackHandle
-impl core::marker::Unpin for lean_rs::callback::LeanCallbackHandle
-impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackHandle
-impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackHandle
-impl !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackHandle
+pub struct lean_rs::LeanCallbackHandle<P: lean_rs::callback::LeanCallbackPayload>
+impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>
+pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
+impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanStringEvent>
+pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanStringEvent>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanStringEvent) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
+impl<P: lean_rs::callback::LeanCallbackPayload> lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_handle(&self) -> usize
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_parts(&self) -> (usize, usize)
+pub fn lean_rs::callback::LeanCallbackHandle<P>::abi_trampoline(&self) -> usize
+pub fn lean_rs::callback::LeanCallbackHandle<P>::last_error(&self) -> core::option::Option<lean_rs::error::LeanError>
+impl<P: lean_rs::callback::LeanCallbackPayload> core::fmt::Debug for lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<P: lean_rs::callback::LeanCallbackPayload> core::ops::drop::Drop for lean_rs::callback::LeanCallbackHandle<P>
+pub fn lean_rs::callback::LeanCallbackHandle<P>::drop(&mut self)
+impl<P> core::marker::Freeze for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Send for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Sync for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::Unpin for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
+impl<P> !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
 pub struct lean_rs::LeanCancelled
 impl lean_rs::error::LeanCancelled
 pub fn lean_rs::error::LeanCancelled::message(&self) -> &str
@@ -1147,6 +1199,26 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanName<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
+pub struct lean_rs::LeanProgressTick
+pub lean_rs::LeanProgressTick::current: u64
+pub lean_rs::LeanProgressTick::total: u64
+impl core::clone::Clone for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::clone(&self) -> lean_rs::callback::LeanProgressTick
+impl core::cmp::Eq for lean_rs::callback::LeanProgressTick
+impl core::cmp::PartialEq for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::eq(&self, other: &lean_rs::callback::LeanProgressTick) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanProgressTick
+pub fn lean_rs::callback::LeanProgressTick::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs::callback::LeanProgressTick
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanProgressTick
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
+impl core::marker::Freeze for lean_rs::callback::LeanProgressTick
+impl core::marker::Send for lean_rs::callback::LeanProgressTick
+impl core::marker::Sync for lean_rs::callback::LeanProgressTick
+impl core::marker::Unpin for lean_rs::callback::LeanProgressTick
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanProgressTick
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanProgressTick
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanProgressTick
 pub struct lean_rs::LeanRuntime
 impl lean_rs::LeanRuntime
 pub fn lean_rs::LeanRuntime::init() -> lean_rs::error::LeanResult<&'static Self>
@@ -1159,6 +1231,24 @@ impl core::marker::Unpin for lean_rs::LeanRuntime
 impl core::marker::UnsafeUnpin for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntime
+pub struct lean_rs::LeanStringEvent
+pub lean_rs::LeanStringEvent::value: alloc::string::String
+impl core::clone::Clone for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::clone(&self) -> lean_rs::callback::LeanStringEvent
+impl core::cmp::Eq for lean_rs::callback::LeanStringEvent
+impl core::cmp::PartialEq for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::eq(&self, other: &lean_rs::callback::LeanStringEvent) -> bool
+impl core::fmt::Debug for lean_rs::callback::LeanStringEvent
+pub fn lean_rs::callback::LeanStringEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::callback::LeanStringEvent
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
+impl core::marker::Freeze for lean_rs::callback::LeanStringEvent
+impl core::marker::Send for lean_rs::callback::LeanStringEvent
+impl core::marker::Sync for lean_rs::callback::LeanStringEvent
+impl core::marker::Unpin for lean_rs::callback::LeanStringEvent
+impl core::marker::UnsafeUnpin for lean_rs::callback::LeanStringEvent
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanStringEvent
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanStringEvent
 pub struct lean_rs::LeanThreadGuard<'lean>
 impl<'lean> lean_rs::LeanThreadGuard<'lean>
 pub fn lean_rs::LeanThreadGuard<'lean>::attach(_runtime: &'lean lean_rs::LeanRuntime) -> Self
@@ -1301,4 +1391,8 @@ impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits
 pub const (A1)::ARITY: usize
 impl<'lean> lean_rs::LeanArgs<'lean> for ()
 pub const ()::ARITY: usize
+pub trait lean_rs::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
+impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
+pub type lean_rs::LeanCallbackEvent = lean_rs::callback::LeanProgressTick
 pub type lean_rs::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>

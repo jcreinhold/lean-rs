@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use lean_rs::module::{LeanIo, LeanLibrary};
 use lean_rs::{
-    HostStage, LeanCallbackEvent, LeanCallbackHandle, LeanCallbackStatus, LeanDiagnosticCode, LeanError, LeanRuntime,
+    HostStage, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanDiagnosticCode, LeanError,
+    LeanProgressTick, LeanRuntime, LeanStringEvent,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,8 +21,8 @@ struct SeenEvent {
     total: u64,
 }
 
-impl From<LeanCallbackEvent> for SeenEvent {
-    fn from(value: LeanCallbackEvent) -> Self {
+impl From<LeanProgressTick> for SeenEvent {
+    fn from(value: LeanProgressTick) -> Self {
         Self {
             current: value.current,
             total: value.total,
@@ -101,17 +102,29 @@ fn callback_loop<'lean, 'lib>(
         .expect("callback loop export resolves")
 }
 
+fn string_callback_loop<'lean, 'lib>(
+    library: &'lib LeanLibrary<'lean>,
+) -> lean_rs::LeanExported<'lean, 'lib, (usize, usize, Vec<String>), LeanIo<u8>> {
+    let module = library
+        .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
+        .expect("consumer root module initializes");
+    module
+        .exported::<(usize, usize, Vec<String>), LeanIo<u8>>("lean_rs_interop_consumer_string_callback_loop")
+        .expect("string callback loop export resolves")
+}
+
 #[test]
 fn registered_callback_runs_through_typed_lean_export() {
     let library = consumer_library();
     let callback_loop = callback_loop(&library);
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
-    let callback = LeanCallbackHandle::register(move |event| {
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
         callback_events
             .lock()
             .expect("callback events lock is not poisoned")
             .push(SeenEvent::from(event));
+        LeanCallbackFlow::Continue
     })
     .expect("callback registration succeeds");
 
@@ -134,10 +147,106 @@ fn registered_callback_runs_through_typed_lean_export() {
 }
 
 #[test]
+fn registered_string_callback_decodes_owned_events() {
+    let library = consumer_library();
+    let callback_loop = string_callback_loop(&library);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let callback_events = Arc::clone(&events);
+    let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
+        callback_events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(event.value);
+        LeanCallbackFlow::Continue
+    })
+    .expect("string callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(
+            handle,
+            trampoline,
+            vec!["alpha".to_owned(), "βeta".to_owned(), "with\0nul".to_owned()],
+        )
+        .expect("string callback loop returns");
+
+    assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Ok));
+    assert!(callback.last_error().is_none());
+    assert_eq!(
+        events.lock().expect("callback events lock is not poisoned").as_slice(),
+        &["alpha".to_owned(), "βeta".to_owned(), "with\0nul".to_owned()],
+    );
+}
+
+#[test]
+fn callback_can_stop_lean_loop_cleanly() {
+    let library = consumer_library();
+    let callback_loop = callback_loop(&library);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let callback_events = Arc::clone(&events);
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
+        callback_events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(SeenEvent::from(event));
+        if event.current == 2 {
+            LeanCallbackFlow::Stop
+        } else {
+            LeanCallbackFlow::Continue
+        }
+    })
+    .expect("callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(handle, trampoline, 5)
+        .expect("callback loop returns after requested stop");
+
+    assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Stopped));
+    assert!(callback.last_error().is_none());
+    assert_eq!(
+        events.lock().expect("callback events lock is not poisoned").as_slice(),
+        &[
+            SeenEvent { current: 0, total: 5 },
+            SeenEvent { current: 1, total: 5 },
+            SeenEvent { current: 2, total: 5 },
+        ],
+    );
+}
+
+#[test]
+fn wrong_payload_returns_status_without_calling_callback() {
+    let library = consumer_library();
+    let callback_loop = callback_loop(&library);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let callback_events = Arc::clone(&events);
+    let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
+        callback_events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(event.value);
+        LeanCallbackFlow::Continue
+    })
+    .expect("string callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(handle, trampoline, 1)
+        .expect("tick loop returns wrong-payload status");
+
+    assert_eq!(
+        LeanCallbackStatus::from_abi(status),
+        Some(LeanCallbackStatus::WrongPayload),
+    );
+    assert!(events.lock().expect("callback events lock is not poisoned").is_empty());
+}
+
+#[test]
 fn dropped_handle_reports_stale_without_use_after_drop() {
     let library = consumer_library();
     let callback_loop = callback_loop(&library);
-    let callback = LeanCallbackHandle::register(|_| {}).expect("callback registration succeeds");
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(|_| LeanCallbackFlow::Continue)
+        .expect("callback registration succeeds");
     let (handle, trampoline) = callback.abi_parts();
     drop(callback);
 
@@ -155,12 +264,13 @@ fn dropped_handle_reports_stale_without_use_after_drop() {
 fn callback_panic_is_contained_at_registry_trampoline() {
     let library = consumer_library();
     let callback_loop = callback_loop(&library);
-    let callback = LeanCallbackHandle::register(|event| {
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
         assert_ne!(
             event.current, 2,
             "lean-rs callback registry deliberate panic at {}",
             event.current,
         );
+        LeanCallbackFlow::Continue
     })
     .expect("callback registration succeeds");
 

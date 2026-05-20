@@ -85,11 +85,9 @@ because the registry knows the payload type associated with each handle.
 
 ## Relationship To Existing Docs
 
-[`10-callback-registry.md`](10-callback-registry.md) documents the current
-counter-only registry. That implementation remains the verified release
-surface until the typed payload prompts land. This document records the next
-boundary: the counter event should become `LeanProgressTick`, and string
-callbacks should use `LeanCallbackHandle<LeanStringEvent>`.
+[`10-callback-registry.md`](10-callback-registry.md) documents the implemented
+typed registry. The counter event is `LeanProgressTick`, and string callbacks
+use `LeanCallbackHandle<LeanStringEvent>`.
 
 [`13-structured-progress.md`](13-structured-progress.md) remains host policy.
 Its progress sink should be implemented over `LeanProgressTick`, not over a

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lean_rs::module::{LeanIo, LeanLibrary};
-use lean_rs::{LeanCallbackEvent, LeanCallbackHandle, LeanCallbackStatus, LeanRuntime};
+use lean_rs::{LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanProgressTick, LeanRuntime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SeenEvent {
@@ -21,8 +21,8 @@ struct SeenEvent {
     total: u64,
 }
 
-impl From<LeanCallbackEvent> for SeenEvent {
-    fn from(value: LeanCallbackEvent) -> Self {
+impl From<LeanProgressTick> for SeenEvent {
+    fn from(value: LeanProgressTick) -> Self {
         Self {
             current: value.current,
             total: value.total,
@@ -77,10 +77,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
-    let callback = LeanCallbackHandle::register(move |event| {
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
         if let Ok(mut guard) = callback_events.lock() {
             guard.push(SeenEvent::from(event));
         }
+        LeanCallbackFlow::Continue
     })?;
 
     let (handle, trampoline) = callback.abi_parts();

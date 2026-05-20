@@ -38,10 +38,11 @@ are stable across patch releases.
 mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
 boundary.
 
-L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. A stale
-callback handle is reported as `LeanCallbackStatus::StaleHandle`; a contained callback panic is
-reported as `LeanCallbackStatus::Panic` and recorded on the live handle as `LeanError::Host`
-with code `Internal` and stage `CallbackPanic`.
+L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. `Ok = 0`
+continues the Lean-side callback loop; `StaleHandle = 1` means Lean called a dropped handle;
+`Panic = 2` means Rust contained a callback panic and recorded `LeanError::Host` on the live
+handle; `WrongPayload = 3` means Lean used a handle with the wrong payload trampoline; and
+`Stopped = 4` means the Rust callback asked Lean to stop cleanly.
 
 `lean-toolchain` uses a separate `LinkDiagnostics` enum for build-script work.
 Those diagnostics cover Lean discovery, unsupported toolchains, missing `lake`,

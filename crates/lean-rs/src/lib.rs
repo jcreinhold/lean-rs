@@ -55,9 +55,9 @@
 //!   [`LeanDeclaration`]). Construction and inspection happen Lean-side
 //!   through [`LeanModule::exported`] against caller-authored shims.
 //! - [`callback`] — RAII callback registrations for Lean-to-Rust calls.
-//!   [`LeanCallbackHandle`] hides the registry id and trampoline while
-//!   still producing the two `USize` ABI values generic interop shims
-//!   pass to Lean.
+//!   [`LeanCallbackHandle`] hides the registry id, payload decoder, and
+//!   trampoline while still producing the two `USize` ABI values generic
+//!   interop shims pass to Lean.
 //! - [`runtime`] — process-wide [`LeanRuntime`] anchor,
 //!   [`LeanThreadGuard`] attach RAII, and the lifetime-bound owned /
 //!   borrowed object handles [`Obj`] / [`ObjRef`].
@@ -113,7 +113,11 @@ pub mod __host_internals {
 pub mod fuzz_entry;
 
 pub use crate::abi::traits::LeanAbi;
-pub use crate::callback::{LeanCallbackEvent, LeanCallbackHandle, LeanCallbackStatus};
+#[allow(deprecated, reason = "temporary public compatibility alias until prompt 54")]
+pub use crate::callback::LeanCallbackEvent;
+pub use crate::callback::{
+    LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanProgressTick, LeanStringEvent,
+};
 pub use crate::error::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
     LEAN_ERROR_MESSAGE_LIMIT, LeanCancelled, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind,
