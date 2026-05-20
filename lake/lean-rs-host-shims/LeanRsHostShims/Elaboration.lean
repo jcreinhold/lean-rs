@@ -1,4 +1,5 @@
 import Lean
+import LeanRsInterop.Callback
 
 /-! Capability category: term elaboration and kernel checking driven from
     Rust through the [`LeanSession`] dispatch. Two `@[export]` shims plus
@@ -14,6 +15,13 @@ import Lean
 namespace LeanRsFixture.Elaboration
 
 open Lean
+
+private def reportProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
+  let status ← LeanRsInterop.Callback.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
+  if status == 0 then
+    pure none
+  else
+    pure (some status)
 
 /-- Severity tag attached to each diagnostic. Nullary-only so it
     encodes as a `uint8_t` in the surrounding structure's scalar tail. -/
@@ -183,6 +191,20 @@ def hostElaborateBulk (env : Environment) (sources : Array String)
   sources.mapM fun src =>
     hostElaborate env src none ns fileLabel heartbeats diagByteLimit
 
+@[export lean_rs_host_elaborate_bulk_progress]
+def hostElaborateBulkProgress (env : Environment) (sources : Array String)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (handle trampoline : USize) : IO (Except UInt8 (Array (Except ElabFailure Expr))) := do
+  let mut out := #[]
+  let mut idx := 0
+  for src in sources do
+    let result ← hostElaborate env src none ns fileLabel heartbeats diagByteLimit
+    out := out.push result
+    idx := idx + 1
+    if let some status ← reportProgress? handle trampoline idx sources.size then
+      return .error status
+  return .ok out
+
 /-- Parse, elaborate, and kernel-check a Lean declaration source.
     Drives the full `Lean.Elab.Frontend.process` pipeline, which runs
     `Command.elabCommand` followed by `Environment.addDecl` — the latter
@@ -225,6 +247,17 @@ def hostKernelCheck (env : Environment) (src : String)
       return .unsupported failurePayload
   catch ex =>
     return .unavailable (singleErrorFailure (toString ex) fileLabel)
+
+@[export lean_rs_host_kernel_check_progress]
+def hostKernelCheckProgress (env : Environment) (src : String)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (handle trampoline : USize) : IO (Except UInt8 KernelOutcome) := do
+  if let some status ← reportProgress? handle trampoline 0 1 then
+    return .error status
+  let outcome ← hostKernelCheck env src ns fileLabel heartbeats diagByteLimit
+  if let some status ← reportProgress? handle trampoline 1 1 then
+    return .error status
+  return .ok outcome
 
 /-! ## Prompt 17 — proof summaries and evidence re-validation
 

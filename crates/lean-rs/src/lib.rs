@@ -102,7 +102,9 @@ pub mod runtime;
 /// External crates must not depend on anything under this path.
 #[doc(hidden)]
 pub mod __host_internals {
+    pub use crate::error::host_callback_panic;
     pub use crate::error::host_cancelled;
+    pub use crate::error::host_internal;
     pub use crate::error::host_module_init;
 }
 

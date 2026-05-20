@@ -360,9 +360,9 @@ any panic, exception kind, or sanitizer-detected fault is a finding.
 
 A dedicated workflow at `.github/workflows/sanitizer.yml` runs the Linux ASan command above on
 `ubuntu-latest` nightly, runs the panic-containment fixture and the callback trampoline and
-registry fixtures under ASan, and runs the fuzz target for 120 seconds, on every push to
-`main`, every pull request, and a weekly cron. Failure blocks the PR. The stable workspace
-matrix at `.github/workflows/ci.yml` is unchanged.
+registry fixtures under ASan, runs the host progress callback fixture under ASan, and runs the
+fuzz target for 120 seconds, on every push to `main`, every pull request, and a weekly cron.
+Failure blocks the PR. The stable workspace matrix at `.github/workflows/ci.yml` is unchanged.
 
 ### Coverage gaps
 

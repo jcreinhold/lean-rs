@@ -1,7 +1,8 @@
 import Lean
+import LeanRsInterop.Callback
 
 /-! Capability category: session-scoped environment queries. The Rust
-    `LeanSession` looks up these thirteen `@[export]` symbols by name at
+    `LeanSession` looks up these environment `@[export]` symbols by name at
     `LeanCapabilities::load_capabilities` time and dispatches every query
     through the cached addresses. Path-layout knowledge (where the
     `.olean` files live for `Lean.importModules`) stays on the Rust side
@@ -10,6 +11,13 @@ import Lean
 namespace LeanRsFixture.Environment
 
 open Lean
+
+private def reportProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
+  let status ← LeanRsInterop.Callback.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
+  if status == 0 then
+    pure none
+  else
+    pure (some status)
 
 structure SourceRange where
   file : String
@@ -47,6 +55,16 @@ def sessionImport (searchPaths : Array String) (importNames : Array String) : IO
   -- `elaborate` / `kernel_check` shims see the full operator set
   -- the prelude defines.
   Lean.importModules imports Lean.Options.empty 0 (loadExts := true)
+
+@[export lean_rs_host_session_import_progress]
+def sessionImportProgress (searchPaths : Array String) (importNames : Array String)
+    (handle trampoline : USize) : IO (Except UInt8 Environment) := do
+  if let some status ← reportProgress? handle trampoline 0 importNames.size then
+    return .error status
+  let env ← sessionImport searchPaths importNames
+  if let some status ← reportProgress? handle trampoline importNames.size importNames.size then
+    return .error status
+  return .ok env
 
 /-- Convert a dotted Rust string into a `Lean.Name`. Pure (no IO);
     `Lean.Name.toName` parses the dotted form (`"Foo.Bar"` ⇒
@@ -92,6 +110,23 @@ def envListDeclarationsFiltered (env : Environment) (filter : DeclarationFilter)
   let env := if filter.includePrivate != 0 then env.setExporting false else env
   pure <| env.constants.fold (init := #[]) fun acc name _ =>
     if keepDeclaration filter name then acc.push name else acc
+
+@[export lean_rs_host_env_list_declarations_filtered_progress]
+def envListDeclarationsFilteredProgress (env : Environment) (filter : DeclarationFilter)
+    (handle trampoline : USize) : IO (Except UInt8 (Array Name)) := do
+  let env := if filter.includePrivate != 0 then env.setExporting false else env
+  let mut out := #[]
+  let mut seen := 0
+  for (name, _) in env.constants.toList do
+    seen := seen + 1
+    if keepDeclaration filter name then
+      out := out.push name
+    if seen % 1024 == 0 then
+      if let some status ← reportProgress? handle trampoline out.size 0 then
+        return .error status
+  if let some status ← reportProgress? handle trampoline out.size 0 then
+    return .error status
+  return .ok out
 
 private def moduleSourcePath (moduleName : Name) : System.FilePath :=
   System.FilePath.mk <| moduleName.toString.replace "." System.FilePath.pathSeparator.toString ++ ".lean"
@@ -168,6 +203,24 @@ def envDeclarationTypeBulk (env : Environment) (names : Array String)
           out := out.push type?
       pure out
 
+@[export lean_rs_host_env_declaration_type_bulk_progress]
+def envDeclarationTypeBulkProgress (env : Environment) (names : Array String)
+    (handle trampoline : USize) : IO (Except UInt8 (Array (Option Expr))) := do
+  let mut cache : Std.HashMap String (Option Expr) := {}
+  let mut out := #[]
+  let mut idx := 0
+  for name in names do
+    match cache.get? name with
+    | some type? => out := out.push type?
+    | none =>
+      let type? ← envDeclarationType env name.toName
+      cache := cache.insert name type?
+      out := out.push type?
+    idx := idx + 1
+    if let some status ← reportProgress? handle trampoline idx names.size then
+      return .error status
+  return .ok out
+
 @[export lean_rs_host_env_declaration_kind]
 def envDeclarationKind (env : Environment) (name : Name) : IO String := do
   match env.find? name with
@@ -203,6 +256,24 @@ def envDeclarationKindBulk (env : Environment) (names : Array String)
           out := out.push kind
       pure out
 
+@[export lean_rs_host_env_declaration_kind_bulk_progress]
+def envDeclarationKindBulkProgress (env : Environment) (names : Array String)
+    (handle trampoline : USize) : IO (Except UInt8 (Array String)) := do
+  let mut cache : Std.HashMap String String := {}
+  let mut out := #[]
+  let mut idx := 0
+  for name in names do
+    match cache.get? name with
+    | some kind => out := out.push kind
+    | none =>
+      let kind ← envDeclarationKind env name.toName
+      cache := cache.insert name kind
+      out := out.push kind
+    idx := idx + 1
+    if let some status ← reportProgress? handle trampoline idx names.size then
+      return .error status
+  return .ok out
+
 @[export lean_rs_host_env_declaration_name]
 def envDeclarationName (_env : Environment) (name : Name) : IO String := do
   pure name.toString
@@ -229,6 +300,24 @@ def envDeclarationNameBulk (_env : Environment) (names : Array String)
           out := out.push rendered
       pure out
 
+@[export lean_rs_host_env_declaration_name_bulk_progress]
+def envDeclarationNameBulkProgress (_env : Environment) (names : Array String)
+    (handle trampoline : USize) : IO (Except UInt8 (Array String)) := do
+  let mut cache : Std.HashMap String String := {}
+  let mut out := #[]
+  let mut idx := 0
+  for name in names do
+    match cache.get? name with
+    | some rendered => out := out.push rendered
+    | none =>
+      let rendered := name.toName.toString
+      cache := cache.insert name rendered
+      out := out.push rendered
+    idx := idx + 1
+    if let some status ← reportProgress? handle trampoline idx names.size then
+      return .error status
+  return .ok out
+
 /-- Bulk variant of [`envQueryDeclaration`]: a single IO traversal that
     folds the singular lookup across `names`. One Lean traversal, one
     `MessageLog`-less FFI crossing. Iteration semantics are identical to a
@@ -237,5 +326,18 @@ def envDeclarationNameBulk (_env : Environment) (names : Array String)
 def envQueryDeclarationsBulk (env : Environment) (names : Array Name)
     : IO (Array (Option Declaration)) := do
   names.mapM (envQueryDeclaration env)
+
+@[export lean_rs_host_env_query_declarations_bulk_progress]
+def envQueryDeclarationsBulkProgress (env : Environment) (names : Array Name)
+    (handle trampoline : USize) : IO (Except UInt8 (Array (Option Declaration))) := do
+  let mut out := #[]
+  let mut idx := 0
+  for name in names do
+    let decl? ← envQueryDeclaration env name
+    out := out.push decl?
+    idx := idx + 1
+    if let some status ← reportProgress? handle trampoline idx names.size then
+      return .error status
+  return .ok out
 
 end LeanRsFixture.Environment

@@ -75,7 +75,7 @@ fn main() {
     // declarations the bulk query exercises.
     let t = Instant::now();
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None)
+        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None, None)
         .expect("session imports");
     report("session_import", t.elapsed().as_micros());
 
@@ -106,6 +106,7 @@ fn main() {
             "theorem lean_rs_session_workflow_rfl : 1 + 1 = 2 := rfl",
             &elab_opts,
             None,
+            None,
         )
         .expect("host stack");
     match outcome {
@@ -128,6 +129,7 @@ fn main() {
                 "LeanRsFixture.Handles.nameMkStr",
                 "LeanRsFixture.Handles.exprConstNat",
             ],
+            None,
             None,
         )
         .expect("bulk query");

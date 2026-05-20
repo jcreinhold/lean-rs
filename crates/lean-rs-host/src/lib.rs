@@ -5,12 +5,13 @@
 //! FFI primitive shipped by [`lean-rs`](https://docs.rs/lean-rs). It owns:
 //!
 //! - The high-level [`LeanHost`] / [`LeanCapabilities`] / [`LeanSession`]
-//!   trio, plus the [`SessionPool`] / [`PooledSession`] reuse helper.
+//!   trio, plus the [`SessionPool`] / [`PooledSession`] reuse helper and
+//!   [`LeanProgressSink`] for live progress from long-running calls.
 //! - The host-defined evidence / kernel-outcome / elaboration / meta
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 18 mandatory + 4 optional
+//! - The capability contract: 26 mandatory + 4 optional
 //!   `lean_rs_host_*` `@[export]` Lean shims this stack expects in the
 //!   capability dylib it loads.
 //!
@@ -27,7 +28,6 @@ pub mod meta {
     pub use crate::host::meta::*;
 }
 
-pub use crate::host::LeanCancellationToken;
 pub use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX, LeanDiagnostic, LeanElabFailure, LeanElabOptions, LeanPosition, LeanSeverity,
@@ -35,6 +35,7 @@ pub use crate::host::elaboration::{
 pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
+pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};
 pub use crate::host::{
     LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange, PoolStats, PooledSession,
     SessionPool, SessionStats,

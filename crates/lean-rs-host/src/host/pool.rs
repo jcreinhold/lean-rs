@@ -54,6 +54,7 @@ use core::cell::{Cell, RefCell};
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
+use crate::host::progress::LeanProgressSink;
 use crate::host::session::LeanSession;
 use lean_rs::LeanRuntime;
 use lean_rs::Obj;
@@ -166,7 +167,7 @@ impl<'lean> SessionPool<'lean> {
     /// imports fresh and every release drops the environment. This is
     /// useful for tests that want metrics without recycling, and as the
     /// degenerate point that proves the pool's metrics agree with
-    /// repeated `caps.session(..., None)` calls.
+    /// repeated `caps.session(..., None, None)` calls.
     ///
     /// The `runtime` borrow witnesses `'lean` and is stored so the pool
     /// itself outlives every entry on its free list — even after every
@@ -212,6 +213,7 @@ impl<'lean> SessionPool<'lean> {
         caps: &'c LeanCapabilities<'lean, 'c>,
         imports: &[&str],
         cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -233,7 +235,7 @@ impl<'lean> SessionPool<'lean> {
                 (LeanSession::from_environment(caps, env), true)
             } else {
                 drop(inner);
-                let session = caps.session(imports, cancellation)?;
+                let session = caps.session(imports, cancellation, progress)?;
                 self.bump_imported();
                 (session, false)
             }
@@ -376,7 +378,7 @@ impl core::fmt::Debug for SessionPool<'_> {
 ///
 /// ```ignore
 /// let pool = lean_rs::SessionPool::with_capacity(runtime, 4);
-/// let mut sess = pool.acquire(&caps, &["MyLib"], None)?;
+/// let mut sess = pool.acquire(&caps, &["MyLib"], None, None)?;
 /// let kind = sess.declaration_kind("MyLib.thing", None)?;
 /// // dropping `sess` returns the imported environment to the pool
 /// ```

@@ -73,21 +73,22 @@ extern "C" fn test_callback_trampoline(handle: usize, current: u64, total: u64) 
     }
 }
 
-fn shims_dylib_path() -> PathBuf {
+fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest_dir
         .parent()
         .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
+        .expect("crates/<name>/ lives two directories beneath the workspace root")
+        .to_path_buf();
     let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = workspace
-        .join("lake")
-        .join("lean-rs-host-shims")
+    let lib_dir = package_dir
+        .iter()
+        .fold(workspace, |path, part| path.join(part))
         .join(".lake")
         .join("build")
         .join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__host__shims_LeanRsHostShims.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("libLeanRsHostShims.{dylib_extension}"));
+    let new_style = lib_dir.join(format!("{new_name}.{dylib_extension}"));
+    let old_style = lib_dir.join(format!("{old_name}.{dylib_extension}"));
     if old_style.is_file() && !new_style.is_file() {
         old_style
     } else {
@@ -95,28 +96,52 @@ fn shims_dylib_path() -> PathBuf {
     }
 }
 
-fn shims_library() -> LeanLibrary<'static> {
-    let path = shims_dylib_path();
+fn interop_dylib_path() -> PathBuf {
+    dylib_path(
+        &["lake", "lean-rs-interop-shims"],
+        "liblean__rs__interop__shims_LeanRsInterop",
+        "libLeanRsInterop",
+    )
+}
+
+fn consumer_dylib_path() -> PathBuf {
+    dylib_path(
+        &["fixtures", "interop-shims"],
+        "liblean__rs__interop__consumer_LeanRsInteropConsumer",
+        "libLeanRsInteropConsumer",
+    )
+}
+
+fn consumer_library() -> LeanLibrary<'static> {
+    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
+    let interop_path = interop_dylib_path();
+    assert!(
+        interop_path.exists(),
+        "interop dylib not found at {} — run `cd lake/lean-rs-interop-shims && lake build`",
+        interop_path.display(),
+    );
+    let interop = LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly");
+    let _interop_module = interop
+        .initialize_module("lean_rs_interop_shims", "LeanRsInterop")
+        .expect("interop root module initializes");
+
+    let path = consumer_dylib_path();
     assert!(
         path.exists(),
-        "shim dylib not found at {} — run `cd lake/lean-rs-host-shims && lake build`",
+        "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
         path.display(),
     );
-    LeanLibrary::open(
-        LeanRuntime::init().expect("Lean runtime initialisation must succeed"),
-        &path,
-    )
-    .expect("shim dylib opens cleanly")
+    LeanLibrary::open(runtime, &path).expect("interop consumer dylib opens cleanly")
 }
 
 #[test]
 fn lean_loop_invokes_rust_trampoline_in_order() {
-    let library = shims_library();
+    let library = consumer_library();
     let module = library
-        .initialize_module("lean_rs_host_shims", "LeanRsHostShims")
-        .expect("shim root module initializes");
+        .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
+        .expect("consumer root module initializes");
     let callback_loop = module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_test_callback_loop")
+        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
         .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(None);
@@ -143,12 +168,12 @@ fn lean_loop_invokes_rust_trampoline_in_order() {
 
 #[test]
 fn rust_callback_panic_is_caught_before_returning_to_lean() {
-    let library = shims_library();
+    let library = consumer_library();
     let module = library
-        .initialize_module("lean_rs_host_shims", "LeanRsHostShims")
-        .expect("shim root module initializes");
+        .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
+        .expect("consumer root module initializes");
     let callback_loop = module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_test_callback_loop")
+        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
         .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(Some(2));

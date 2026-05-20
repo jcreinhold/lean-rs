@@ -40,7 +40,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None)
+    caps.session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly")
 }
 
@@ -103,7 +103,9 @@ fn pool_acquire_release_loop_small() {
 
     let n = iters(16);
     for _ in 0..n {
-        let sess = pool.acquire(&caps, &imports, None).expect("acquire from warm pool");
+        let sess = pool
+            .acquire(&caps, &imports, None, None)
+            .expect("acquire from warm pool");
         drop(sess);
     }
 
@@ -143,7 +145,9 @@ fn pool_acquire_release_loop_long() {
 
     let n = iters(2048);
     for _ in 0..n {
-        let sess = pool.acquire(&caps, &imports, None).expect("acquire from warm pool");
+        let sess = pool
+            .acquire(&caps, &imports, None, None)
+            .expect("acquire from warm pool");
         drop(sess);
     }
 
@@ -174,8 +178,8 @@ fn pool_overflow_eviction_loop_small() {
 
     let n = iters(4);
     for _ in 0..n {
-        let s1 = pool.acquire(&caps, &imports, None).expect("acquire #1");
-        let s2 = pool.acquire(&caps, &imports, None).expect("acquire #2");
+        let s1 = pool.acquire(&caps, &imports, None, None).expect("acquire #1");
+        let s2 = pool.acquire(&caps, &imports, None, None).expect("acquire #2");
         drop(s1);
         drop(s2);
     }

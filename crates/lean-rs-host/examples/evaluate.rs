@@ -51,7 +51,7 @@ fn run() -> LeanResult<()> {
     // dispatch through. The import list affects what's in the Lean
     // environment, not which dylib symbols are reachable, so a small
     // import keeps the cold path fast.
-    let mut session = caps.session(&["LeanRsFixture.Strings"], None)?;
+    let mut session = caps.session(&["LeanRsFixture.Strings"], None, None)?;
 
     let input = "hello, lean";
 

@@ -24,6 +24,11 @@ pub(crate) const SHIM_PACKAGE_NAME: &str = "lean_rs_host_shims";
 /// Lake `lean_lib` name inside the shim package. Constant on our side
 /// because the shim package is ours; consumers don't re-declare it.
 pub(crate) const SHIM_LIB_NAME: &str = "LeanRsHostShims";
+/// Lake package name for the generic Lean/Rust interop shims used by
+/// host progress callbacks.
+pub(crate) const INTEROP_PACKAGE_NAME: &str = "lean_rs_interop_shims";
+/// Lake `lean_lib` name inside the generic interop shim package.
+pub(crate) const INTEROP_LIB_NAME: &str = "LeanRsInterop";
 
 /// A validated Lake project root.
 ///
@@ -120,6 +125,27 @@ impl LakeProject {
         Ok(package_dir.join(".lake").join("build").join("lib").join("lean"))
     }
 
+    /// Search path for the generic `lean-rs-interop-shims` package's `.olean`
+    /// files. Host shim modules import `LeanRsInterop.Callback`, so sessions
+    /// that import `LeanRsHostShims.*` need this entry on the Lean search path.
+    pub(crate) fn interop_olean_search_path(&self) -> LeanResult<PathBuf> {
+        let manifest_path = self.root.join("lake-manifest.json");
+        let manifest_bytes = std::fs::read(&manifest_path).map_err(|err| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "Lake manifest at '{}' could not be read ({err})",
+                manifest_path.display()
+            ))
+        })?;
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|err| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "Lake manifest at '{}' is not valid JSON: {err}",
+                manifest_path.display()
+            ))
+        })?;
+        let package_dir = package_dir_from_manifest(&self.root, &manifest, &manifest_path, INTEROP_PACKAGE_NAME)?;
+        Ok(package_dir.join(".lake").join("build").join("lib").join("lean"))
+    }
+
     /// Source roots passed to the source-range shim.
     ///
     /// Lean's declaration-range extension stores positions, not a stable
@@ -167,11 +193,26 @@ impl LakeProject {
     /// the manifest's JSON shape doesn't match Lake's documented
     /// format (Lake bumped manifest schema beyond supported range).
     pub(crate) fn shim_dylib(&self) -> LeanResult<PathBuf> {
+        self.package_dylib(SHIM_PACKAGE_NAME, SHIM_LIB_NAME)
+    }
+
+    /// Resolve the on-disk dylib path for the generic interop shim package.
+    ///
+    /// Host progress shims import `LeanRsInterop.Callback`. Lake records that
+    /// inherited dependency in the consumer's manifest, but it does not link
+    /// the generic package shared library into the host shim dylib. The host
+    /// loader opens this dylib globally before initializing host shims so the
+    /// generated interop initializers resolve normally.
+    pub(crate) fn interop_dylib(&self) -> LeanResult<PathBuf> {
+        self.package_dylib(INTEROP_PACKAGE_NAME, INTEROP_LIB_NAME)
+    }
+
+    fn package_dylib(&self, package_name: &str, lib_name: &str) -> LeanResult<PathBuf> {
         let manifest_path = self.root.join("lake-manifest.json");
         let manifest_bytes = std::fs::read(&manifest_path).map_err(|err| {
             lean_rs::__host_internals::host_module_init(format!(
                 "Lake manifest at '{}' could not be read ({err}); the consumer must run `lake update` after \
-                 adding `require lean_rs_host_shims` to their lakefile",
+                 adding the required lean-rs shim packages to their lakefile",
                 manifest_path.display()
             ))
         })?;
@@ -181,12 +222,12 @@ impl LakeProject {
                 manifest_path.display()
             ))
         })?;
-        let package_dir = shim_package_dir_from_manifest(&self.root, &manifest, &manifest_path)?;
+        let package_dir = package_dir_from_manifest(&self.root, &manifest, &manifest_path, package_name)?;
         let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
         let lib_dir = package_dir.join(".lake").join("build").join("lib");
-        let escaped_shim_package = SHIM_PACKAGE_NAME.replace('_', "__");
-        let new_style = lib_dir.join(format!("lib{escaped_shim_package}_{SHIM_LIB_NAME}.{dylib_extension}"));
-        let old_style = lib_dir.join(format!("lib{SHIM_LIB_NAME}.{dylib_extension}"));
+        let escaped_package = package_name.replace('_', "__");
+        let new_style = lib_dir.join(format!("lib{escaped_package}_{lib_name}.{dylib_extension}"));
+        let old_style = lib_dir.join(format!("lib{lib_name}.{dylib_extension}"));
         if new_style.is_file() {
             Ok(new_style)
         } else if old_style.is_file() {
@@ -204,6 +245,17 @@ fn shim_package_dir_from_manifest(
     manifest: &serde_json::Value,
     manifest_path: &Path,
 ) -> LeanResult<PathBuf> {
+    package_dir_from_manifest(lake_root, manifest, manifest_path, SHIM_PACKAGE_NAME)
+}
+
+/// Walk Lake's `packages` array to find the entry whose `name` matches
+/// `package_name` and resolve its on-disk directory.
+fn package_dir_from_manifest(
+    lake_root: &Path,
+    manifest: &serde_json::Value,
+    manifest_path: &Path,
+    package_name: &str,
+) -> LeanResult<PathBuf> {
     let packages = manifest.get("packages").and_then(|p| p.as_array()).ok_or_else(|| {
         lean_rs::__host_internals::host_module_init(format!(
             "Lake manifest at '{}' has no `packages` array (unexpected manifest schema)",
@@ -212,11 +264,11 @@ fn shim_package_dir_from_manifest(
     })?;
     let entry = packages
         .iter()
-        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(SHIM_PACKAGE_NAME))
+        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(package_name))
         .ok_or_else(|| {
             lean_rs::__host_internals::host_module_init(format!(
-                "Lake manifest at '{}' lists no `{SHIM_PACKAGE_NAME}` package; the consumer's lakefile \
-                 must `require lean_rs_host_shims from \"…\"` (path or git) and then run `lake update`",
+                "Lake manifest at '{}' lists no `{package_name}` package; the consumer's lakefile \
+                 must require the lean-rs shim packages and then run `lake update`",
                 manifest_path.display()
             ))
         })?;
@@ -227,7 +279,7 @@ fn shim_package_dir_from_manifest(
         "path" => {
             let dir = entry.get("dir").and_then(|d| d.as_str()).ok_or_else(|| {
                 lean_rs::__host_internals::host_module_init(format!(
-                    "Lake manifest entry for `{SHIM_PACKAGE_NAME}` has type=\"path\" but no `dir` field"
+                    "Lake manifest entry for `{package_name}` has type=\"path\" but no `dir` field"
                 ))
             })?;
             Ok(lake_root.join(dir))
@@ -239,10 +291,10 @@ fn shim_package_dir_from_manifest(
                 .get("packagesDir")
                 .and_then(|p| p.as_str())
                 .unwrap_or(".lake/packages");
-            Ok(lake_root.join(packages_dir).join(SHIM_PACKAGE_NAME))
+            Ok(lake_root.join(packages_dir).join(package_name))
         }
         other => Err(lean_rs::__host_internals::host_module_init(format!(
-            "Lake manifest entry for `{SHIM_PACKAGE_NAME}` has unsupported require type '{other}' \
+            "Lake manifest entry for `{package_name}` has unsupported require type '{other}' \
              (only `path` and `git` are supported today)"
         ))),
     }

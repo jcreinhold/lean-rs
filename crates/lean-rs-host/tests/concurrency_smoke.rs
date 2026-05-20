@@ -87,7 +87,7 @@ fn independent_worker_sessions_run_in_parallel() {
             // do Lean work simultaneously.
             barrier.wait();
             let mut session = caps
-                .session(&["LeanRsFixture.Handles"], None)
+                .session(&["LeanRsFixture.Handles"], None, None)
                 .expect("worker imports its own session");
 
             let decl = session
@@ -137,7 +137,7 @@ fn per_worker_session_pool_under_concurrency() {
             barrier.wait();
             for _ in 0..CHECKOUTS_PER_WORKER {
                 let mut session = pool
-                    .acquire(&caps, &["LeanRsFixture.Handles"], None)
+                    .acquire(&caps, &["LeanRsFixture.Handles"], None, None)
                     .expect("pool acquire returns a session");
                 let kind = session
                     .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)

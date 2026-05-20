@@ -33,7 +33,7 @@ fn curated_surface_drives_full_happy_path() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("fixture capability loads cleanly");
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"], None)
+        .session(&["LeanRsHostShims.Elaboration"], None, None)
         .expect("LeanRsHostShims.Elaboration module imports cleanly");
 
     let _decl = session
@@ -48,7 +48,7 @@ fn curated_surface_drives_full_happy_path() {
     elab.expect("elaboration succeeds for a well-typed Nat term");
 
     let outcome = session
-        .kernel_check("theorem lean_rs_curated : 1 + 1 = 2 := rfl", &opts, None)
+        .kernel_check("theorem lean_rs_curated : 1 + 1 = 2 := rfl", &opts, None, None)
         .expect("host stack reports no exception while kernel-checking");
 
     let LeanKernelOutcome::Checked(evidence) = outcome else {

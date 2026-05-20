@@ -55,7 +55,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **`lean/lakefile.lean`**—adds the shim require so `LeanCapabilities::load_capabilities`
-can find the 18 + 4 `lean_rs_host_*` shim symbols at runtime:
+can find the 26 + 4 `lean_rs_host_*` shim symbols at runtime:
+
+Long-running imports, bulk introspection, filtered listing, and kernel-check
+calls can receive a borrowed `LeanProgressSink` for live in-thread progress
+events. Passing `None` keeps the no-progress fast path.
 
 ```lean
 import Lake

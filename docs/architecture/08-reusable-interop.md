@@ -54,11 +54,10 @@ theorem-prover policy on top without owning the callback substrate itself.
 
 ## Progress Reporting
 
-Progress is host policy, not a low-level callback primitive. A future
-`LeanProgressSink` should report `LeanSession` phases such as import,
-bulk-introspection progress, or kernel-check progress. It should be implemented
-over the generic callback substrate after the callback ABI, registry, shim
-package, and build ergonomics are verified.
+Progress is host policy, not a low-level callback primitive.
+`LeanProgressSink` reports `LeanSession` phases such as import,
+bulk-introspection progress, or kernel-check progress. It is implemented over
+the generic callback substrate.
 
 That ordering prevents a host-only callback path from becoming the de facto
 interop API. The same substrate must serve downstream Lean extensions that do
@@ -80,5 +79,6 @@ shim package is documented in
 helper path and cache contract are documented in
 [`12-interop-build-and-link.md`](12-interop-build-and-link.md). The downstream
 recipe is documented in
-[`../recipes/downstream-interop.md`](../recipes/downstream-interop.md). The next
-implementation step is structured host progress on the shared substrate.
+[`../recipes/downstream-interop.md`](../recipes/downstream-interop.md).
+Structured host progress is documented in
+[`13-structured-progress.md`](13-structured-progress.md).

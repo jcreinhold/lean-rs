@@ -29,21 +29,22 @@ impl From<LeanCallbackEvent> for SeenEvent {
     }
 }
 
-fn shims_dylib_path() -> PathBuf {
+fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest_dir
         .parent()
         .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
+        .expect("crates/<name>/ lives two directories beneath the workspace root")
+        .to_path_buf();
     let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = workspace
-        .join("lake")
-        .join("lean-rs-host-shims")
+    let lib_dir = package_dir
+        .iter()
+        .fold(workspace, |path, part| path.join(part))
         .join(".lake")
         .join("build")
         .join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__host__shims_LeanRsHostShims.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("libLeanRsHostShims.{dylib_extension}"));
+    let new_style = lib_dir.join(format!("{new_name}.{dylib_extension}"));
+    let old_style = lib_dir.join(format!("{old_name}.{dylib_extension}"));
     if old_style.is_file() && !new_style.is_file() {
         old_style
     } else {
@@ -51,34 +52,58 @@ fn shims_dylib_path() -> PathBuf {
     }
 }
 
-fn shims_library() -> LeanLibrary<'static> {
-    let path = shims_dylib_path();
+fn interop_dylib_path() -> PathBuf {
+    dylib_path(
+        &["lake", "lean-rs-interop-shims"],
+        "liblean__rs__interop__shims_LeanRsInterop",
+        "libLeanRsInterop",
+    )
+}
+
+fn consumer_dylib_path() -> PathBuf {
+    dylib_path(
+        &["fixtures", "interop-shims"],
+        "liblean__rs__interop__consumer_LeanRsInteropConsumer",
+        "libLeanRsInteropConsumer",
+    )
+}
+
+fn consumer_library() -> LeanLibrary<'static> {
+    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
+    let interop_path = interop_dylib_path();
+    assert!(
+        interop_path.exists(),
+        "interop dylib not found at {} — run `cd lake/lean-rs-interop-shims && lake build`",
+        interop_path.display(),
+    );
+    let interop = LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly");
+    let _interop_module = interop
+        .initialize_module("lean_rs_interop_shims", "LeanRsInterop")
+        .expect("interop root module initializes");
+
+    let path = consumer_dylib_path();
     assert!(
         path.exists(),
-        "shim dylib not found at {} — run `cd lake/lean-rs-host-shims && lake build`",
+        "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
         path.display(),
     );
-    LeanLibrary::open(
-        LeanRuntime::init().expect("Lean runtime initialisation must succeed"),
-        &path,
-    )
-    .expect("shim dylib opens cleanly")
+    LeanLibrary::open(runtime, &path).expect("interop consumer dylib opens cleanly")
 }
 
 fn callback_loop<'lean, 'lib>(
     library: &'lib LeanLibrary<'lean>,
 ) -> lean_rs::LeanExported<'lean, 'lib, (usize, usize, u64), LeanIo<u8>> {
     let module = library
-        .initialize_module("lean_rs_host_shims", "LeanRsHostShims")
-        .expect("shim root module initializes");
+        .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
+        .expect("consumer root module initializes");
     module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_test_callback_loop")
+        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
         .expect("callback loop export resolves")
 }
 
 #[test]
 fn registered_callback_runs_through_typed_lean_export() {
-    let library = shims_library();
+    let library = consumer_library();
     let callback_loop = callback_loop(&library);
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
@@ -110,7 +135,7 @@ fn registered_callback_runs_through_typed_lean_export() {
 
 #[test]
 fn dropped_handle_reports_stale_without_use_after_drop() {
-    let library = shims_library();
+    let library = consumer_library();
     let callback_loop = callback_loop(&library);
     let callback = LeanCallbackHandle::register(|_| {}).expect("callback registration succeeds");
     let (handle, trampoline) = callback.abi_parts();
@@ -128,7 +153,7 @@ fn dropped_handle_reports_stale_without_use_after_drop() {
 
 #[test]
 fn callback_panic_is_contained_at_registry_trampoline() {
-    let library = shims_library();
+    let library = consumer_library();
     let callback_loop = callback_loop(&library);
     let callback = LeanCallbackHandle::register(|event| {
         assert_ne!(

@@ -61,7 +61,7 @@ fn pre_cancelled_session_call_returns_cancelled_without_ffi() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly");
     let token = LeanCancellationToken::new();
     token.cancel();
@@ -86,7 +86,7 @@ fn never_cancelled_token_preserves_successful_call() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly");
     let token = LeanCancellationToken::new();
 
@@ -107,7 +107,7 @@ fn bulk_query_observes_cancellation_from_another_thread() {
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly");
     let names = vec!["LeanRsFixture.Handles.nameAnonymous"; ITEMS];
     let token = LeanCancellationToken::new();
@@ -122,7 +122,7 @@ fn bulk_query_observes_cancellation_from_another_thread() {
     });
 
     let err = session
-        .query_declarations_bulk(&names, Some(&token))
+        .query_declarations_bulk(&names, Some(&token), None)
         .expect_err("bulk loop should observe cancellation between per-name dispatches");
     let observed_at = Instant::now();
     handle.join().expect("canceller thread exits cleanly");
@@ -151,7 +151,7 @@ fn pool_acquire_cancelled_before_import_does_not_update_stats() {
     token.cancel();
 
     let err = pool
-        .acquire(&caps, &["LeanRsFixture.Handles"], Some(&token))
+        .acquire(&caps, &["LeanRsFixture.Handles"], Some(&token), None)
         .expect_err("pre-cancelled acquire should not import");
 
     assert_cancelled(err);

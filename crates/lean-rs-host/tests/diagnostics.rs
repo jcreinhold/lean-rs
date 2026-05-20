@@ -58,12 +58,12 @@ fn fixture_caps<'lean, 'h>(host: &'h LeanHost<'lean>) -> LeanCapabilities<'lean,
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None)
+    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
         .expect("session imports cleanly")
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None)
+    caps.session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly")
 }
 
@@ -148,7 +148,7 @@ fn lean_exception_code_from_lean_throw() {
     // channel; `call_capability` projects the `IO Nat` return as
     // `LeanIo<u64>` so the failure surfaces as `LeanError::LeanException`.
     let mut session = caps
-        .session(&["LeanRsFixture.Effects"], None)
+        .session(&["LeanRsFixture.Effects"], None, None)
         .expect("session imports cleanly");
     let err = session
         .call_capability::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", (), None)
@@ -207,7 +207,7 @@ fn unsupported_code_on_absent_meta_service() {
     // path — the response is `Ok` here, but `code()` on `Ok` is
     // `None`, which is part of the contract surface this test pins.
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None)
+        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None, None)
         .expect("session imports cleanly");
     let expr = session
         .declaration_type("Nat.zero", None)

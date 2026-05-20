@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 18 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
+The 26 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The shim package
 [`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
@@ -12,25 +12,29 @@ helpers. External consumers add `require lean_rs_host_shims from "…"` to their
 
 This document covers the **wire-level contract**: each Lean signature, the typed Rust shape
 `LeanSession::*` exposes on top, and the Rust call-site mapping. The architectural rationale
-(two dylibs, `RTLD_GLOBAL`, the consumer `lakefile.lean` shape) lives in
+(generic interop dylib, host shim dylib, `RTLD_GLOBAL`, the consumer `lakefile.lean` shape) lives in
 [`architecture/03-host-stack.md`](architecture/03-host-stack.md).
 
 ## Resolution
 
 `LeanCapabilities::new` performs:
 
-1. `LakeProject::shim_dylib()` reads the consumer's `lake-manifest.json` for the entry whose `name` is `lean_rs_host_shims`. Handles `type: "path"` (`<dir>` resolved relative to the project root) and `type: "git"` (`.lake/packages/lean_rs_host_shims/`).
-2. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the shim dylib first, with `RTLD_LAZY | RTLD_GLOBAL` on Unix so the subsequently opened consumer dylib can resolve its transitive reference to `_initialize_lean__rs__host__shims_LeanRsHostShims`.
-3. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` (idempotent via Lean's `_G_initialized` flag). The package also links the generic interop C callback helper used by its compatibility callback export.
-4. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer; it reaches the now-global shim symbols through the dynamic linker.
-5. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
+1. `LakeProject::interop_dylib()` reads the consumer's `lake-manifest.json` for the entry whose `name` is `lean_rs_interop_shims`, opens the generic interop dylib globally, and initializes `LeanRsInterop`.
+2. `LakeProject::shim_dylib()` reads the same manifest for the entry whose `name` is `lean_rs_host_shims`.
+3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on Unix so the subsequently opened consumer dylib can resolve its transitive reference to `_initialize_lean__rs__host__shims_LeanRsHostShims`.
+4. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` and the already-loaded generic callback module.
+5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer; it reaches the now-global shim symbols through the dynamic linker.
+6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
+
+`LeanSession::import` passes three `.olean` roots to the import shim: the
+consumer project, `lean_rs_interop_shims`, and `lean_rs_host_shims`.
 
 A missing mandatory symbol fails capability load with `LeanError::Host(stage = Link)`. A
 missing optional meta-service symbol stores `None` in `SessionSymbols`;
 `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that service at dispatch
 time.
 
-## Mandatory contract (18 symbols)
+## Mandatory contract (26 symbols)
 
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
 `KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
@@ -47,27 +51,35 @@ host-defined records; Rust callers see ordinary `bool` fields.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
-| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation)` |
+| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation, None)` |
+| `lean_rs_host_session_import_progress` | `(searchPaths : Array String) (importNames : Array String) (handle trampoline : USize) : IO (Except UInt8 Environment)` | `LeanCapabilities::session(imports, cancellation, Some(progress))` |
 | `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
 | `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
-| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation)` |
+| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation, None)` |
+| `lean_rs_host_env_query_declarations_bulk_progress` | `(env : Environment) (names : Array Name) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Declaration)))` | `query_declarations_bulk(names, None, Some(progress))` |
 | `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations(cancellation)` |
-| `lean_rs_host_env_list_declarations_filtered` | `(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` | `list_declarations_filtered(filter, cancellation)` |
+| `lean_rs_host_env_list_declarations_filtered` | `(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` | `list_declarations_filtered(filter, cancellation, None)` |
+| `lean_rs_host_env_list_declarations_filtered_progress` | `(env : Environment) (filter : DeclarationFilter) (handle trampoline : USize) : IO (Except UInt8 (Array Name))` | `list_declarations_filtered(filter, cancellation, Some(progress))` |
 | `lean_rs_host_env_declaration_source_range` | `(env : Environment) (name : Name) (sourceRoots : Array String) : IO (Option SourceRange)` | `declaration_source_range(name, cancellation)` |
 | `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` |
-| `lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` | `declaration_type_bulk(names, cancellation)` |
+| `lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` | `declaration_type_bulk(names, cancellation, None)` |
+| `lean_rs_host_env_declaration_type_bulk_progress` | `(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Expr)))` | `declaration_type_bulk(names, None, Some(progress))` |
 | `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` |
-| `lean_rs_host_env_declaration_kind_bulk` | `(env : Environment) (names : Array String) : IO (Array String)` | `declaration_kind_bulk(names, cancellation)` |
+| `lean_rs_host_env_declaration_kind_bulk` | `(env : Environment) (names : Array String) : IO (Array String)` | `declaration_kind_bulk(names, cancellation, None)` |
+| `lean_rs_host_env_declaration_kind_bulk_progress` | `(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_kind_bulk(names, None, Some(progress))` |
 | `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` |
-| `lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` | `declaration_name_bulk(names, cancellation)` |
+| `lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` | `declaration_name_bulk(names, cancellation, None)` |
+| `lean_rs_host_env_declaration_name_bulk_progress` | `(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_name_bulk(names, None, Some(progress))` |
 
 ### Elaboration, kernel check, evidence (5)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
 | `lean_rs_host_elaborate` | `(env) (src : String) (expectedType : Option Expr) (opts : ElabOpts) : IO ElabResult` | `elaborate(source, expected_type, options, cancellation)` |
-| `lean_rs_host_elaborate_bulk` | `(env) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options, cancellation)` |
-| `lean_rs_host_kernel_check` | `(env) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options, cancellation)` |
+| `lean_rs_host_elaborate_bulk` | `(env) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options, cancellation, None)` |
+| `lean_rs_host_elaborate_bulk_progress` | `(env) (sources : Array String) (opts : ElabOpts) (handle trampoline : USize) : IO (Except UInt8 (Array ElabResult))` | `elaborate_bulk(sources, options, None, Some(progress))` |
+| `lean_rs_host_kernel_check` | `(env) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options, cancellation, None)` |
+| `lean_rs_host_kernel_check_progress` | `(env) (src : String) (opts : ElabOpts) (handle trampoline : USize) : IO (Except UInt8 KernelOutcome)` | `kernel_check(source, options, cancellation, Some(progress))` |
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
@@ -90,7 +102,7 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` finds the dylib at the conventional path.
-- Same 18 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
+- Same 26 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
 - The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this

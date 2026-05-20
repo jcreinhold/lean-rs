@@ -2,10 +2,8 @@
 //! `LeanSession` cascade.
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
-//! loads the `LeanRsFixture` capability dylib (which pre-resolves
-//! eighteen mandatory session symbols — thirteen environment queries,
-//! the `elaborate`/`kernel_check` pair, and the
-//! `check_evidence`/`evidence_summary` pair — plus the four optional
+//! loads the `LeanRsFixture` capability dylib (which pre-resolves the
+//! twenty-six mandatory session symbols plus the four optional
 //! meta-service symbols), starts a session over an import list, and
 //! exercises the typed query methods.
 
@@ -103,7 +101,7 @@ fn load_capabilities_missing_dylib_is_load_error() {
 // -- session import + query ---------------------------------------------
 
 fn session_over_handles<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None)
+    caps.session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly")
 }
 
@@ -245,7 +243,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
 // -- elaborate + kernel_check -------------------------------------------
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None)
+    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
         .expect("session imports cleanly")
 }
 
@@ -334,7 +332,7 @@ fn kernel_check_small_theorem_returns_evidence() {
 
     let src = "theorem lean_rs_smoke : 1 + 1 = 2 := rfl";
     let outcome = session
-        .kernel_check(src, &LeanElabOptions::new(), None)
+        .kernel_check(src, &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -362,7 +360,7 @@ fn kernel_check_rejects_bad_proof() {
 
     let src = "theorem lean_rs_bad : 1 = 2 := rfl";
     let outcome = session
-        .kernel_check(src, &LeanElabOptions::new(), None)
+        .kernel_check(src, &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -410,7 +408,7 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
     let mut session = session_over_elaboration(&caps);
 
     let outcome = session
-        .kernel_check("theorem :=", &LeanElabOptions::new(), None)
+        .kernel_check("theorem :=", &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert!(
         matches!(outcome.status(), EvidenceStatus::Rejected | EvidenceStatus::Unavailable),
@@ -441,7 +439,7 @@ fn kernel_check_unsupported_on_non_declaration() {
     // constant to the environment, so the classifier returns
     // `Unsupported` (no new theorem/definition).
     let outcome = session
-        .kernel_check("#check Nat", &LeanElabOptions::new(), None)
+        .kernel_check("#check Nat", &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -462,6 +460,7 @@ fn check_evidence_revalidates_checked_evidence() {
         .kernel_check(
             "theorem lean_rs_recheck : 1 + 1 = 2 := rfl",
             &LeanElabOptions::new(),
+            None,
             None,
         )
         .expect("host stack reports no exception");
@@ -507,6 +506,7 @@ fn summarize_evidence_exposes_declaration_name() {
         .kernel_check(
             "theorem lean_rs_summary : 1 + 1 = 2 := rfl",
             &LeanElabOptions::new(),
+            None,
             None,
         )
         .expect("host stack reports no exception");
@@ -597,7 +597,7 @@ fn session_reuse_amortises_import() {
     let start_reuse = Instant::now();
     {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"], None)
+            .session(&["LeanRsFixture.Handles"], None, None)
             .expect("session imports cleanly");
         for _ in 0..QUERIES {
             let kind = session
@@ -612,7 +612,7 @@ fn session_reuse_amortises_import() {
     let start_per_query = Instant::now();
     for _ in 0..QUERIES {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"], None)
+            .session(&["LeanRsFixture.Handles"], None, None)
             .expect("session imports cleanly");
         let kind = session
             .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
@@ -644,7 +644,7 @@ fn session_reuse_amortises_import() {
 // dispatches through cached addresses.
 
 fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Meta", "LeanRsHostShims.Meta"], None)
+    caps.session(&["LeanRsFixture.Meta", "LeanRsHostShims.Meta"], None, None)
         .expect("session imports cleanly")
 }
 

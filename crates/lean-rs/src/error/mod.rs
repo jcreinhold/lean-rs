@@ -547,9 +547,7 @@ pub fn bound_message(mut s: String) -> String {
 // this `#[doc(hidden)] pub fn` wrapper, re-exported at
 // [`crate::__host_internals`].
 //
-// The only wrappers live here are those a real call site needs:
-// `host_module_init` (called from `lake.rs`) and `host_cancelled` (for
-// the sibling crate's cancellation token). Add another the same way
+// The only wrappers live here are those a real call site needs. Add another the same way
 // (single-call wrapper + re-export in `crate::__host_internals`) only
 // when a future call site needs one.
 
@@ -563,6 +561,18 @@ pub fn host_module_init(message: impl Into<String>) -> LeanError {
 #[doc(hidden)]
 pub fn host_cancelled() -> LeanError {
     LeanError::cancelled()
+}
+
+/// Construct a host-internal failure. See [`LeanError::internal`].
+#[doc(hidden)]
+pub fn host_internal(message: impl Into<String>) -> LeanError {
+    LeanError::internal(message)
+}
+
+/// Construct a callback-panic host failure. See [`LeanError::callback_panic`].
+#[doc(hidden)]
+pub fn host_callback_panic(payload: &(dyn Any + Send)) -> LeanError {
+    LeanError::callback_panic(payload)
 }
 
 /// Render an arbitrary panic payload as a human-readable string. Strings

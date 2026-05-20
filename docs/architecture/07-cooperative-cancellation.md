@@ -26,9 +26,10 @@ thread::spawn(move || {
 Already-collected bulk results are discarded. There is no partial-output
 return shape.
 
-Cancellation is a control signal checked at host-owned boundaries. Future
-progress events are observability signals and will be layered on the reusable
-interop callback substrate rather than on this token.
+Cancellation is a control signal checked at host-owned boundaries. Progress
+events are observability signals delivered through the reusable interop
+callback substrate. Where a method uses a Rust per-item loop, progress reports
+and cancellation checks share the same item boundary.
 
 ## What Is Checked
 
@@ -40,6 +41,11 @@ Every host operation that can enter Lean accepts
 - `LeanSession::{query_declaration,list_declarations,list_declarations_filtered,declaration_source_range,declaration_type,declaration_kind,declaration_name}`
 - `LeanSession::{elaborate,kernel_check,check_evidence,summarize_evidence}`
 - `LeanSession::{run_meta,query_declarations_bulk,declaration_type_bulk,declaration_kind_bulk,declaration_name_bulk,elaborate_bulk,call_capability}`
+
+Some long-running methods also accept `Option<&dyn LeanProgressSink>` after the
+cancellation token. That progress sink is not a cancellation token. It may call
+`token.cancel()` on a shared token, but the session still observes cancellation
+only at the next host-controlled check point.
 
 `None` preserves the existing non-cancellable path. In particular,
 `query_declarations_bulk(..., None)`, `declaration_*_bulk(..., None)`, and

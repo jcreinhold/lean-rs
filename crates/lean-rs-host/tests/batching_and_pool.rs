@@ -39,12 +39,12 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None)
+    caps.session(&["LeanRsFixture.Handles"], None, None)
         .expect("session imports cleanly")
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None)
+    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
         .expect("session imports cleanly")
 }
 
@@ -79,7 +79,7 @@ fn query_declarations_bulk_returns_all_for_existing_names() {
         "LeanRsFixture.Handles.exprConstNat",
     ];
     let decls = session
-        .query_declarations_bulk(&names, None)
+        .query_declarations_bulk(&names, None, None)
         .expect("bulk query succeeds for fully-resolvable name list");
 
     assert_eq!(decls.len(), 3, "bulk returns one slot per input name");
@@ -118,6 +118,7 @@ fn query_declarations_bulk_errors_on_missing_name() {
                 "LeanRsFixture.Handles.nameMkStr",
             ],
             None,
+            None,
         )
         .expect_err("bulk must error when any input name is missing");
     match err {
@@ -145,7 +146,7 @@ fn query_declarations_bulk_empty_input_is_no_op() {
 
     let baseline = session.stats();
     let decls = session
-        .query_declarations_bulk(&[], None)
+        .query_declarations_bulk(&[], None, None)
         .expect("empty input returns empty vec");
     assert!(decls.is_empty(), "empty input yields empty output");
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
@@ -171,7 +172,7 @@ fn declaration_type_bulk_returns_present_and_missing_slots_in_one_dispatch() {
 
     let baseline = session.stats();
     let types = session
-        .declaration_type_bulk(&names, None)
+        .declaration_type_bulk(&names, None, None)
         .expect("bulk type query succeeds");
 
     assert_eq!(types.len(), names.len(), "one output slot per input");
@@ -213,7 +214,7 @@ fn declaration_kind_bulk_returns_expected_kinds_and_missing_slot() {
 
     let baseline = session.stats();
     let kinds = session
-        .declaration_kind_bulk(&names, None)
+        .declaration_kind_bulk(&names, None, None)
         .expect("bulk kind query succeeds");
 
     assert_eq!(
@@ -257,7 +258,7 @@ fn declaration_name_bulk_round_trips_names_including_missing() {
 
     let baseline = session.stats();
     let rendered = session
-        .declaration_name_bulk(&names, None)
+        .declaration_name_bulk(&names, None, None)
         .expect("bulk name query succeeds");
 
     assert_eq!(rendered, names, "name bulk round-trips the dotted form");
@@ -285,19 +286,19 @@ fn declaration_bulk_empty_inputs_are_no_ops() {
     let baseline = session.stats();
     assert!(
         session
-            .declaration_type_bulk(&[], None)
+            .declaration_type_bulk(&[], None, None)
             .expect("empty type bulk succeeds")
             .is_empty(),
     );
     assert!(
         session
-            .declaration_kind_bulk(&[], None)
+            .declaration_kind_bulk(&[], None, None)
             .expect("empty kind bulk succeeds")
             .is_empty(),
     );
     assert!(
         session
-            .declaration_name_bulk(&[], None)
+            .declaration_name_bulk(&[], None, None)
             .expect("empty name bulk succeeds")
             .is_empty(),
     );
@@ -316,7 +317,7 @@ fn declaration_bulk_pre_cancelled_token_returns_cancelled_without_ffi() {
 
     let baseline = session.stats();
     let err = session
-        .declaration_kind_bulk(&["LeanRsFixture.Handles.nameAnonymous"], Some(&token))
+        .declaration_kind_bulk(&["LeanRsFixture.Handles.nameAnonymous"], Some(&token), None)
         .expect_err("pre-cancelled bulk call should stop before dispatch");
 
     assert_cancelled(err);
@@ -349,7 +350,7 @@ fn declaration_bulk_observes_cancellation_between_items() {
     });
 
     let err = session
-        .declaration_kind_bulk(&names, Some(&token))
+        .declaration_kind_bulk(&names, Some(&token), None)
         .expect_err("token-present declaration bulk should observe cancellation between items");
     let observed_at = Instant::now();
     handle.join().expect("canceller thread exits cleanly");
@@ -379,7 +380,7 @@ fn elaborate_bulk_returns_per_source_results() {
     let baseline = session.stats();
     let opts = LeanElabOptions::new();
     let outcomes = session
-        .elaborate_bulk(&["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"], &opts, None)
+        .elaborate_bulk(&["(1 + 2 : Nat)", "1 +", "(1 + \"hi\" : Nat)"], &opts, None, None)
         .expect("bulk elaborate routes through the host stack cleanly");
 
     assert_eq!(outcomes.len(), 3, "bulk returns one slot per input source");
@@ -410,7 +411,7 @@ fn elaborate_bulk_empty_input_is_no_op() {
 
     let baseline = session.stats();
     let outcomes = session
-        .elaborate_bulk(&[], &LeanElabOptions::new(), None)
+        .elaborate_bulk(&[], &LeanElabOptions::new(), None, None)
         .expect("empty input returns empty vec");
     assert!(outcomes.is_empty(), "empty input yields empty output");
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
@@ -508,7 +509,7 @@ fn session_pool_reuses_session() {
 
     {
         let mut sess = pool
-            .acquire(&caps, &imports, None)
+            .acquire(&caps, &imports, None, None)
             .expect("first acquire imports fresh");
         let kind = sess
             .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
@@ -517,7 +518,7 @@ fn session_pool_reuses_session() {
     }
     {
         let mut sess = pool
-            .acquire(&caps, &imports, None)
+            .acquire(&caps, &imports, None, None)
             .expect("second acquire reuses the released env");
         let kind = sess
             .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
@@ -546,8 +547,8 @@ fn session_pool_capacity_caps_storage() {
     let pool = SessionPool::with_capacity(runtime, 1);
     let imports = ["LeanRsFixture.Handles"];
 
-    let s1 = pool.acquire(&caps, &imports, None).expect("acquire #1");
-    let s2 = pool.acquire(&caps, &imports, None).expect("acquire #2");
+    let s1 = pool.acquire(&caps, &imports, None, None).expect("acquire #1");
+    let s2 = pool.acquire(&caps, &imports, None, None).expect("acquire #2");
     drop(s1);
     drop(s2);
 
@@ -571,11 +572,11 @@ fn session_pool_distinct_imports_do_not_match() {
     let pool = SessionPool::with_capacity(runtime, 4);
 
     drop(
-        pool.acquire(&caps, &["LeanRsFixture.Handles"], None)
+        pool.acquire(&caps, &["LeanRsFixture.Handles"], None, None)
             .expect("acquire A"),
     );
     drop(
-        pool.acquire(&caps, &["LeanRsHostShims.Elaboration"], None)
+        pool.acquire(&caps, &["LeanRsHostShims.Elaboration"], None, None)
             .expect("acquire B"),
     );
 
@@ -598,8 +599,8 @@ fn session_pool_zero_capacity_never_reuses() {
     let pool = SessionPool::with_capacity(runtime, 0);
     let imports = ["LeanRsFixture.Handles"];
 
-    drop(pool.acquire(&caps, &imports, None).expect("acquire #1"));
-    drop(pool.acquire(&caps, &imports, None).expect("acquire #2"));
+    drop(pool.acquire(&caps, &imports, None, None).expect("acquire #1"));
+    drop(pool.acquire(&caps, &imports, None, None).expect("acquire #2"));
 
     let stats = pool.stats();
     assert_eq!(stats.imports_performed, 2, "capacity 0 degenerates to always-import");
@@ -617,7 +618,7 @@ fn session_pool_drain_drops_cached_entries() {
     let pool = SessionPool::with_capacity(runtime, 4);
     let imports = ["LeanRsFixture.Handles"];
 
-    drop(pool.acquire(&caps, &imports, None).expect("warm pool"));
+    drop(pool.acquire(&caps, &imports, None, None).expect("warm pool"));
     assert_eq!(pool.len(), 1, "warm pool has one cached environment");
 
     let drained = pool.drain();
@@ -633,7 +634,7 @@ fn session_pool_drain_drops_cached_entries() {
     assert_eq!(stats.drained, 1);
 
     drop(
-        pool.acquire(&caps, &imports, None)
+        pool.acquire(&caps, &imports, None, None)
             .expect("drained pool must import fresh on next acquire"),
     );
     let stats = pool.stats();
@@ -656,7 +657,7 @@ fn session_pool_drain_leaves_checked_out_sessions_valid() {
     let pool = SessionPool::with_capacity(runtime, 2);
     let imports = ["LeanRsFixture.Handles"];
 
-    let mut sess = pool.acquire(&caps, &imports, None).expect("checked-out session");
+    let mut sess = pool.acquire(&caps, &imports, None, None).expect("checked-out session");
     assert_eq!(pool.drain(), 0, "no free-list entries while the session is checked out");
 
     let kind = sess
@@ -717,7 +718,7 @@ fn bulk_vs_singular_timing_note() {
 
     let start_bulk = Instant::now();
     let decls = session
-        .query_declarations_bulk(&names, None)
+        .query_declarations_bulk(&names, None, None)
         .expect("bulk query for known names");
     let bulk_elapsed = start_bulk.elapsed();
 

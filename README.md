@@ -151,8 +151,9 @@ Ships zero Lean-side code; the Rust-to-Lean analog of `ocaml-rs`.
 
 **`lean-rs-host` is the L2 opinionated host stack.** The `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, the bounded `MetaM`
-service registry, and `SessionPool` / `PooledSession`. Requires the 18 + 4 `lean_rs_host_*`
-Lean shim contract in the capability dylib it loads.
+service registry, and `SessionPool` / `PooledSession`. Requires the 26 + 4 `lean_rs_host_*`
+Lean shim contract in the capability dylib it loads. Long-running calls can
+report live progress through `LeanProgressSink`.
 
 The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. Raw
 `lean_object *` and raw `lean_*` symbols enter the workspace only via `lean-rs-sys` and are
@@ -179,6 +180,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
+- [`13-structured-progress.md`](docs/architecture/13-structured-progress.md)—the host progress-sink contract over the reusable callback substrate.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later

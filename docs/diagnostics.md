@@ -1,7 +1,11 @@
 # Diagnostics and Observability
 
 Both crates project errors to the same stable [`lean_rs::LeanDiagnosticCode`] taxonomy and
-emit structured `tracing` spans against the `lean_rs` target. A downstream caller gets:
+emit structured `tracing` spans against the `lean_rs` target. Long-running host
+session operations can also report live progress through
+`lean_rs_host::LeanProgressSink`; see
+[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md).
+A downstream caller gets:
 
 - a stable identifier (`err.code()`) to react by family, independent of internal stage tags that may grow new variants;
 - visibility into where time is spent and where failures originate, without rebuilding the crates.
@@ -48,6 +52,9 @@ render as one line so a `build.rs` can either return them or print them through
 `Cancelled` is cooperative. It is returned only when `lean-rs-host` regains
 control and checks the token; it does not pre-empt an in-flight Lean call.
 See [`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-cancellation.md).
+
+Progress sink panics are caught at the Rust callback boundary and surfaced as
+`LeanError::Host` with stage `CallbackPanic`, code `lean_rs.internal`.
 
 ## Matching on codes
 
@@ -200,3 +207,4 @@ that drops the relevant fields.
 - [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what they cannot interrupt.
 - [Callback registry](architecture/10-callback-registry.md)—how L1 callback statuses relate to the error taxonomy.
 - [Interop build and link](architecture/12-interop-build-and-link.md)—typed `lean-toolchain` build diagnostics and cache behavior.
+- [Structured progress](architecture/13-structured-progress.md)—live in-process progress events for long-running host calls.

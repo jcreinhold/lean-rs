@@ -66,7 +66,7 @@ const HANDLES_NAMES: [&str; 16] = [
 
 fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::query_declarations_bulk");
@@ -76,7 +76,7 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
         group.bench_with_input(BenchmarkId::from_parameter(n), &names, |b, names| {
             b.iter(|| {
                 let decls = session
-                    .query_declarations_bulk(black_box(names), None)
+                    .query_declarations_bulk(black_box(names), None, None)
                     .expect("bulk query");
                 black_box(decls);
             });
@@ -102,10 +102,10 @@ fn introspection_names_5k() -> Vec<&'static str> {
 fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_type_bulk_vs_loop");
@@ -114,7 +114,7 @@ fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
     group.bench_function("bulk_5000", |b| {
         b.iter(|| {
             let types = bulk_session
-                .declaration_type_bulk(black_box(names.as_slice()), None)
+                .declaration_type_bulk(black_box(names.as_slice()), None, None)
                 .expect("bulk type query");
             black_box(types);
         });
@@ -138,10 +138,10 @@ fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_kind_bulk_vs_loop");
@@ -150,7 +150,7 @@ fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
     group.bench_function("bulk_5000", |b| {
         b.iter(|| {
             let kinds = bulk_session
-                .declaration_kind_bulk(black_box(names.as_slice()), None)
+                .declaration_kind_bulk(black_box(names.as_slice()), None, None)
                 .expect("bulk kind query");
             black_box(kinds);
         });
@@ -174,10 +174,10 @@ fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None)
+        .session(&["LeanRsFixture.Handles"], None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_name_bulk_vs_loop");
@@ -186,7 +186,7 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
     group.bench_function("bulk_5000", |b| {
         b.iter(|| {
             let rendered = bulk_session
-                .declaration_name_bulk(black_box(names.as_slice()), None)
+                .declaration_name_bulk(black_box(names.as_slice()), None, None)
                 .expect("bulk name query");
             black_box(rendered);
         });
@@ -219,7 +219,7 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"], None)
+        .session(&["LeanRsHostShims.Elaboration"], None, None)
         .expect("Elaboration imports cleanly");
     let opts = LeanElabOptions::new();
 
@@ -245,7 +245,7 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.Meta"], None)
+        .session(&["LeanRsHostShims.Meta"], None, None)
         .expect("Meta imports cleanly");
     let expr = session
         .declaration_type("Nat.zero", None)
@@ -279,12 +279,12 @@ fn bench_session_pool_reuse_hit(c: &mut Criterion, runtime: &'static LeanRuntime
 
     // Warm the pool: one acquire + drop seeds the free list with a
     // ready-to-reuse environment.
-    drop(pool.acquire(caps, &imports, None).expect("warm-up acquire"));
+    drop(pool.acquire(caps, &imports, None, None).expect("warm-up acquire"));
 
     c.bench_function("host::pool::session_reuse_hit", |b| {
         b.iter(|| {
             let sess = pool
-                .acquire(black_box(caps), black_box(&imports), None)
+                .acquire(black_box(caps), black_box(&imports), None, None)
                 .expect("acquire");
             black_box(&sess);
             drop(sess);

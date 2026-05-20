@@ -16,6 +16,20 @@ and the `String`/`Vec<String>` round-trip decoders. `session` covers
 5k-vs-loop comparisons, `elaborate_small`, `run_meta_whnf`, and
 `SessionPool` hits.
 
+Progress changes must benchmark the no-progress path explicitly. The retained
+fast path for bulk introspection is:
+
+```sh
+cargo bench -p lean-rs-host --bench session -- \
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline before
+# ... make progress changes ...
+cargo bench -p lean-rs-host --bench session -- \
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline before
+```
+
+`progress = None` should stay within Criterion noise because it allocates no
+callback handle and dispatches the same bulk shim as before.
+
 The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion
 benches because they only fire once per process. Run them via:
 

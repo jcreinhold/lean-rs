@@ -49,13 +49,13 @@ fn run() -> LeanResult<()> {
     // `LeanRsHostShims.Elaboration` brings in the Lean shim that
     // `kernel_check` dispatches through; the Lean prelude is
     // imported transitively, so `1 + 1 = 2 := rfl` elaborates.
-    let mut session = caps.session(&["LeanRsHostShims.Elaboration"], None)?;
+    let mut session = caps.session(&["LeanRsHostShims.Elaboration"], None, None)?;
 
     let source = "theorem demo_proof_check : 1 + 1 = 2 := rfl";
     let options = LeanElabOptions::new();
 
     println!("kernel_check source: {source}");
-    let outcome = session.kernel_check(source, &options, None)?;
+    let outcome = session.kernel_check(source, &options, None, None)?;
 
     // The outcome is a four-tag enum. Only `Checked` carries a
     // `LeanEvidence` handle for re-validation; the other three carry

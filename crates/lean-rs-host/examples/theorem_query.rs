@@ -46,7 +46,7 @@ fn run() -> LeanResult<()> {
     // `LeanRsFixture.Handles` is the smallest fixture module that
     // demonstrates a Lake-built import; the Lean prelude (where
     // `Nat.add` and `Nat.add_zero` live) is imported transitively.
-    let mut session = caps.session(&["LeanRsFixture.Handles"], None)?;
+    let mut session = caps.session(&["LeanRsFixture.Handles"], None, None)?;
 
     // The environment carries the full Lean prelude plus the
     // fixture's own declarations. Many thousands of entries even for

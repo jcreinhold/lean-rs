@@ -37,7 +37,7 @@ use lean_rs::LeanResult;
 /// });
 ///
 /// // On the Lean worker thread:
-/// // session.query_declarations_bulk(&names, Some(&token))?;
+/// // session.query_declarations_bulk(&names, Some(&token), None)?;
 /// # let _ = token;
 /// ```
 #[derive(Clone, Debug, Default)]

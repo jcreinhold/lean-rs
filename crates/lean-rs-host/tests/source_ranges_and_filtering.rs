@@ -30,7 +30,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_source_ranges<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.SourceRanges"], None)
+    caps.session(&["LeanRsFixture.SourceRanges"], None, None)
         .expect("session imports source-range fixture")
 }
 
@@ -109,7 +109,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
 
     let unfiltered = session.list_declarations(None).expect("unfiltered list").len();
     let default = session
-        .list_declarations_filtered(&LeanDeclarationFilter::default(), None)
+        .list_declarations_filtered(&LeanDeclarationFilter::default(), None, None)
         .expect("default filtered list")
         .len();
     assert!(default <= unfiltered, "filtered list must not exceed unfiltered list");
@@ -120,6 +120,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
                 include_private: false,
                 ..LeanDeclarationFilter::default()
             },
+            None,
             None,
         )
         .expect("private-filtered list")
@@ -136,6 +137,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
                 ..LeanDeclarationFilter::default()
             },
             None,
+            None,
         )
         .expect("generated-inclusive list")
         .len();
@@ -150,6 +152,7 @@ fn list_declarations_filtered_applies_each_flag_in_lean() {
                 include_internal: true,
                 ..LeanDeclarationFilter::default()
             },
+            None,
             None,
         )
         .expect("internal-inclusive list")
@@ -170,7 +173,7 @@ fn list_declarations_filtered_records_one_dispatch() {
 
     let before = session.stats();
     let names = session
-        .list_declarations_filtered(&LeanDeclarationFilter::default(), None)
+        .list_declarations_filtered(&LeanDeclarationFilter::default(), None, None)
         .expect("filtered list succeeds");
     assert!(!names.is_empty(), "filtered fixture environment is non-empty");
     let after = session.stats();
@@ -201,7 +204,7 @@ fn pre_cancelled_token_cancels_before_source_range_or_filter_dispatch() {
     );
 
     let err = session
-        .list_declarations_filtered(&LeanDeclarationFilter::default(), Some(&token))
+        .list_declarations_filtered(&LeanDeclarationFilter::default(), Some(&token), None)
         .expect_err("pre-cancelled filtered listing must fail");
     assert_cancelled(err);
     assert_eq!(
