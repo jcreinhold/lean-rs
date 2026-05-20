@@ -208,6 +208,16 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 writer.write(Message::Response(response))?;
             }
+            Request::JsonCommand { export, request_json } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.json_command(&export, &request_json) {
+                        Ok(response_json) => Response::JsonCommand { response_json },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
             Request::EmitTestRows { streams } => {
                 let count = emit_test_rows(&writer, &streams)?;
                 writer.write(Message::Response(Response::RowsComplete { count }))?;
@@ -520,6 +530,11 @@ impl HostSessionState {
             .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
             .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
+    }
+
+    fn json_command(&mut self, export: &str, request_json: &str) -> LeanResult<String> {
+        self.session
+            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
     }
 }
 

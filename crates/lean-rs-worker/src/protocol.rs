@@ -90,6 +90,10 @@ pub(crate) enum Request {
         export: String,
         request_json: String,
     },
+    JsonCommand {
+        export: String,
+        request_json: String,
+    },
     // Private harness requests used to prove streaming frame behavior before
     // prompt 63 exposes a public row sink API.
     EmitTestRows {
@@ -118,6 +122,7 @@ pub(crate) enum Response {
     CapabilityDoctor { report: WorkerDoctorReport },
     CapabilityMetadataMalformed { message: String },
     CapabilityDoctorMalformed { message: String },
+    JsonCommand { response_json: String },
     RowsComplete { count: u64 },
     Terminating,
     Error { code: String, message: String },

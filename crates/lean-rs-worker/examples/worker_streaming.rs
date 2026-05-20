@@ -12,8 +12,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Mutex;
 
-use lean_rs_worker::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink};
-use serde_json::{Value, json};
+use lean_rs_worker::{
+    LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
+    LeanWorkerTypedDataSink,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 fn main() -> ExitCode {
     match run() {
@@ -52,10 +56,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_or(0, |metadata| metadata.commands.len())
     );
 
-    let request = json!({
-        "source": "worker_streaming_example",
-        "limit": 3
-    });
+    let request = ExampleRequest {
+        source: "worker_streaming_example".to_owned(),
+        limit: 3,
+    };
 
     let first = run_stream_once(&mut capability, &request, "initial")?;
     println!("initial_stream_rows={first}");
@@ -74,7 +78,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_stream_once(
     capability: &mut LeanWorkerCapability,
-    request: &Value,
+    request: &ExampleRequest,
     label: &'static str,
 ) -> Result<u64, Box<dyn std::error::Error>> {
     let sink = JsonlSink::new(label);
@@ -86,14 +90,10 @@ fn run_stream_once(
         None,
     )?;
     println!("doctor_diagnostics={}", doctor.diagnostics.len());
-    let summary = session.run_data_stream(
+    let command = LeanWorkerStreamingCommand::<ExampleRequest, ExampleRow, ExampleSummary>::new(
         "lean_rs_interop_consumer_worker_data_stream",
-        request,
-        &sink,
-        None,
-        None,
-        None,
-    )?;
+    );
+    let summary = session.run_streaming_command(&command, request, &sink, None, None, None)?;
 
     let rows = sink.rows()?;
     if summary.total_rows != 2 || rows.len() != 2 {
@@ -107,12 +107,34 @@ fn run_stream_once(
     if rows.first().map(|row| row.stream.as_str()) != Some("rows") {
         return Err(format!("{label} stream did not start with the rows stream").into());
     }
+    if !summary.metadata.as_ref().is_some_and(|metadata| metadata.ok) {
+        return Err(format!("{label} stream did not return successful terminal metadata").into());
+    }
     Ok(summary.total_rows)
+}
+
+#[derive(Debug, Serialize)]
+struct ExampleRequest {
+    source: String,
+    limit: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ExampleRow {
+    kind: String,
+    ordinal: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExampleSummary {
+    #[allow(dead_code)]
+    fixture: String,
+    ok: bool,
 }
 
 struct JsonlSink {
     label: &'static str,
-    rows: Mutex<Vec<LeanWorkerDataRow>>,
+    rows: Mutex<Vec<LeanWorkerTypedDataRow<ExampleRow>>>,
 }
 
 impl JsonlSink {
@@ -123,7 +145,7 @@ impl JsonlSink {
         }
     }
 
-    fn rows(&self) -> Result<Vec<LeanWorkerDataRow>, Box<dyn std::error::Error>> {
+    fn rows(&self) -> Result<Vec<LeanWorkerTypedDataRow<ExampleRow>>, Box<dyn std::error::Error>> {
         self.rows
             .lock()
             .map(|guard| guard.clone())
@@ -131,13 +153,16 @@ impl JsonlSink {
     }
 }
 
-impl LeanWorkerDataSink for JsonlSink {
-    fn report(&self, row: LeanWorkerDataRow) {
+impl LeanWorkerTypedDataSink<ExampleRow> for JsonlSink {
+    fn report(&self, row: LeanWorkerTypedDataRow<ExampleRow>) {
         let line = json!({
             "example_phase": self.label,
-            "stream": row.stream,
+            "stream": &row.stream,
             "sequence": row.sequence,
-            "payload": row.payload,
+            "payload": {
+                "kind": &row.payload.kind,
+                "ordinal": row.payload.ordinal,
+            },
         });
         println!("{line}");
         if let Ok(mut guard) = self.rows.lock() {

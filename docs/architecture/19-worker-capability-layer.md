@@ -104,11 +104,10 @@ implementations.
 
 ## Consumer Guidance
 
-Use `run_data_stream` directly for low-level experiments and fixtures.
-
-Use the worker capability layer for production-style downstream tools that need
-live row delivery, request completion metadata, diagnostics, timeouts,
-capability discovery, restart policy, and measured performance.
+Use typed worker commands for production-style downstream tools that need live
+row delivery, request completion metadata, diagnostics, timeouts, capability
+discovery, restart policy, and measured performance. Use `run_data_stream`
+directly only for low-level experiments, fixtures, and schema-less tooling.
 
 As of the stream completion work, `run_data_stream` forwards rows live, keeps
 diagnostics on a separate sink, and returns terminal summaries with total rows,
@@ -150,3 +149,13 @@ Use downstream crates for domain schemas. A `lean-dup` integration should map
 its own request and row types onto the generic worker capability layer; it
 should not require `lean-rs-worker` to know what a declaration row, feature row,
 index update, or probe result means.
+
+As of the typed command work, `LeanWorkerJsonCommand<Req, Resp>` and
+`LeanWorkerStreamingCommand<Req, Row, Summary>` are the preferred downstream
+interfaces over capability exports. They name an export while keeping request,
+row, and terminal-summary schemas in downstream serde types. The worker still
+owns process lifecycle, private framing, live row forwarding, diagnostics,
+timeouts, cancellation, and terminal completion. Typed row decode failures
+carry the command export, stream, and sequence; raw `LeanWorkerDataRow` access
+remains available through `run_data_stream` for callers that intentionally want
+schema-less rows.

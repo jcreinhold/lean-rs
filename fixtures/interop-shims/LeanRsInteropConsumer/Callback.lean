@@ -114,4 +114,12 @@ def workerDoctor (_requestJson : String) : IO String :=
 def workerDoctorMalformed (_requestJson : String) : IO String :=
   pure "{\"diagnostics\":[{\"severity\":\"bogus\",\"code\":\"fixture.bad\",\"message\":\"bad severity\"}]}"
 
+@[export lean_rs_interop_consumer_worker_json_command]
+def workerJsonCommand (_requestJson : String) : IO String :=
+  pure "{\"accepted\":true,\"kind\":\"fixture\"}"
+
+@[export lean_rs_interop_consumer_worker_json_command_malformed]
+def workerJsonCommandMalformed (_requestJson : String) : IO String :=
+  pure "{not-json"
+
 end LeanRsInteropConsumer.Callback

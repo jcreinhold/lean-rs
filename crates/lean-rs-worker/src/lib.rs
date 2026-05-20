@@ -18,9 +18,10 @@ pub use session::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
     LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,
     LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerProgressEvent,
-    LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerSessionConfig,
-    LeanWorkerStreamSummary,
+    LeanWorkerElabResult, LeanWorkerJsonCommand, LeanWorkerKernelResult, LeanWorkerKernelStatus,
+    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSession,
+    LeanWorkerSessionConfig, LeanWorkerStreamSummary, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
+    LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
 pub use supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig,

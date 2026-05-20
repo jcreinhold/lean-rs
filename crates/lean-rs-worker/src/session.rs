@@ -6,11 +6,15 @@
 //! handles such as `LeanExpr` and `LeanEvidence` stay inside the child.
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::protocol::{
@@ -381,6 +385,141 @@ impl From<StreamSummary> for LeanWorkerStreamSummary {
     }
 }
 
+/// A non-streaming downstream JSON command.
+///
+/// The command names a Lean export with ABI `String -> IO String`. `Req` and
+/// `Resp` are downstream-owned serde types; `lean-rs-worker` owns request
+/// transport, worker lifecycle, timeout, cancellation, and response decoding.
+pub struct LeanWorkerJsonCommand<Req, Resp> {
+    export: String,
+    _types: PhantomData<fn(&Req) -> Resp>,
+}
+
+impl<Req, Resp> LeanWorkerJsonCommand<Req, Resp> {
+    /// Create a typed JSON command for one Lean export.
+    #[must_use]
+    pub fn new(export: impl Into<String>) -> Self {
+        Self {
+            export: export.into(),
+            _types: PhantomData,
+        }
+    }
+
+    /// Return the Lean export name used by this command.
+    #[must_use]
+    pub fn export(&self) -> &str {
+        &self.export
+    }
+}
+
+impl<Req, Resp> Clone for LeanWorkerJsonCommand<Req, Resp> {
+    fn clone(&self) -> Self {
+        Self {
+            export: self.export.clone(),
+            _types: PhantomData,
+        }
+    }
+}
+
+impl<Req, Resp> fmt::Debug for LeanWorkerJsonCommand<Req, Resp> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LeanWorkerJsonCommand")
+            .field("export", &self.export)
+            .finish()
+    }
+}
+
+impl<Req, Resp> PartialEq for LeanWorkerJsonCommand<Req, Resp> {
+    fn eq(&self, other: &Self) -> bool {
+        self.export == other.export
+    }
+}
+
+impl<Req, Resp> Eq for LeanWorkerJsonCommand<Req, Resp> {}
+
+/// A streaming downstream JSON command.
+///
+/// The command names a Lean export with ABI
+/// `String -> USize -> USize -> IO UInt8`. `Req`, `Row`, and `Summary` are
+/// downstream-owned serde types. Row and terminal-summary JSON are decoded at
+/// the parent boundary, after `lean-rs-worker` has handled process lifecycle,
+/// framing, diagnostics, timeout, cancellation, and completion.
+pub struct LeanWorkerStreamingCommand<Req, Row, Summary> {
+    export: String,
+    _types: PhantomData<fn(&Req) -> (Row, Summary)>,
+}
+
+impl<Req, Row, Summary> LeanWorkerStreamingCommand<Req, Row, Summary> {
+    /// Create a typed streaming command for one Lean export.
+    #[must_use]
+    pub fn new(export: impl Into<String>) -> Self {
+        Self {
+            export: export.into(),
+            _types: PhantomData,
+        }
+    }
+
+    /// Return the Lean export name used by this command.
+    #[must_use]
+    pub fn export(&self) -> &str {
+        &self.export
+    }
+}
+
+impl<Req, Row, Summary> Clone for LeanWorkerStreamingCommand<Req, Row, Summary> {
+    fn clone(&self) -> Self {
+        Self {
+            export: self.export.clone(),
+            _types: PhantomData,
+        }
+    }
+}
+
+impl<Req, Row, Summary> fmt::Debug for LeanWorkerStreamingCommand<Req, Row, Summary> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LeanWorkerStreamingCommand")
+            .field("export", &self.export)
+            .finish()
+    }
+}
+
+impl<Req, Row, Summary> PartialEq for LeanWorkerStreamingCommand<Req, Row, Summary> {
+    fn eq(&self, other: &Self) -> bool {
+        self.export == other.export
+    }
+}
+
+impl<Req, Row, Summary> Eq for LeanWorkerStreamingCommand<Req, Row, Summary> {}
+
+/// One typed downstream row decoded from a worker data row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerTypedDataRow<Row> {
+    pub stream: String,
+    pub sequence: u64,
+    pub payload: Row,
+}
+
+/// Parent-side sink for typed downstream data rows produced by one command.
+///
+/// The sink remains request-local. A panic from `report` is contained by the
+/// worker supervisor and returned as `LeanWorkerError::DataSinkPanic`.
+pub trait LeanWorkerTypedDataSink<Row>: Send + Sync {
+    fn report(&self, row: LeanWorkerTypedDataRow<Row>);
+}
+
+/// Typed summary returned after a streaming command reaches terminal success.
+///
+/// Rows delivered to a typed sink remain tentative until this summary is
+/// returned. `metadata` is decoded from the downstream terminal JSON metadata,
+/// when the export provides it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerTypedStreamSummary<Summary> {
+    pub total_rows: u64,
+    pub per_stream_counts: BTreeMap<String, u64>,
+    pub elapsed: Duration,
+    pub metadata: Option<Summary>,
+}
+
 /// Serializable elaboration result returned over the worker boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerElabResult {
@@ -639,6 +778,139 @@ impl LeanWorkerSession<'_> {
         }
     }
 
+    /// Run a typed non-streaming downstream JSON command.
+    ///
+    /// The Lean export must have ABI `String -> IO String`. The request is
+    /// serialized from `Req`; the returned JSON string is decoded into `Resp`.
+    /// Use this for commands that return one terminal JSON value and no rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if request encoding fails, the worker is
+    /// dead, the session was invalidated, the export is missing, response
+    /// decoding fails, cancellation or timeout is observed, a progress sink
+    /// panics, or protocol communication fails.
+    pub fn run_json_command<Req, Resp>(
+        &mut self,
+        command: &LeanWorkerJsonCommand<Req, Resp>,
+        request: &Req,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Resp, LeanWorkerError>
+    where
+        Req: Serialize,
+        Resp: DeserializeOwned,
+    {
+        self.ensure_open()?;
+        let request_json =
+            serde_json::to_string(request).map_err(|err| LeanWorkerError::TypedCommandRequestEncode {
+                export: command.export().to_owned(),
+                message: err.to_string(),
+            })?;
+        match self
+            .worker
+            .worker_json_command(command.export(), request_json, cancellation, progress)
+        {
+            Ok(response_json) => {
+                serde_json::from_str(&response_json).map_err(|err| LeanWorkerError::TypedCommandResponseDecode {
+                    export: command.export().to_owned(),
+                    message: err.to_string(),
+                })
+            }
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Run a typed downstream streaming command.
+    ///
+    /// The Lean export must have ABI
+    /// `String -> USize -> USize -> IO UInt8`. The request is serialized from
+    /// `Req`; each row payload is decoded into `Row`; terminal metadata is
+    /// decoded into `Summary` when present. Raw-row access remains available
+    /// through `run_data_stream`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if request encoding fails, row or summary
+    /// decoding fails, the worker is dead, the session was invalidated, the
+    /// export fails, cancellation or timeout is observed, a sink panics, or
+    /// protocol communication fails. Row decode errors include the stream and
+    /// sequence that identified the bad payload.
+    pub fn run_streaming_command<Req, Row, Summary>(
+        &mut self,
+        command: &LeanWorkerStreamingCommand<Req, Row, Summary>,
+        request: &Req,
+        rows: &dyn LeanWorkerTypedDataSink<Row>,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerTypedStreamSummary<Summary>, LeanWorkerError>
+    where
+        Req: Serialize,
+        Row: DeserializeOwned,
+        Summary: DeserializeOwned,
+    {
+        self.ensure_open()?;
+        let request_value =
+            serde_json::to_value(request).map_err(|err| LeanWorkerError::TypedCommandRequestEncode {
+                export: command.export().to_owned(),
+                message: err.to_string(),
+            })?;
+        let internal_cancellation = LeanWorkerCancellationToken::new();
+        let cancellation_for_stream = cancellation.unwrap_or(&internal_cancellation);
+        let typed_sink = TypedDataSink {
+            export: command.export(),
+            rows,
+            cancellation: cancellation_for_stream,
+            decode_error: std::sync::Mutex::new(None),
+        };
+
+        match self.run_data_stream(
+            command.export(),
+            &request_value,
+            &typed_sink,
+            diagnostics,
+            Some(cancellation_for_stream),
+            progress,
+        ) {
+            Ok(summary) => {
+                if let Some(err) = typed_sink.take_decode_error() {
+                    return Err(err);
+                }
+                let metadata = summary
+                    .metadata
+                    .map(|metadata| {
+                        serde_json::from_value(metadata).map_err(|err| LeanWorkerError::TypedCommandSummaryDecode {
+                            export: command.export().to_owned(),
+                            message: err.to_string(),
+                        })
+                    })
+                    .transpose()?;
+                Ok(LeanWorkerTypedStreamSummary {
+                    total_rows: summary.total_rows,
+                    per_stream_counts: summary.per_stream_counts,
+                    elapsed: summary.elapsed,
+                    metadata,
+                })
+            }
+            Err(LeanWorkerError::Cancelled { .. }) => {
+                if let Some(err) = typed_sink.take_decode_error() {
+                    Err(err)
+                } else {
+                    self.open = false;
+                    Err(LeanWorkerError::Cancelled {
+                        operation: "worker_run_data_stream",
+                    })
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     /// Query generic metadata from a downstream capability export.
     ///
     /// The Lean export must have ABI `String -> IO String`. The request and
@@ -712,6 +984,45 @@ impl LeanWorkerSession<'_> {
             Err(LeanWorkerError::UnsupportedRequest {
                 operation: "worker_session_invalidated",
             })
+        }
+    }
+}
+
+struct TypedDataSink<'a, Row> {
+    export: &'a str,
+    rows: &'a dyn LeanWorkerTypedDataSink<Row>,
+    cancellation: &'a LeanWorkerCancellationToken,
+    decode_error: std::sync::Mutex<Option<LeanWorkerError>>,
+}
+
+impl<Row> TypedDataSink<'_, Row> {
+    fn take_decode_error(&self) -> Option<LeanWorkerError> {
+        self.decode_error.lock().ok().and_then(|mut guard| guard.take())
+    }
+}
+
+impl<Row> LeanWorkerDataSink for TypedDataSink<'_, Row>
+where
+    Row: DeserializeOwned,
+{
+    fn report(&self, row: LeanWorkerDataRow) {
+        match serde_json::from_value(row.payload) {
+            Ok(payload) => self.rows.report(LeanWorkerTypedDataRow {
+                stream: row.stream,
+                sequence: row.sequence,
+                payload,
+            }),
+            Err(err) => {
+                if let Ok(mut guard) = self.decode_error.lock() {
+                    *guard = Some(LeanWorkerError::TypedCommandRowDecode {
+                        export: self.export.to_owned(),
+                        stream: row.stream,
+                        sequence: row.sequence,
+                        message: err.to_string(),
+                    });
+                }
+                self.cancellation.cancel();
+            }
         }
     }
 }

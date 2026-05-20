@@ -69,21 +69,34 @@ owns the row schema.
 
 ## Rust Call Site
 
-The caller implements a request-local sink:
+The preferred call site uses the typed command facade. The caller defines its
+own serde request, row, and terminal metadata types:
 
 ```rust
+#[derive(serde::Serialize)]
+struct ScanRequest {
+    source: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct ScanRow {
+    kind: String,
+    ordinal: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct ScanSummary {
+    fixture: String,
+    ok: bool,
+}
+
 struct Rows;
 
-impl LeanWorkerDataSink for Rows {
-    fn report(&self, row: LeanWorkerDataRow) {
-        println!(
-            "{}",
-            serde_json::json!({
-                "stream": row.stream,
-                "sequence": row.sequence,
-                "payload": row.payload,
-            })
-        );
+impl LeanWorkerTypedDataSink<ScanRow> for Rows {
+    fn report(&self, row: LeanWorkerTypedDataRow<ScanRow>) {
+        // Commit policy belongs to the caller. The row is still tentative
+        // until the command returns terminal success.
+        println!("{}:{} {:?}", row.stream, row.sequence, row.payload.kind);
     }
 }
 ```
@@ -118,9 +131,14 @@ Then it runs the export through a worker session:
 
 ```rust
 let mut session = capability.open_session(None, None)?;
-let summary = session.run_data_stream(
+let command = LeanWorkerStreamingCommand::<ScanRequest, ScanRow, ScanSummary>::new(
     "lean_rs_interop_consumer_worker_data_stream",
-    &serde_json::json!({"source": "worker_streaming_example"}),
+);
+let summary = session.run_streaming_command(
+    &command,
+    &ScanRequest {
+        source: "worker_streaming_example".to_owned(),
+    },
     &Rows,
     None,
     None,
@@ -128,13 +146,21 @@ let summary = session.run_data_stream(
 )?;
 assert_eq!(summary.total_rows, 2);
 assert_eq!(summary.per_stream_counts["rows"], 2);
+assert_eq!(summary.metadata.unwrap().ok, true);
 ```
 
 Rows are live: the worker forwards each row while Lean produces it. They remain
 tentative until terminal success. If a caller needs atomic commit, it should
-buffer rows in its sink and commit them only after `run_data_stream` returns
-`Ok`. The terminal summary reports total rows, per-stream counts, elapsed time,
-and optional downstream-defined metadata.
+buffer rows in its sink and commit them only after `run_streaming_command`
+returns `Ok`. The terminal summary reports total rows, per-stream counts,
+elapsed time, and optional downstream-defined metadata decoded into the
+caller's summary type.
+
+`LeanWorkerSession::run_data_stream` remains available for low-level fixtures
+and schema-less callers. It returns raw `LeanWorkerDataRow` values with
+`serde_json::Value` payloads. Production downstream code should prefer typed
+commands so row and summary decode errors are reported with command, stream,
+and sequence context.
 
 Request timeout is configured on `LeanWorkerConfig` or changed on a live worker
 or session:

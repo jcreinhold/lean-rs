@@ -61,13 +61,13 @@ downstream-owned row streaming, run the worker example:
 cargo run -p lean-rs-worker --example worker_streaming
 ```
 
-It starts a `lean-rs-worker` child, runs the prompt-64 streaming export,
-prints JSONL-like rows projected from live `LeanWorkerDataRow` events, returns
-terminal row counts / metadata separately from diagnostics, applies
-parent-owned request watchdogs, exposes generic capability metadata and doctor
-checks, cycles the worker, and proves the next request succeeds in a fresh
-child. The example uses `LeanWorkerCapabilityBuilder`, so the caller does not
-hand-assemble Lake output paths, worker child paths, or startup ordering. See
+It starts a `lean-rs-worker` child, runs a typed streaming command, prints
+JSONL-like rows projected from live typed row events, returns terminal row
+counts / typed metadata separately from diagnostics, applies parent-owned
+request watchdogs, exposes generic capability metadata and doctor checks,
+cycles the worker, and proves the next request succeeds in a fresh child. The
+example uses `LeanWorkerCapabilityBuilder`, so the caller does not hand-assemble
+Lake output paths, worker child paths, or startup ordering. See
 [`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
 
 ## Build your own consumer
