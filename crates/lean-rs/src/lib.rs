@@ -113,8 +113,6 @@ pub mod __host_internals {
 pub mod fuzz_entry;
 
 pub use crate::abi::traits::LeanAbi;
-#[allow(deprecated, reason = "temporary public compatibility alias until prompt 54")]
-pub use crate::callback::LeanCallbackEvent;
 pub use crate::callback::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanProgressTick, LeanStringEvent,
 };

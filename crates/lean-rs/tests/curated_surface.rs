@@ -13,17 +13,12 @@
 //! its own `tests/curated_surface.rs` that drives the host-stack happy
 //! path against the workspace fixture.
 
-#![allow(
-    deprecated,
-    reason = "curated surface includes the temporary LeanCallbackEvent alias"
-)]
-
 use lean_rs::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DecodeCallResult, DiagnosticCapture, HostFailure, HostStage,
-    LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackEvent, LeanCallbackFlow, LeanCallbackHandle,
-    LeanCallbackPayload, LeanCallbackStatus, LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException,
-    LeanExceptionKind, LeanExported, LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanProgressTick,
-    LeanResult, LeanRuntime, LeanStringEvent, LeanThreadGuard, Obj, ObjRef, VERSION,
+    LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload,
+    LeanCallbackStatus, LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanExported,
+    LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanProgressTick, LeanResult, LeanRuntime,
+    LeanStringEvent, LeanThreadGuard, Obj, ObjRef, VERSION,
 };
 
 #[test]
@@ -56,7 +51,6 @@ fn l1_curated_surface_is_reachable_from_crate_root() {
         _stage: HostStage,
         _kind: LeanExceptionKind,
         _code: LeanDiagnosticCode,
-        _callback_event: LeanCallbackEvent,
         _callback_flow: LeanCallbackFlow,
         _callback_handle: LeanCallbackHandle<LeanProgressTick>,
         _string_callback_handle: LeanCallbackHandle<LeanStringEvent>,

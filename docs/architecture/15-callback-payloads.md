@@ -1,6 +1,6 @@
 # Callback Payloads
 
-`LeanCallbackEvent { current, total }` is a progress tick. It was enough to
+The original two-counter callback payload is a progress tick. It was enough to
 prove the callback handle, trampoline, stale-handle, panic, and reentrancy
 contracts, but it is not a general Lean-to-Rust callback payload model.
 
@@ -90,8 +90,8 @@ typed registry. The counter event is `LeanProgressTick`, and string callbacks
 use `LeanCallbackHandle<LeanStringEvent>`.
 
 [`13-structured-progress.md`](13-structured-progress.md) remains host policy.
-Its progress sink should be implemented over `LeanProgressTick`, not over a
-general `LeanCallbackEvent`.
+Its progress sink is implemented over `LeanProgressTick`, not a general
+callback event.
 
 [`14-interop-release-contract.md`](14-interop-release-contract.md) remains
 useful for the interop stack as a whole: explicit exports, build helpers,

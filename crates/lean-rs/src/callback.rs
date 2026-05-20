@@ -50,9 +50,8 @@ pub trait LeanCallbackPayload: private::Sealed + Send + Sync + 'static {}
 
 /// Counter payload for progress-like callback ticks.
 ///
-/// This is the typed replacement for the old counter-only
-/// `LeanCallbackEvent` model. `lean-rs-host` maps it into host progress
-/// events; `lean-rs` itself attaches no theorem-prover policy to the counters.
+/// `lean-rs-host` maps this payload into host progress events; `lean-rs`
+/// itself attaches no theorem-prover policy to the counters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LeanProgressTick {
     /// Current item, tick, or phase-local counter supplied by Lean.
@@ -81,15 +80,6 @@ pub enum LeanCallbackFlow {
     /// panic or stale-handle failure.
     Stop,
 }
-
-/// Deprecated compatibility alias for the old counter payload name.
-///
-/// Use [`LeanProgressTick`] for new code.
-#[deprecated(
-    since = "0.1.0",
-    note = "LeanCallbackEvent was the counter-only payload name; use LeanProgressTick"
-)]
-pub type LeanCallbackEvent = LeanProgressTick;
 
 /// Status returned by the Rust callback trampoline to Lean.
 ///

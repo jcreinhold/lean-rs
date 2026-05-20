@@ -46,9 +46,9 @@ pub struct LeanStringEvent {
 }
 ```
 
-`LeanProgressTick` is the old two-counter payload under a precise name. The
-deprecated `LeanCallbackEvent` alias remains temporarily for compatibility, but
-new code should use `LeanProgressTick`.
+`LeanProgressTick` is the two-counter payload. It carries no host policy by
+itself; `lean-rs-host` interprets it as progress when reporting long-running
+session work.
 
 `LeanStringEvent` copies a borrowed Lean `String` into an owned Rust `String`
 before user code runs. No Lean object lifetime escapes the trampoline.

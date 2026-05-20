@@ -271,7 +271,6 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanStringEvent
 pub trait lean_rs::callback::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
-pub type lean_rs::callback::LeanCallbackEvent = lean_rs::callback::LeanProgressTick
 pub mod lean_rs::error
 #[non_exhaustive] pub enum lean_rs::error::HostStage
 pub lean_rs::error::HostStage::CallbackPanic
@@ -1394,5 +1393,4 @@ pub const ()::ARITY: usize
 pub trait lean_rs::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
-pub type lean_rs::LeanCallbackEvent = lean_rs::callback::LeanProgressTick
 pub type lean_rs::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
