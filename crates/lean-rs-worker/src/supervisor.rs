@@ -17,6 +17,12 @@ use crate::session::{
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Default deadline for one worker request after startup.
+pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
+
+/// Suggested deadline for long-running worker requests.
+pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mins(10);
+
 /// Configuration for starting a `lean-rs-worker` child process.
 ///
 /// The executable should be the `lean-rs-worker-child` binary. The supervisor
@@ -29,6 +35,7 @@ pub struct LeanWorkerConfig {
     current_dir: Option<PathBuf>,
     env: Vec<(OsString, OsString)>,
     startup_timeout: Duration,
+    request_timeout: Duration,
     restart_policy: LeanWorkerRestartPolicy,
 }
 
@@ -40,6 +47,7 @@ impl LeanWorkerConfig {
             current_dir: None,
             env: Vec::new(),
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
+            request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
             restart_policy: LeanWorkerRestartPolicy::default(),
         }
     }
@@ -67,6 +75,24 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;
+        self
+    }
+
+    /// Set the maximum time to wait for one request's terminal response.
+    ///
+    /// The request timeout starts after the request frame is written. It covers
+    /// live rows, diagnostics, progress events, and the terminal response. On
+    /// timeout, the supervisor kills and replaces the child process.
+    #[must_use]
+    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
+    /// Use the documented long-running request timeout profile.
+    #[must_use]
+    pub fn long_running_requests(mut self) -> Self {
+        self.request_timeout = LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING;
         self
     }
 
@@ -151,6 +177,11 @@ pub enum LeanWorkerRestartReason {
     Idle { idle_for: Duration, limit: Duration },
     /// Parent-side cancellation replaced the child during an in-flight request.
     Cancelled { operation: &'static str },
+    /// Parent-side request timeout replaced the child during an in-flight request.
+    RequestTimeout {
+        operation: &'static str,
+        duration: Duration,
+    },
 }
 
 /// Snapshot of worker lifecycle counters.
@@ -176,6 +207,8 @@ pub struct LeanWorkerStats {
     pub idle_restarts: u64,
     /// Restarts caused by parent-side cancellation of an in-flight request.
     pub cancelled_restarts: u64,
+    /// Restarts caused by parent-side request timeouts.
+    pub timeout_restarts: u64,
     /// RSS checks skipped because the platform did not provide a usable sample.
     pub rss_samples_unavailable: u64,
     /// Last measured child RSS in KiB, when a policy check could sample it.
@@ -187,7 +220,7 @@ pub struct LeanWorkerStats {
 impl LeanWorkerStats {
     fn record_restart(&mut self, reason: LeanWorkerRestartReason) {
         self.restarts = self.restarts.saturating_add(1);
-        match reason {
+        match &reason {
             LeanWorkerRestartReason::Explicit => {
                 self.explicit_cycles = self.explicit_cycles.saturating_add(1);
             }
@@ -205,6 +238,9 @@ impl LeanWorkerStats {
             }
             LeanWorkerRestartReason::Cancelled { .. } => {
                 self.cancelled_restarts = self.cancelled_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::RequestTimeout { .. } => {
+                self.timeout_restarts = self.timeout_restarts.saturating_add(1);
             }
         }
         self.last_restart_reason = Some(reason);
@@ -618,6 +654,20 @@ impl LeanWorker {
                 None
             }
         }
+    }
+
+    /// Return the timeout used for subsequent worker requests.
+    #[must_use]
+    pub fn request_timeout(&self) -> Duration {
+        self.config.request_timeout
+    }
+
+    /// Change the timeout for subsequent worker requests.
+    ///
+    /// This changes supervisor policy only. The supervisor still owns the
+    /// deadline, child kill, replacement, and restart accounting.
+    pub fn set_request_timeout(&mut self, timeout: Duration) {
+        self.config.request_timeout = timeout;
     }
 
     /// Explicitly cycle the worker process.
@@ -1035,30 +1085,7 @@ impl LeanWorker {
     }
 
     fn read_response(&mut self, operation: &'static str) -> Result<Response, LeanWorkerError> {
-        let Some(stdout) = self.stdout.as_mut() else {
-            return Err(self.dead_error());
-        };
-        let frame = match read_frame(stdout) {
-            Ok(frame) => frame,
-            Err(err) if err.is_eof() => return Err(self.record_exit_error()),
-            Err(err) => {
-                return Err(LeanWorkerError::Protocol {
-                    message: err.to_string(),
-                });
-            }
-        };
-        match frame.message {
-            Message::Response(Response::Error { code, message }) => Err(LeanWorkerError::Worker { code, message }),
-            Message::Response(response) => Ok(response),
-            other @ (Message::Handshake { .. }
-            | Message::Request(_)
-            | Message::Diagnostic(_)
-            | Message::ProgressTick(_)
-            | Message::DataRow(_)
-            | Message::FatalExit(_)) => Err(LeanWorkerError::Protocol {
-                message: format!("worker sent unexpected {operation} message: {other:?}"),
-            }),
-        }
+        self.read_response_with_events(operation, None, None, None, None)
     }
 
     fn read_response_with_progress(
@@ -1079,20 +1106,83 @@ impl LeanWorker {
         diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
     ) -> Result<Response, LeanWorkerError> {
         let started = Instant::now();
+        let timeout = self.config.request_timeout;
+        let deadline = started.checked_add(timeout);
+        let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
+        let (sender, receiver) = mpsc::channel();
+        let _reader = thread::spawn(move || read_request_messages(stdout, sender));
+
         loop {
-            let Some(stdout) = self.stdout.as_mut() else {
-                return Err(self.dead_error());
-            };
-            let frame = match read_frame(stdout) {
-                Ok(frame) => frame,
-                Err(err) if err.is_eof() => return Err(self.record_exit_error()),
-                Err(err) => {
-                    return Err(LeanWorkerError::Protocol {
-                        message: err.to_string(),
+            let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
+                Some(remaining) if remaining.is_zero() => {
+                    self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
+                        operation,
+                        duration: timeout,
+                    })?;
+                    return Err(LeanWorkerError::Timeout {
+                        operation,
+                        duration: timeout,
                     });
                 }
+                Some(remaining) => match receiver.recv_timeout(remaining) {
+                    Ok(event) => event,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
+                            operation,
+                            duration: timeout,
+                        })?;
+                        return Err(LeanWorkerError::Timeout {
+                            operation,
+                            duration: timeout,
+                        });
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(LeanWorkerError::Protocol {
+                            message: "worker response reader exited without a terminal response".to_owned(),
+                        });
+                    }
+                },
+                None => match receiver.recv() {
+                    Ok(event) => event,
+                    Err(_err) => {
+                        return Err(LeanWorkerError::Protocol {
+                            message: "worker response reader exited without a terminal response".to_owned(),
+                        });
+                    }
+                },
             };
-            match frame.message {
+
+            let message = match event {
+                RequestReaderEvent::Message(message) => message,
+                RequestReaderEvent::Terminal(message, stdout) => {
+                    self.stdout = Some(stdout);
+                    match message {
+                        Message::Response(Response::Error { code, message }) => {
+                            return Err(LeanWorkerError::Worker { code, message });
+                        }
+                        Message::Response(response) => return Ok(response),
+                        other @ (Message::Handshake { .. }
+                        | Message::Request(_)
+                        | Message::Diagnostic(_)
+                        | Message::ProgressTick(_)
+                        | Message::DataRow(_)
+                        | Message::FatalExit(_)) => {
+                            return Err(LeanWorkerError::Protocol {
+                                message: format!("worker sent unexpected {operation} message: {other:?}"),
+                            });
+                        }
+                    }
+                }
+                RequestReaderEvent::ReadError { message, eof } => {
+                    return if eof {
+                        Err(self.record_exit_error())
+                    } else {
+                        Err(LeanWorkerError::Protocol { message })
+                    };
+                }
+            };
+
+            match message {
                 Message::ProgressTick(tick) => {
                     report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))?;
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
@@ -1110,10 +1200,7 @@ impl LeanWorker {
                 Message::Diagnostic(diagnostic) => {
                     report_parent_diagnostic(diagnostics, diagnostic.into())?;
                 }
-                Message::Response(Response::Error { code, message }) => {
-                    return Err(LeanWorkerError::Worker { code, message });
-                }
-                Message::Response(response) => return Ok(response),
+                Message::Response(response) => return Err(unexpected_response(operation, &response)),
                 other @ (Message::Handshake { .. } | Message::Request(_) | Message::FatalExit(_)) => {
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
@@ -1206,6 +1293,39 @@ impl LeanWorker {
     fn child_rss_kib(&mut self) -> Option<u64> {
         let child = self.child.as_mut()?;
         child_rss_kib(child.id())
+    }
+}
+
+enum RequestReaderEvent {
+    Message(Message),
+    Terminal(Message, BufReader<ChildStdout>),
+    ReadError { message: String, eof: bool },
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the request reader thread must own the sender"
+)]
+fn read_request_messages(mut stdout: BufReader<ChildStdout>, sender: mpsc::Sender<RequestReaderEvent>) {
+    loop {
+        match read_frame(&mut stdout) {
+            Ok(frame) if matches!(frame.message, Message::Response(_)) => {
+                drop(sender.send(RequestReaderEvent::Terminal(frame.message, stdout)));
+                return;
+            }
+            Ok(frame) => {
+                if sender.send(RequestReaderEvent::Message(frame.message)).is_err() {
+                    return;
+                }
+            }
+            Err(err) => {
+                drop(sender.send(RequestReaderEvent::ReadError {
+                    message: err.to_string(),
+                    eof: err.is_eof(),
+                }));
+                return;
+            }
+        }
     }
 }
 

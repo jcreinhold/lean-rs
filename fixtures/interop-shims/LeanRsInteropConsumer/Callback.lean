@@ -55,6 +55,16 @@ def manyWorkerDataRows (count : Nat) : Array String := Id.run do
 def workerDataStreamMany (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline (manyWorkerDataRows 512)
 
+@[export lean_rs_interop_consumer_worker_data_stream_slow_after_row]
+def workerDataStreamSlowAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← LeanRsInterop.Callback.String.loop handle trampoline
+    #["{\"stream\":\"rows\",\"payload\":{\"kind\":\"before-timeout\"}}"]
+  if status == 0 then
+    IO.sleep 200
+    pure 0
+  else
+    pure status
+
 @[export lean_rs_interop_consumer_worker_data_stream_malformed_json]
 def workerDataStreamMalformedJson (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline #["{not-json"]

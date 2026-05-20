@@ -19,8 +19,9 @@ pub use session::{
     LeanWorkerSessionConfig, LeanWorkerStreamSummary,
 };
 pub use supervisor::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
-    LeanWorkerStats, LeanWorkerStatus,
+    LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig,
+    LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
+    LeanWorkerStatus,
 };
 
 /// Run the prompt-56 child process on stdin/stdout.

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lean_rs_worker::{
     LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink,
@@ -374,7 +374,7 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
             .expect_err("cancelled worker session should be invalidated");
         match err {
             LeanWorkerError::UnsupportedRequest { operation } => {
-                assert_eq!(operation, "worker_session_after_cancel");
+                assert_eq!(operation, "worker_session_invalidated");
             }
             other => panic!("expected invalidated session error, got {other:?}"),
         }
@@ -391,6 +391,70 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
     worker
         .health()
         .expect("worker remains usable after cancellation restart");
+}
+
+#[test]
+fn request_timeout_cycles_child_and_invalidates_session() {
+    ensure_interop_built();
+    let sink = RecordingDataSink::default();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    {
+        let mut session = worker
+            .open_session(&stream_session_config(), None, None)
+            .expect("worker session opens");
+
+        session.set_request_timeout(Duration::from_millis(50));
+        let err = session
+            .run_data_stream(
+                "lean_rs_interop_consumer_worker_data_stream_slow_after_row",
+                &json!({}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect_err("slow stream should time out");
+
+        match err {
+            LeanWorkerError::Timeout { operation, duration } => {
+                assert_eq!(operation, "worker_run_data_stream");
+                assert_eq!(duration, Duration::from_millis(50));
+            }
+            other => panic!("expected timeout, got {other:?}"),
+        }
+        assert_eq!(
+            sink.rows(),
+            vec![LeanWorkerDataRow {
+                stream: "rows".to_owned(),
+                sequence: 0,
+                payload: json!({"kind": "before-timeout"}),
+            }],
+            "rows delivered before timeout remain tentative because no terminal summary returned",
+        );
+
+        let err = session
+            .declaration_names(&["LeanRsInteropConsumer.Callback.add"], None, None)
+            .expect_err("timed-out worker session should be invalidated");
+        match err {
+            LeanWorkerError::UnsupportedRequest { operation } => {
+                assert_eq!(operation, "worker_session_invalidated");
+            }
+            other => panic!("expected invalidated session error, got {other:?}"),
+        }
+    }
+
+    let stats = worker.stats();
+    assert_eq!(stats.timeout_restarts, 1);
+    assert_eq!(
+        stats.last_restart_reason,
+        Some(LeanWorkerRestartReason::RequestTimeout {
+            operation: "worker_run_data_stream",
+            duration: Duration::from_millis(50),
+        }),
+    );
+    assert_eq!(stats.cancelled_restarts, 0);
+    assert_eq!(worker.request_timeout(), Duration::from_millis(50));
+    worker.health().expect("worker remains usable after timeout restart");
 }
 
 #[test]

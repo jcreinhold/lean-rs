@@ -63,8 +63,9 @@ cargo run -p lean-rs-worker --example worker_streaming
 
 It starts a `lean-rs-worker` child, runs the prompt-64 streaming export,
 prints JSONL-like rows projected from live `LeanWorkerDataRow` events, returns
-terminal row counts / metadata separately from diagnostics, cycles the worker,
-and proves the next request succeeds in a fresh child. See
+terminal row counts / metadata separately from diagnostics, applies
+parent-owned request watchdogs, cycles the worker, and proves the next request
+succeeds in a fresh child. See
 [`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
 
 ## Build your own consumer

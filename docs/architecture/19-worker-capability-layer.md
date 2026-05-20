@@ -116,6 +116,15 @@ per-stream counts, elapsed time, and optional downstream metadata. It remains a
 low-level escape hatch until the builder and typed command facade hide export
 names, request JSON encoding, and setup sequencing.
 
+As of the request-timeout work, startup and request deadlines are separate.
+`LeanWorkerConfig::startup_timeout` covers only child handshake.
+`LeanWorkerConfig::request_timeout`, `LeanWorker::set_request_timeout`, and
+`LeanWorkerSession::set_request_timeout` configure the parent-enforced deadline
+for one request. A timeout kills and replaces the child, records
+`LeanWorkerRestartReason::RequestTimeout`, returns `LeanWorkerError::Timeout`,
+and invalidates the open session. Partial rows delivered before the timeout
+remain tentative because no terminal success summary was returned.
+
 Use downstream crates for domain schemas. A `lean-dup` integration should map
 its own request and row types onto the generic worker capability layer; it
 should not require `lean-rs-worker` to know what a declaration row, feature row,

@@ -123,3 +123,9 @@ Schema ownership remains with the downstream crate.
 
 The worked recipe is
 [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md).
+
+Request timeout is the watchdog for streams that stop producing terminal
+success. It is enforced by the parent supervisor, not by the Lean callback. If
+the deadline expires after some rows have been delivered, those rows are still
+tentative: callers that need atomic commit must discard them unless
+`run_data_stream` returns `Ok(LeanWorkerStreamSummary)`.

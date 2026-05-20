@@ -367,6 +367,20 @@ impl LeanWorker {
 }
 
 impl LeanWorkerSession<'_> {
+    /// Return the timeout used for subsequent requests on this session.
+    #[must_use]
+    pub fn request_timeout(&self) -> Duration {
+        self.worker.request_timeout()
+    }
+
+    /// Change the timeout for subsequent requests on this session.
+    ///
+    /// A timeout is parent-enforced. If it fires, the supervisor kills and
+    /// replaces the child process and invalidates this session.
+    pub fn set_request_timeout(&mut self, timeout: Duration) {
+        self.worker.set_request_timeout(timeout);
+    }
+
     /// Elaborate one term and return only process-safe success/diagnostic data.
     ///
     /// # Errors
@@ -384,7 +398,7 @@ impl LeanWorkerSession<'_> {
         self.ensure_open()?;
         match self.worker.worker_elaborate(source, options, cancellation, progress) {
             Ok(value) => Ok(value),
-            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;
                 Err(err)
             }
@@ -409,7 +423,7 @@ impl LeanWorkerSession<'_> {
         self.ensure_open()?;
         match self.worker.worker_kernel_check(source, options, cancellation, progress) {
             Ok(value) => Ok(value),
-            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;
                 Err(err)
             }
@@ -433,7 +447,7 @@ impl LeanWorkerSession<'_> {
         self.ensure_open()?;
         match self.worker.worker_declaration_kinds(names, cancellation, progress) {
             Ok(value) => Ok(value),
-            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;
                 Err(err)
             }
@@ -457,7 +471,7 @@ impl LeanWorkerSession<'_> {
         self.ensure_open()?;
         match self.worker.worker_declaration_names(names, cancellation, progress) {
             Ok(value) => Ok(value),
-            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;
                 Err(err)
             }
@@ -493,7 +507,7 @@ impl LeanWorkerSession<'_> {
             .worker_run_data_stream(export, request, rows, diagnostics, cancellation, progress)
         {
             Ok(value) => Ok(value),
-            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;
                 Err(err)
             }
@@ -506,7 +520,7 @@ impl LeanWorkerSession<'_> {
             Ok(())
         } else {
             Err(LeanWorkerError::UnsupportedRequest {
-                operation: "worker_session_after_cancel",
+                operation: "worker_session_invalidated",
             })
         }
     }

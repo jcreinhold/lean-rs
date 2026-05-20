@@ -13,6 +13,13 @@ duration is reached. Cycling is a process restart. It is the reset boundary for
 Lean process-global runtime and import memory; `SessionPool::drain()` remains an
 in-process cache operation, not an RSS reset.
 
+Startup timeout and request timeout are separate. Startup timeout covers the
+child handshake. Request timeout covers one request after its frame is written,
+including live rows, diagnostics, progress, and terminal response. If the
+request deadline expires, the supervisor kills and replaces the child, records
+`LeanWorkerRestartReason::RequestTimeout`, returns `LeanWorkerError::Timeout`,
+and invalidates the open worker session.
+
 `LeanWorker::open_session` adds a narrow host-session adapter over the worker
 boundary. It supports elaboration, kernel-check status, declaration-kind bulk
 queries, and declaration-name bulk queries. The adapter returns copied

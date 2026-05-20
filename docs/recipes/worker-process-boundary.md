@@ -108,6 +108,20 @@ buffer rows in its sink and commit them only after `run_data_stream` returns
 `Ok`. The terminal summary reports total rows, per-stream counts, elapsed time,
 and optional downstream-defined metadata.
 
+Request timeout is configured on `LeanWorkerConfig` or changed on a live worker
+or session:
+
+```rust
+let config = LeanWorkerConfig::new(worker_child)
+    .request_timeout(LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING);
+```
+
+Startup timeout only covers the child handshake. Request timeout covers one
+request after it has been sent, including live rows, diagnostics, progress, and
+terminal response. If it expires, the supervisor kills and replaces the child,
+returns `LeanWorkerError::Timeout`, records
+`LeanWorkerRestartReason::RequestTimeout`, and invalidates the open session.
+
 ## Failure And Lifecycle Rules
 
 Malformed row JSON, missing `stream`, and missing `payload` are typed worker
@@ -116,11 +130,11 @@ panics and aborts kill the child, not the parent; the supervisor reports the
 fatal child exit.
 
 Progress and diagnostics use typed worker messages. They do not share the row
-schema. A streaming request may take a `LeanWorkerDiagnosticSink` for diagnostic
-events; data rows remain downstream data. Cancellation and timeout policy sit
-above worker requests: a parent-side cancellation token can stop an in-flight
-request at a row or progress boundary, cycle the child, and invalidate the
-current session.
+schema. A streaming request may take a `LeanWorkerDiagnosticSink` for
+diagnostic events; data rows remain downstream data. Use cancellation when the
+caller knows it wants to stop and can wait for a row or progress boundary. Use
+request timeout as a parent-enforced watchdog for unresponsive Lean work; it
+may kill the child without cooperative cleanup.
 
 Cycling the worker is the memory-reset boundary. `SessionPool::drain()` remains
 an in-process cache operation; it is not an RSS reset.
