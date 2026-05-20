@@ -98,7 +98,7 @@ fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
 
 fn interop_dylib_path() -> PathBuf {
     dylib_path(
-        &["lake", "lean-rs-interop-shims"],
+        &["crates", "lean-rs", "shims", "lean-rs-interop-shims"],
         "liblean__rs__interop__shims_LeanRsInterop",
         "libLeanRsInterop",
     )
@@ -117,7 +117,7 @@ fn consumer_library() -> LeanLibrary<'static> {
     let interop_path = interop_dylib_path();
     assert!(
         interop_path.exists(),
-        "interop dylib not found at {} — run `cd lake/lean-rs-interop-shims && lake build`",
+        "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
         interop_path.display(),
     );
     let interop = LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly");

@@ -137,14 +137,10 @@ impl<'lean> LeanLibrary<'lean> {
     /// global namespace, so any subsequently `dlopen`ed dylib whose
     /// initializer chain references them resolves correctly.
     ///
-    /// The motivating case is the `lean-rs-host` two-dylib load: a
-    /// downstream capability dylib's `initialize_<ConsumerLib>`
-    /// transitively calls `initialize_<RequiredShim>`, which is
-    /// defined in a sibling dylib (the `lean-rs-host-shims` Lake
-    /// package). With the default `RTLD_LOCAL`, the consumer's
-    /// initializer chain SIGSEGVs jumping to the unresolved symbol;
-    /// opening the shim dylib globally first lets the consumer's
-    /// chain resolve through the global namespace.
+    /// The motivating case is the `lean-rs-host` shim load: the host shim
+    /// package imports the generic interop shim package, so opening the
+    /// generic dylib globally first lets the host shim initializer resolve
+    /// the generated `LeanRsInterop.*` references normally.
     ///
     /// # Errors
     ///

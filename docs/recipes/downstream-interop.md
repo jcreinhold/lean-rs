@@ -17,8 +17,9 @@ A downstream package needs the same pieces as
 [`fixtures/interop-shims/`](../../fixtures/interop-shims/):
 
 - A Lake package with a `lean_lib` shared facet.
-- A `require lean_rs_interop_shims from ...` line for the generic interop
-  helpers when Lean will call Rust callbacks.
+- A `require lean_rs_interop_shims from ...` line pointing at the bundled
+  `crates/lean-rs/shims/lean-rs-interop-shims` package when Lean will call
+  Rust callbacks.
 - Explicit `@[export]` definitions for every Rust-callable Lean entry point.
 - A Rust build script that calls `lean_toolchain::emit_lean_link_directives_checked`
   and `lean_toolchain::build_lake_target`.

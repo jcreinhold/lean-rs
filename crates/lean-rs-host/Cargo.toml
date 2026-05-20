@@ -12,6 +12,11 @@ include = [
   "benches/**/*.rs",
   "build.rs",
   "examples/**/*.rs",
+  "shims/**/*.c",
+  "shims/**/*.lean",
+  "shims/**/lakefile.lean",
+  "shims/**/lake-manifest.json",
+  "shims/**/lean-toolchain",
   "src/**/*.rs",
   "tests/**/*.rs",
   "tests/compile_fail/**",
@@ -27,18 +32,14 @@ version.workspace = true
 [dependencies]
 lean-rs = { workspace = true }
 lean-rs-sys = { workspace = true }
+lean-toolchain = { workspace = true }
 libloading = "0.8"
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
-# Parses `lake-manifest.json` to locate the required `lean-rs-host-shims` Lake
-# package's dylib for the two-dylib load in `LeanCapabilities`. Default
-# features (std + serde, no preserve_order) are enough; the manifest is small.
-serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-lean-toolchain = { path = "../lean-toolchain" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
 trybuild = "1"
 

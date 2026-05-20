@@ -254,11 +254,17 @@ fn read_lean_version(prefix: &Path) -> String {
 fn emit_link_directives(prefix: &Path) {
     let lib_lean = prefix.join("lib").join("lean");
     let lib = prefix.join("lib");
-    println!("cargo:rustc-link-search=native={}", lib_lean.display());
-    println!("cargo:rustc-link-search=native={}", lib.display());
 
+    let metadata_only = env::var_os("CARGO_FEATURE_METADATA_ONLY").is_some();
     let dynamic = env::var_os("CARGO_FEATURE_DYNAMIC").is_some();
     let static_link = env::var_os("CARGO_FEATURE_STATIC").is_some() && !dynamic;
+
+    if metadata_only && !dynamic && !static_link {
+        return;
+    }
+
+    println!("cargo:rustc-link-search=native={}", lib_lean.display());
+    println!("cargo:rustc-link-search=native={}", lib.display());
 
     if static_link {
         for lib in ["Lean", "Init", "leanrt", "leancpp", "Lake"] {

@@ -20,9 +20,9 @@ triples.
 Extending the window is the [bump procedure](bump-toolchain.md). Untested
 versions are not supported.
 
-The in-tree Lake packages `lake/lean-rs-interop-shims`,
-`lake/lean-rs-host-shims`, `fixtures/lean`, and `fixtures/interop-shims` use
-the same toolchain window.
+The bundled Lake packages under `crates/lean-rs/shims/` and
+`crates/lean-rs-host/shims/`, plus `fixtures/lean` and `fixtures/interop-shims`,
+use the same toolchain window.
 
 ## `lean-rs-sys` symbol coverage
 

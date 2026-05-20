@@ -103,15 +103,17 @@ jobs:
       - name: Pin workspace to Lean ${{ matrix.lean_version }}
         run: |
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lean-toolchain
-          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-interop-shims/lean-toolchain
-          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > lake/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > crates/lean-rs/shims/lean-rs-interop-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > crates/lean-rs-host/shims/lean-rs-interop-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > crates/lean-rs-host/shims/lean-rs-host-shims/lean-toolchain
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/interop-shims/lean-toolchain
 
       - name: Build Lake packages
         run: |
-          (cd lake/lean-rs-interop-shims && lake build)
-          (cd lake/lean-rs-host-shims && lake build)
+          (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
 

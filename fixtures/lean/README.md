@@ -5,9 +5,9 @@ so the `lean-rs` Rust crates have a stable set of compiled Lean symbols to call 
 exercising every distinct ABI behavior at the C boundary.
 
 `lakefile.lean` here also doubles as a template for a consumer's own Lake package—the
-structure transfers verbatim. Rename the package and module to taste, drop the
-`require «lean_rs_host_shims»` line if you only need the L1 surface, and add your own
-`@[export]` declarations.
+structure transfers verbatim. Rename the package and module to taste, then add your own
+`@[export]` declarations. `lean-rs-host` ships its host shims separately; consumer Lake
+packages do not require them.
 
 ## What's exported
 
@@ -50,5 +50,5 @@ Rust callers derive these names mechanically from the package name via Lake's ma
 `MetaM` and `CoreM` carry compiler state (`Environment`, options, traces) that has no
 meaningful C ABI representation, so they cannot appear in an `@[export]` signature. The module
 exists so the package's module-initializer pipeline imports `Lean`; the `MetaM` capability is
-exposed to Rust through the bounded `lean_rs_host_meta_*` services declared in the sibling
-`lake/lean-rs-host-shims` package, not through direct `@[export]` here.
+exposed to Rust through the bounded `lean_rs_host_meta_*` services declared in the bundled
+`lean-rs-host` shim package, not through direct `@[export]` here.

@@ -85,8 +85,8 @@ scripts/test-all-toolchains.sh
 ```
 
 Iterates every version in `digests/manifest.json`, repoints the workspace
-`lean-toolchain` files (root + `lake/lean-rs-interop-shims/` +
-`lake/lean-rs-host-shims/` + `fixtures/lean/` + `fixtures/interop-shims/`),
+`lean-toolchain` files (root + bundled shim packages under `crates/lean-rs/shims/`
+and `crates/lean-rs-host/shims/` + `fixtures/lean` + `fixtures/interop-shims`),
 rebuilds the Lake packages, runs `cargo nextest run --workspace`, and prints a
 per-version pass/fail summary. Restores the
 original `lean-toolchain` files on exit (even on failure).

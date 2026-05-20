@@ -10,10 +10,9 @@
 //!
 //! ## Capability contract
 //!
-//! Every Lean capability dylib that [`crate::host::LeanCapabilities`]
-//! loads must export twenty-six **mandatory** `@[export]` symbols and may
-//! export four **optional** meta-service symbols (matched at
-//! `LeanCapabilities::load_capabilities` time):
+//! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
+//! exports twenty-six **mandatory** `@[export]` symbols and may export four
+//! **optional** meta-service symbols (matched at `LeanCapabilities::load_capabilities` time):
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
 //! | ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -452,8 +451,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let project = capabilities.host().project();
         let search_paths: Vec<String> = vec![
             project.olean_search_path().to_string_lossy().into_owned(),
-            project.interop_olean_search_path()?.to_string_lossy().into_owned(),
-            project.shim_olean_search_path()?.to_string_lossy().into_owned(),
+            crate::host::lake::LakeProject::interop_olean_search_path()?
+                .to_string_lossy()
+                .into_owned(),
+            crate::host::lake::LakeProject::shim_olean_search_path()?
+                .to_string_lossy()
+                .into_owned(),
         ];
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
         let environment = if let Some(sink) = progress {

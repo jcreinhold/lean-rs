@@ -8,8 +8,9 @@
 //! `LeanCapabilities`, `LeanSession`, plus the evidence and meta
 //! surfaces) lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
-//! 18+4 `lean_rs_host_*` Lean shim contract. This crate has no
-//! Lean-side shim contract and ships zero target-language code.
+//! 26+4 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
+//! interop shims used by L1 callbacks; it has no theorem-prover host shim
+//! contract.
 //!
 //! ## Happy path (L1)
 //!
@@ -21,7 +22,7 @@
 //! let library = lean_rs::LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
 //! let module  = library.initialize_module("my_pkg", "MyMod")?;
 //! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;
-//! let sum     = add.call((3, 4))?;
+//! let sum     = add.call(3, 4)?;
 //! ```
 //!
 //! [`LeanRuntime::init`] is the single doorway. It brings Lean up

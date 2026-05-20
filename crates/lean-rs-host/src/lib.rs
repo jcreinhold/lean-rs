@@ -11,9 +11,9 @@
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 26 mandatory + 4 optional
-//!   `lean_rs_host_*` `@[export]` Lean shims this stack expects in the
-//!   capability dylib it loads.
+//! - The capability contract: 26 mandatory + 4 optional `lean_rs_host_*`
+//!   `@[export]` Lean shims bundled with this crate and loaded alongside the
+//!   consumer capability dylib.
 //!
 //! Downstream applications that want the (β)-binding minimum — call any
 //! `@[export]` Lean function with typed arguments, no shim contract —

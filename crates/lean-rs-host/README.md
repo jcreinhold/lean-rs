@@ -22,11 +22,10 @@ The capability loader transparently handles the Lake naming-convention change be
 
 ## Quick start
 
-The L2 setup adds a `require lean_rs_host_shims from ...` to the consumer's `lakefile.lean`
-and a `lean-rs-host` dependency to `Cargo.toml`. Everything else mirrors the L1 setup in
+The L2 setup adds a `lean-rs-host` dependency to `Cargo.toml`. The crate ships the matching
+host and generic interop shim sources and builds them on demand, so your `lakefile.lean`
+declares only your own capability library. Everything else mirrors the L1 setup in
 [`lean-rs`'s README](https://docs.rs/lean-rs).
-The host shim package depends on `lean-rs-interop-shims` transitively; consumers do not add a
-separate require line for the generic interop package when they only use `lean-rs-host`.
 
 **`Cargo.toml`**:
 
@@ -54,8 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**`lean/lakefile.lean`**—adds the shim require so `LeanCapabilities::load_capabilities`
-can find the 26 + 4 `lean_rs_host_*` shim symbols at runtime:
+**`lean/lakefile.lean`**—declares your capability target. Do not add a
+`lean_rs_host_shims` require; `lean-rs-host` loads its bundled shims separately.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check
 calls can receive a borrowed `LeanProgressSink` for live in-thread progress
@@ -66,11 +65,6 @@ import Lake
 open Lake DSL
 
 package «my_app»
-
--- Pre-publish: path-require against a sibling checkout of this repository.
-require «lean_rs_host_shims» from "../path/to/lean-rs/lake/lean-rs-host-shims"
--- Post-publish: git-require by tag.
--- require «lean_rs_host_shims» from git "https://github.com/jcreinhold/lean-rs" @ "v0.1.0" / "lake/lean-rs-host-shims"
 
 @[default_target]
 lean_lib «MyCapability» where
@@ -99,7 +93,7 @@ fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
     let host = LeanHost::from_lake_project(runtime, &lake_root)?;
     let caps = host.load_capabilities("my_app", "MyCapability")?;
-    let mut session = caps.session(&["MyCapability"], None)?;
+    let mut session = caps.session(&["MyCapability"], None, None)?;
 
     // Elaborate a Lean term in the session's environment.
     let opts = LeanElabOptions::new();
@@ -121,9 +115,9 @@ Build and run:
 cargo run
 ```
 
-Lake produces two dylibs (your `libmy__app_MyCapability.{dylib,so}` plus the shim package's
-`liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`). `load_capabilities` opens both,
-sharing one Lean runtime; per-module `initialize_*` functions are idempotent.
+Lake produces your `libmy__app_MyCapability.{dylib,so}`. `load_capabilities` also builds and
+opens the crate-bundled `LeanRsInterop` and `LeanRsHostShims` dylibs, sharing one Lean
+runtime; per-module `initialize_*` functions are idempotent.
 
 Pre-publish, pin against the workspace by adding `path =` lines alongside the `version`
 constraints in `Cargo.toml` (same as the L1 setup).
@@ -133,8 +127,8 @@ constraints in `Cargo.toml` (same as the L1 setup).
 The full per-symbol contract—each Lean signature, the Rust call site it maps to, and the
 typed `LeanSession::*` method on top—lives at
 [`docs/lean-rs-host-capability-contract.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/lean-rs-host-capability-contract.md).
-Your `lean_lib` does **not** need to `import LeanRsHostShims`; Lake's two-package build
-handles the dylib-level wiring and the Rust side does the runtime dispatch.
+Your `lean_lib` does **not** need to `import LeanRsHostShims`; the Rust side builds and
+loads the bundled shim dylibs and then dispatches through their fixed symbols.
 
 ## Caveats
 

@@ -42,7 +42,9 @@ row to `SUPPORTED_TOOLCHAINS`, add a CI matrix entry, run the local sweep
 appropriate `cargo:rustc-link-*` directives, and exposes `LEAN_VERSION`, `LEAN_HEADER_PATH`,
 and `LEAN_HEADER_DIGEST` as build-time environment variables consumed by `consts.rs`. The
 default features (`dynamic`, `mimalloc`) link against `libleanshared`; the `static` feature is
-available but requires extending the link set beyond what `lean.h` alone demands. See
+available but requires extending the link set beyond what `lean.h` alone demands. The
+`metadata-only` feature is for crates such as `lean-toolchain` that need the supported-window
+metadata from build scripts without linking the build-script binary to `libleanshared`. See
 `build.rs` for details.
 
 ## License

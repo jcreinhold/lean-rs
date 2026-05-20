@@ -112,7 +112,7 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 ///
 /// The cache key is:
 ///
-/// - SHA-256 of `lake-manifest.json`;
+/// - SHA-256 of `lake-manifest.json`, or `missing` until Lake creates one;
 /// - the maximum modification timestamp of `lakefile.lean`, `lakefile.toml`, `lean-toolchain`,
 ///   and every `*.lean` file below `project_root` excluding `.lake/`;
 /// - the counted source-set size;
@@ -120,7 +120,8 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 ///
 /// A cache hit skips the Lake command only when the cache key matches and the dylib exists.
 /// The helper always emits `cargo:rerun-if-changed=...` directives for the Lake files and
-/// source files it scans. It captures Lake stdout/stderr and never forwards Lake output to
+/// source files it scans. If `lake-manifest.json` is absent, the helper lets
+/// `lake build` create it. It captures Lake stdout/stderr and never forwards Lake output to
 /// stdout, so stdout remains valid Cargo build-script directives only.
 ///
 /// # Errors
@@ -131,7 +132,22 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 /// source-set traversal failures, cache write failures, or missing built dylibs.
 pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
     let mut runner = RealLakeRunner;
-    build_lake_target_with_runner(project_root, target_name, &mut runner)
+    build_lake_target_with_runner(project_root, target_name, &mut runner, CargoMetadata::Emit)
+}
+
+/// Build a Lake `lean_lib` shared-library target without emitting Cargo build-script directives.
+///
+/// This is the same Lake/cache resolver as [`build_lake_target`], but it writes no
+/// `cargo:rerun-if-changed=...` lines to stdout. Use it from library/runtime code that needs
+/// to materialize a bundled shim on demand. Build scripts should use [`build_lake_target`] so
+/// Cargo sees the relevant rerun triggers.
+///
+/// # Errors
+///
+/// Returns the same [`LinkDiagnostics`] variants as [`build_lake_target`].
+pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
+    let mut runner = RealLakeRunner;
+    build_lake_target_with_runner(project_root, target_name, &mut runner, CargoMetadata::Suppress)
 }
 
 fn emit_for(info: &ToolchainInfo) {
@@ -190,21 +206,46 @@ struct LakeRun {
     stderr: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CargoMetadata {
+    Emit,
+    Suppress,
+}
+
+impl CargoMetadata {
+    fn println(self, args: std::fmt::Arguments<'_>) {
+        if matches!(self, Self::Emit) {
+            println!("{args}");
+        }
+    }
+
+    fn trace(self, args: std::fmt::Arguments<'_>) {
+        if matches!(self, Self::Emit) {
+            emit_lake_trace(args);
+        }
+    }
+}
+
 fn build_lake_target_with_runner(
     project_root: &Path,
     target_name: &str,
     runner: &mut impl LakeRunner,
+    cargo_metadata: CargoMetadata,
 ) -> Result<PathBuf, LinkDiagnostics> {
-    let project_root = project_root.to_path_buf();
+    let project_root = fs::canonicalize(project_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("could not canonicalize project root {} ({err})", project_root.display()),
+    })?;
     let lakefile = project_root.join("lakefile.lean");
-    println!("cargo:rerun-if-changed={}", lakefile.display());
+    cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile.display()));
     let lakefile_toml = project_root.join("lakefile.toml");
     if lakefile_toml.is_file() {
-        println!("cargo:rerun-if-changed={}", lakefile_toml.display());
+        cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_toml.display()));
     }
     let toolchain_file = project_root.join("lean-toolchain");
     if toolchain_file.is_file() {
-        println!("cargo:rerun-if-changed={}", toolchain_file.display());
+        cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", toolchain_file.display()));
     }
 
     if !target_declared_in_lakefile(&lakefile, target_name)? {
@@ -215,31 +256,41 @@ fn build_lake_target_with_runner(
     }
 
     let manifest_path = project_root.join("lake-manifest.json");
-    println!("cargo:rerun-if-changed={}", manifest_path.display());
-    let manifest_bytes = fs::read(&manifest_path).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
-        project_root: project_root.clone(),
-        target_name: target_name.to_owned(),
-        reason: format!("could not read {} ({err})", manifest_path.display()),
-    })?;
-    let manifest_digest = sha256_hex(&manifest_bytes);
-    let package_name = package_name_from_manifest(&project_root, target_name, &manifest_path, &manifest_bytes)?;
+    cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", manifest_path.display()));
+    let (manifest_digest, package_name) = match fs::read(&manifest_path) {
+        Ok(manifest_bytes) => (
+            sha256_hex(&manifest_bytes),
+            package_name_from_manifest(&project_root, target_name, &manifest_path, &manifest_bytes)?,
+        ),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (
+            "missing".to_owned(),
+            package_name_from_lakefile(&project_root, target_name, &lakefile)?,
+        ),
+        Err(err) => {
+            return Err(LinkDiagnostics::LakeOutputUnresolved {
+                project_root: project_root.clone(),
+                target_name: target_name.to_owned(),
+                reason: format!("could not read {} ({err})", manifest_path.display()),
+            });
+        }
+    };
     let source_set = scan_source_set(&project_root, target_name)?;
     for path in &source_set.paths {
-        println!("cargo:rerun-if-changed={}", path.display());
+        cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", path.display()));
     }
 
     let dylib = resolve_dylib_path(&project_root, &package_name, target_name);
-    let cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set);
+    let initial_cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set);
     let cache_path = cache_path(&project_root, target_name);
-    if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == cache_key) {
-        emit_lake_trace(format_args!(
+    if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == initial_cache_key) {
+        cargo_metadata.trace(format_args!(
             "lean-toolchain: cache hit for Lake target `{target_name}` in {}; using {}",
             project_root.display(),
             dylib.display(),
         ));
         return Ok(dylib);
     }
-    emit_lake_trace(format_args!(
+    cargo_metadata.trace(format_args!(
         "lean-toolchain: cache miss for Lake target `{target_name}` in {}; running `lake build {target_name}:shared`",
         project_root.display(),
     ));
@@ -260,7 +311,16 @@ fn build_lake_target_with_runner(
         });
     }
 
-    let dylib = resolve_dylib_path(&project_root, &package_name, target_name);
+    let (final_manifest_digest, final_package_name) = match fs::read(&manifest_path) {
+        Ok(manifest_bytes) => (
+            sha256_hex(&manifest_bytes),
+            package_name_from_manifest(&project_root, target_name, &manifest_path, &manifest_bytes)?,
+        ),
+        Err(_) => (manifest_digest, package_name),
+    };
+    let final_cache_key = cache_key(target_name, &final_package_name, &final_manifest_digest, &source_set);
+
+    let dylib = resolve_dylib_path(&project_root, &final_package_name, target_name);
     if !dylib.is_file() {
         return Err(LinkDiagnostics::LakeOutputUnresolved {
             project_root,
@@ -276,7 +336,7 @@ fn build_lake_target_with_runner(
             reason: format!("could not create cache directory {} ({err})", parent.display()),
         })?;
     }
-    fs::write(&cache_path, cache_key).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+    fs::write(&cache_path, final_cache_key).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root,
         target_name: target_name.to_owned(),
         reason: format!("could not write cache file {} ({err})", cache_path.display()),
@@ -319,6 +379,38 @@ fn package_name_from_manifest(
             target_name: target_name.to_owned(),
             reason: format!("{} has no string `name` field", manifest_path.display()),
         })
+}
+
+fn package_name_from_lakefile(
+    project_root: &Path,
+    target_name: &str,
+    lakefile: &Path,
+) -> Result<String, LinkDiagnostics> {
+    let contents = fs::read_to_string(lakefile).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("could not read {} ({err})", lakefile.display()),
+    })?;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("package ") {
+            return Ok(normalize_lake_identifier(rest));
+        }
+    }
+    Err(LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("{} has no `package` declaration", lakefile.display()),
+    })
+}
+
+fn normalize_lake_identifier(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('«')
+        .trim_matches('»')
+        .trim_matches('"')
+        .trim()
+        .to_owned()
 }
 
 struct SourceSet {
@@ -481,7 +573,7 @@ fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
-    use super::{LakeRun, LakeRunner, build_lake_target_with_runner, command_detail};
+    use super::{CargoMetadata, LakeRun, LakeRunner, build_lake_target_with_runner, command_detail};
     use crate::LinkDiagnostics;
     use std::cell::Cell;
     use std::fs;
@@ -591,18 +683,33 @@ mod tests {
     fn cache_hit_skips_lake_invocation() {
         let root = make_project("cache-hit", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
-        let first = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect("first build");
-        let second = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect("cached build");
+        let first = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect("first build");
+        let second = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect("cached build");
 
         assert_eq!(first, second);
         assert_eq!(runner.calls(), 1, "second call should use cache");
     }
 
     #[test]
+    fn missing_manifest_lets_lake_create_manifest() {
+        let root = make_project("missing-manifest", "MyCapability");
+        fs::remove_file(root.join("lake-manifest.json")).expect("remove manifest");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let path = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect("build without checked-in manifest");
+
+        assert!(path.ends_with(format!("libmy__pkg_MyCapability.{}", dylib_ext())));
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[test]
     fn legacy_output_path_is_supported() {
         let root = make_project("legacy", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SuccessLegacy);
-        let path = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect("legacy build");
+        let path = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect("legacy build");
 
         assert!(path.ends_with(format!("libMyCapability.{}", dylib_ext())));
     }
@@ -611,7 +718,8 @@ mod tests {
     fn missing_target_is_typed() {
         let root = make_project("missing-target", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
-        let err = build_lake_target_with_runner(&root, "OtherTarget", &mut runner).expect_err("missing target");
+        let err = build_lake_target_with_runner(&root, "OtherTarget", &mut runner, CargoMetadata::Emit)
+            .expect_err("missing target");
 
         match err {
             LinkDiagnostics::LakeTargetMissing { target_name, .. } => assert_eq!(target_name, "OtherTarget"),
@@ -624,7 +732,8 @@ mod tests {
     fn build_failure_is_typed_and_one_line() {
         let root = make_project("failure", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::Failure);
-        let err = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect_err("failure");
+        let err = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect_err("failure");
         let rendered = format!("{err}");
 
         match err {
@@ -642,7 +751,8 @@ mod tests {
     fn missing_lake_is_typed() {
         let root = make_project("spawn-error", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SpawnError);
-        let err = build_lake_target_with_runner(&root, "MyCapability", &mut runner).expect_err("spawn error");
+        let err = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Emit)
+            .expect_err("spawn error");
 
         match err {
             LinkDiagnostics::LakeUnavailable {
@@ -661,16 +771,18 @@ mod tests {
         let root = make_project("interop-cache-hit", "InteropConsumer");
         write_file(
             &root.join("lakefile.lean"),
-            "import Lake\nopen Lake DSL\npackage «my_pkg»\nrequire «lean_rs_interop_shims» from \"../../lake/lean-rs-interop-shims\"\n@[default_target]\nlean_lib «InteropConsumer» where\n  defaultFacets := #[LeanLib.sharedFacet]\n",
+            "import Lake\nopen Lake DSL\npackage «my_pkg»\nrequire «lean_rs_interop_shims» from \"../../crates/lean-rs/shims/lean-rs-interop-shims\"\n@[default_target]\nlean_lib «InteropConsumer» where\n  defaultFacets := #[LeanLib.sharedFacet]\n",
         );
         write_file(
             &root.join("lake-manifest.json"),
-            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"../../lake/lean-rs-interop-shims","configFile":"lakefile.lean"}],"name":"my_pkg","lakeDir":".lake"}"#,
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"../../crates/lean-rs/shims/lean-rs-interop-shims","configFile":"lakefile.lean"}],"name":"my_pkg","lakeDir":".lake"}"#,
         );
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
 
-        let first = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner).expect("first build");
-        let second = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner).expect("cached build");
+        let first = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner, CargoMetadata::Emit)
+            .expect("first build");
+        let second = build_lake_target_with_runner(&root, "InteropConsumer", &mut runner, CargoMetadata::Emit)
+            .expect("cached build");
 
         assert_eq!(first, second);
         assert_eq!(runner.calls(), 1, "second call should use cache");

@@ -27,11 +27,10 @@ This proves the reusable mechanism without requiring a process-global exported
 Rust symbol. The Rust test owns the handle and the trampoline function pointer;
 the shim only knows the stable C ABI shape.
 
-The C helper source and Lean callback call primitive now live in the generic
-`lean-rs-interop-shims` package. The host shim export remains as a
-compatibility test symbol and loops over the same C helper. The host Lake
-package links the generic C helper source into its own shared facet because
-Rust opens the host shim dylib directly in the prompt-40/41 fixtures.
+The C helper source and Lean callback call primitive live in the generic
+`lean-rs-interop-shims` package bundled under `crates/lean-rs/shims/`. The host
+shim export remains as a compatibility test symbol and loops over the same C
+helper in the host crate's bundled shim copy.
 
 ## Thread And Reentrancy Contract
 
@@ -58,9 +57,9 @@ foreign unwinds. Lean's FFI model still uses explicit `@[extern]` and
 
 ## Files
 
-- Generic Lean helper: `lake/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
-- C helper: `lake/lean-rs-interop-shims/c/interop_callback.c`
-- Host test export: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
+- Generic Lean helper: `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
+- C helper: `crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c`
+- Host test export: `crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
 - Rust fixture: `crates/lean-rs/tests/callback_trampoline.rs`
 - Sanitizer job: `.github/workflows/sanitizer.yml`
 

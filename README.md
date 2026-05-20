@@ -112,7 +112,7 @@ fn main() -> LeanResult<()> {
     let module = library.initialize_module("my_app", "MyCapability")?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
-    println!("{}", add.call((40, 2))?);  // 42
+    println!("{}", add.call(40, 2)?);  // 42
     Ok(())
 }
 ```
@@ -128,8 +128,8 @@ cargo run
 
 For the L2 path (the `LeanHost` / `LeanCapabilities` / `LeanSession` stack with kernel
 checking and `MetaM`), add `lean-rs-host = "0.1"` and follow
-[`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). That path also requires a
-`require lean_rs_host_shims from ...` line in your `lakefile.lean`.
+[`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). The host crate ships and
+builds its own shim packages; your Lake package only declares your capability library.
 
 ## The four published crates
 
@@ -147,13 +147,13 @@ own build scripts (`emit_lean_link_directives_checked` and `build_lake_target`, 
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported
 functions, semantic handles (`LeanName`/`LeanLevel`/`LeanExpr`/`LeanDeclaration`), RAII
 callback registrations for Lean-to-Rust calls, and a structured error/diagnostic boundary.
-Ships zero Lean-side code; the Rust-to-Lean analog of `ocaml-rs`.
+Ships the generic interop shim package used by callbacks, but no theorem-prover host shims.
 
 **`lean-rs-host` is the L2 opinionated host stack.** The `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, the bounded `MetaM`
 service registry, and `SessionPool` / `PooledSession`. Requires the 26 + 4 `lean_rs_host_*`
-Lean shim contract in the capability dylib it loads. Long-running calls can
-report live progress through `LeanProgressSink`.
+Lean shim contract shipped with the crate and loaded alongside the consumer capability dylib.
+Long-running calls can report live progress through `LeanProgressSink`.
 
 The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. Raw
 `lean_object *` and raw `lean_*` symbols enter the workspace only via `lean-rs-sys` and are

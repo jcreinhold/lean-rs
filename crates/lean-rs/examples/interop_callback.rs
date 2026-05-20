@@ -49,8 +49,14 @@ fn require(condition: bool, message: &'static str) -> Result<(), io::Error> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = workspace_root();
-    let interop_shims =
-        lean_toolchain::build_lake_target(&workspace.join("lake").join("lean-rs-interop-shims"), "LeanRsInterop")?;
+    let interop_shims = lean_toolchain::build_lake_target(
+        &workspace
+            .join("crates")
+            .join("lean-rs")
+            .join("shims")
+            .join("lean-rs-interop-shims"),
+        "LeanRsInterop",
+    )?;
     let consumer = lean_toolchain::build_lake_target(
         &workspace.join("fixtures").join("interop-shims"),
         "LeanRsInteropConsumer",

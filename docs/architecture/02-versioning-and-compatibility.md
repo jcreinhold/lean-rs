@@ -53,7 +53,7 @@ hatch without forking the workspace.
 
 There is no external `lean-sys` dependency. The split between `lean-rs-sys` and `lean-toolchain`:
 
-- **`lean-rs-sys`** owns what the active Lean header says: extern declarations split by category, the pure-Rust refcount mirrors, the `REQUIRED_SYMBOLS` allowlist, the `SUPPORTED_TOOLCHAINS` window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, `LEAN_HEADER_DIGEST`, and the `cargo:rustc-link-*` / `rerun-if-changed=<lean.h>` directives. Public types are opaque; layout structs are `pub(crate)`.
+- **`lean-rs-sys`** owns what the active Lean header says: extern declarations split by category, the pure-Rust refcount mirrors, the `REQUIRED_SYMBOLS` allowlist, the `SUPPORTED_TOOLCHAINS` window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, `LEAN_HEADER_DIGEST`, and the `cargo:rustc-link-*` / `rerun-if-changed=<lean.h>` directives. Public types are opaque; layout structs are `pub(crate)`. Its `metadata-only` feature is reserved for build-helper crates that need those constants without linking their own build-script binaries to `libleanshared`.
 - **`lean-toolchain`** owns everything composed on top: the typed `ToolchainFingerprint` (which exposes `is_supported()`), the Lake fixture digest, layered link diagnostics, reusable build-script helpers, and `required_symbols()` returning `lean_rs_sys::REQUIRED_SYMBOLS` so the allowlist lives in one place.
 
 See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the per-decision rationale behind
@@ -88,11 +88,11 @@ version bumps without breaking downstream code that uses the `pub unsafe fn` hel
 crate root. Items inside `lean-rs`'s `pub(crate)` modules (`runtime`, `abi`) and the internal
 helper modules under `module/` and `host/` are **not** part of the public API; they can be
 renamed, moved, or collapsed without a minor bump as long as the curated re-exports keep their
-shape. `lean-rs-host` also depends on the host shim package's `@[export]` contract.
+shape. `lean-rs-host` also depends on its bundled host shim package's `@[export]` contract.
 
-**Lean shim packages.** Same toolchain window. `lean-rs-interop-shims` owns generic
-callback ABI helpers, and `lean-rs-host-shims` owns the theorem-prover host `@[export]`
-contract on top of that generic package.
+**Lean shim packages.** Same toolchain window. `lean-rs` bundles
+`lean-rs-interop-shims` for generic callback ABI helpers. `lean-rs-host` bundles
+`lean-rs-host-shims` plus the generic helper it needs for host progress.
 
 Stabilization to `1.0` requires the `RELEASE-READINESS` contract and is not implicit.
 

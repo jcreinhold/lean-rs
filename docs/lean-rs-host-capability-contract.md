@@ -2,12 +2,11 @@
 
 The 26 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
-resolves at runtime. The shim package
-[`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
-ships an implementation and depends on the generic
-[`lean-rs-interop-shims`](../lake/lean-rs-interop-shims/) package for reusable callback ABI
-helpers. External consumers add `require lean_rs_host_shims from "…"` to their
-`lakefile.lean`; Lake resolves the generic interop dependency transitively. Expected on-disk dylib name:
+resolves at runtime. The `lean-rs-host` crate ships the implementation under
+`crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
+`crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
+`lean_rs_host_shims` require line to their own `lakefile.lean`; the Rust loader builds and opens
+the crate-owned shim dylibs. Expected host-shim dylib name:
 `liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
 
 This document covers the **wire-level contract**: each Lean signature, the typed Rust shape
@@ -19,11 +18,11 @@ This document covers the **wire-level contract**: each Lean signature, the typed
 
 `LeanCapabilities::new` performs:
 
-1. `LakeProject::interop_dylib()` reads the consumer's `lake-manifest.json` for the entry whose `name` is `lean_rs_interop_shims`, opens the generic interop dylib globally, and initializes `LeanRsInterop`.
-2. `LakeProject::shim_dylib()` reads the same manifest for the entry whose `name` is `lean_rs_host_shims`.
-3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on Unix so the subsequently opened consumer dylib can resolve its transitive reference to `_initialize_lean__rs__host__shims_LeanRsHostShims`.
+1. `LakeProject::interop_dylib()` builds the bundled generic interop shim target if needed, opens the generic interop dylib globally, and initializes `LeanRsInterop`.
+2. `LakeProject::shim_dylib()` builds the bundled host shim target if needed.
+3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on Unix.
 4. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` and the already-loaded generic callback module.
-5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer; it reaches the now-global shim symbols through the dynamic linker.
+5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not require or initialize host shims.
 6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
 
 `LeanSession::import` passes three `.olean` roots to the import shim: the
@@ -39,8 +38,8 @@ time.
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
 `KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
 `SourceRange`) live in
-[`lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
-and [`Meta.lean`](../lake/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and
+[`crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
+and [`Meta.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and
 the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 `crates/lean-rs-host/src/host/{elaboration,evidence,meta}/`.
 `DeclarationFilter` is a private wire record whose three flags are Nat-backed
@@ -101,7 +100,7 @@ service mapped to the missing address.
 The shim package is small (~557 LOC across three files). A fork that customises behaviour
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
-- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` finds the dylib at the conventional path.
+- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can initialize the module and interpret symbol names consistently.
 - Same 26 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
 - The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 

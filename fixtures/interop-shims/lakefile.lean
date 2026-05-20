@@ -3,7 +3,7 @@ open Lake DSL
 
 package «lean_rs_interop_consumer»
 
-require «lean_rs_interop_shims» from "../../lake/lean-rs-interop-shims"
+require «lean_rs_interop_shims» from "../../crates/lean-rs/shims/lean-rs-interop-shims"
 
 @[default_target]
 lean_lib «LeanRsInteropConsumer» where

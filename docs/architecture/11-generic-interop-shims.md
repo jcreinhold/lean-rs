@@ -6,7 +6,12 @@ the theorem-prover host session model.
 
 ## Package Boundary
 
-The package lives at [`lake/lean-rs-interop-shims/`](../../lake/lean-rs-interop-shims/).
+The packaged L1 copy lives under
+[`crates/lean-rs/shims/lean-rs-interop-shims/`](../../crates/lean-rs/shims/lean-rs-interop-shims/).
+`lean-rs-host` carries its own bundled copy under
+[`crates/lean-rs-host/shims/lean-rs-interop-shims/`](../../crates/lean-rs-host/shims/lean-rs-interop-shims/)
+so the host crate can build and load its shims without reaching into another crate's source
+directory at runtime.
 Its public Lean namespace is `LeanRsInterop`.
 
 Current modules:
@@ -45,10 +50,8 @@ policy symbols. Host-specific environment queries, elaboration, kernel
 checking, and `MetaM` services stay out of `LeanRsInterop`.
 
 The prompt-40 host compatibility export is loaded from the host dylib directly,
-so it keeps a local Lean loop and compiles the generic package's C helper
-source into the host shared facet. The source of truth remains
-`lake/lean-rs-interop-shims/c/interop_callback.c`; the host package only links
-that helper for the compatibility export.
+so it keeps a local Lean loop and compiles the bundled generic package's C
+helper source into the host shared facet.
 
 The host package keeps its prompt-40 test export:
 
@@ -72,7 +75,7 @@ generic callbacks without taking a host session dependency.
 Build commands:
 
 ```sh
-cd lake/lean-rs-interop-shims && lake build
+cd crates/lean-rs/shims/lean-rs-interop-shims && lake build
 cd fixtures/interop-shims && lake build
 ```
 

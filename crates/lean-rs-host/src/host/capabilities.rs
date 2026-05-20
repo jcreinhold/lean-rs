@@ -14,17 +14,15 @@
 //!   `liblean__rs__interop__shims_LeanRsInterop.dylib`; it carries
 //!   reusable callback helpers imported by the host progress shims.
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
-//!   built by the consumer's `lake build` from the required
-//!   `lean-rs-host-shims` Lake package. It contains the 26 mandatory +
-//!   4 optional `lean_rs_host_*` `@[export]` symbols that every typed
-//!   `LeanSession` method dispatches through. Lake does *not*
-//!   transitively bundle the shim's `@[export]` symbols into the
-//!   user's dylib (verified at carve-out time, 2026-05-18 —
-//!   `LeanLib.sharedFacet` is a per-package shared library, not a
-//!   transitive merge), so the host stack loads the generic interop
-//!   dylib, host shim dylib, and user dylib explicitly. All dylibs share one Lean runtime;
-//!   each per-module `initialize_<Module>` short-circuits idempotently
-//!   on its own flag.
+//!   built from the `lean-rs-host` crate's bundled shim sources. It contains
+//!   the 26 mandatory + 4 optional `lean_rs_host_*` `@[export]` symbols that
+//!   every typed `LeanSession` method dispatches through. Lake does *not*
+//!   transitively bundle the shim's `@[export]` symbols into the user's dylib
+//!   (verified at carve-out time, 2026-05-18 — `LeanLib.sharedFacet` is a
+//!   per-package shared library, not a transitive merge), so the host stack
+//!   loads the generic interop dylib, host shim dylib, and user dylib
+//!   explicitly. All dylibs share one Lean runtime; each per-module
+//!   `initialize_<Module>` short-circuits idempotently on its own flag.
 //!
 //! A missing mandatory shim symbol fails capability load; a missing
 //! meta-service symbol degrades to a synthesised
@@ -85,8 +83,8 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// Initializes the root module of the user's dylib (idempotent
     /// through Lean's `_G_initialized` short-circuit), opens and
-    /// initializes the generic interop and host shim dylibs located via
-    /// the Lake manifest, and resolves the
+    /// initializes the generic interop and host shim dylibs built from the
+    /// crate-owned shim sources, and resolves the
     /// session-dispatch symbol addresses from the **shim** dylib: 26
     /// mandatory baseline symbols (load failure on miss) and 4
     /// optional meta-service symbols (missing entries stored as
@@ -98,14 +96,11 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// Returns [`lean_rs::LeanError::Host`] with stage
     /// [`lean_rs::HostStage::Load`] /
-    /// [`lean_rs::LeanDiagnosticCode::ModuleInit`] if the shim dylib
-    /// cannot be located (missing `lake-manifest.json`, missing
-    /// `lean_rs_host_shims` entry, missing built dylib — the consumer
-    /// likely forgot `require lean_rs_host_shims` or didn't run
-    /// `lake build`). Returns [`lean_rs::HostStage::Link`] if the
-    /// initializer or any of the 26 **mandatory** symbols is missing
-    /// from the shim dylib. Missing optional meta-service symbols
-    /// never fail capability load.
+    /// [`lean_rs::LeanDiagnosticCode::ModuleInit`] if the bundled shim dylibs
+    /// cannot be built or located. Returns [`lean_rs::HostStage::Link`] if the
+    /// initializer or any of the 26 **mandatory** symbols is missing from the
+    /// shim dylib. Missing optional meta-service symbols never fail capability
+    /// load.
     pub(crate) fn new(
         host: &'h LeanHost<'lean>,
         user_library: LeanLibrary<'lean>,
@@ -114,30 +109,17 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ) -> LeanResult<Self> {
         // Load order matters. The host shim imports LeanRsInterop.Callback,
         // so the generic interop dylib must be global before the host shim
-        // initializer runs. The user's compiled dylib has
-        // `_initialize_lean__rs__host__shims_LeanRsHostShims` as an
-        // *undefined* symbol — the user's initializer chain calls it
-        // transitively because their lakefile `require`s the shim
-        // package. The dynamic linker can only resolve that reference
-        // if the shim dylib was loaded first with `RTLD_GLOBAL`
-        // (default `RTLD_LOCAL` keeps the shim's symbols invisible to
-        // subsequently loaded dylibs and the user's init chain
-        // SIGSEGVs jumping to an unresolved symbol). Verified at
-        // bring-up: `nm` showed `U _initialize_..._LeanRsHostShims`
-        // in the consumer dylib.
-        //
-        // So: open the generic interop dylib globally, then the host shim
-        // dylib globally, then the user dylib normally; initializing the
-        // user module then drives the shim's initializer through the
-        // resolved global symbols.
-        let interop_dylib_path = host.project().interop_dylib()?;
+        // initializer runs. Consumers no longer require host shims in their
+        // Lake package; the host stack opens and initializes both bundled shim
+        // dylibs explicitly before the user dylib initializes.
+        let interop_dylib_path = crate::host::lake::LakeProject::interop_dylib()?;
         let interop_library = LeanLibrary::open_globally(host.runtime(), &interop_dylib_path)?;
         let _interop_module = interop_library.initialize_module(
             crate::host::lake::INTEROP_PACKAGE_NAME,
             crate::host::lake::INTEROP_LIB_NAME,
         )?;
 
-        let shim_dylib_path = host.project().shim_dylib()?;
+        let shim_dylib_path = crate::host::lake::LakeProject::shim_dylib()?;
         let shim_library = LeanLibrary::open_globally(host.runtime(), &shim_dylib_path)?;
         // Explicitly initialize the shim's root module too, so the
         // shim's @[export] functions are live regardless of whether
@@ -145,8 +127,8 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         let _shim_module =
             shim_library.initialize_module(crate::host::lake::SHIM_PACKAGE_NAME, crate::host::lake::SHIM_LIB_NAME)?;
 
-        // Now the user dylib: its initializer can resolve the
-        // shim-defined transitives through the global namespace.
+        // Now the user dylib. It does not need to depend on the host shims;
+        // ad-hoc user exports still resolve from this library.
         let _user_module = user_library.initialize_module(package, lib_name)?;
 
         // The 26 mandatory + 4 optional `lean_rs_host_*` symbols live

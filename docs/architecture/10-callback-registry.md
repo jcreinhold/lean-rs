@@ -81,6 +81,6 @@ handle is still alive. The recorded error has diagnostic code
 ## Files
 
 - Registry: `crates/lean-rs/src/callback.rs`
-- Generic Lean helper: `lake/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
-- Host ABI proof export: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
+- Generic Lean helper: `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
+- Host ABI proof export: `crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
 - Tests: `crates/lean-rs/tests/callback_registry.rs`

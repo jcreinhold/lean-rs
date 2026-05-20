@@ -6,10 +6,9 @@ first-order ABI conversions, module loading and exported functions, semantic han
 (`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`), and a structured error/diagnostic
 boundary.
 
-Ships **zero Lean-side code**. This is the minimum every mainstream Rust binding to a
-GC-hosted language follows (`ocaml-rs`, `hs-bindgen`, `caml-oxide`). If you want an
-opinionated theorem-prover-host stack with sessions, `MetaM`, and kernel-checked evidence,
-add [`lean-rs-host`](https://docs.rs/lean-rs-host) on top.
+Ships the generic interop shim package used by Lean-to-Rust callbacks, but no
+theorem-prover host shims. If you want sessions, `MetaM`, and kernel-checked evidence, add
+[`lean-rs-host`](https://docs.rs/lean-rs-host) on top.
 
 ## Quick start
 
@@ -78,7 +77,7 @@ fn main() -> LeanResult<()> {
     let module = library.initialize_module("my_app", "MyCapability")?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
-    println!("{}", add.call((40, 2))?);  // 42
+    println!("{}", add.call(40, 2)?);  // 42
     Ok(())
 }
 ```

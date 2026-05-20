@@ -13,7 +13,8 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling r
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The L1 FFI primitive `lean-rs`
 ships the typed `@[export]`-calling machinery and the structured error boundary; this L2 crate
 adds the opinionated capability/session/pool stack, and depends on the 26 + 4
-`lean_rs_host_*` `@[export]` Lean shims that capabilities load into the dylib it opens.
+`lean_rs_host_*` `@[export]` Lean shims bundled with `lean-rs-host` and loaded alongside
+consumer capability dylibs.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed
 arguments—the norm for Rust bindings to GC-hosted languages—depend on `lean-rs` directly

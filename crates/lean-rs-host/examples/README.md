@@ -263,9 +263,9 @@ Run the generic interop example from the workspace root:
 cargo run -p lean-rs --example interop_callback
 ```
 
-That example builds `lean-rs-interop-shims` and a downstream-style Lake target
-with `lean_toolchain::build_lake_target`, then invokes a Lean export that calls
-back into a Rust `LeanCallbackHandle`.
+That example builds the bundled `lean-rs-interop-shims` package and a downstream-style Lake
+target with `lean_toolchain::build_lake_target`, then invokes a Lean export that calls back
+into a Rust `LeanCallbackHandle`.
 
 ## Pointers
 

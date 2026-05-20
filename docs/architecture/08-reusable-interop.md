@@ -73,8 +73,7 @@ New interop surfaces must pass the deep-module test:
 - Panic, abort, and reentrancy limits are documented at the callback boundary.
 - Performance claims name the workload and measurement command.
 
-The host shim ABI remains unchanged by this architecture record. The generic
-shim package is documented in
+The generic shim package is documented in
 [`11-generic-interop-shims.md`](11-generic-interop-shims.md). The build-script
 helper path and cache contract are documented in
 [`12-interop-build-and-link.md`](12-interop-build-and-link.md). The downstream
@@ -82,3 +81,5 @@ recipe is documented in
 [`../recipes/downstream-interop.md`](../recipes/downstream-interop.md).
 Structured host progress is documented in
 [`13-structured-progress.md`](13-structured-progress.md).
+Shim packaging is crate-owned: `lean-rs` ships the L1 generic interop shims,
+and `lean-rs-host` ships the host shims it loads.

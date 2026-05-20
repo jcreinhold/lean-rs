@@ -75,6 +75,7 @@ method result, maps `Panic` through the callback handle's stored error, and maps
 `StaleHandle` to an internal host invariant failure. Existing no-progress shim
 symbols and signatures are unchanged.
 
-`LeanCapabilities` opens the generic interop shim dylib globally before opening
-the host shim dylib. This anchors the generated `LeanRsInterop.Callback`
-initializer that host progress shims import.
+`LeanCapabilities` builds the crate-bundled generic interop and host shim Lake
+targets on demand, then opens the generic interop shim dylib globally before
+opening the host shim dylib. This anchors the generated
+`LeanRsInterop.Callback` initializer that host progress shims import.

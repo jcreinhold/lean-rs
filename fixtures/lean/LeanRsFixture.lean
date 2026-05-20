@@ -14,12 +14,10 @@ import LeanRsFixture.SourceRanges
     workspace-internal test fixtures (containers, effects, scalars, …)
     that the in-tree integration and codegen tests drive.
 
-    The 18 mandatory + 4 optional `@[export] lean_rs_host_*` shims live
-    in the sibling Lake package `lean-rs-host-shims` at
-    `/lake/lean-rs-host-shims/`; the `require` line in
-    `fixtures/lean/lakefile.lean` builds the shim package and places
-    its `.olean` files where Lean's `importModules` can reach them at
-    runtime via the search-path entry the host stack adds.
+    The 26 mandatory + 4 optional `@[export] lean_rs_host_*` shims travel
+    with the `lean-rs-host` crate. The host stack builds and loads those
+    bundled shims directly, then adds their `.olean` directory to the search
+    path when a session imports `LeanRsHostShims.*`.
 
     Critically this fixture does **not** `import LeanRsHostShims`. The
     L1 tests in `crates/lean-rs/src/{module,handle}/tests.rs` open this
@@ -32,6 +30,5 @@ import LeanRsFixture.SourceRanges
     discipline; L2 tests reach the shim's modules at *runtime* by
     naming them in `caps.session(&["LeanRsHostShims.Elaboration", …])`.
 
-    The split (test-only fixtures here; capability contract in the
-    shim package; runtime two-dylib load in Rust) is the hybrid layout
-    documented in `docs/downstream-integration.md`. -/
+    The split keeps this test fixture as ordinary consumer Lean code while
+    `lean-rs-host` owns its theorem-prover host shims. -/

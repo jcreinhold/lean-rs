@@ -28,6 +28,9 @@ for callers that prefer the earlier warning-on-failure behavior.
 `build_lake_target` emits `cargo:rerun-if-changed` lines for the Lake files and
 Lean source files it scans. It captures Lake stdout and stderr, so stdout stays
 limited to Cargo directives and caller-chosen `cargo:` lines.
+`build_lake_target_quiet` uses the same cache and path resolver without emitting
+Cargo directives; `lean-rs-host` uses it when it materializes bundled shims at
+runtime.
 
 Human cache diagnostics go to stderr:
 
@@ -70,7 +73,7 @@ Each diagnostic renders as one line, so callers may print it through
 [`crates/lean-rs/examples/interop_callback.rs`](../../crates/lean-rs/examples/interop_callback.rs)
 builds two Lake targets through the helper:
 
-- `lake/lean-rs-interop-shims` target `LeanRsInterop`;
+- `crates/lean-rs/shims/lean-rs-interop-shims` target `LeanRsInterop`;
 - `fixtures/interop-shims` target `LeanRsInteropConsumer`.
 
 The example opens the generic shim dylib globally, opens the downstream-style
@@ -91,6 +94,6 @@ The full consumer recipe is
 ## Scope
 
 The helper builds Lake `lean_lib` shared facets for the host platform. It does
-not cross-compile, build executables, publish Lake packages, or bundle shim
-sources. Packaging the generic and host shim packages is a separate release
-contract.
+not cross-compile, build executables, or publish Lake packages. The generic and
+host shim sources are bundled with their owning Rust crates; this helper is the
+path those crates and downstream examples use to materialize the dylibs.
