@@ -1,0 +1,38 @@
+[package]
+authors.workspace = true
+categories = ["api-bindings"]
+description = "Internal worker-process boundary for lean-rs host workloads."
+documentation = "https://docs.rs/lean-rs-worker"
+edition.workspace = true
+include = [
+  "Cargo.toml",
+  "LICENSE-APACHE",
+  "LICENSE-MIT",
+  "README.md",
+  "build.rs",
+  "src/**/*.rs",
+  "tests/**/*.rs",
+]
+keywords = ["bindings", "embedding", "lean", "lean4", "worker"]
+license.workspace = true
+name = "lean-rs-worker"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+lean-rs = { workspace = true }
+lean-rs-host = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+lean-toolchain = { workspace = true }
+
+[[bin]]
+name = "lean-rs-worker-child"
+path = "src/bin/lean-rs-worker-child.rs"
+
+[lints]
+workspace = true

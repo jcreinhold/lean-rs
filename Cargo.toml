@@ -13,6 +13,7 @@ version = "0.1.1"
 
 [workspace.dependencies]
 lean-rs = { version = "0.1.1", path = "crates/lean-rs" }
+lean-rs-host = { version = "0.1.1", path = "crates/lean-rs-host" }
 lean-rs-sys = { version = "0.1.1", path = "crates/lean-rs-sys" }
 lean-toolchain = { version = "0.1.1", path = "crates/lean-toolchain" }
 sha2 = "0.11"
