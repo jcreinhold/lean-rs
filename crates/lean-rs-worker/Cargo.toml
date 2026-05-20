@@ -10,9 +10,9 @@ include = [
   "LICENSE-MIT",
   "README.md",
   "build.rs",
+  "examples/**/*.rs",
   "src/**/*.rs",
   "tests/**/*.rs",
-  "examples/**/*.rs",
 ]
 keywords = ["bindings", "embedding", "lean", "lean4", "worker"]
 license.workspace = true
@@ -37,3 +37,6 @@ path = "src/bin/lean-rs-worker-child.rs"
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

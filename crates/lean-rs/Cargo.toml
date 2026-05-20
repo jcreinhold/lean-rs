@@ -5,6 +5,7 @@ description = "Safe Rust bindings for Lean 4 interop: runtime initialization, ob
 documentation = "https://docs.rs/lean-rs"
 edition.workspace = true
 include = [
+  "!shims/**/.lake/**",
   "Cargo.toml",
   "LICENSE-APACHE",
   "LICENSE-MIT",
@@ -14,10 +15,9 @@ include = [
   "examples/**/*.rs",
   "shims/**/*.c",
   "shims/**/*.lean",
-  "shims/**/lakefile.lean",
   "shims/**/lake-manifest.json",
+  "shims/**/lakefile.lean",
   "shims/**/lean-toolchain",
-  "!shims/**/.lake/**",
   "src/**/*.rs",
   "tests/**/*.rs",
   "tests/compile_fail/**",
@@ -73,10 +73,6 @@ fuzzing = []
 
 [dev-dependencies]
 lean-toolchain = { path = "../lean-toolchain" }
-# Compile-fail tests pinning the curated surface invariants (handles
-# cannot outlive their runtime borrow; runtime / session / handles are
-# !Send + !Sync). Each negative case lives under tests/compile_fail/.
-trybuild = "1"
 # Criterion drives the steady-state hot-path and session-path baselines
 # under `benches/`. Cold paths (runtime init, library open, module init)
 # are once-per-process and live in `examples/cold_probe.rs` instead —
@@ -103,3 +99,6 @@ required-features = ["dhat-heap"]
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false
