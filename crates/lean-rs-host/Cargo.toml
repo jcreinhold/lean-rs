@@ -34,11 +34,11 @@ version.workspace = true
 lean-rs = { workspace = true }
 lean-rs-sys = { workspace = true }
 lean-toolchain = { workspace = true }
-tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
+criterion = { workspace = true }
+tracing-subscriber = { workspace = true }
 trybuild = "1"
 
 [[bench]]
@@ -47,3 +47,9 @@ name = "session"
 
 [lints]
 workspace = true
+
+# `tests/compile_fail/*.rs` are driven by trybuild from
+# `tests/compile_fail_surface.rs` via string-based `t.compile_fail(...)` calls,
+# which cargo-shear cannot see statically.
+[package.metadata.cargo-shear]
+ignored-paths = ["tests/compile_fail/*.rs"]

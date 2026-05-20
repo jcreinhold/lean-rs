@@ -12,11 +12,20 @@ rust-version = "1.91"
 version = "0.1.1"
 
 [workspace.dependencies]
-lean-rs = { version = "0.1.1", path = "crates/lean-rs" }
-lean-rs-host = { version = "0.1.1", path = "crates/lean-rs-host" }
-lean-rs-sys = { version = "0.1.1", path = "crates/lean-rs-sys" }
-lean-toolchain = { version = "0.1.1", path = "crates/lean-toolchain" }
+lean-rs = { path = "crates/lean-rs" }
+lean-rs-host = { path = "crates/lean-rs-host" }
+lean-rs-sys = { path = "crates/lean-rs-sys" }
+lean-toolchain = { path = "crates/lean-toolchain" }
+
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+serde_json = "1"
 sha2 = "0.11"
+# Baseline tracing-subscriber surface: `registry` + `std` is enough for the
+# `DiagnosticCapture` plumbing in `lean-rs`. Crates that need `fmt` /
+# `env-filter` (examples, dev-deps) layer those features on top via
+# `features = [...]`; Cargo unions feature sets.
+tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 [workspace.lints.rust]
 future-incompatible = "warn"

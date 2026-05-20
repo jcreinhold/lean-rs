@@ -15,8 +15,8 @@
 //! Usage:
 //!
 //! ```text
-//! cargo run --release -p lean-rs --features dhat-heap --example alloc_probe -- string_identity_4096
-//! cargo run --release -p lean-rs --features dhat-heap --example alloc_probe -- array_string_256
+//! cargo run --release -p lean-rs --example alloc_probe -- string_identity_4096
+//! cargo run --release -p lean-rs --example alloc_probe -- array_string_256
 //! ```
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::print_stderr)]

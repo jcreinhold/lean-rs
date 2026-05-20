@@ -31,7 +31,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-lean-rs-sys.workspace = true
+lean-rs-sys = { workspace = true }
 libloading = "0.8"
 # Symbol-table walk in `module::library` distinguishes Lean nullary-constant
 # globals (compiled by Lake as persistent `lean_object*` data-section
@@ -44,23 +44,14 @@ object = { version = "0.36", default-features = false, features = ["read", "std"
 # the crate; downstream consumers attach their own (or `DiagnosticCapture`
 # for in-process tests). Cost is one atomic load per span entry when no
 # subscriber is attached.
-tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }
+tracing = { workspace = true }
 # `tracing-subscriber` powers `DiagnosticCapture` (always present, no
 # feature gate). Only the `registry` plumbing is needed; the `fmt`
 # stack is intentionally absent so downstream applications choose their
 # own formatter.
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
-# Optional heap profiler for `examples/alloc_probe.rs`. Gated behind the
-# `dhat-heap` feature so the default build, `cargo test`, and `cargo bench`
-# do not pull dhat in. Installs `dhat::Alloc` as the *Rust* global
-# allocator; Lean's internal mimalloc (statically linked into
-# `libleanrt.a`) is a separate allocator and unaffected.
-dhat = { version = "0.3", optional = true }
+tracing-subscriber = { workspace = true }
 
 [features]
-# Enables the dhat-instrumented `alloc_probe` example. Not consumed by
-# any library code path — purely a build switch for the profiling binary.
-dhat-heap = ["dep:dhat"]
 # Opens a narrow set of `pub(crate)` ABI decoders as `pub fn` entry
 # points so the in-tree `fuzz/` crate (cargo-fuzz, nightly-only) can
 # drive them with `lean-rs-sys`-constructed Lean-shaped inputs.
@@ -72,19 +63,24 @@ dhat-heap = ["dep:dhat"]
 fuzzing = []
 
 [dev-dependencies]
-lean-toolchain = { path = "../lean-toolchain" }
+# Heap profiler for `examples/alloc_probe.rs`. Installs `dhat::Alloc` as the
+# *Rust* global allocator; Lean's internal mimalloc (statically linked into
+# `libleanrt.a`) is a separate allocator and unaffected. Dev-only — never
+# pulled into the published library build.
+dhat = "0.3"
+lean-toolchain = { workspace = true }
 # Criterion drives the steady-state hot-path and session-path baselines
 # under `benches/`. Cold paths (runtime init, library open, module init)
 # are once-per-process and live in `examples/cold_probe.rs` instead —
 # see `docs/performance/baseline.md` for the rationale.
-criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+criterion = { workspace = true }
 # Examples under `examples/` install a `tracing_subscriber::fmt`
 # sink so `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces
-# the spans the crate emits. The non-dev `tracing-subscriber`
-# dependency carries only `registry` + `std` (enough for
-# `DiagnosticCapture`); the dev override layers `fmt` + `env-filter`
-# on top so production builds don't pull either.
-tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+# the spans the crate emits. The workspace `tracing-subscriber` carries
+# only `registry` + `std` (enough for `DiagnosticCapture`); the dev
+# override layers `fmt` + `env-filter` on top so production builds don't
+# pull either. Cargo unions the feature sets across the two declarations.
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [[bench]]
 harness = false
@@ -95,7 +91,6 @@ name = "cold_probe"
 
 [[example]]
 name = "alloc_probe"
-required-features = ["dhat-heap"]
 
 [lints]
 workspace = true

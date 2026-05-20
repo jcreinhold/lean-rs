@@ -90,7 +90,7 @@ dhat output for the conversion-heavy workloads, when an allocation question need
 ```sh
 # Run from the workspace root.
 WORKSPACE=$(pwd)
-cargo build --release -p lean-rs --features dhat-heap --example alloc_probe
+cargo build --release -p lean-rs --example alloc_probe
 mkdir -p /tmp/dhat-runs && cd /tmp/dhat-runs
 "$WORKSPACE/target/release/examples/alloc_probe" string_identity_4096
 # dhat-heap.json carries per-call-site backtraces; inspect with
