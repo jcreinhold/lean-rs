@@ -25,11 +25,9 @@ version.workspace = true
 [dependencies]
 lean-rs = { workspace = true }
 lean-rs-host = { workspace = true }
+lean-toolchain = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
-
-[dev-dependencies]
-lean-toolchain = { workspace = true }
 
 [[bin]]
 name = "lean-rs-worker-child"

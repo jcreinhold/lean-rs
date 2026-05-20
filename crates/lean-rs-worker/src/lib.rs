@@ -7,11 +7,13 @@
 //! cycles the child process for memory reset; it does not change the
 //! in-process `lean-rs-host` memory contract.
 
+mod capability;
 mod child;
 mod protocol;
 mod session;
 mod supervisor;
 
+pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
 pub use session::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
     LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,

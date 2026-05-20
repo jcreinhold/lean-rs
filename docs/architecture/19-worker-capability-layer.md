@@ -135,6 +135,17 @@ validates those envelopes; downstream crates decide which command names,
 capability names, semantic versions, and doctor diagnostics affect caches or
 user-facing support workflows.
 
+As of the builder work, `LeanWorkerCapabilityBuilder` is the normal setup path
+for downstream capabilities. It builds the named Lake `lean_lib` target through
+`lean-toolchain`, resolves and starts the worker child, health-checks the
+worker, opens the configured import session, applies selected restart/timeout
+policy, and optionally validates capability metadata. The caller still names
+the Lake project root, package, target, and imports; those are capability
+identity, not worker internals. The default child resolver checks
+`LEAN_RS_WORKER_CHILD`, sibling Cargo profile paths, and the workspace
+development build. Low-level `LeanWorker` remains available for tests, custom
+supervision, and focused lifecycle examples.
+
 Use downstream crates for domain schemas. A `lean-dup` integration should map
 its own request and row types onto the generic worker capability layer; it
 should not require `lean-rs-worker` to know what a declaration row, feature row,

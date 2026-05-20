@@ -66,7 +66,8 @@ prints JSONL-like rows projected from live `LeanWorkerDataRow` events, returns
 terminal row counts / metadata separately from diagnostics, applies
 parent-owned request watchdogs, exposes generic capability metadata and doctor
 checks, cycles the worker, and proves the next request succeeds in a fresh
-child. See
+child. The example uses `LeanWorkerCapabilityBuilder`, so the caller does not
+hand-assemble Lake output paths, worker child paths, or startup ordering. See
 [`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
 
 ## Build your own consumer
@@ -155,7 +156,7 @@ checking and `MetaM`), add `lean-rs-host = "0.1"` and follow
 [`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). The host crate ships and
 builds its own shim packages; your Lake package only declares your capability library.
 
-## The four published crates
+## The five published crates
 
 `lean-rs-sys` is the raw Lean 4 C ABI binding: curated `extern "C"` declarations split by
 semantic category, pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, the
@@ -179,13 +180,23 @@ service registry, and `SessionPool` / `PooledSession`. Requires the 26 + 4 `lean
 Lean shim contract shipped with the crate and loaded alongside the consumer capability dylib.
 Long-running calls can report live progress through `LeanProgressSink`.
 
-The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. Raw
-`lean_object *` and raw `lean_*` symbols enter the workspace only via `lean-rs-sys` and are
-not re-exported by `lean-toolchain` or `lean-rs`. The L1 (`lean-rs`) curated surface is the
-typed FFI primitive plus the four core semantic handle types and the error boundary; the L2
-(`lean-rs-host`) curated surface is the opinionated theorem-prover-host capability stack. See
-[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the L2
-classification table.
+**`lean-rs-worker` is the process-boundary host stack.** It supervises a
+`lean-rs-worker-child` process around `lean-rs-host` for fatal-exit containment
+and memory cycling. `LeanWorkerCapabilityBuilder` is the normal downstream
+entry point: it builds the Lake target, starts the worker, opens imports,
+optionally validates metadata, and leaves request/row schemas to the downstream
+crate.
+
+The in-process layering invariant is
+`lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`;
+`lean-rs-worker` wraps that host stack in a child-process boundary. Raw
+`lean_object *` and raw `lean_*` symbols enter the workspace only via
+`lean-rs-sys` and are not re-exported by `lean-toolchain` or `lean-rs`. The L1
+(`lean-rs`) curated surface is the typed FFI primitive plus the four core
+semantic handle types and the error boundary; the L2 (`lean-rs-host`) curated
+surface is the opinionated theorem-prover-host capability stack. See
+[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for
+the L2 classification table.
 
 ## Going deeper
 

@@ -13,6 +13,17 @@ duration is reached. Cycling is a process restart. It is the reset boundary for
 Lean process-global runtime and import memory; `SessionPool::drain()` remains an
 in-process cache operation, not an RSS reset.
 
+`LeanWorkerCapabilityBuilder` is the normal downstream entry point. It builds
+the named Lake `lean_lib` shared target through `lean-toolchain`, resolves the
+worker child, starts and health-checks the worker, opens the configured import
+session, and can validate generic capability metadata. Callers provide the Lake
+project root, package name, library target, imports, and deliberate policy
+overrides; they do not construct `.lake/build/lib` paths or hand-order startup
+steps. The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo
+profile paths, and the in-tree workspace development build. Packaged
+applications may set `LEAN_RS_WORKER_CHILD` or pass `worker_executable` when
+the child binary is shipped elsewhere.
+
 Startup timeout and request timeout are separate. Startup timeout covers the
 child handshake. Request timeout covers one request after its frame is written,
 including live rows, diagnostics, progress, and terminal response. If the

@@ -6,9 +6,10 @@ Run the worker streaming example from a clean checkout:
 cargo run -p lean-rs-worker --example worker_streaming
 ```
 
-The example builds the downstream Lake target, starts a worker child, opens a
-worker session, runs a streaming Lean export, prints JSONL-like rows, cycles the
-worker, and proves that the next request succeeds in a fresh child.
+The example uses `LeanWorkerCapabilityBuilder` to build the downstream Lake
+target, start a worker child, open a worker session, validate capability
+metadata, run a streaming Lean export, print JSONL-like rows, cycle the worker,
+and prove that the next request succeeds in a fresh child.
 
 Use this path when the application needs process isolation or memory cycling.
 Use direct L1 callbacks, such as
@@ -87,9 +88,36 @@ impl LeanWorkerDataSink for Rows {
 }
 ```
 
+Then it builds and opens the worker-backed capability:
+
+```rust
+let mut capability = LeanWorkerCapabilityBuilder::new(
+    "fixtures/interop-shims",
+    "lean_rs_interop_consumer",
+    "LeanRsInteropConsumer",
+    ["LeanRsInteropConsumer.Callback"],
+)
+.validate_metadata(
+    "lean_rs_interop_consumer_worker_metadata",
+    serde_json::json!({"source": "worker_streaming_example"}),
+)
+.open()?;
+```
+
+The builder uses `lean-toolchain::build_lake_target_quiet` to materialize the
+Lake shared library, starts and health-checks the worker, opens the import
+session once, and stores the validated metadata. The caller names the Lake
+project, package, target, and imports because those are capability identity; it
+does not construct `.lake/build/lib` paths, locate the worker child by hand, or
+repeat startup ordering. The default resolver checks `LEAN_RS_WORKER_CHILD`,
+sibling Cargo profile paths, and the in-tree workspace development build.
+Packaged applications can set `LEAN_RS_WORKER_CHILD` or call
+`worker_executable` when the child binary is shipped outside those defaults.
+
 Then it runs the export through a worker session:
 
 ```rust
+let mut session = capability.open_session(None, None)?;
 let summary = session.run_data_stream(
     "lean_rs_interop_consumer_worker_data_stream",
     &serde_json::json!({"source": "worker_streaming_example"}),
@@ -144,6 +172,10 @@ names, capability names, semantic versions, optional Lean version text, and
 extra JSON, while `LeanWorkerSession::capability_doctor` decodes pass, warning,
 and error diagnostics. The worker validates the generic envelope, but the
 downstream crate decides which versions affect cache keys.
+
+`LeanWorkerCapabilityBuilder::validate_metadata` runs the metadata export
+during setup when the caller wants metadata as a startup contract. Doctor checks
+remain an explicit request because they may be slower or environment-specific.
 
 Cycling the worker is the memory-reset boundary. `SessionPool::drain()` remains
 an in-process cache operation; it is not an RSS reset.

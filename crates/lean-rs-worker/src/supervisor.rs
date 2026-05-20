@@ -288,6 +288,16 @@ pub enum LeanWorkerError {
         executable: PathBuf,
         source: std::io::Error,
     },
+    /// The default worker child executable could not be resolved.
+    WorkerChildUnresolved {
+        /// Candidate paths checked by the default resolver.
+        tried: Vec<PathBuf>,
+    },
+    /// The capability Lake target could not be built.
+    CapabilityBuild {
+        /// Typed Lake/toolchain diagnostic from `lean-toolchain`.
+        diagnostic: lean_toolchain::LinkDiagnostics,
+    },
     /// The child process could not be prepared after spawning.
     Setup { message: String },
     /// The child did not complete the startup handshake.
@@ -335,6 +345,20 @@ impl fmt::Display for LeanWorkerError {
             Self::Spawn { executable, source } => {
                 write!(f, "failed to spawn worker {}: {source}", executable.display())
             }
+            Self::WorkerChildUnresolved { tried } => {
+                let tried = tried
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "could not resolve lean-rs-worker-child; set LEAN_RS_WORKER_CHILD or place it beside the current executable (tried: {tried})"
+                )
+            }
+            Self::CapabilityBuild { diagnostic } => {
+                write!(f, "worker capability Lake target build failed: {diagnostic}")
+            }
             Self::Setup { message } => write!(f, "worker child setup failed: {message}"),
             Self::Handshake { message } => write!(f, "worker handshake failed: {message}"),
             Self::Protocol { message } => write!(f, "worker protocol failed: {message}"),
@@ -375,6 +399,8 @@ impl std::error::Error for LeanWorkerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Spawn { source, .. } | Self::Wait { source } => Some(source),
+            Self::CapabilityBuild { diagnostic } => Some(diagnostic),
+            Self::WorkerChildUnresolved { .. } => None,
             Self::Setup { .. }
             | Self::Handshake { .. }
             | Self::Protocol { .. }

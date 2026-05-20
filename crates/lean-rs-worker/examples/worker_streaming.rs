@@ -9,10 +9,10 @@
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::sync::Mutex;
 
-use lean_rs_worker::{LeanWorker, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerSessionConfig};
+use lean_rs_worker::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink};
 use serde_json::{Value, json};
 
 fn main() -> ExitCode {
@@ -28,55 +28,57 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let workspace = workspace_root();
     let interop_fixture = workspace.join("fixtures").join("interop-shims");
-    lean_toolchain::build_lake_target_quiet(&interop_fixture, "LeanRsInteropConsumer")?;
-    let worker_binary = ensure_worker_child_built(&workspace)?;
 
-    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary))?;
-    worker.health()?;
+    let mut capability = LeanWorkerCapabilityBuilder::new(
+        &interop_fixture,
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["LeanRsInteropConsumer.Callback"],
+    )
+    .validate_metadata(
+        "lean_rs_interop_consumer_worker_metadata",
+        json!({"source": "worker_streaming_example"}),
+    )
+    .open()?;
     println!("worker_status=started");
-    println!("worker_runtime_version={}", worker.runtime_metadata().worker_version);
+    println!(
+        "worker_runtime_version={}",
+        capability.runtime_metadata().worker_version
+    );
+    println!(
+        "capability_commands={}",
+        capability
+            .validated_metadata()
+            .map_or(0, |metadata| metadata.commands.len())
+    );
 
     let request = json!({
         "source": "worker_streaming_example",
         "limit": 3
     });
 
-    let first = run_stream_once(&mut worker, &interop_fixture, &request, "initial")?;
+    let first = run_stream_once(&mut capability, &request, "initial")?;
     println!("initial_stream_rows={first}");
 
-    worker.cycle()?;
-    println!("worker_cycle_restarts={}", worker.stats().restarts);
+    capability.worker_mut().cycle()?;
+    println!("worker_cycle_restarts={}", capability.worker().stats().restarts);
 
-    let second = run_stream_once(&mut worker, &interop_fixture, &request, "after_cycle")?;
+    let second = run_stream_once(&mut capability, &request, "after_cycle")?;
     println!("post_cycle_stream_rows={second}");
 
-    let exit = worker.terminate()?;
+    let exit = capability.terminate()?;
     println!("worker_exit_success={}", exit.success);
     println!("status=ok");
     Ok(())
 }
 
 fn run_stream_once(
-    worker: &mut LeanWorker,
-    interop_fixture: &Path,
+    capability: &mut LeanWorkerCapability,
     request: &Value,
     label: &'static str,
 ) -> Result<u64, Box<dyn std::error::Error>> {
     let sink = JsonlSink::new(label);
-    let config = LeanWorkerSessionConfig::new(
-        interop_fixture,
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        ["LeanRsInteropConsumer.Callback"],
-    );
-    let mut session = worker.open_session(&config, None, None)?;
-    let metadata = session.capability_metadata(
-        "lean_rs_interop_consumer_worker_metadata",
-        &json!({"source": "worker_streaming_example"}),
-        None,
-        None,
-    )?;
-    println!("capability_commands={}", metadata.commands.len());
+    let mut session = capability.open_session(None, None)?;
     let doctor = session.capability_doctor(
         "lean_rs_interop_consumer_worker_doctor",
         &json!({"source": "worker_streaming_example"}),
@@ -142,40 +144,6 @@ impl LeanWorkerDataSink for JsonlSink {
             guard.push(row);
         }
     }
-}
-
-fn ensure_worker_child_built(workspace: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let cargo = option_env!("CARGO").unwrap_or("cargo");
-    let status = Command::new(cargo)
-        .current_dir(workspace)
-        .args(["build", "-p", "lean-rs-worker", "--bin", "lean-rs-worker-child"])
-        .status()?;
-    if !status.success() {
-        return Err("failed to build lean-rs-worker-child".into());
-    }
-    worker_binary_path(workspace)
-}
-
-fn worker_binary_path(workspace: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let executable = format!("lean-rs-worker-child{}", std::env::consts::EXE_SUFFIX);
-    let current = std::env::current_exe()?;
-    let profile_candidate = current
-        .parent()
-        .and_then(Path::parent)
-        .map(|profile| profile.join(&executable));
-    for candidate in [
-        profile_candidate,
-        Some(workspace.join("target").join("debug").join(&executable)),
-        Some(workspace.join("target").join("release").join(&executable)),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err("worker child binary was built but could not be found".into())
 }
 
 fn workspace_root() -> PathBuf {
