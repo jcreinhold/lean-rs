@@ -1,7 +1,8 @@
 # lean-rs-worker
 
-Internal worker-process boundary for `lean-rs` host workloads.
+Worker-process boundary for `lean-rs` host workloads.
 
-This crate is not yet the public supervisor API. Prompt 56 uses it to prove a
-private framed protocol and child runner; prompt 57 will add the caller-facing
-`LeanWorker` surface.
+`LeanWorker` supervises one `lean-rs-worker-child` process. It hides process
+spawning, stdio pipes, protocol framing, child-exit parsing, and cleanup behind
+a small lifecycle API. The in-process theorem-prover stack remains in
+`lean-rs-host`; this crate owns the production process boundary around it.

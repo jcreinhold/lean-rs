@@ -1,12 +1,15 @@
 //! Worker-process boundary for `lean-rs` host workloads.
 //!
-//! This crate is intentionally internal at prompt 56. It proves a child
-//! runner and a versioned framed protocol before prompt 57 adds the public
-//! supervisor API. The protocol module is private; callers should not learn
-//! frame bytes, child pipe handling, or restart bookkeeping.
+//! `LeanWorker` is the public process-boundary supervisor. It hides child
+//! spawning, pipe management, protocol framing, child exit parsing, and cleanup
+//! behind a small lifecycle API. The protocol module is private; callers should
+//! not learn frame bytes or restart bookkeeping.
 
 mod child;
 mod protocol;
+mod supervisor;
+
+pub use supervisor::{LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerStatus};
 
 /// Run the prompt-56 child process on stdin/stdout.
 ///
