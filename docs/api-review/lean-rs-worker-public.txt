@@ -8,6 +8,8 @@ pub lean_rs_worker::LeanWorkerError::ChildPanicOrAbort
 pub lean_rs_worker::LeanWorkerError::ChildPanicOrAbort::exit: lean_rs_worker::LeanWorkerExit
 pub lean_rs_worker::LeanWorkerError::DataSinkPanic
 pub lean_rs_worker::LeanWorkerError::DataSinkPanic::message: alloc::string::String
+pub lean_rs_worker::LeanWorkerError::DiagnosticSinkPanic
+pub lean_rs_worker::LeanWorkerError::DiagnosticSinkPanic::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::Handshake
 pub lean_rs_worker::LeanWorkerError::Handshake::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::ProgressPanic
@@ -221,6 +223,24 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerDiagnostic
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDiagnostic
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDiagnostic
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDiagnostic
+pub struct lean_rs_worker::LeanWorkerDiagnosticEvent
+pub lean_rs_worker::LeanWorkerDiagnosticEvent::code: alloc::string::String
+pub lean_rs_worker::LeanWorkerDiagnosticEvent::message: alloc::string::String
+impl core::clone::Clone for lean_rs_worker::LeanWorkerDiagnosticEvent
+pub fn lean_rs_worker::LeanWorkerDiagnosticEvent::clone(&self) -> lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerDiagnosticEvent
+pub fn lean_rs_worker::LeanWorkerDiagnosticEvent::eq(&self, other: &lean_rs_worker::LeanWorkerDiagnosticEvent) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerDiagnosticEvent
+pub fn lean_rs_worker::LeanWorkerDiagnosticEvent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::marker::Send for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::marker::Sync for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDiagnosticEvent
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDiagnosticEvent
 pub struct lean_rs_worker::LeanWorkerElabOptions
 impl lean_rs_worker::LeanWorkerElabOptions
 pub fn lean_rs_worker::LeanWorkerElabOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
@@ -353,7 +373,7 @@ pub fn lean_rs_worker::LeanWorkerSession<'_>::declaration_kinds(&mut self, names
 pub fn lean_rs_worker::LeanWorkerSession<'_>::declaration_names(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerSession<'_>::elaborate(&mut self, source: &str, options: &lean_rs_worker::LeanWorkerElabOptions, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerElabResult, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerSession<'_>::kernel_check(&mut self, source: &str, options: &lean_rs_worker::LeanWorkerElabOptions, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerKernelResult, lean_rs_worker::LeanWorkerError>
-pub fn lean_rs_worker::LeanWorkerSession<'_>::run_data_stream(&mut self, export: &str, request: &serde_json::value::Value, rows: &dyn lean_rs_worker::LeanWorkerDataSink, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerStreamSummary, lean_rs_worker::LeanWorkerError>
+pub fn lean_rs_worker::LeanWorkerSession<'_>::run_data_stream(&mut self, export: &str, request: &serde_json::value::Value, rows: &dyn lean_rs_worker::LeanWorkerDataSink, diagnostics: core::option::Option<&dyn lean_rs_worker::LeanWorkerDiagnosticSink>, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerStreamSummary, lean_rs_worker::LeanWorkerError>
 impl<'worker> core::marker::Freeze for lean_rs_worker::LeanWorkerSession<'worker>
 impl<'worker> core::marker::Send for lean_rs_worker::LeanWorkerSession<'worker>
 impl<'worker> core::marker::Sync for lean_rs_worker::LeanWorkerSession<'worker>
@@ -411,7 +431,10 @@ impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerStats
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerStats
 pub struct lean_rs_worker::LeanWorkerStreamSummary
-pub lean_rs_worker::LeanWorkerStreamSummary::rows: u64
+pub lean_rs_worker::LeanWorkerStreamSummary::elapsed: core::time::Duration
+pub lean_rs_worker::LeanWorkerStreamSummary::metadata: core::option::Option<serde_json::value::Value>
+pub lean_rs_worker::LeanWorkerStreamSummary::per_stream_counts: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
+pub lean_rs_worker::LeanWorkerStreamSummary::total_rows: u64
 impl core::clone::Clone for lean_rs_worker::LeanWorkerStreamSummary
 pub fn lean_rs_worker::LeanWorkerStreamSummary::clone(&self) -> lean_rs_worker::LeanWorkerStreamSummary
 impl core::cmp::Eq for lean_rs_worker::LeanWorkerStreamSummary
@@ -419,7 +442,6 @@ impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerStreamSummary
 pub fn lean_rs_worker::LeanWorkerStreamSummary::eq(&self, other: &lean_rs_worker::LeanWorkerStreamSummary) -> bool
 impl core::fmt::Debug for lean_rs_worker::LeanWorkerStreamSummary
 pub fn lean_rs_worker::LeanWorkerStreamSummary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for lean_rs_worker::LeanWorkerStreamSummary
 impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerStreamSummary
 impl core::marker::Freeze for lean_rs_worker::LeanWorkerStreamSummary
 impl core::marker::Send for lean_rs_worker::LeanWorkerStreamSummary
@@ -430,5 +452,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerStrea
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerStreamSummary
 pub trait lean_rs_worker::LeanWorkerDataSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_worker::LeanWorkerDataSink::report(&self, row: lean_rs_worker::LeanWorkerDataRow)
+pub trait lean_rs_worker::LeanWorkerDiagnosticSink: core::marker::Send + core::marker::Sync
+pub fn lean_rs_worker::LeanWorkerDiagnosticSink::report(&self, diagnostic: lean_rs_worker::LeanWorkerDiagnosticEvent)
 pub trait lean_rs_worker::LeanWorkerProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_worker::LeanWorkerProgressSink::report(&self, event: lean_rs_worker::LeanWorkerProgressEvent)

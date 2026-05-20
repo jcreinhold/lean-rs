@@ -35,13 +35,25 @@ def jsonlStream (handle trampoline : USize) : IO UInt8 :=
 def workerDataRows : Array String :=
   #[
     "{\"stream\":\"rows\",\"payload\":{\"kind\":\"request\",\"ordinal\":0}}",
-    "{\"stream\":\"diagnostics\",\"payload\":{\"severity\":\"info\",\"message\":\"started\"}}",
-    "{\"stream\":\"rows\",\"payload\":{\"kind\":\"done\",\"ordinal\":1}}"
+    "{\"diagnostic\":{\"code\":\"lean_rs.worker.fixture.started\",\"message\":\"started\"}}",
+    "{\"stream\":\"rows\",\"payload\":{\"kind\":\"done\",\"ordinal\":1}}",
+    "{\"diagnostic\":{\"code\":\"lean_rs.worker.fixture.finished\",\"message\":\"finished\"}}",
+    "{\"metadata\":{\"fixture\":\"worker_data_stream\",\"ok\":true}}"
   ]
 
 @[export lean_rs_interop_consumer_worker_data_stream]
 def workerDataStream (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline workerDataRows
+
+def manyWorkerDataRows (count : Nat) : Array String := Id.run do
+  let mut rows := #[]
+  for i in [0:count] do
+    rows := rows.push ("{\"stream\":\"rows\",\"payload\":{\"i\":" ++ toString i ++ "}}")
+  rows
+
+@[export lean_rs_interop_consumer_worker_data_stream_many]
+def workerDataStreamMany (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  LeanRsInterop.Callback.String.loop handle trampoline (manyWorkerDataRows 512)
 
 @[export lean_rs_interop_consumer_worker_data_stream_malformed_json]
 def workerDataStreamMalformedJson (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
@@ -66,5 +78,14 @@ def workerDataStreamWrongCallback (_requestJson : String) (handle trampoline : U
 @[export lean_rs_interop_consumer_worker_data_stream_panic]
 def workerDataStreamPanic (_requestJson : String) (_handle _trampoline : USize) : IO UInt8 :=
   panic! "lean-rs worker stream panic"
+
+@[export lean_rs_interop_consumer_worker_data_stream_row_then_panic]
+def workerDataStreamRowThenPanic (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← LeanRsInterop.Callback.String.loop handle trampoline
+    #["{\"stream\":\"rows\",\"payload\":{\"kind\":\"before-panic\"}}"]
+  if status == 0 then
+    panic! "lean-rs worker stream panic after row"
+  else
+    pure status
 
 end LeanRsInteropConsumer.Callback

@@ -75,13 +75,14 @@ fn run_stream_once(
         &sink,
         None,
         None,
+        None,
     )?;
 
     let rows = sink.rows()?;
-    if summary.rows != 3 || rows.len() != 3 {
+    if summary.total_rows != 2 || rows.len() != 2 {
         return Err(format!(
-            "{label} stream expected 3 rows, got summary={} observed={}",
-            summary.rows,
+            "{label} stream expected 2 rows, got summary={} observed={}",
+            summary.total_rows,
             rows.len()
         )
         .into());
@@ -89,7 +90,7 @@ fn run_stream_once(
     if rows.first().map(|row| row.stream.as_str()) != Some("rows") {
         return Err(format!("{label} stream did not start with the rows stream").into());
     }
-    Ok(summary.rows)
+    Ok(summary.total_rows)
 }
 
 struct JsonlSink {

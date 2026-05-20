@@ -40,6 +40,9 @@ business objects.
 - length-delimited, versioned row frames in the private worker protocol;
 - per-stream row ordering;
 - conversion from child-side streaming callbacks to parent-side row events;
+- live forwarding with pipe backpressure at row boundaries;
+- terminal stream summaries for commit-after-success workflows;
+- diagnostics as a separate worker channel, not row payloads;
 - row-boundary cancellation behavior;
 - EOF and fatal-child-exit behavior while a stream is active;
 - containment of parent-side data-sink panics.
@@ -73,14 +76,17 @@ tool into an IPC API and leak exactly the mechanics the worker exists to hide.
 **Worker data rows.** Chosen. A worker row stream is the smallest public shape
 that supports arbitrary downstream JSON rows while preserving the worker's deep
 module boundary. Callers learn a row sink and a row type; they do not learn frame
-bytes, pipe reads, child exits, or callback handles.
+bytes, pipe reads, child exits, callback handles, or terminal-response frames.
 
 ## Relationship To L1 Callback Payloads
 
 The child may use in-process L1 callbacks to collect strings from a Lean export,
 but those callbacks remain child-local. For the first streaming runner, the
 child registers a `LeanCallbackHandle<LeanStringEvent>`, parses each callback
-string as one JSON row, and sends a private `DataRow` frame to the parent.
+string as a row, diagnostic, or terminal-metadata envelope, and sends private
+worker frames to the parent. The parent sees `LeanWorkerDataRow`,
+`LeanWorkerDiagnosticSink` events, and a terminal summary; callback handles stay
+inside the child.
 
 Byte streaming and Lean-object callbacks stay in the L1 callback-payload track.
 They require their own ABI and soundness work because they change how Lean data

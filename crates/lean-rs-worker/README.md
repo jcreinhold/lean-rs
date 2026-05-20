@@ -25,9 +25,13 @@ returns `LeanWorkerError::Cancelled`, and invalidates the open worker session.
 
 Worker data rows carry downstream-owned JSON payloads over the same process
 boundary. `LeanWorkerSession::run_data_stream` runs a fixed-ABI Lean export in
-the child, validates each callback string as `{stream, payload}`, assigns
-per-stream sequence numbers, and reports owned `LeanWorkerDataRow` values to a
-borrowed `LeanWorkerDataSink`. Row schemas belong to the downstream tool.
+the child, validates each callback string as either a data row, diagnostic, or
+terminal metadata envelope, assigns per-stream sequence numbers, and reports
+owned `LeanWorkerDataRow` values to a borrowed `LeanWorkerDataSink`.
+Diagnostics use `LeanWorkerDiagnosticSink`, not row payloads. Delivered rows are
+tentative until terminal success returns `LeanWorkerStreamSummary` with total
+rows, per-stream counts, elapsed time, and optional metadata. Row schemas belong
+to the downstream tool.
 
 Run the worked example:
 

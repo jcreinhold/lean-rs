@@ -9,9 +9,10 @@ use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig, LeanWorkerStreamSummary, check_cancelled,
-    elapsed_event, report_parent_data_row, report_parent_progress,
+    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerDiagnosticSink, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig,
+    LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic,
+    report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -274,6 +275,8 @@ pub enum LeanWorkerError {
     ProgressPanic { message: String },
     /// A parent-side data sink panicked while handling a worker row.
     DataSinkPanic { message: String },
+    /// A parent-side diagnostic sink panicked while handling a worker diagnostic.
+    DiagnosticSinkPanic { message: String },
     /// A streaming export returned a nonzero downstream status byte.
     StreamExportFailed { status: u8 },
     /// The in-child string callback helper returned a callback failure status.
@@ -306,6 +309,9 @@ impl fmt::Display for LeanWorkerError {
             Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
             Self::DataSinkPanic { message } => write!(f, "worker data sink panicked: {message}"),
+            Self::DiagnosticSinkPanic { message } => {
+                write!(f, "worker diagnostic sink panicked: {message}")
+            }
             Self::StreamExportFailed { status } => write!(f, "streaming export returned status {status}"),
             Self::StreamCallbackFailed { status, description } => {
                 write!(f, "streaming callback failed with status {status}: {description}")
@@ -333,6 +339,7 @@ impl std::error::Error for LeanWorkerError {
             | Self::Cancelled { .. }
             | Self::ProgressPanic { .. }
             | Self::DataSinkPanic { .. }
+            | Self::DiagnosticSinkPanic { .. }
             | Self::StreamExportFailed { .. }
             | Self::StreamCallbackFailed { .. }
             | Self::StreamRowMalformed { .. }
@@ -723,7 +730,7 @@ impl LeanWorker {
         self.prepare_request(false)?;
         self.send_request(Request::EmitTestRows { streams })?;
         self.record_request(false);
-        match self.read_response_with_events(OPERATION, None, cancellation, data)? {
+        match self.read_response_with_events(OPERATION, None, cancellation, data, None)? {
             Response::RowsComplete { count } => Ok(count),
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
@@ -911,6 +918,7 @@ impl LeanWorker {
         export: &str,
         request: &serde_json::Value,
         rows: &dyn LeanWorkerDataSink,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
@@ -926,8 +934,8 @@ impl LeanWorker {
             progress: progress.is_some(),
         })?;
         self.record_request(false);
-        match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows))? {
-            Response::StreamComplete { rows } => Ok(LeanWorkerStreamSummary { rows }),
+        match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
+            Response::StreamComplete { summary } => Ok(summary.into()),
             Response::StreamExportFailed { status_byte } => {
                 Err(LeanWorkerError::StreamExportFailed { status: status_byte })
             }
@@ -1059,7 +1067,7 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<Response, LeanWorkerError> {
-        self.read_response_with_events(operation, progress, cancellation, None)
+        self.read_response_with_events(operation, progress, cancellation, None, None)
     }
 
     fn read_response_with_events(
@@ -1068,6 +1076,7 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
         data: Option<&dyn LeanWorkerDataSink>,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
     ) -> Result<Response, LeanWorkerError> {
         let started = Instant::now();
         loop {
@@ -1098,14 +1107,14 @@ impl LeanWorker {
                         return Err(LeanWorkerError::Cancelled { operation });
                     }
                 }
+                Message::Diagnostic(diagnostic) => {
+                    report_parent_diagnostic(diagnostics, diagnostic.into())?;
+                }
                 Message::Response(Response::Error { code, message }) => {
                     return Err(LeanWorkerError::Worker { code, message });
                 }
                 Message::Response(response) => return Ok(response),
-                other @ (Message::Handshake { .. }
-                | Message::Request(_)
-                | Message::Diagnostic(_)
-                | Message::FatalExit(_)) => {
+                other @ (Message::Handshake { .. } | Message::Request(_) | Message::FatalExit(_)) => {
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
                     });

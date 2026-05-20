@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -101,7 +102,7 @@ pub(crate) enum Response {
     Elaboration { outcome: WorkerElabOutcome },
     KernelCheck { outcome: WorkerKernelOutcome },
     Strings { values: Vec<String> },
-    StreamComplete { rows: u64 },
+    StreamComplete { summary: StreamSummary },
     StreamExportFailed { status_byte: u8 },
     StreamCallbackFailed { status_byte: u8, description: String },
     StreamRowMalformed { message: String },
@@ -130,6 +131,30 @@ pub(crate) struct DataRow {
     pub(crate) payload: Value,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct StreamSummary {
+    pub(crate) total_rows: u64,
+    pub(crate) per_stream_counts: BTreeMap<String, u64>,
+    pub(crate) elapsed_micros: u64,
+    pub(crate) metadata: Option<Value>,
+}
+
+impl StreamSummary {
+    pub(crate) fn new(
+        total_rows: u64,
+        per_stream_counts: BTreeMap<String, u64>,
+        elapsed: Duration,
+        metadata: Option<Value>,
+    ) -> Self {
+        Self {
+            total_rows,
+            per_stream_counts,
+            elapsed_micros: elapsed.as_micros().try_into().unwrap_or(u64::MAX),
+            metadata,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct DataRowEmitter {
     sequences: BTreeMap<String, u64>,
@@ -137,12 +162,7 @@ pub(crate) struct DataRowEmitter {
 }
 
 impl DataRowEmitter {
-    pub(crate) fn emit(
-        &mut self,
-        writer: &mut impl Write,
-        stream: impl Into<String>,
-        payload: Value,
-    ) -> Result<(), ProtocolError> {
+    pub(crate) fn next(&mut self, stream: impl Into<String>, payload: Value) -> DataRow {
         let stream = stream.into();
         let sequence = self.sequences.entry(stream.clone()).or_insert(0);
         let row = DataRow {
@@ -152,11 +172,26 @@ impl DataRowEmitter {
         };
         *sequence = sequence.saturating_add(1);
         self.count = self.count.saturating_add(1);
+        row
+    }
+
+    #[cfg(test)]
+    pub(crate) fn emit(
+        &mut self,
+        writer: &mut impl Write,
+        stream: impl Into<String>,
+        payload: Value,
+    ) -> Result<(), ProtocolError> {
+        let row = self.next(stream, payload);
         write_frame(writer, Message::DataRow(row))
     }
 
     pub(crate) fn count(&self) -> u64 {
         self.count
+    }
+
+    pub(crate) fn per_stream_counts(&self) -> BTreeMap<String, u64> {
+        self.sequences.clone()
     }
 }
 

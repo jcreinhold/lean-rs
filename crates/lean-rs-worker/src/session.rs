@@ -5,6 +5,7 @@
 //! declaration text, elaboration diagnostics, and kernel-check status. Runtime
 //! handles such as `LeanExpr` and `LeanEvidence` stay inside the child.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +14,8 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::protocol::{
-    DataRow, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus,
+    DataRow, Diagnostic, StreamSummary, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome,
+    WorkerKernelStatus,
 };
 use crate::supervisor::{LeanWorker, LeanWorkerError};
 
@@ -202,11 +204,57 @@ pub trait LeanWorkerDataSink: Send + Sync {
     fn report(&self, row: LeanWorkerDataRow);
 }
 
+/// One diagnostic message delivered over a worker request.
+///
+/// Diagnostics are control/observability messages, not data rows. They are
+/// delivered through `LeanWorkerDiagnosticSink` so row payloads remain
+/// downstream-owned data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerDiagnosticEvent {
+    pub code: String,
+    pub message: String,
+}
+
+impl From<Diagnostic> for LeanWorkerDiagnosticEvent {
+    fn from(value: Diagnostic) -> Self {
+        Self {
+            code: value.code,
+            message: value.message,
+        }
+    }
+}
+
+/// Parent-side sink for diagnostics produced by one worker request.
+pub trait LeanWorkerDiagnosticSink: Send + Sync {
+    fn report(&self, diagnostic: LeanWorkerDiagnosticEvent);
+}
+
 /// Summary returned after a worker data-stream export completes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// Rows delivered to `LeanWorkerDataSink` are tentative until this summary is
+/// returned successfully. Downstream callers that need atomic commit should
+/// buffer rows in their sink and commit only after terminal success.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerStreamSummary {
-    /// Number of rows delivered to the parent before terminal success.
-    pub rows: u64,
+    /// Total number of rows delivered to the parent before terminal success.
+    pub total_rows: u64,
+    /// Per-stream row counts assigned by `lean-rs-worker`.
+    pub per_stream_counts: BTreeMap<String, u64>,
+    /// Elapsed time measured in the child for the streaming export.
+    pub elapsed: Duration,
+    /// Optional downstream-defined terminal metadata.
+    pub metadata: Option<Value>,
+}
+
+impl From<StreamSummary> for LeanWorkerStreamSummary {
+    fn from(value: StreamSummary) -> Self {
+        Self {
+            total_rows: value.total_rows,
+            per_stream_counts: value.per_stream_counts,
+            elapsed: Duration::from_micros(value.elapsed_micros),
+            metadata: value.metadata,
+        }
+    }
 }
 
 /// Serializable elaboration result returned over the worker boundary.
@@ -435,13 +483,14 @@ impl LeanWorkerSession<'_> {
         export: &str,
         request: &Value,
         rows: &dyn LeanWorkerDataSink,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
         self.ensure_open()?;
         match self
             .worker
-            .worker_run_data_stream(export, request, rows, cancellation, progress)
+            .worker_run_data_stream(export, request, rows, diagnostics, cancellation, progress)
         {
             Ok(value) => Ok(value),
             Err(err @ LeanWorkerError::Cancelled { .. }) => {
@@ -511,6 +560,25 @@ pub(crate) fn report_parent_data_row(
             "worker data sink panicked".to_owned()
         };
         LeanWorkerError::DataSinkPanic { message }
+    })
+}
+
+pub(crate) fn report_parent_diagnostic(
+    sink: Option<&dyn LeanWorkerDiagnosticSink>,
+    diagnostic: LeanWorkerDiagnosticEvent,
+) -> Result<(), LeanWorkerError> {
+    let Some(sink) = sink else {
+        return Ok(());
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(diagnostic))).map_err(|payload| {
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            (*s).to_owned()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "worker diagnostic sink panicked".to_owned()
+        };
+        LeanWorkerError::DiagnosticSinkPanic { message }
     })
 }
 

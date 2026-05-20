@@ -1,11 +1,14 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use lean_rs_worker::{
-    LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError,
-    LeanWorkerRestartReason, LeanWorkerSessionConfig,
+    LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink,
+    LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError, LeanWorkerRestartReason,
+    LeanWorkerSessionConfig,
 };
 use serde_json::json;
 
@@ -62,6 +65,37 @@ impl LeanWorkerDataSink for RecordingDataSink {
     }
 }
 
+#[derive(Default)]
+struct RecordingDiagnosticSink {
+    diagnostics: Mutex<Vec<LeanWorkerDiagnosticEvent>>,
+}
+
+impl RecordingDiagnosticSink {
+    fn diagnostics(&self) -> Vec<LeanWorkerDiagnosticEvent> {
+        self.diagnostics
+            .lock()
+            .expect("diagnostic lock is not poisoned")
+            .clone()
+    }
+}
+
+impl LeanWorkerDiagnosticSink for RecordingDiagnosticSink {
+    fn report(&self, diagnostic: LeanWorkerDiagnosticEvent) {
+        self.diagnostics
+            .lock()
+            .expect("diagnostic lock is not poisoned")
+            .push(diagnostic);
+    }
+}
+
+struct PanicDiagnosticSink;
+
+impl LeanWorkerDiagnosticSink for PanicDiagnosticSink {
+    fn report(&self, _diagnostic: LeanWorkerDiagnosticEvent) {
+        panic!("diagnostic sink boom");
+    }
+}
+
 struct CancelOnFirstRow<'a> {
     token: &'a LeanWorkerCancellationToken,
     rows: Mutex<Vec<LeanWorkerDataRow>>,
@@ -84,6 +118,7 @@ impl LeanWorkerDataSink for CancelOnFirstRow<'_> {
 fn successful_stream_delivers_rows_with_per_stream_sequences() {
     ensure_interop_built();
     let sink = RecordingDataSink::default();
+    let diagnostics = RecordingDiagnosticSink::default();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
         .open_session(&stream_session_config(), None, None)
@@ -94,12 +129,18 @@ fn successful_stream_delivers_rows_with_per_stream_sequences() {
             "lean_rs_interop_consumer_worker_data_stream",
             &json!({"request": "demo"}),
             &sink,
+            Some(&diagnostics),
             None,
             None,
         )
         .expect("streaming export succeeds");
 
-    assert_eq!(summary.rows, 3);
+    assert_eq!(summary.total_rows, 2);
+    assert_eq!(summary.per_stream_counts, BTreeMap::from([("rows".to_owned(), 2)]));
+    assert_eq!(
+        summary.metadata,
+        Some(json!({"fixture": "worker_data_stream", "ok": true}))
+    );
     assert_eq!(
         sink.rows(),
         vec![
@@ -109,14 +150,22 @@ fn successful_stream_delivers_rows_with_per_stream_sequences() {
                 payload: json!({"kind": "request", "ordinal": 0}),
             },
             LeanWorkerDataRow {
-                stream: "diagnostics".to_owned(),
-                sequence: 0,
-                payload: json!({"severity": "info", "message": "started"}),
-            },
-            LeanWorkerDataRow {
                 stream: "rows".to_owned(),
                 sequence: 1,
                 payload: json!({"kind": "done", "ordinal": 1}),
+            },
+        ],
+    );
+    assert_eq!(
+        diagnostics.diagnostics(),
+        vec![
+            LeanWorkerDiagnosticEvent {
+                code: "lean_rs.worker.fixture.started".to_owned(),
+                message: "started".to_owned(),
+            },
+            LeanWorkerDiagnosticEvent {
+                code: "lean_rs.worker.fixture.finished".to_owned(),
+                message: "finished".to_owned(),
             },
         ],
     );
@@ -136,6 +185,7 @@ fn malformed_row_json_is_typed() {
             "lean_rs_interop_consumer_worker_data_stream_malformed_json",
             &json!({}),
             &sink,
+            None,
             None,
             None,
         )
@@ -166,6 +216,7 @@ fn missing_stream_or_payload_is_typed() {
             &sink,
             None,
             None,
+            None,
         )
         .expect_err("missing stream should be typed");
     match err {
@@ -180,6 +231,7 @@ fn missing_stream_or_payload_is_typed() {
             "lean_rs_interop_consumer_worker_data_stream_missing_payload",
             &json!({}),
             &sink,
+            None,
             None,
             None,
         )
@@ -209,6 +261,7 @@ fn nonzero_export_status_is_typed() {
             &sink,
             None,
             None,
+            None,
         )
         .expect_err("nonzero export status should be typed");
 
@@ -232,6 +285,7 @@ fn callback_status_error_is_typed() {
             "lean_rs_interop_consumer_worker_data_stream_wrong_callback",
             &json!({}),
             &sink,
+            None,
             None,
             None,
         )
@@ -265,6 +319,7 @@ fn child_fatal_exit_is_reported_to_parent() {
             &sink,
             None,
             None,
+            None,
         )
         .expect_err("Lean panic should kill only the child");
 
@@ -295,6 +350,7 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
                 "lean_rs_interop_consumer_worker_data_stream",
                 &json!({}),
                 &sink,
+                None,
                 Some(&token),
                 None,
             )
@@ -335,4 +391,108 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
     worker
         .health()
         .expect("worker remains usable after cancellation restart");
+}
+
+#[test]
+fn row_before_child_panic_is_delivered_before_terminal_failure() {
+    ensure_interop_built();
+    let sink = RecordingDataSink::default();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&stream_session_config(), None, None)
+        .expect("worker session opens");
+
+    let err = session
+        .run_data_stream(
+            "lean_rs_interop_consumer_worker_data_stream_row_then_panic",
+            &json!({}),
+            &sink,
+            None,
+            None,
+            None,
+        )
+        .expect_err("fatal child exit should fail the stream");
+
+    match err {
+        LeanWorkerError::ChildPanicOrAbort { exit } => {
+            assert!(!exit.success, "panic export should terminate the child");
+        }
+        other => panic!("expected fatal child exit, got {other:?}"),
+    }
+    assert_eq!(
+        sink.rows(),
+        vec![LeanWorkerDataRow {
+            stream: "rows".to_owned(),
+            sequence: 0,
+            payload: json!({"kind": "before-panic"}),
+        }],
+    );
+}
+
+#[test]
+fn diagnostic_sink_panic_is_typed() {
+    ensure_interop_built();
+    let sink = RecordingDataSink::default();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&stream_session_config(), None, None)
+        .expect("worker session opens");
+
+    let err = session
+        .run_data_stream(
+            "lean_rs_interop_consumer_worker_data_stream",
+            &json!({}),
+            &sink,
+            Some(&PanicDiagnosticSink),
+            None,
+            None,
+        )
+        .expect_err("diagnostic sink panic should be typed");
+
+    match err {
+        LeanWorkerError::DiagnosticSinkPanic { message } => {
+            assert!(
+                message.contains("diagnostic sink boom"),
+                "panic message should be preserved, got {message}",
+            );
+        }
+        other => panic!("expected diagnostic sink panic, got {other:?}"),
+    }
+}
+
+#[test]
+fn large_stream_records_live_forwarding_throughput_and_rss() {
+    ensure_interop_built();
+    let sink = RecordingDataSink::default();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let rss_before = worker.rss_kib();
+    let started = Instant::now();
+    let summary = {
+        let mut session = worker
+            .open_session(&stream_session_config(), None, None)
+            .expect("worker session opens");
+        session
+            .run_data_stream(
+                "lean_rs_interop_consumer_worker_data_stream_many",
+                &json!({}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect("large stream succeeds")
+    };
+    let elapsed = started.elapsed();
+
+    assert_eq!(summary.total_rows, 512);
+    assert_eq!(sink.rows().len(), 512);
+    assert_eq!(summary.per_stream_counts, BTreeMap::from([("rows".to_owned(), 512)]));
+    let rss_after = worker.rss_kib();
+    println!(
+        "large_stream rows=512 elapsed_ms={} rows_per_sec={:.1} rss_before_kib={:?} rss_after_kib={:?}",
+        elapsed.as_millis(),
+        512.0 / elapsed.as_secs_f64().max(0.001),
+        rss_before,
+        rss_after,
+    );
 }

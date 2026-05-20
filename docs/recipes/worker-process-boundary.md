@@ -96,13 +96,17 @@ let summary = session.run_data_stream(
     &Rows,
     None,
     None,
+    None,
 )?;
-assert_eq!(summary.rows, 3);
+assert_eq!(summary.total_rows, 2);
+assert_eq!(summary.per_stream_counts["rows"], 2);
 ```
 
-Rows are delivered before terminal success. If a caller needs atomic commit, it
-should buffer rows in its sink and commit them only after `run_data_stream`
-returns `Ok`.
+Rows are live: the worker forwards each row while Lean produces it. They remain
+tentative until terminal success. If a caller needs atomic commit, it should
+buffer rows in its sink and commit them only after `run_data_stream` returns
+`Ok`. The terminal summary reports total rows, per-stream counts, elapsed time,
+and optional downstream-defined metadata.
 
 ## Failure And Lifecycle Rules
 
@@ -112,9 +116,11 @@ panics and aborts kill the child, not the parent; the supervisor reports the
 fatal child exit.
 
 Progress and diagnostics use typed worker messages. They do not share the row
-schema. Cancellation and timeout policy sit above worker requests: a parent-side
-cancellation token can stop an in-flight request at a row or progress boundary,
-cycle the child, and invalidate the current session.
+schema. A streaming request may take a `LeanWorkerDiagnosticSink` for diagnostic
+events; data rows remain downstream data. Cancellation and timeout policy sit
+above worker requests: a parent-side cancellation token can stop an in-flight
+request at a row or progress boundary, cycle the child, and invalidate the
+current session.
 
 Cycling the worker is the memory-reset boundary. `SessionPool::drain()` remains
 an in-process cache operation; it is not an RSS reset.

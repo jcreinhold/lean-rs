@@ -13,9 +13,10 @@ mod session;
 mod supervisor;
 
 pub use session::{
-    LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerProgressEvent,
-    LeanWorkerProgressSink, LeanWorkerSession, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
+    LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic,
+    LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSession,
+    LeanWorkerSessionConfig, LeanWorkerStreamSummary,
 };
 pub use supervisor::{
     LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason,

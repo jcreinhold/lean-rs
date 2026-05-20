@@ -110,6 +110,12 @@ Use the worker capability layer for production-style downstream tools that need
 live row delivery, request completion metadata, diagnostics, timeouts,
 capability discovery, restart policy, and measured performance.
 
+As of the stream completion work, `run_data_stream` forwards rows live, keeps
+diagnostics on a separate sink, and returns terminal summaries with total rows,
+per-stream counts, elapsed time, and optional downstream metadata. It remains a
+low-level escape hatch until the builder and typed command facade hide export
+names, request JSON encoding, and setup sequencing.
+
 Use downstream crates for domain schemas. A `lean-dup` integration should map
 its own request and row types onto the generic worker capability layer; it
 should not require `lean-rs-worker` to know what a declaration row, feature row,
