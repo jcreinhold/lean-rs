@@ -21,9 +21,9 @@ opaque_handle : USize
 trampoline    : USize
 ```
 
-Lean treats both values as opaque and passes them to the generic C helper that
-invokes the Rust trampoline. Callers cannot supply their own trampoline
-function pointer through the public API.
+Lean treats both values as opaque and passes them to `LeanRsInterop.Callback`,
+which invokes the Rust trampoline through the generic C helper. Callers cannot
+supply their own trampoline function pointer through the public API.
 
 ## Lifetime
 
@@ -81,5 +81,6 @@ handle is still alive. The recorded error has diagnostic code
 ## Files
 
 - Registry: `crates/lean-rs/src/callback.rs`
-- Lean ABI proof export: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
+- Generic Lean helper: `lake/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
+- Host ABI proof export: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
 - Tests: `crates/lean-rs/tests/callback_registry.rs`

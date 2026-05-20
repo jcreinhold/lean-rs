@@ -4,8 +4,10 @@ The 18 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The shim package
 [`lean-rs-host-shims`](https://github.com/jcreinhold/lean-rs/tree/main/lake/lean-rs-host-shims)
-ships an implementation; external consumers add `require lean_rs_host_shims from "…"` to
-their `lakefile.lean`. Expected on-disk dylib name:
+ships an implementation and depends on the generic
+[`lean-rs-interop-shims`](../lake/lean-rs-interop-shims/) package for reusable callback ABI
+helpers. External consumers add `require lean_rs_host_shims from "…"` to their
+`lakefile.lean`; Lake resolves the generic interop dependency transitively. Expected on-disk dylib name:
 `liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
 
 This document covers the **wire-level contract**: each Lean signature, the typed Rust shape
@@ -19,7 +21,7 @@ This document covers the **wire-level contract**: each Lean signature, the typed
 
 1. `LakeProject::shim_dylib()` reads the consumer's `lake-manifest.json` for the entry whose `name` is `lean_rs_host_shims`. Handles `type: "path"` (`<dir>` resolved relative to the project root) and `type: "git"` (`.lake/packages/lean_rs_host_shims/`).
 2. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the shim dylib first, with `RTLD_LAZY | RTLD_GLOBAL` on Unix so the subsequently opened consumer dylib can resolve its transitive reference to `_initialize_lean__rs__host__shims_LeanRsHostShims`.
-3. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` (idempotent via Lean's `_G_initialized` flag).
+3. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` (idempotent via Lean's `_G_initialized` flag). The package also links the generic interop C callback helper used by its compatibility callback export.
 4. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer; it reaches the now-global shim symbols through the dynamic linker.
 5. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
 
@@ -94,3 +96,6 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this
 is why the shim package isn't framed as "compatibility shims" but as the **implementation** of
 the wire contract.
+
+Forks should keep reusable callback/string/name/object ABI helpers in the generic
+`lean-rs-interop-shims` package when those helpers are not host-policy-specific.

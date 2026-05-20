@@ -4,7 +4,8 @@
 #
 # For each version in `crates/lean-rs-sys/digests/manifest.json`:
 #   1. Repoint the workspace `lean-toolchain` files (root +
-#      `lake/lean-rs-host-shims/` + `fixtures/lean/`) so `lean` resolves
+#      `lake/lean-rs-interop-shims/` + `lake/lean-rs-host-shims/` +
+#      `fixtures/lean/` + `fixtures/interop-shims/`) so `lean` resolves
 #      to that toolchain.
 #   2. Rebuild the Lake packages from a clean `.lake/` directory.
 #   3. `cargo clean` the workspace (so `lean-rs-sys`'s build.rs re-runs
@@ -25,8 +26,10 @@ MANIFEST="$REPO_ROOT/crates/lean-rs-sys/digests/manifest.json"
 # the one `lean --print-prefix` (invoked by the shim's
 # `Lean.findSysroot`) resolves against from the test process's cwd.
 ROOT_TOOLCHAIN="$REPO_ROOT/lean-toolchain"
+INTEROP_SHIM_TOOLCHAIN="$REPO_ROOT/lake/lean-rs-interop-shims/lean-toolchain"
 SHIM_TOOLCHAIN="$REPO_ROOT/lake/lean-rs-host-shims/lean-toolchain"
 FIXTURE_TOOLCHAIN="$REPO_ROOT/fixtures/lean/lean-toolchain"
+INTEROP_FIXTURE_TOOLCHAIN="$REPO_ROOT/fixtures/interop-shims/lean-toolchain"
 
 declare -a TOUCHED_FILES=()
 
@@ -63,9 +66,14 @@ write_toolchain() {
 }
 
 rebuild_lake_packages() {
-    rm -rf "$REPO_ROOT/lake/lean-rs-host-shims/.lake" "$REPO_ROOT/fixtures/lean/.lake"
+    rm -rf "$REPO_ROOT/lake/lean-rs-interop-shims/.lake" \
+        "$REPO_ROOT/lake/lean-rs-host-shims/.lake" \
+        "$REPO_ROOT/fixtures/lean/.lake" \
+        "$REPO_ROOT/fixtures/interop-shims/.lake"
+    (cd "$REPO_ROOT/lake/lean-rs-interop-shims" && lake build >/dev/null)
     (cd "$REPO_ROOT/lake/lean-rs-host-shims" && lake build >/dev/null)
     (cd "$REPO_ROOT/fixtures/lean" && lake build >/dev/null)
+    (cd "$REPO_ROOT/fixtures/interop-shims" && lake build >/dev/null)
 }
 
 run_one_version() {
@@ -73,8 +81,10 @@ run_one_version() {
     printf '\n=== Lean %s ===\n' "$version"
 
     write_toolchain "$ROOT_TOOLCHAIN" "$version"
+    write_toolchain "$INTEROP_SHIM_TOOLCHAIN" "$version"
     write_toolchain "$SHIM_TOOLCHAIN" "$version"
     write_toolchain "$FIXTURE_TOOLCHAIN" "$version"
+    write_toolchain "$INTEROP_FIXTURE_TOOLCHAIN" "$version"
 
     rebuild_lake_packages
     (cd "$REPO_ROOT" && cargo clean >/dev/null 2>&1 || true)
@@ -101,8 +111,10 @@ PY
 }
 
 backup_one "$ROOT_TOOLCHAIN"
+backup_one "$INTEROP_SHIM_TOOLCHAIN"
 backup_one "$SHIM_TOOLCHAIN"
 backup_one "$FIXTURE_TOOLCHAIN"
+backup_one "$INTEROP_FIXTURE_TOOLCHAIN"
 
 declare -a FAILED=()
 declare -a PASSED=()

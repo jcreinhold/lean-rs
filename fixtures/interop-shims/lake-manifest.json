@@ -6,7 +6,7 @@
    "name": "lean_rs_interop_shims",
    "manifestFile": "lake-manifest.json",
    "inherited": false,
-   "dir": "../lean-rs-interop-shims",
+   "dir": "../../lake/lean-rs-interop-shims",
    "configFile": "lakefile.lean"}],
- "name": "lean_rs_host_shims",
+ "name": "lean_rs_interop_consumer",
  "lakeDir": ".lake"}

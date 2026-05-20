@@ -84,15 +84,15 @@ of `lean.h`. The semver promise is about *symbol names and signatures* and the
 part of this surface—`LeanObjectRepr` is `pub(crate)` and may be updated to track Lean
 version bumps without breaking downstream code that uses the `pub unsafe fn` helpers.
 
-**`lean-toolchain`, `lean-rs`.** Standard `0.x` semver over the curated re-exports at each
+**`lean-toolchain`, `lean-rs`, `lean-rs-host`.** Standard `0.x` semver over the curated re-exports at each
 crate root. Items inside `lean-rs`'s `pub(crate)` modules (`runtime`, `abi`) and the internal
 helper modules under `module/` and `host/` are **not** part of the public API; they can be
 renamed, moved, or collapsed without a minor bump as long as the curated re-exports keep their
-shape.
+shape. `lean-rs-host` also depends on the host shim package's `@[export]` contract.
 
-**`lean-rs-host`.** Same `0.x` policy. Its surface depends on `lean-rs-sys`'s window and on
-the [`lean-rs-host-shims`](../../lake/lean-rs-host-shims/) Lake package shipping the `@[export]`
-shim contract.
+**Lean shim packages.** Same toolchain window. `lean-rs-interop-shims` owns generic
+callback ABI helpers, and `lean-rs-host-shims` owns the theorem-prover host `@[export]`
+contract on top of that generic package.
 
 Stabilization to `1.0` requires the `RELEASE-READINESS` contract and is not implicit.
 

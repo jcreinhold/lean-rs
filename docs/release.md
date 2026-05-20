@@ -107,7 +107,7 @@ wrong workspace version.
 
 - Verify the release on crates.io: `cargo search lean-rs` (all four crates should appear with the new version).
 - Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other three) within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
-- Open PRs against the downstream proof repos (`lean-rs-downstream`, `lean-rs-host-downstream`) to bump dependencies. The L2 proof's `lakefile.lean` also bumps its `from git "…" @ "vX.Y.Z" / "lake/lean-rs-host-shims"` tag.
+- Open PRs against the downstream proof repos (`lean-rs-downstream`, `lean-rs-host-downstream`) to bump dependencies. The L2 proof's `lakefile.lean` also bumps its `from git "…" @ "vX.Y.Z" / "lake/lean-rs-host-shims"` tag. Consumers using generic callbacks directly bump the matching `lake/lean-rs-interop-shims` tag.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 
 ## Fallback—local publish when CI is unavailable

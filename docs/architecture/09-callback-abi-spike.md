@@ -6,7 +6,7 @@ that uses this ABI is documented in
 
 ## ABI Shape
 
-The test-only shim export is:
+The test-only host shim export is:
 
 ```text
 lean_rs_interop_test_callback_loop : USize -> USize -> UInt64 -> IO UInt8
@@ -26,6 +26,12 @@ and invokes it with the opaque handle and integer payload.
 This proves the reusable mechanism without requiring a process-global exported
 Rust symbol. The Rust test owns the handle and the trampoline function pointer;
 the shim only knows the stable C ABI shape.
+
+The C helper source and Lean callback call primitive now live in the generic
+`lean-rs-interop-shims` package. The host shim export remains as a
+compatibility test symbol and loops over the same C helper. The host Lake
+package links the generic C helper source into its own shared facet because
+Rust opens the host shim dylib directly in the prompt-40/41 fixtures.
 
 ## Thread And Reentrancy Contract
 
@@ -52,8 +58,9 @@ foreign unwinds. Lean's FFI model still uses explicit `@[extern]` and
 
 ## Files
 
-- Lean shim: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
-- C helper: `lake/lean-rs-host-shims/c/interop_callback.c`
+- Generic Lean helper: `lake/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
+- C helper: `lake/lean-rs-interop-shims/c/interop_callback.c`
+- Host test export: `lake/lean-rs-host-shims/LeanRsHostShims/Interop.lean`
 - Rust fixture: `crates/lean-rs/tests/callback_trampoline.rs`
 - Sanitizer job: `.github/workflows/sanitizer.yml`
 

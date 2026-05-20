@@ -7,6 +7,13 @@
    "manifestFile": "lake-manifest.json",
    "inherited": false,
    "dir": "../../lake/lean-rs-host-shims",
+   "configFile": "lakefile.lean"},
+  {"type": "path",
+   "scope": "",
+   "name": "lean_rs_interop_shims",
+   "manifestFile": "lake-manifest.json",
+   "inherited": true,
+   "dir": "../../lake/lean-rs-host-shims/../lean-rs-interop-shims",
    "configFile": "lakefile.lean"}],
  "name": "lean_rs_fixture",
  "lakeDir": ".lake"}

@@ -19,8 +19,8 @@ The interop stack has five layers:
 - `lean-rs-sys` owns raw Lean C runtime symbols and opaque raw types.
 - `lean-rs` owns typed object ownership, exported-function calls, and callback
   handles.
-- Generic Lean interop shims own reusable ABI helpers for callbacks, strings,
-  names, and object plumbing.
+- Generic Lean interop shims own reusable ABI helpers for callbacks and, when
+  real callers need them, strings, names, and object plumbing.
 - `lean-rs-host` owns theorem-prover host policy: sessions, declaration
   introspection, elaboration, kernel checking, and progress events.
 - `lean-toolchain` owns Lake and build-script ergonomics.
@@ -74,6 +74,7 @@ New interop surfaces must pass the deep-module test:
 - Panic, abort, and reentrancy limits are documented at the callback boundary.
 - Performance claims name the workload and measurement command.
 
-The host shim ABI remains unchanged by this architecture record. The next
-implementation steps are generic interop shims, downstream examples, and then
-structured host progress.
+The host shim ABI remains unchanged by this architecture record. The generic
+shim package is documented in
+[`11-generic-interop-shims.md`](11-generic-interop-shims.md). The next
+implementation steps are downstream examples and then structured host progress.

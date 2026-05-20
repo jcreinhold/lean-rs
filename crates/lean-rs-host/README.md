@@ -25,6 +25,8 @@ The capability loader transparently handles the Lake naming-convention change be
 The L2 setup adds a `require lean_rs_host_shims from ...` to the consumer's `lakefile.lean`
 and a `lean-rs-host` dependency to `Cargo.toml`. Everything else mirrors the L1 setup in
 [`lean-rs`'s README](https://docs.rs/lean-rs).
+The host shim package depends on `lean-rs-interop-shims` transitively; consumers do not add a
+separate require line for the generic interop package when they only use `lean-rs-host`.
 
 **`Cargo.toml`**:
 

@@ -1,10 +1,9 @@
-/-! Test-only interop callback spike.
+/-! Test-only interop callback export.
 
-    This module is not part of the stable host session contract. It proves the
-    reusable ABI shape used by later callback work: Lean receives an opaque
-    Rust handle and a Rust trampoline function pointer as `USize`, then calls a
-    tiny C helper linked into the shim dylib. The C helper casts the pointer and
-    invokes it on the same thread. -/
+    This module is not part of the stable host session contract. It keeps the
+    prompt-40 test export available from the host shim dylib. The host package
+    links the generic interop package's C callback helper source directly so
+    this export can be called from a host-only dylib load. -/
 
 namespace LeanRsFixture.Interop
 

@@ -164,6 +164,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`08-reusable-interop.md`](docs/architecture/08-reusable-interop.md)—the reusable Lean/Rust interop boundary below `lean-rs-host`.
 - [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md)—the test-only callback ABI proof before a public callback registry.
 - [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
+- [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

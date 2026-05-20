@@ -14,8 +14,10 @@ open System Lake DSL
     host-side `dlsym` resolver. -/
 package «lean_rs_host_shims»
 
+require «lean_rs_interop_shims» from "../lean-rs-interop-shims"
+
 input_file interop_callback.c where
-  path := "c" / "interop_callback.c"
+  path := ".." / "lean-rs-interop-shims" / "c" / "interop_callback.c"
   text := true
 
 target interop_callback.o pkg : FilePath := do
