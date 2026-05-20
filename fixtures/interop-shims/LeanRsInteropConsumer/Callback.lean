@@ -21,4 +21,15 @@ def callbackLoop (handle trampoline : USize) (total : UInt64) : IO UInt8 :=
 def stringCallbackLoop (handle trampoline : USize) (payloads : Array String) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline payloads
 
+def jsonlRows : Array String :=
+  #[
+    "{\"kind\":\"module\",\"name\":\"LeanRsInteropConsumer\"}",
+    "{\"kind\":\"declaration\",\"name\":\"lean_rs_interop_consumer_add\"}",
+    "{\"kind\":\"done\",\"count\":2}"
+  ]
+
+@[export lean_rs_interop_consumer_jsonl_stream]
+def jsonlStream (handle trampoline : USize) : IO UInt8 :=
+  LeanRsInterop.Callback.String.loop handle trampoline jsonlRows
+
 end LeanRsInteropConsumer.Callback

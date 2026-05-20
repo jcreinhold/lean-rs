@@ -44,6 +44,15 @@ It builds the generic interop shim package and a downstream-style Lake target th
 `lean-toolchain`, opens both dylibs, calls an ordinary Lean export from Rust, and lets
 Lean call back into a Rust `LeanCallbackHandle`. The worked recipe is
 [`docs/recipes/downstream-interop.md`](docs/recipes/downstream-interop.md).
+For line-oriented string callbacks, run:
+
+```sh
+cargo run -p lean-rs --example string_streaming
+```
+
+That example uses `LeanCallbackHandle<LeanStringEvent>` to receive JSONL-like
+rows from Lean without importing `lean-rs-host`; see
+[`docs/recipes/string-callback-streaming.md`](docs/recipes/string-callback-streaming.md).
 
 ## Build your own consumer
 
@@ -183,6 +192,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md)—the host progress-sink contract over the reusable callback substrate.
 - [`14-interop-release-contract.md`](docs/architecture/14-interop-release-contract.md)—the final interop release contract and source-of-truth map.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
+- [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the L1 recipe for Lean-to-Rust string streams such as JSONL-like worker output.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

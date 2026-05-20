@@ -63,7 +63,8 @@ callback abstraction.
 JSONL-style streaming: Lean can emit one encoded line at a time, Rust receives
 owned strings, and neither side has to tunnel through subprocess stdout. This
 is the shape needed by an in-process `lean-dup` worker while still avoiding a
-general arbitrary-object callback API.
+general arbitrary-object callback API. The runnable proof is
+[`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md).
 
 Byte arrays and arbitrary Lean-object callbacks are deferred. They should land
 only when a measured consumer needs them, because each payload adds ABI,

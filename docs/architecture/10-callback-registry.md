@@ -52,6 +52,9 @@ session work.
 
 `LeanStringEvent` copies a borrowed Lean `String` into an owned Rust `String`
 before user code runs. No Lean object lifetime escapes the trampoline.
+Downstream line-oriented protocols can use it directly; see
+[`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md)
+for a JSONL-like example.
 
 ## Flow And Lifetime
 

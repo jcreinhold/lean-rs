@@ -92,7 +92,8 @@ def stringCallbackLoop (handle trampoline : USize) (payloads : Array String) : I
 
 Rust registers `LeanCallbackHandle::<LeanStringEvent>` for that export. The
 trampoline copies the borrowed Lean string into an owned Rust `String` before
-calling user code.
+calling user code. For a complete line-oriented string streaming example, see
+[`string-callback-streaming.md`](string-callback-streaming.md).
 
 ## What This Is Not
 

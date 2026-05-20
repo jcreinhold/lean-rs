@@ -95,6 +95,9 @@ mangled initializer symbol internally.
 For a complete downstream-style example that also lets Lean call a Rust callback, run
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
+For a line-oriented string callback example, run
+`cargo run -p lean-rs --example string_streaming` and read
+[`docs/recipes/string-callback-streaming.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/string-callback-streaming.md).
 
 Before the matching workspace version is published, pin against a checkout by adding
 `path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.

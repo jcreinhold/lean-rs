@@ -13,6 +13,8 @@ Consumer-facing contracts live in these documents:
 
 - [`../recipes/downstream-interop.md`](../recipes/downstream-interop.md): L1 interop without
   `lean-rs-host`.
+- [`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md): L1
+  Lean-to-Rust string streaming without `lean-rs-host`.
 - [`03-host-stack.md`](03-host-stack.md): L2 `LeanHost` / `LeanCapabilities` / `LeanSession`
   surface and host method signatures.
 - [`10-callback-registry.md`](10-callback-registry.md): callback handle lifetime, panic, and
@@ -68,6 +70,7 @@ Before a release that changes interop or host progress, run:
 
 ```sh
 cargo run -p lean-rs --example interop_callback
+cargo run -p lean-rs --example string_streaming
 cargo run -p lean-rs-host --example progress
 cargo test -p lean-rs --test callback_trampoline -- --nocapture
 cargo test -p lean-rs --test callback_registry -- --nocapture
