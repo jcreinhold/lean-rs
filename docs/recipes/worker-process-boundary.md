@@ -1,5 +1,10 @@
 # Worker Process Boundary
 
+For the normal worker-capability path, start with
+[`worker-capability-runner.md`](worker-capability-runner.md). This page
+explains the lower-level process-boundary mechanics and the raw row escape
+hatch.
+
 Run the worker streaming example from a clean checkout:
 
 ```sh

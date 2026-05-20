@@ -81,6 +81,17 @@ It exercises generic `version`, `doctor`, `extract`, `features`, `index`, and
 `probe` command shapes without importing downstream schemas into
 `lean-rs-worker`.
 
+For the source-of-truth worker capability recipe, run:
+
+```sh
+cargo run -p lean-rs-worker --example worker_capability_runner
+```
+
+It demonstrates the normal downstream path: `LeanWorkerCapabilityBuilder`,
+typed commands, live rows, diagnostics, progress ticks, terminal completion,
+request timeout handling, and worker cycling. See
+[`docs/recipes/worker-capability-runner.md`](docs/recipes/worker-capability-runner.md).
+
 ## Build your own consumer
 
 The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean
@@ -236,6 +247,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the L1 recipe for Lean-to-Rust string streams such as JSONL-like worker output.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.
+- [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md)—the normal worker-capability recipe with builder setup, typed commands, live rows, diagnostics, timeout handling, terminal completion, and worker cycling.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

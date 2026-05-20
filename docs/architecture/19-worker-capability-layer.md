@@ -108,6 +108,8 @@ Use typed worker commands for production-style downstream tools that need live
 row delivery, request completion metadata, diagnostics, timeouts, capability
 discovery, restart policy, and measured performance. Use `run_data_stream`
 directly only for low-level experiments, fixtures, and schema-less tooling.
+The source-of-truth recipe for this path is
+[`docs/recipes/worker-capability-runner.md`](../recipes/worker-capability-runner.md).
 
 As of the stream completion work, `run_data_stream` forwards rows live, keeps
 diagnostics on a separate sink, and returns terminal summaries with total rows,

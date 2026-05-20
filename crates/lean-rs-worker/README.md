@@ -79,6 +79,16 @@ Run the worked example:
 cargo run -p lean-rs-worker --example worker_streaming
 ```
 
+Run the worker capability recipe example:
+
+```sh
+cargo run -p lean-rs-worker --example worker_capability_runner
+```
+
+This is the normal downstream shape: builder-managed startup, typed commands,
+live rows, diagnostics, progress, terminal completion, request timeout
+handling, and explicit worker cycling.
+
 Run the downstream-shaped operational probe:
 
 ```sh
@@ -97,4 +107,6 @@ reports the command status and elapsed time without treating that command as
 part of the `lean-rs-worker` API.
 
 The recipe is
+[`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).
+The lower-level process-boundary recipe is
 [`docs/recipes/worker-process-boundary.md`](../../docs/recipes/worker-process-boundary.md).
