@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig, check_cancelled, elapsed_event,
-    report_parent_data_row, report_parent_progress,
+    LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig, LeanWorkerStreamSummary, check_cancelled,
+    elapsed_event, report_parent_data_row, report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -274,6 +274,12 @@ pub enum LeanWorkerError {
     ProgressPanic { message: String },
     /// A parent-side data sink panicked while handling a worker row.
     DataSinkPanic { message: String },
+    /// A streaming export returned a nonzero downstream status byte.
+    StreamExportFailed { status: u8 },
+    /// The in-child string callback helper returned a callback failure status.
+    StreamCallbackFailed { status: u8, description: String },
+    /// A streaming callback emitted a malformed row envelope.
+    StreamRowMalformed { message: String },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -300,6 +306,11 @@ impl fmt::Display for LeanWorkerError {
             Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
             Self::DataSinkPanic { message } => write!(f, "worker data sink panicked: {message}"),
+            Self::StreamExportFailed { status } => write!(f, "streaming export returned status {status}"),
+            Self::StreamCallbackFailed { status, description } => {
+                write!(f, "streaming callback failed with status {status}: {description}")
+            }
+            Self::StreamRowMalformed { message } => write!(f, "streaming export emitted malformed row: {message}"),
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -322,6 +333,9 @@ impl std::error::Error for LeanWorkerError {
             | Self::Cancelled { .. }
             | Self::ProgressPanic { .. }
             | Self::DataSinkPanic { .. }
+            | Self::StreamExportFailed { .. }
+            | Self::StreamCallbackFailed { .. }
+            | Self::StreamRowMalformed { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -463,6 +477,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("health", &other)),
@@ -492,6 +510,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("load_fixture_capability", &other)),
@@ -525,6 +547,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("call_fixture_mul", &other)),
@@ -647,6 +673,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Error { .. }) => Err(unexpected_response("terminate", &other)),
         }
@@ -702,6 +732,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -731,6 +765,10 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -760,6 +798,10 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -790,6 +832,10 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -818,6 +864,10 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -846,6 +896,56 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_run_data_stream(
+        &mut self,
+        export: &str,
+        request: &serde_json::Value,
+        rows: &dyn LeanWorkerDataSink,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
+        const OPERATION: &str = "worker_run_data_stream";
+        check_cancelled(OPERATION, cancellation)?;
+        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+            message: format!("worker data-stream request JSON encode failed: {err}"),
+        })?;
+        self.prepare_request(false)?;
+        self.send_request(Request::RunDataStream {
+            export: export.to_owned(),
+            request_json,
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows))? {
+            Response::StreamComplete { rows } => Ok(LeanWorkerStreamSummary { rows }),
+            Response::StreamExportFailed { status_byte } => {
+                Err(LeanWorkerError::StreamExportFailed { status: status_byte })
+            }
+            Response::StreamCallbackFailed {
+                status_byte,
+                description,
+            } => Err(LeanWorkerError::StreamCallbackFailed {
+                status: status_byte,
+                description,
+            }),
+            Response::StreamRowMalformed { message } => Err(LeanWorkerError::StreamRowMalformed { message }),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),

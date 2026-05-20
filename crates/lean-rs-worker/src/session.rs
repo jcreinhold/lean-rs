@@ -202,6 +202,13 @@ pub trait LeanWorkerDataSink: Send + Sync {
     fn report(&self, row: LeanWorkerDataRow);
 }
 
+/// Summary returned after a worker data-stream export completes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LeanWorkerStreamSummary {
+    /// Number of rows delivered to the parent before terminal success.
+    pub rows: u64,
+}
+
 /// Serializable elaboration result returned over the worker boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerElabResult {
@@ -401,6 +408,41 @@ impl LeanWorkerSession<'_> {
     ) -> Result<Vec<String>, LeanWorkerError> {
         self.ensure_open()?;
         match self.worker.worker_declaration_names(names, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ LeanWorkerError::Cancelled { .. }) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Run a downstream streaming export and deliver JSON rows to `rows`.
+    ///
+    /// The Lean export must have ABI
+    /// `String -> USize -> USize -> IO UInt8`. The child supplies the
+    /// callback handle and trampoline; the parent only sees validated
+    /// `LeanWorkerDataRow` values.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child reports a
+    /// host or stream error, cancellation is observed, a sink panics, or
+    /// protocol communication fails. In-flight cancellation cycles the child
+    /// and invalidates this session.
+    pub fn run_data_stream(
+        &mut self,
+        export: &str,
+        request: &Value,
+        rows: &dyn LeanWorkerDataSink,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_run_data_stream(export, request, rows, cancellation, progress)
+        {
             Ok(value) => Ok(value),
             Err(err @ LeanWorkerError::Cancelled { .. }) => {
                 self.open = false;

@@ -76,6 +76,11 @@ pub(crate) enum Request {
         names: Vec<String>,
         progress: bool,
     },
+    RunDataStream {
+        export: String,
+        request_json: String,
+        progress: bool,
+    },
     // Private harness requests used to prove streaming frame behavior before
     // prompt 63 exposes a public row sink API.
     EmitTestRows {
@@ -96,6 +101,10 @@ pub(crate) enum Response {
     Elaboration { outcome: WorkerElabOutcome },
     KernelCheck { outcome: WorkerKernelOutcome },
     Strings { values: Vec<String> },
+    StreamComplete { rows: u64 },
+    StreamExportFailed { status_byte: u8 },
+    StreamCallbackFailed { status_byte: u8, description: String },
+    StreamRowMalformed { message: String },
     RowsComplete { count: u64 },
     Terminating,
     Error { code: String, message: String },

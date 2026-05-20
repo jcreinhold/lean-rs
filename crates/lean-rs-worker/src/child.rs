@@ -1,7 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
 
-use lean_rs::{LeanError, LeanResult, LeanRuntime};
+use lean_rs::error::host_internal;
+use lean_rs::module::LeanIo;
+use lean_rs::{
+    LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
+};
 use lean_rs_host::{
     LeanCapabilities, LeanElabFailure, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
@@ -136,6 +141,28 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     Some(state) => match state.declaration_names(&names, progress, &mut writer) {
                         Ok(values) => Response::Strings { values },
                         Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_frame(&mut writer, Message::Response(response))?;
+            }
+            Request::RunDataStream {
+                export,
+                request_json,
+                progress,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.run_data_stream(&export, &request_json, progress, &mut writer) {
+                        Ok(rows) => Response::StreamComplete { rows },
+                        Err(StreamRunError::Host(err)) => error_response(&err),
+                        Err(StreamRunError::ExportStatus(status)) => {
+                            Response::StreamExportFailed { status_byte: status }
+                        }
+                        Err(StreamRunError::CallbackStatus(status)) => Response::StreamCallbackFailed {
+                            status_byte: status.as_abi(),
+                            description: status.description().to_owned(),
+                        },
+                        Err(StreamRunError::MalformedRow(message)) => Response::StreamRowMalformed { message },
                     },
                     None => missing_session_response(),
                 };
@@ -320,6 +347,113 @@ impl HostSessionState {
             self.session.declaration_name_bulk(&refs, None, None)
         }
     }
+
+    fn run_data_stream(
+        &mut self,
+        export: &str,
+        request_json: &str,
+        progress: bool,
+        writer: &mut impl std::io::Write,
+    ) -> Result<u64, StreamRunError> {
+        if progress {
+            emit_progress(writer, "data_stream", 0, None);
+        }
+
+        let rows = Arc::new(Mutex::new(Vec::<PendingDataRow>::new()));
+        let row_error = Arc::new(Mutex::new(None::<String>));
+        let callback_rows = Arc::clone(&rows);
+        let callback_error = Arc::clone(&row_error);
+        let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
+            if callback_error.lock().map_or(true, |guard| guard.is_some()) {
+                return LeanCallbackFlow::Stop;
+            }
+            match parse_row_envelope(&event.value) {
+                Ok(row) => {
+                    if let Ok(mut guard) = callback_rows.lock() {
+                        guard.push(row);
+                        LeanCallbackFlow::Continue
+                    } else {
+                        LeanCallbackFlow::Stop
+                    }
+                }
+                Err(message) => {
+                    if let Ok(mut guard) = callback_error.lock() {
+                        *guard = Some(message);
+                    }
+                    LeanCallbackFlow::Stop
+                }
+            }
+        })
+        .map_err(StreamRunError::Host)?;
+
+        let (handle, trampoline) = callback.abi_parts();
+        let status = self
+            .session
+            .call_capability::<(&str, usize, usize), LeanIo<u8>>(export, (request_json, handle, trampoline), None)
+            .map_err(StreamRunError::Host)?;
+
+        if let Some(message) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
+            return Err(StreamRunError::MalformedRow(message));
+        }
+
+        match LeanCallbackStatus::from_abi(status) {
+            Some(LeanCallbackStatus::Ok) => {}
+            Some(status) => return Err(StreamRunError::CallbackStatus(status)),
+            None => return Err(StreamRunError::ExportStatus(status)),
+        }
+
+        let pending_rows = rows
+            .lock()
+            .map_err(|_| StreamRunError::MalformedRow("stream row buffer mutex was poisoned".to_owned()))?
+            .clone();
+        let mut emitter = DataRowEmitter::default();
+        for row in pending_rows {
+            emitter.emit(writer, row.stream, row.payload)?;
+            if progress {
+                emit_progress(writer, "data_stream", emitter.count(), None);
+            }
+        }
+        Ok(emitter.count())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingDataRow {
+    stream: String,
+    payload: serde_json::Value,
+}
+
+#[derive(Debug)]
+enum StreamRunError {
+    Host(LeanError),
+    ExportStatus(u8),
+    CallbackStatus(LeanCallbackStatus),
+    MalformedRow(String),
+}
+
+impl From<crate::protocol::ProtocolError> for StreamRunError {
+    fn from(value: crate::protocol::ProtocolError) -> Self {
+        Self::Host(host_internal(format!("worker data-row frame write failed: {value}")))
+    }
+}
+
+fn parse_row_envelope(raw: &str) -> Result<PendingDataRow, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|err| format!("row callback payload is not valid JSON: {err}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "row callback payload must be a JSON object".to_owned())?;
+    let stream = object
+        .get("stream")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "row callback payload must contain a non-empty string field `stream`".to_owned())?
+        .to_owned();
+    let payload = object
+        .get("payload")
+        .cloned()
+        .ok_or_else(|| "row callback payload must contain field `payload`".to_owned())?;
+    Ok(PendingDataRow { stream, payload })
 }
 
 impl WorkerElabOptions {
