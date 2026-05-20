@@ -49,7 +49,9 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decis
 [`03-host-stack.md`](03-host-stack.md) for `lean-rs-host`'s curated surface, and
 [`14-interop-release-contract.md`](14-interop-release-contract.md) for the final reusable
 interop release contract. See [`16-production-boundary.md`](16-production-boundary.md) for the
-future worker-process boundary around `lean-rs-host`.
+worker-process boundary around `lean-rs-host` and
+[`17-worker-session-adapter.md`](17-worker-session-adapter.md) for the narrow
+host-session subset available across that boundary.
 
 ## Hidden knowledge
 

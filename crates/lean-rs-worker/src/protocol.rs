@@ -39,9 +39,40 @@ pub(crate) enum Message {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub(crate) enum Request {
     Health,
-    LoadFixtureCapability { fixture_root: String },
-    CallFixtureMul { fixture_root: String, lhs: u64, rhs: u64 },
-    TriggerLeanPanic { fixture_root: String },
+    LoadFixtureCapability {
+        fixture_root: String,
+    },
+    CallFixtureMul {
+        fixture_root: String,
+        lhs: u64,
+        rhs: u64,
+    },
+    TriggerLeanPanic {
+        fixture_root: String,
+    },
+    OpenHostSession {
+        project_root: String,
+        package: String,
+        lib_name: String,
+        imports: Vec<String>,
+    },
+    Elaborate {
+        source: String,
+        options: WorkerElabOptions,
+    },
+    KernelCheck {
+        source: String,
+        options: WorkerElabOptions,
+        progress: bool,
+    },
+    DeclarationKinds {
+        names: Vec<String>,
+        progress: bool,
+    },
+    DeclarationNames {
+        names: Vec<String>,
+        progress: bool,
+    },
     Terminate,
 }
 
@@ -51,6 +82,10 @@ pub(crate) enum Response {
     HealthOk,
     CapabilityLoaded,
     U64 { value: u64 },
+    HostSessionOpened,
+    Elaboration { outcome: WorkerElabOutcome },
+    KernelCheck { outcome: WorkerKernelOutcome },
+    Strings { values: Vec<String> },
     Terminating,
     Error { code: String, message: String },
 }
@@ -63,8 +98,51 @@ pub(crate) struct Diagnostic {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct ProgressTick {
+    pub(crate) phase: String,
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerElabOptions {
+    pub(crate) namespace_context: String,
+    pub(crate) file_label: String,
+    pub(crate) heartbeat_limit: u64,
+    pub(crate) diagnostic_byte_limit: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerElabOutcome {
+    pub(crate) success: bool,
+    pub(crate) diagnostics: Vec<WorkerDiagnostic>,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerKernelOutcome {
+    pub(crate) status: WorkerKernelStatus,
+    pub(crate) diagnostics: Vec<WorkerDiagnostic>,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WorkerKernelStatus {
+    Checked,
+    Rejected,
+    Unavailable,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerDiagnostic {
+    pub(crate) severity: String,
+    pub(crate) message: String,
+    pub(crate) file_label: String,
+    pub(crate) line: Option<u32>,
+    pub(crate) column: Option<u32>,
+    pub(crate) end_line: Option<u32>,
+    pub(crate) end_column: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

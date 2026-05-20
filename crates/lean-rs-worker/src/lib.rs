@@ -9,8 +9,14 @@
 
 mod child;
 mod protocol;
+mod session;
 mod supervisor;
 
+pub use session::{
+    LeanWorkerCancellationToken, LeanWorkerDiagnostic, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSession,
+    LeanWorkerSessionConfig,
+};
 pub use supervisor::{
     LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
     LeanWorkerStats, LeanWorkerStatus,

@@ -12,3 +12,13 @@ configured request count, import-like request count, RSS ceiling, or idle
 duration is reached. Cycling is a process restart. It is the reset boundary for
 Lean process-global runtime and import memory; `SessionPool::drain()` remains an
 in-process cache operation, not an RSS reset.
+
+`LeanWorker::open_session` adds a narrow host-session adapter over the worker
+boundary. It supports elaboration, kernel-check status, declaration-kind bulk
+queries, and declaration-name bulk queries. The adapter returns copied
+diagnostics and strings; it does not send child-runtime handles such as
+`LeanExpr`, `LeanEvidence`, or `LeanDeclaration` to the parent.
+
+Worker progress and cancellation are parent-side IPC concepts. Progress arrives
+as `LeanWorkerProgressEvent`; in-flight cancellation cycles the child process,
+returns `LeanWorkerError::Cancelled`, and invalidates the open worker session.

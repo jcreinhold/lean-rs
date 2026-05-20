@@ -8,6 +8,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
+use crate::session::{
+    LeanWorkerCancellationToken, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult,
+    LeanWorkerProgressSink, LeanWorkerSessionConfig, check_cancelled, elapsed_event, report_parent_progress,
+};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -143,6 +147,8 @@ pub enum LeanWorkerRestartReason {
     RssCeiling { current_kib: u64, limit_kib: u64 },
     /// Worker was idle at least as long as the configured limit.
     Idle { idle_for: Duration, limit: Duration },
+    /// Parent-side cancellation replaced the child during an in-flight request.
+    Cancelled { operation: &'static str },
 }
 
 /// Snapshot of worker lifecycle counters.
@@ -166,6 +172,8 @@ pub struct LeanWorkerStats {
     pub rss_restarts: u64,
     /// Restarts caused by `LeanWorkerRestartPolicy::idle_restart_after`.
     pub idle_restarts: u64,
+    /// Restarts caused by parent-side cancellation of an in-flight request.
+    pub cancelled_restarts: u64,
     /// RSS checks skipped because the platform did not provide a usable sample.
     pub rss_samples_unavailable: u64,
     /// Last measured child RSS in KiB, when a policy check could sample it.
@@ -192,6 +200,9 @@ impl LeanWorkerStats {
             }
             LeanWorkerRestartReason::Idle { .. } => {
                 self.idle_restarts = self.idle_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::Cancelled { .. } => {
+                self.cancelled_restarts = self.cancelled_restarts.saturating_add(1);
             }
         }
         self.last_restart_reason = Some(reason);
@@ -256,6 +267,10 @@ pub enum LeanWorkerError {
         operation: &'static str,
         duration: Duration,
     },
+    /// A parent-side cancellation token was observed.
+    Cancelled { operation: &'static str },
+    /// A parent-side progress sink panicked while handling a worker event.
+    ProgressPanic { message: String },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -279,6 +294,8 @@ impl fmt::Display for LeanWorkerError {
             Self::Timeout { operation, duration } => {
                 write!(f, "worker operation {operation} timed out after {duration:?}")
             }
+            Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
+            Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -298,6 +315,8 @@ impl std::error::Error for LeanWorkerError {
             | Self::ChildExited { .. }
             | Self::ChildPanicOrAbort { .. }
             | Self::Timeout { .. }
+            | Self::Cancelled { .. }
+            | Self::ProgressPanic { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -435,6 +454,10 @@ impl LeanWorker {
             Response::HealthOk => Ok(()),
             other @ (Response::CapabilityLoaded
             | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("health", &other)),
         }
@@ -457,9 +480,14 @@ impl LeanWorker {
         self.record_request(true);
         match self.read_response("load_fixture_capability")? {
             Response::CapabilityLoaded => Ok(()),
-            other @ (Response::HealthOk | Response::U64 { .. } | Response::Terminating | Response::Error { .. }) => {
-                Err(unexpected_response("load_fixture_capability", &other))
-            }
+            other @ (Response::HealthOk
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response("load_fixture_capability", &other)),
         }
     }
 
@@ -486,6 +514,10 @@ impl LeanWorker {
             Response::U64 { value } => Ok(value),
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("call_fixture_mul", &other)),
         }
@@ -603,6 +635,10 @@ impl LeanWorker {
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
             | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
             | Response::Error { .. }) => Err(unexpected_response("terminate", &other)),
         }
     }
@@ -627,6 +663,146 @@ impl LeanWorker {
             Ok(response) => Err(unexpected_response("trigger_lean_panic", &response)),
             Err(LeanWorkerError::ChildPanicOrAbort { exit }) => Ok(exit),
             Err(err) => Err(err),
+        }
+    }
+
+    pub(crate) fn open_worker_session(
+        &mut self,
+        config: &LeanWorkerSessionConfig,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<(), LeanWorkerError> {
+        const OPERATION: &str = "open_worker_session";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(true)?;
+        self.send_request(Request::OpenHostSession {
+            project_root: config.project_root_string(),
+            package: config.package().to_owned(),
+            lib_name: config.lib_name().to_owned(),
+            imports: config.imports().to_vec(),
+        })?;
+        self.record_request(true);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::HostSessionOpened => Ok(()),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_elaborate(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerElabResult, LeanWorkerError> {
+        const OPERATION: &str = "worker_elaborate";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::Elaborate {
+            source: source.to_owned(),
+            options: options.wire(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::Elaboration { outcome } => Ok(outcome.into()),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_kernel_check(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerKernelResult, LeanWorkerError> {
+        const OPERATION: &str = "worker_kernel_check";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::KernelCheck {
+            source: source.to_owned(),
+            options: options.wire(),
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::KernelCheck { outcome } => Ok(outcome.into()),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::Strings { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_declaration_kinds(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<String>, LeanWorkerError> {
+        const OPERATION: &str = "worker_declaration_kinds";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::DeclarationKinds {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::Strings { values } => Ok(values),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_declaration_names(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<String>, LeanWorkerError> {
+        const OPERATION: &str = "worker_declaration_names";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::DeclarationNames {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::Strings { values } => Ok(values),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
     }
 
@@ -727,6 +903,50 @@ impl LeanWorker {
             | Message::FatalExit(_)) => Err(LeanWorkerError::Protocol {
                 message: format!("worker sent unexpected {operation} message: {other:?}"),
             }),
+        }
+    }
+
+    fn read_response_with_progress(
+        &mut self,
+        operation: &'static str,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<Response, LeanWorkerError> {
+        let started = Instant::now();
+        loop {
+            let Some(stdout) = self.stdout.as_mut() else {
+                return Err(self.dead_error());
+            };
+            let frame = match read_frame(stdout) {
+                Ok(frame) => frame,
+                Err(err) if err.is_eof() => return Err(self.record_exit_error()),
+                Err(err) => {
+                    return Err(LeanWorkerError::Protocol {
+                        message: err.to_string(),
+                    });
+                }
+            };
+            match frame.message {
+                Message::ProgressTick(tick) => {
+                    report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))?;
+                    if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
+                        self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
+                        return Err(LeanWorkerError::Cancelled { operation });
+                    }
+                }
+                Message::Response(Response::Error { code, message }) => {
+                    return Err(LeanWorkerError::Worker { code, message });
+                }
+                Message::Response(response) => return Ok(response),
+                other @ (Message::Handshake { .. }
+                | Message::Request(_)
+                | Message::Diagnostic(_)
+                | Message::FatalExit(_)) => {
+                    return Err(LeanWorkerError::Protocol {
+                        message: format!("worker sent unexpected {operation} message: {other:?}"),
+                    });
+                }
+            }
         }
     }
 

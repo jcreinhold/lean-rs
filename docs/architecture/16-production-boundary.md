@@ -54,8 +54,17 @@ interned names, allocator state, and other Lean runtime structures.
 useful at idle boundaries, but it is not an RSS reset. Only exiting the worker
 process resets Lean's process-global state. `lean-rs-worker` therefore provides
 process-cycling triggers for explicit cycles, request count, import-like request
-count, idle restart, and measured RSS ceiling. The measurement baseline remains
+count, idle restart, measured RSS ceiling, and in-flight worker-session
+cancellation. The measurement baseline remains
 [`../safety/long-session-memory.md`](../safety/long-session-memory.md).
+
+## Host Operations Across The Boundary
+
+The worker session adapter is a narrow, process-safe subset of `LeanSession`.
+It returns copied diagnostics, kernel statuses, and rendered declaration strings;
+it does not send runtime-bound `LeanExpr`, `LeanEvidence`, `LeanDeclaration`, or
+`LeanName` handles to the parent. See
+[`17-worker-session-adapter.md`](17-worker-session-adapter.md).
 
 ## Rejected Boundaries
 
