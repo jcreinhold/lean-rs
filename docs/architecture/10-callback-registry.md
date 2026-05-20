@@ -22,9 +22,10 @@ opaque_handle : USize
 trampoline    : USize
 ```
 
-Lean treats both values as opaque and passes them to `LeanRsInterop.Callback`,
-which invokes the Rust trampoline through the generic C helper. Callers cannot
-supply their own trampoline function pointer through the public API.
+Lean treats both values as opaque and passes them to a payload-specific helper
+such as `LeanRsInterop.Callback.Tick` or `LeanRsInterop.Callback.String`.
+The helper invokes the Rust trampoline through its matching C symbol. Callers
+cannot supply their own trampoline function pointer through the public API.
 
 ## Payloads
 
@@ -99,5 +100,8 @@ handle is still alive. The recorded error has diagnostic code
 ## Files
 
 - Registry: `crates/lean-rs/src/callback.rs`
-- Generic Lean helper: `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean`
+- Generic Lean helpers:
+  `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/Tick.lean`
+  and
+  `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/String.lean`
 - Tests: `crates/lean-rs/tests/callback_registry.rs`

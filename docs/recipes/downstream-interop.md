@@ -60,7 +60,7 @@ Callbacks use the generic interop shim package:
 ```lean
 @[export lean_rs_interop_consumer_callback_loop]
 def callbackLoop (handle trampoline : USize) (total : UInt64) : IO UInt8 :=
-  LeanRsInterop.Callback.loop handle trampoline total
+  LeanRsInterop.Callback.Tick.loop handle trampoline total
 ```
 
 Rust registers a callback and passes the opaque handle plus crate-owned
@@ -80,6 +80,19 @@ the handle unregisters the id; a stale Lean call returns
 `LeanCallbackStatus::StaleHandle` instead of dereferencing freed Rust memory.
 Callbacks run synchronously on the Lean-bound thread and must not re-enter the
 same Lean call stack.
+
+String callbacks use the same handle/trampoline lifetime rules with a different
+payload helper:
+
+```lean
+@[export lean_rs_interop_consumer_string_callback_loop]
+def stringCallbackLoop (handle trampoline : USize) (payloads : Array String) : IO UInt8 :=
+  LeanRsInterop.Callback.String.loop handle trampoline payloads
+```
+
+Rust registers `LeanCallbackHandle::<LeanStringEvent>` for that export. The
+trampoline copies the borrowed Lean string into an owned Rust `String` before
+calling user code.
 
 ## What This Is Not
 

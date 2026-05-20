@@ -17,7 +17,7 @@ namespace LeanRsFixture.Elaboration
 open Lean
 
 private def reportProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
-  let status ← LeanRsInterop.Callback.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
+  let status ← LeanRsInterop.Callback.Tick.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
   if status == 0 then
     pure none
   else

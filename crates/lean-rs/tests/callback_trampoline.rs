@@ -15,6 +15,8 @@ use std::sync::Mutex;
 use lean_rs::LeanRuntime;
 use lean_rs::module::{LeanIo, LeanLibrary};
 
+const PAYLOAD_TICK: u8 = 0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CallbackEvent {
     current: u64,
@@ -53,8 +55,15 @@ impl CallbackProbe {
     }
 }
 
-extern "C" fn test_callback_trampoline(handle: usize, current: u64, total: u64) -> u8 {
+extern "C" fn test_callback_trampoline(
+    handle: usize,
+    payload_tag: u8,
+    current: u64,
+    total: u64,
+    _payload: *mut std::ffi::c_void,
+) -> u8 {
     let result = catch_unwind(AssertUnwindSafe(|| {
+        assert_eq!(payload_tag, PAYLOAD_TICK, "callback payload tag must be tick");
         let probe = {
             assert_ne!(handle, 0, "callback handle must be non-null");
             let ptr = handle as *const CallbackProbe;

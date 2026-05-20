@@ -80,4 +80,4 @@ are unchanged.
 `LeanCapabilities` builds the crate-bundled generic interop and host shim Lake
 targets on demand, then opens the generic interop shim dylib globally before
 opening the host shim dylib. This anchors the generated
-`LeanRsInterop.Callback` initializer that host progress shims import.
+`LeanRsInterop.Callback.Tick` initializer that host progress shims import.

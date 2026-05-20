@@ -14,7 +14,7 @@ lean_rs_interop_test_callback_loop : USize -> USize -> UInt64 -> IO UInt8
 
 The first `USize` is an opaque Rust-owned handle. The second is a Rust
 function pointer. Lean does not call the function pointer directly. It calls
-`lean_rs_interop_callback_call`, a tiny C helper linked into the shim dylib.
+`lean_rs_interop_tick_callback_call`, a tiny C helper linked into the shim dylib.
 The helper casts the second `USize` to:
 
 ```c

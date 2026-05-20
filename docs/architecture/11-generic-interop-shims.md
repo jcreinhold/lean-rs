@@ -16,28 +16,37 @@ Its public Lean namespace is `LeanRsInterop`.
 
 Current modules:
 
-- `LeanRsInterop.Callback`: callback invocation helper for the L1
-  `lean_rs::LeanCallbackHandle` ABI.
+- `LeanRsInterop.Callback.Tick`: tick callback helper for
+  `LeanCallbackHandle<LeanProgressTick>`.
+- `LeanRsInterop.Callback.String`: string callback helper for
+  `LeanCallbackHandle<LeanStringEvent>`.
+- `LeanRsInterop.Callback`: roll-up module that imports both payload-specific
+  helper namespaces.
 
-String, name, and object helpers belong in this package when a prompt adds a
-real caller. They are not present yet, because unused helpers would widen the
-shim surface without hiding any current complexity.
+Name, byte, and object helpers belong in this package when a prompt adds a real
+caller. They are not present yet, because unused helpers would widen the shim
+surface without hiding any current complexity.
 
 ## Callback Helper
 
-The callback helper owns the reusable ABI mechanism:
+The callback helpers own the reusable ABI mechanism:
 
 ```lean
-LeanRsInterop.Callback.call : USize -> USize -> UInt64 -> UInt64 -> BaseIO UInt8
-LeanRsInterop.Callback.loop : USize -> USize -> UInt64 -> IO UInt8
+LeanRsInterop.Callback.Tick.call : USize -> USize -> UInt64 -> UInt64 -> BaseIO UInt8
+LeanRsInterop.Callback.Tick.loop : USize -> USize -> UInt64 -> IO UInt8
+LeanRsInterop.Callback.String.call : USize -> USize -> @& String -> BaseIO UInt8
+LeanRsInterop.Callback.String.loop : USize -> USize -> Array String -> IO UInt8
 ```
 
 The first `USize` is an opaque Rust callback handle. The second is the Rust
-trampoline value returned by `LeanCallbackHandle::abi_trampoline()`.
-`LeanRsInterop.Callback.call` calls the linked C symbol
-`lean_rs_interop_callback_call`, which invokes the Rust trampoline with
-`(handle, current, total)` and returns a `UInt8` status. `loop` is a small
-convenience used by downstream-style fixtures.
+trampoline value returned by `LeanCallbackHandle::abi_trampoline()`. The tick
+helper calls `lean_rs_interop_tick_callback_call`, which delivers a
+`(current, total)` payload. The string helper calls
+`lean_rs_interop_string_callback_call`, which delivers a borrowed Lean
+`String` payload. Both helpers return the `UInt8` status produced by the Rust
+trampoline. The raw trampoline signature is crate-owned; Lean code should only
+pass the opaque values through the payload-specific helpers. The `loop`
+functions are small conveniences used by downstream-style fixtures.
 
 Lean code treats the handle and trampoline as opaque tokens. Lifetime,
 reentrancy, and Rust panic containment are Rust-side registry contracts; see
@@ -59,18 +68,19 @@ The host package keeps its prompt-40 test export:
 lean_rs_interop_test_callback_loop : USize -> USize -> UInt64 -> IO UInt8
 ```
 
-That export loops over the same `lean_rs_interop_callback_call` C helper used
-by `LeanRsInterop.Callback.call`. This preserves the Rust test symbol while
-moving the callback C helper source into the generic package.
+That export loops over the same `lean_rs_interop_tick_callback_call` C helper
+used by `LeanRsInterop.Callback.Tick.call`. This preserves the Rust test symbol
+while moving the callback C helper source into the generic package.
 
 ## Downstream Fixture
 
 [`fixtures/interop-shims/`](../../fixtures/interop-shims/) is a small Lake
 package that depends on `lean-rs-interop-shims` without importing
 `lean-rs-host-shims`. Its `LeanRsInteropConsumer.Callback` module exports a
-plain addition function and a callback loop through the generic helper. The
-fixture verifies that downstream capability packages can use typed exports and
-generic callbacks without taking a host session dependency.
+plain addition function, a tick callback loop, and a string callback loop
+through the generic helpers. The fixture verifies that downstream capability
+packages can use typed exports and generic callbacks without taking a host
+session dependency.
 
 Build commands:
 

@@ -22,6 +22,7 @@ const OK: u8 = 0;
 const STALE_HANDLE: u8 = 1;
 const PANIC: u8 = 2;
 const WRONG_PAYLOAD: u8 = 3;
+const PAYLOAD_STRING: u8 = 1;
 
 #[derive(Debug)]
 struct StringCallbackProbe {
@@ -54,8 +55,17 @@ impl StringCallbackProbe {
     }
 }
 
-extern "C" fn test_string_callback_trampoline(handle: usize, payload: *mut lean_object) -> u8 {
+extern "C" fn test_string_callback_trampoline(
+    handle: usize,
+    payload_tag: u8,
+    _arg0: u64,
+    _arg1: u64,
+    payload: *mut lean_object,
+) -> u8 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if payload_tag != PAYLOAD_STRING {
+            return WRONG_PAYLOAD;
+        }
         let Some(probe) = probe_from_handle(handle) else {
             return STALE_HANDLE;
         };

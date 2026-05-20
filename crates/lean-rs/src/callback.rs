@@ -33,6 +33,9 @@ use crate::error::{LeanError, LeanResult};
 type ProgressCallbackFn = dyn Fn(LeanProgressTick) -> LeanCallbackFlow + Send + Sync + 'static;
 type StringCallbackFn = dyn Fn(LeanStringEvent) -> LeanCallbackFlow + Send + Sync + 'static;
 
+const PAYLOAD_PROGRESS_TICK: u8 = 0;
+const PAYLOAD_STRING: u8 = 1;
+
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 static REGISTRY: OnceLock<Mutex<HashMap<usize, Arc<CallbackEntry>>>> = OnceLock::new();
 
@@ -361,15 +364,38 @@ fn allocate_id(guard: &HashMap<usize, Arc<CallbackEntry>>) -> LeanResult<NonZero
     ))
 }
 
-extern "C" fn progress_trampoline(handle: usize, current: u64, total: u64) -> u8 {
+extern "C" fn progress_trampoline(
+    handle: usize,
+    payload_tag: u8,
+    arg0: u64,
+    arg1: u64,
+    _payload: *mut lean_object,
+) -> u8 {
+    if payload_tag != PAYLOAD_PROGRESS_TICK {
+        return LeanCallbackStatus::WrongPayload.as_abi();
+    }
     let entry = registry().lock().ok().and_then(|guard| guard.get(&handle).cloned());
     let Some(entry) = entry else {
         return LeanCallbackStatus::StaleHandle.as_abi();
     };
-    entry.report_progress(LeanProgressTick { current, total }).as_abi()
+    entry
+        .report_progress(LeanProgressTick {
+            current: arg0,
+            total: arg1,
+        })
+        .as_abi()
 }
 
-extern "C" fn string_trampoline(handle: usize, payload: *mut lean_object) -> u8 {
+extern "C" fn string_trampoline(
+    handle: usize,
+    payload_tag: u8,
+    _arg0: u64,
+    _arg1: u64,
+    payload: *mut lean_object,
+) -> u8 {
+    if payload_tag != PAYLOAD_STRING {
+        return LeanCallbackStatus::WrongPayload.as_abi();
+    }
     let entry = registry().lock().ok().and_then(|guard| guard.get(&handle).cloned());
     let Some(entry) = entry else {
         return LeanCallbackStatus::StaleHandle.as_abi();

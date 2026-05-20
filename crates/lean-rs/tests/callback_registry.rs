@@ -242,6 +242,33 @@ fn wrong_payload_returns_status_without_calling_callback() {
 }
 
 #[test]
+fn wrong_string_payload_returns_status_without_calling_tick_callback() {
+    let library = consumer_library();
+    let callback_loop = string_callback_loop(&library);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let callback_events = Arc::clone(&events);
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
+        callback_events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(SeenEvent::from(event));
+        LeanCallbackFlow::Continue
+    })
+    .expect("tick callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(handle, trampoline, vec!["not-a-tick".to_owned()])
+        .expect("string loop returns wrong-payload status");
+
+    assert_eq!(
+        LeanCallbackStatus::from_abi(status),
+        Some(LeanCallbackStatus::WrongPayload),
+    );
+    assert!(events.lock().expect("callback events lock is not poisoned").is_empty());
+}
+
+#[test]
 fn dropped_handle_reports_stale_without_use_after_drop() {
     let library = consumer_library();
     let callback_loop = callback_loop(&library);
