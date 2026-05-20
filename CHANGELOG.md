@@ -34,13 +34,19 @@ toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
 
 ### `lean-rs` 0.1.1
 
-- Added the L1 callback registry: `LeanCallbackHandle`, `LeanCallbackEvent`, and
-  `LeanCallbackStatus`. Lean can call Rust through opaque handles and the crate-owned trampoline
-  without exposing public raw callback pointers.
+- Added the L1 callback registry:
+  `LeanCallbackHandle<P: LeanCallbackPayload>`, `LeanProgressTick`, `LeanStringEvent`,
+  `LeanCallbackFlow`, and `LeanCallbackStatus`. Lean can call Rust through opaque handles and
+  crate-owned trampolines without exposing public raw callback pointers. Callback payloads are a
+  sealed family; downstream crates can use the supported tick and string payloads but cannot add
+  arbitrary payload ABI shapes.
 - Bundled the generic `lean-rs-interop-shims` Lake package under the crate so downstream L1
   consumers do not depend on in-tree development paths.
 - Added the downstream interop example and recipe covering Rust-to-Lean exported calls plus
   Lean-to-Rust callbacks without `lean-rs-host`.
+- Added the string streaming callback example and recipe, showing Lean-to-Rust JSONL-like row
+  streaming through `LeanCallbackHandle<LeanStringEvent>` without making `lean-rs` own the row
+  schema.
 
 ### `lean-rs-host` 0.1.1
 
