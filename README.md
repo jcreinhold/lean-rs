@@ -70,6 +70,17 @@ example uses `LeanWorkerCapabilityBuilder`, so the caller does not hand-assemble
 Lake output paths, worker child paths, or startup ordering. See
 [`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
 
+For the lean-dup-shaped worker capability fixture and local performance probe,
+run:
+
+```sh
+cargo run --release -p lean-rs-worker --example worker_capability_probe
+```
+
+It exercises generic `version`, `doctor`, `extract`, `features`, `index`, and
+`probe` command shapes without importing downstream schemas into
+`lean-rs-worker`.
+
 ## Build your own consumer
 
 The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean

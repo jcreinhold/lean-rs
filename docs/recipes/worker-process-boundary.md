@@ -230,3 +230,39 @@ subprocess management:
 
 The result is a process boundary with structured rows, not a `lean-dup`
 protocol embedded in `lean-rs-worker`.
+
+## Operational Fixture
+
+For a larger worker-capability check, run:
+
+```sh
+cargo run --release -p lean-rs-worker --example worker_capability_probe
+```
+
+The probe uses fixture exports with command-like names `version`, `doctor`,
+`extract`, `features`, `index`, and `probe`. These names exercise the same
+operational shape as a downstream semantic worker, but the schemas are generic:
+rows contain small declaration, feature, and probe-like JSON objects owned by
+the fixture, not `lean-dup` business types.
+
+The probe records:
+
+- cold builder startup;
+- first import/session opening;
+- import-once streaming row throughput;
+- cancellation latency at a row boundary;
+- fatal child-exit recovery;
+- explicit worker cycling;
+- parent and child RSS samples.
+
+Use it as an envelope check for the worker capability layer. It is not a
+`lean-dup` parity benchmark. If you want a local comparison against an existing
+subprocess worker, pass the command explicitly:
+
+```sh
+LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
+  cargo run --release -p lean-rs-worker --example worker_capability_probe
+```
+
+Record the exact command, revisions, and output limits with any comparison.
+The comparison command is outside the `lean-rs-worker` contract.

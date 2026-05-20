@@ -37,6 +37,10 @@ dhat = "0.3"
 harness = false
 name = "row_payload"
 
+[[bench]]
+harness = false
+name = "worker_capability"
+
 [[bin]]
 name = "lean-rs-worker-child"
 path = "src/bin/lean-rs-worker-child.rs"

@@ -79,5 +79,22 @@ Run the worked example:
 cargo run -p lean-rs-worker --example worker_streaming
 ```
 
+Run the downstream-shaped operational probe:
+
+```sh
+cargo run --release -p lean-rs-worker --example worker_capability_probe
+```
+
+That probe uses command-like fixture exports named `version`, `doctor`,
+`extract`, `features`, `index`, and `probe` to exercise the generic worker
+capability layer. The row schemas stay deliberately small and generic; they are
+not `lean-dup` declarations or feature rows. The probe records cold startup,
+first import, import-once streaming, cancellation latency, fatal-exit recovery,
+worker cycling, row throughput, and parent/child RSS samples. To compare
+against an existing downstream subprocess worker in a local checkout, set
+`LEAN_RS_WORKER_COMPARE_COMMAND` to the shell command you want timed; the probe
+reports the command status and elapsed time without treating that command as
+part of the `lean-rs-worker` API.
+
 The recipe is
 [`docs/recipes/worker-process-boundary.md`](../../docs/recipes/worker-process-boundary.md).

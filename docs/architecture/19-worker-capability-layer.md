@@ -166,3 +166,21 @@ Typed streaming commands deserialize that validated raw JSON directly into
 downstream row types. The public `LeanWorkerDataRow { payload:
 serde_json::Value }` surface remains for schema-less tooling, but it is no
 longer on the typed command hot path.
+
+As of the downstream-shaped fixture work, `lean-rs-worker` has an operational
+proof that combines the verified pieces above without adding downstream
+business methods. The fixture exports command-like names `version`, `doctor`,
+`extract`, `features`, `index`, and `probe` only to stress the generic
+capability layer: metadata discovery, doctor diagnostics, typed JSON commands,
+typed streaming commands, terminal summaries, cancellation, request timeouts,
+fatal child exits, explicit cycling, and RSS/throughput measurement. The row
+schemas are intentionally small fixture schemas. They do not define
+declaration rows, feature rows, probe results, cache policy, ranking, or any
+other downstream semantic contract.
+
+The scenario benchmark and `worker_capability_probe` example are the
+performance envelope for this shape. They measure cold startup, first import,
+import-once streaming, row throughput, cancellation latency, fatal-exit
+recovery, worker cycling, and memory growth. A comparison against an existing
+subprocess worker is optional and must name the exact downstream command and
+revision; it is not part of the `lean-rs-worker` API.
