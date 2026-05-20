@@ -57,18 +57,20 @@ pub struct LeanStringEvent {
 continues to own progress policy: phase names, elapsed time, cancellation
 checkpoints, and which `LeanSession` methods emit events. The host layer may
 map a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the L1
-callback abstraction.
+callback abstraction. It is an observability/control signal, not a data row.
 
 `LeanStringEvent` is the next useful L1 payload. It supports downstream
-JSONL-style streaming: Lean can emit one encoded line at a time, Rust receives
-owned strings, and neither side has to tunnel through subprocess stdout. This
-is the shape needed by an in-process `lean-dup` worker while still avoiding a
-general arbitrary-object callback API. The runnable proof is
+same-process line-oriented protocols: Lean can emit one encoded line at a time,
+Rust receives owned strings, and neither side has to tunnel through subprocess
+stdout. Worker-style tools should not expose this handle to parent callers;
+`lean-rs-worker` turns child-local callbacks into typed worker rows when a
+process boundary is needed. The runnable L1 proof is
 [`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md).
 
 Byte arrays and arbitrary Lean-object callbacks are deferred. They should land
-only when a measured consumer needs them, because each payload adds ABI,
-ownership, and diagnostics surface area.
+only when a measured same-process L1 consumer needs them, because each payload
+adds ABI, ownership, and diagnostics surface area. Worker JSON/raw-JSON rows do
+not require new callback payloads.
 
 ## Error Boundary
 

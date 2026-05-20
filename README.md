@@ -34,24 +34,29 @@ elaborate → kernel-check → bulk query → `Meta.whnf`) in one process; five 
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md) for the
 per-example walkthrough—what each one teaches, expected output, and common failures.
 
-For L1 interop without `lean-rs-host`, run the generic callback example:
+For low-level L1 interop without `lean-rs-host`, run the generic callback
+example:
 
 ```sh
 cargo run -p lean-rs --example interop_callback
 ```
 
-It builds the generic interop shim package and a downstream-style Lake target through
-`lean-toolchain`, opens both dylibs, calls an ordinary Lean export from Rust, and lets
-Lean call back into a Rust `LeanCallbackHandle`. The worked recipe is
+It builds the generic interop shim package and a downstream-style Lake target
+through `lean-toolchain`, opens both dylibs, calls an ordinary Lean export from
+Rust, and lets Lean call back into a Rust `LeanCallbackHandle`. This is an
+advanced same-process mechanism for trusted extensions, not the worker-style
+streaming interface. The worked recipe is
 [`docs/recipes/downstream-interop.md`](docs/recipes/downstream-interop.md).
-For line-oriented string callbacks, run:
+For the matching same-process string callback example, run:
 
 ```sh
 cargo run -p lean-rs --example string_streaming
 ```
 
-That example uses `LeanCallbackHandle<LeanStringEvent>` to receive JSONL-like
-rows from Lean without importing `lean-rs-host`; see
+That example uses `LeanCallbackHandle<LeanStringEvent>` to receive owned
+strings from Lean without importing `lean-rs-host`. Use the worker capability
+recipe below when the caller needs process isolation, live rows, diagnostics,
+timeouts, or memory cycling; see
 [`docs/recipes/string-callback-streaming.md`](docs/recipes/string-callback-streaming.md).
 
 For process isolation, fatal-child-exit reporting, memory cycling, and
@@ -193,8 +198,10 @@ own build scripts (`emit_lean_link_directives_checked` and `build_lake_target`, 
 **`lean-rs` is the L1 FFI primitive.** Runtime initialization (token-bound `'lean` lifetime),
 owned/borrowed object handles, typed ABI conversions, module loading, typed exported
 functions, semantic handles (`LeanName`/`LeanLevel`/`LeanExpr`/`LeanDeclaration`), RAII
-callback registrations for Lean-to-Rust calls, and a structured error/diagnostic boundary.
-Ships the generic interop shim package used by callbacks, but no theorem-prover host shims.
+callback registrations for same-process Lean-to-Rust calls, and a structured error/diagnostic
+boundary. Ships the generic interop shim package used by callbacks, but no theorem-prover host
+shims. Callback handles are an L1 mechanism; worker-style applications should use
+`lean-rs-worker` typed commands instead of passing callback handles through their own APIs.
 
 **`lean-rs-host` is the L2 opinionated host stack.** The `LeanHost` / `LeanCapabilities` /
 `LeanSession` trio, kernel-checked `LeanEvidence` and `ProofSummary`, the bounded `MetaM`
@@ -208,6 +215,14 @@ and memory cycling. `LeanWorkerCapabilityBuilder` is the normal downstream
 entry point: it builds the Lake target, starts the worker, opens imports,
 optionally validates metadata, and leaves request/row schemas to the downstream
 crate.
+
+Compose at the highest layer that matches the workload. Use `lean-rs` for
+custom same-process ABI work, `lean-rs-host` for trusted in-process
+theorem-prover sessions, and `lean-rs-worker` for production worker-style tools
+that need process isolation, streaming rows, request timeouts, or memory
+cycling. Lower layers remain available as escape hatches, but ordinary
+applications should not manually wire callbacks, sessions, pipes, and restart
+policy when a higher layer already owns that work.
 
 The in-process layering invariant is
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`;
@@ -234,7 +249,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md)—the token-based cancellation contract and its non-preemptive limits.
 - [`08-reusable-interop.md`](docs/architecture/08-reusable-interop.md)—the reusable Lean/Rust interop boundary below `lean-rs-host`.
 - [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md)—the test-only callback ABI proof before a public callback registry.
-- [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
+- [`10-callback-registry.md`](docs/architecture/10-callback-registry.md)—the low-level L1 RAII callback registry and its panic, lifetime, and reentrancy rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md)—the host progress-sink contract over the reusable callback substrate.
@@ -244,8 +259,8 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`17-worker-session-adapter.md`](docs/architecture/17-worker-session-adapter.md)—the narrow process-safe host-session subset.
 - [`18-worker-data-streaming.md`](docs/architecture/18-worker-data-streaming.md)—arbitrary downstream JSON rows over the worker boundary.
 - [`19-worker-capability-layer.md`](docs/architecture/19-worker-capability-layer.md)—the generic worker capability layer above raw row transport.
-- [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
-- [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the L1 recipe for Lean-to-Rust string streams such as JSONL-like worker output.
+- [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
+- [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.
 - [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md)—the normal worker-capability recipe with builder setup, typed commands, live rows, diagnostics, timeout handling, terminal completion, and worker cycling.
 

@@ -18,16 +18,31 @@ negotiate. Anything that asks Rust to recompute a Lean semantic fact is out of s
 that asks Lean to know about Rust hosting (thread pools, panic conversion, FFI batching, module
 loaders) is out of scope.
 
-## Adopted shape
+## Adopted Shape
 
-Four published crates plus one workspace-internal helper:
+Five published crates plus one workspace-internal helper:
 
 - **`lean-rs-sys`** (published). Raw `extern "C"` view of `lean.h`, split by semantic category; pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers via `AtomicI32::from_ptr`; the `REQUIRED_SYMBOLS` allowlist; build-time `LEAN_HEADER_DIGEST`; link directives. Public types are opaque (`lean_object` is `[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`); layout structs are `pub(crate)`. The one crate-wide `#[allow(unsafe_code)]` opt-out; every `unsafe { ... }` block carries a `// SAFETY:` comment naming the invariant.
 - **`lean-toolchain`** (published). Toolchain discovery, typed `ToolchainFingerprint`, fixture digest, layered link diagnostics, build-script helpers. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS` from `lean-rs-sys` so the allowlist lives in one place.
 - **`lean-rs`** (published, **L1**). The safe FFI primitive: bring the runtime up, open a Lake-built dylib, initialise a module, call typed `@[export]` functions, and register Rust callbacks through a generic shim package. Five public modules (`error`, `module`, `handle`, `runtime`, `abi`) plus one `#[doc(hidden)] pub mod __host_internals` giving the sibling `lean-rs-host` the small set of `LeanError`-constructor wrappers it needs without exposing them to external callers. It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts here.
 - **`lean-rs-host`** (published, **L2**). The opinionated theorem-prover-host stack built on `lean-rs`: `LeanHost`, `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 26 + 4 `lean_rs_host_*` `@[export]` Lean shim contract it loads alongside consumer capability dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate `batch` module. Downstreams that want this opinion add it on top of `lean-rs`; downstreams that don't aren't paying for it.
+- **`lean-rs-worker`** (published process-boundary layer). The worker crate supervises a child process around the host stack. It owns process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming, diagnostics, terminal summaries, capability metadata, and typed command facades. It is not a remote `LeanSession` mirror and not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
 
 `lean-rs-test-support` is workspace-internal (`publish = false`).
+
+### Composition Rule
+
+Compose at the highest layer that fits the workload:
+
+- use `lean-rs` for custom same-process ABI calls, module loading, and advanced callbacks;
+- use `lean-rs-host` for trusted in-process theorem-prover work such as imports, elaboration,
+  kernel checks, declaration queries, progress, cancellation, and pooling;
+- use `lean-rs-worker` when the application needs a process boundary for fatal Lean exits,
+  request watchdogs, worker cycling, live row streams, diagnostics, or typed downstream
+  commands.
+
+Lower layers are still real APIs. They are escape hatches and implementation
+substrates, not steps every downstream caller should hand-compose.
 
 ### Lifetime spine
 

@@ -1,4 +1,4 @@
-# Streaming Strings From Lean
+# Same-Process String Callbacks
 
 Run the example from a clean checkout:
 
@@ -6,11 +6,18 @@ Run the example from a clean checkout:
 cargo run -p lean-rs --example string_streaming
 ```
 
-This recipe stays below `lean-rs-host`. It shows a downstream Lake target
-streaming JSONL-like rows to Rust through
+This recipe stays below `lean-rs-host`. It shows the advanced L1 same-process
+mechanism for sending strings from a Lean export to Rust through
 `LeanCallbackHandle<LeanStringEvent>`. `lean-rs` owns the callback handle,
-trampoline, string copy, stale-handle status, and panic boundary. The row schema
+trampoline, string copy, stale-handle status, and panic boundary. Any row schema
 belongs to the downstream application.
+
+Do not use this as the public interface for a worker-style tool. If the caller
+needs process isolation, live rows, diagnostics, terminal summaries, timeout
+policy, or memory cycling, use
+[`worker-capability-runner.md`](worker-capability-runner.md). The worker child
+may use string callbacks internally, but the parent-facing API is typed worker
+commands and row sinks.
 
 ## Lean Export
 
@@ -30,8 +37,8 @@ def jsonlStream (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline jsonlRows
 ```
 
-Each row is just a `String`. The example uses JSONL-like text because that is a
-common worker protocol shape, but neither Lean nor Rust parses the row.
+Each payload is just a `String`. The example uses JSONL-like text only as a
+compact same-process demonstration; neither Lean nor Rust parses it here.
 
 ## Rust Call Site
 
@@ -68,14 +75,15 @@ different payloads:
 
 - `LeanProgressTick` carries `(current, total)` counters. `lean-rs-host` maps it
   into `LeanProgressEvent` for session progress.
-- `LeanStringEvent` carries one owned Rust `String`. Downstream code can use it
-  for line-oriented protocols such as JSONL.
+- `LeanStringEvent` carries one owned Rust `String`. Same-process downstream
+  code can use it for line-oriented protocols such as JSONL.
 
 Payloads are sealed. Downstream crates cannot implement arbitrary callback
 payloads or pass raw callback pointers to Lean.
 
 ## Limits
 
-This is not a transport framework. `lean-rs` does not define a JSON schema,
-parse rows, multiplex streams, or retry failed callbacks. It provides the typed
-Lean-to-Rust string callback boundary; application protocol belongs above it.
+This is not a transport framework and not the worker data-streaming interface.
+`lean-rs` does not define a JSON schema, parse rows, multiplex streams, or
+retry failed callbacks. It provides the typed Lean-to-Rust string callback
+boundary; application protocol belongs above it.

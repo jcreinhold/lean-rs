@@ -95,6 +95,13 @@ soundness belong below the process supervisor.
 
 ## Consumer Guidance
 
+Compose at the highest layer that matches the operational requirement. Direct
+`lean-rs` callbacks are for trusted same-process ABI work. `lean-rs-host` is
+for trusted in-process theorem-prover sessions. `lean-rs-worker` is for
+worker-style tools where process lifecycle, IPC, fatal exits, request
+timeouts, row streaming, and memory reset should be owned by the library rather
+than every downstream caller.
+
 Use `lean-rs-host` directly when the process can trust the Lean workload, when
 latency is the primary concern, and when process-level memory retention is
 acceptable.

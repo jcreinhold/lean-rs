@@ -11,6 +11,13 @@ target and a downstream-style Lake target, opens both dylibs through
 `lean-rs`, calls one ordinary Lean export, and then lets Lean call a Rust
 callback through `LeanCallbackHandle`.
 
+This is the advanced L1 same-process path. Use it when the Lean extension is
+trusted, lives in the same process, and really needs to push data back into Rust
+before the exported function returns. Worker-style applications should start
+with [`worker-capability-runner.md`](worker-capability-runner.md), where
+`lean-rs-worker` hides callbacks behind typed commands, live rows, diagnostics,
+terminal summaries, timeouts, and worker cycling.
+
 ## Files A Consumer Needs
 
 A downstream package needs the same pieces as
@@ -53,9 +60,9 @@ let answer = add.call(20, 22)?;
 The argument tuple and return type are checked by `lean-rs`'s sealed ABI traits.
 Unsupported Rust types fail at compile time.
 
-## Calling Rust From Lean
+## Calling Rust From Lean In The Same Process
 
-Callbacks use the generic interop shim package:
+Callbacks are a low-level mechanism. They use the generic interop shim package:
 
 ```lean
 @[export lean_rs_interop_consumer_callback_loop]
@@ -92,7 +99,7 @@ def stringCallbackLoop (handle trampoline : USize) (payloads : Array String) : I
 
 Rust registers `LeanCallbackHandle::<LeanStringEvent>` for that export. The
 trampoline copies the borrowed Lean string into an owned Rust `String` before
-calling user code. For a complete line-oriented string streaming example, see
+calling user code. For a complete same-process string callback example, see
 [`string-callback-streaming.md`](string-callback-streaming.md).
 
 ## What This Is Not
@@ -105,3 +112,8 @@ explicit `@[export]`, and a downstream crate still builds a Lake target.
 Use `lean-rs-host` only when the application needs theorem-prover host policy:
 sessions, imports, declaration introspection, elaboration, kernel checking, or
 bounded `MetaM` services.
+
+Use `lean-rs-worker` when the application needs a production worker boundary:
+process isolation, memory cycling, live rows, diagnostics, terminal completion,
+timeouts, or worker-level cancellation. The worker parent API does not expose
+callback handles.

@@ -50,9 +50,10 @@ and decode-error context. `LeanWorkerSession::run_data_stream` remains the raw
 row escape hatch for fixtures and unusual callers.
 
 A streaming command runs a fixed-ABI Lean export in the child, validates each
-callback string as either a data row, diagnostic, or terminal metadata envelope,
-assigns per-stream sequence numbers, decodes row payloads into the caller's row
-type, and reports typed rows to a borrowed `LeanWorkerTypedDataSink`.
+child-local callback string as either a data row, diagnostic, or terminal
+metadata envelope, assigns per-stream sequence numbers, decodes row payloads
+into the caller's row type, and reports typed rows to a borrowed
+`LeanWorkerTypedDataSink`.
 Diagnostics use `LeanWorkerDiagnosticSink`, not row payloads. Delivered rows are
 tentative until terminal success returns `LeanWorkerTypedStreamSummary` with
 total rows, per-stream counts, elapsed time, and optional typed metadata. Row

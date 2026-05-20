@@ -1,7 +1,12 @@
 # Callback Registry
 
 `lean-rs` exposes a narrow Rust callback registry for Lean-to-Rust calls. This
-is an L1 primitive, not a `LeanSession` feature.
+is an L1 primitive, not a `LeanSession` feature and not the worker-facing data
+streaming API. A callback handle is the low-level same-process mechanism used
+when an exported Lean function must push data into Rust before it returns.
+Worker-style callers should normally use `lean-rs-worker` typed commands and
+row sinks; the worker child may use callbacks internally, but parent callers do
+not receive or pass callback handles.
 
 ## Public Shape
 
@@ -52,7 +57,7 @@ session work.
 
 `LeanStringEvent` copies a borrowed Lean `String` into an owned Rust `String`
 before user code runs. No Lean object lifetime escapes the trampoline.
-Downstream line-oriented protocols can use it directly; see
+Trusted same-process line-oriented protocols can use it directly; see
 [`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md)
 for a JSONL-like example.
 

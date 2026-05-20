@@ -6,7 +6,7 @@ first-order ABI conversions, module loading and exported functions, semantic han
 (`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`), and a structured error/diagnostic
 boundary.
 
-Ships the generic interop shim package used by Lean-to-Rust callbacks, but no
+Ships the generic interop shim package used by same-process Lean-to-Rust callbacks, but no
 theorem-prover host shims. If you want sessions, `MetaM`, and kernel-checked evidence, add
 [`lean-rs-host`](https://docs.rs/lean-rs-host) on top.
 
@@ -92,12 +92,15 @@ cargo run
 `initialize_module(package, lib_name)` still takes unmangled names; the loader resolves the
 mangled initializer symbol internally.
 
-For a complete downstream-style example that also lets Lean call a Rust callback, run
+For a complete low-level L1 example that also lets Lean call a Rust callback, run
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
-For a line-oriented string callback example, run
+For a trusted same-process string callback example, run
 `cargo run -p lean-rs --example string_streaming` and read
 [`docs/recipes/string-callback-streaming.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/string-callback-streaming.md).
+Worker-style tools that need process isolation, live rows, diagnostics, terminal summaries,
+timeouts, or memory cycling should use `lean-rs-worker` typed commands instead of exposing
+callback handles.
 
 Before the matching workspace version is published, pin against a checkout by adding
 `path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.

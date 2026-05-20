@@ -93,6 +93,11 @@ They require their own ABI and soundness work because they change how Lean data
 enters Rust in one process. Worker row streaming does not shortcut that work:
 it serializes process-safe JSON values over IPC.
 
+The reverse is also true: worker row streaming does not need wider callback
+payloads. Worker-class data already travels to the parent as JSON or validated
+raw JSON frames. Add byte or object callback payloads only for real
+same-process L1 interop needs, not to improve worker ergonomics.
+
 ## Prompt 60 Replan
 
 Prompt 60 originally targeted worker recipes and `lean-dup` readiness after the
@@ -127,7 +132,9 @@ conversion happens only for callers that choose the low-level raw-row API. The
 typed command facade decodes the raw payload directly into the downstream row
 type, avoiding an intermediate JSON tree.
 
-The worked recipe is
+The normal worked recipe is
+[`../recipes/worker-capability-runner.md`](../recipes/worker-capability-runner.md).
+The lower-level process-boundary and raw-row escape hatch is documented in
 [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md).
 
 Request timeout is the watchdog for streams that stop producing terminal
