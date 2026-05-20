@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 
@@ -23,6 +23,7 @@ pub struct LeanWorkerConfig {
     current_dir: Option<PathBuf>,
     env: Vec<(OsString, OsString)>,
     startup_timeout: Duration,
+    restart_policy: LeanWorkerRestartPolicy,
 }
 
 impl LeanWorkerConfig {
@@ -33,6 +34,7 @@ impl LeanWorkerConfig {
             current_dir: None,
             env: Vec::new(),
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
+            restart_policy: LeanWorkerRestartPolicy::default(),
         }
     }
 
@@ -60,6 +62,139 @@ impl LeanWorkerConfig {
     pub fn startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;
         self
+    }
+
+    /// Set the worker restart policy.
+    ///
+    /// Policy checks run before requests enter the child. A policy restart is a
+    /// process restart; it is the only supported reset for Lean process-global
+    /// runtime and import state.
+    #[must_use]
+    pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
+        self.restart_policy = policy;
+        self
+    }
+}
+
+/// Policy for cycling a worker child before the next request.
+///
+/// The policy resets retained Lean runtime memory only by restarting the
+/// process. It does not change `lean-rs-host`'s in-process memory model, and it
+/// does not imply that `SessionPool::drain()` can return process-global Lean
+/// memory to the OS.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanWorkerRestartPolicy {
+    max_requests: Option<u64>,
+    max_imports: Option<u64>,
+    max_rss_kib: Option<u64>,
+    idle_restart_after: Option<Duration>,
+}
+
+impl LeanWorkerRestartPolicy {
+    /// Disable automatic policy restarts.
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Restart before a request when this many requests have entered the child.
+    #[must_use]
+    pub fn max_requests(mut self, limit: u64) -> Self {
+        self.max_requests = Some(limit.max(1));
+        self
+    }
+
+    /// Restart before an import-like request when this many imports have run.
+    #[must_use]
+    pub fn max_imports(mut self, limit: u64) -> Self {
+        self.max_imports = Some(limit.max(1));
+        self
+    }
+
+    /// Restart before a request when measured child RSS is at least this many KiB.
+    ///
+    /// RSS measurement is best effort. It is implemented for the current
+    /// supported Unix development targets; unsupported platforms skip the
+    /// check and increment `LeanWorkerStats::rss_samples_unavailable`.
+    #[must_use]
+    pub fn max_rss_kib(mut self, limit: u64) -> Self {
+        self.max_rss_kib = Some(limit.max(1));
+        self
+    }
+
+    /// Restart before a request when the worker has been idle for this long.
+    #[must_use]
+    pub fn idle_restart_after(mut self, duration: Duration) -> Self {
+        self.idle_restart_after = Some(duration);
+        self
+    }
+}
+
+/// Reason recorded for the latest worker cycle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LeanWorkerRestartReason {
+    /// The caller explicitly requested a process cycle.
+    Explicit,
+    /// Request count reached the configured limit before the next request.
+    MaxRequests { limit: u64 },
+    /// Import-like request count reached the configured limit before the next import.
+    MaxImports { limit: u64 },
+    /// Child resident set size reached the configured limit.
+    RssCeiling { current_kib: u64, limit_kib: u64 },
+    /// Worker was idle at least as long as the configured limit.
+    Idle { idle_for: Duration, limit: Duration },
+}
+
+/// Snapshot of worker lifecycle counters.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanWorkerStats {
+    /// Requests that entered a worker child.
+    pub requests: u64,
+    /// Import-like requests that entered a worker child.
+    pub imports: u64,
+    /// Child exits observed by the supervisor, including policy cycles.
+    pub exits: u64,
+    /// Policy or explicit restarts performed by the supervisor.
+    pub restarts: u64,
+    /// Explicit process cycles.
+    pub explicit_cycles: u64,
+    /// Restarts caused by `LeanWorkerRestartPolicy::max_requests`.
+    pub max_request_restarts: u64,
+    /// Restarts caused by `LeanWorkerRestartPolicy::max_imports`.
+    pub max_import_restarts: u64,
+    /// Restarts caused by `LeanWorkerRestartPolicy::max_rss_kib`.
+    pub rss_restarts: u64,
+    /// Restarts caused by `LeanWorkerRestartPolicy::idle_restart_after`.
+    pub idle_restarts: u64,
+    /// RSS checks skipped because the platform did not provide a usable sample.
+    pub rss_samples_unavailable: u64,
+    /// Last measured child RSS in KiB, when a policy check could sample it.
+    pub last_rss_kib: Option<u64>,
+    /// Most recent restart reason, if any.
+    pub last_restart_reason: Option<LeanWorkerRestartReason>,
+}
+
+impl LeanWorkerStats {
+    fn record_restart(&mut self, reason: LeanWorkerRestartReason) {
+        self.restarts = self.restarts.saturating_add(1);
+        match reason {
+            LeanWorkerRestartReason::Explicit => {
+                self.explicit_cycles = self.explicit_cycles.saturating_add(1);
+            }
+            LeanWorkerRestartReason::MaxRequests { .. } => {
+                self.max_request_restarts = self.max_request_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::MaxImports { .. } => {
+                self.max_import_restarts = self.max_import_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::RssCeiling { .. } => {
+                self.rss_restarts = self.rss_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::Idle { .. } => {
+                self.idle_restarts = self.idle_restarts.saturating_add(1);
+            }
+        }
+        self.last_restart_reason = Some(reason);
     }
 }
 
@@ -181,6 +316,10 @@ pub struct LeanWorker {
     stdout: Option<BufReader<ChildStdout>>,
     stderr: Option<ChildStderr>,
     last_exit: Option<LeanWorkerExit>,
+    stats: LeanWorkerStats,
+    requests_since_restart: u64,
+    imports_since_restart: u64,
+    last_activity: Instant,
 }
 
 impl LeanWorker {
@@ -241,6 +380,10 @@ impl LeanWorker {
                     stdout: None,
                     stderr,
                     last_exit: None,
+                    stats: LeanWorkerStats::default(),
+                    requests_since_restart: 0,
+                    imports_since_restart: 0,
+                    last_activity: Instant::now(),
                 };
                 let exit = worker.try_record_exit();
                 return Err(match exit {
@@ -271,6 +414,10 @@ impl LeanWorker {
             stdout: Some(stdout),
             stderr,
             last_exit: None,
+            stats: LeanWorkerStats::default(),
+            requests_since_restart: 0,
+            imports_since_restart: 0,
+            last_activity: Instant::now(),
         })
     }
 
@@ -281,7 +428,9 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, the protocol fails, or
     /// the child returns a typed worker error.
     pub fn health(&mut self) -> Result<(), LeanWorkerError> {
+        self.prepare_request(false)?;
         self.send_request(Request::Health)?;
+        self.record_request(false);
         match self.read_response("health")? {
             Response::HealthOk => Ok(()),
             other @ (Response::CapabilityLoaded
@@ -301,9 +450,11 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, fixture loading fails,
     /// or protocol communication fails.
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
+        self.prepare_request(true)?;
         self.send_request(Request::LoadFixtureCapability {
             fixture_root: path_string(fixture_root.as_ref()),
         })?;
+        self.record_request(true);
         match self.read_response("load_fixture_capability")? {
             Response::CapabilityLoaded => Ok(()),
             other @ (Response::HealthOk | Response::U64 { .. } | Response::Terminating | Response::Error { .. }) => {
@@ -324,11 +475,13 @@ impl LeanWorker {
         lhs: u64,
         rhs: u64,
     ) -> Result<u64, LeanWorkerError> {
+        self.prepare_request(true)?;
         self.send_request(Request::CallFixtureMul {
             fixture_root: path_string(fixture_root.as_ref()),
             lhs,
             rhs,
         })?;
+        self.record_request(true);
         match self.read_response("call_fixture_mul")? {
             Response::U64 { value } => Ok(value),
             other @ (Response::HealthOk
@@ -363,10 +516,49 @@ impl LeanWorker {
                 self.child = None;
                 self.stdin = None;
                 self.stdout = None;
+                self.stats.exits = self.stats.exits.saturating_add(1);
                 Ok(LeanWorkerStatus::Exited(exit))
             }
             None => Ok(LeanWorkerStatus::Running),
         }
+    }
+
+    /// Return lifecycle counters for this supervisor.
+    #[must_use]
+    pub fn stats(&self) -> LeanWorkerStats {
+        self.stats.clone()
+    }
+
+    /// Measure the current child RSS in KiB when supported by the platform.
+    ///
+    /// This is an observability hook for restart policy and memory-cycling
+    /// workloads. A `None` result means the platform did not provide a usable
+    /// sample; it is not a worker failure.
+    pub fn rss_kib(&mut self) -> Option<u64> {
+        match self.child_rss_kib() {
+            Some(value) => {
+                self.stats.last_rss_kib = Some(value);
+                Some(value)
+            }
+            None => {
+                self.stats.rss_samples_unavailable = self.stats.rss_samples_unavailable.saturating_add(1);
+                None
+            }
+        }
+    }
+
+    /// Explicitly cycle the worker process.
+    ///
+    /// This is the manual memory-reset operation. It terminates the current
+    /// child, starts a replacement with the original configuration, and records
+    /// `LeanWorkerRestartReason::Explicit`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the existing child cannot be waited on or
+    /// the replacement child cannot be spawned and handshaken.
+    pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
+        self.restart_with_reason(LeanWorkerRestartReason::Explicit)
     }
 
     /// Restart this worker using its original configuration.
@@ -380,11 +572,7 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the existing child cannot be waited on or
     /// the replacement child cannot be spawned and handshaken.
     pub fn restart(&mut self) -> Result<(), LeanWorkerError> {
-        let config = self.config.clone();
-        self.stop_existing_child()?;
-        let next = Self::spawn(&config)?;
-        *self = next;
-        Ok(())
+        self.cycle()
     }
 
     #[doc(hidden)]
@@ -430,9 +618,11 @@ impl LeanWorker {
         mut self,
         fixture_root: impl AsRef<Path>,
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
+        self.prepare_request(true)?;
         self.send_request(Request::TriggerLeanPanic {
             fixture_root: path_string(fixture_root.as_ref()),
         })?;
+        self.record_request(true);
         match self.read_response("trigger_lean_panic") {
             Ok(response) => Err(unexpected_response("trigger_lean_panic", &response)),
             Err(LeanWorkerError::ChildPanicOrAbort { exit }) => Ok(exit),
@@ -448,6 +638,70 @@ impl LeanWorker {
         write_frame(stdin, Message::Request(request)).map_err(|err| LeanWorkerError::Protocol {
             message: err.to_string(),
         })
+    }
+
+    fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
+        self.ensure_running()?;
+
+        if let Some(limit) = self.config.restart_policy.max_requests
+            && self.requests_since_restart >= limit
+        {
+            return self.restart_with_reason(LeanWorkerRestartReason::MaxRequests { limit });
+        }
+
+        if import_like
+            && let Some(limit) = self.config.restart_policy.max_imports
+            && self.imports_since_restart >= limit
+        {
+            return self.restart_with_reason(LeanWorkerRestartReason::MaxImports { limit });
+        }
+
+        if let Some(limit_kib) = self.config.restart_policy.max_rss_kib {
+            match self.child_rss_kib() {
+                Some(current_kib) if current_kib >= limit_kib => {
+                    self.stats.last_rss_kib = Some(current_kib);
+                    return self.restart_with_reason(LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib });
+                }
+                Some(current_kib) => {
+                    self.stats.last_rss_kib = Some(current_kib);
+                }
+                None => {
+                    self.stats.rss_samples_unavailable = self.stats.rss_samples_unavailable.saturating_add(1);
+                }
+            }
+        }
+
+        if let Some(limit) = self.config.restart_policy.idle_restart_after {
+            let idle_for = self.last_activity.elapsed();
+            if idle_for >= limit {
+                return self.restart_with_reason(LeanWorkerRestartReason::Idle { idle_for, limit });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_request(&mut self, import_like: bool) {
+        self.stats.requests = self.stats.requests.saturating_add(1);
+        self.requests_since_restart = self.requests_since_restart.saturating_add(1);
+        if import_like {
+            self.stats.imports = self.stats.imports.saturating_add(1);
+            self.imports_since_restart = self.imports_since_restart.saturating_add(1);
+        }
+        self.last_activity = Instant::now();
+    }
+
+    fn restart_with_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
+        let config = self.config.clone();
+        self.stop_existing_child()?;
+        self.stats.record_restart(reason);
+        self.requests_since_restart = 0;
+        self.imports_since_restart = 0;
+        let mut next = Self::spawn(&config)?;
+        next.stats = self.stats.clone();
+        next.last_activity = Instant::now();
+        *self = next;
+        Ok(())
     }
 
     fn read_response(&mut self, operation: &'static str) -> Result<Response, LeanWorkerError> {
@@ -495,6 +749,7 @@ impl LeanWorker {
         self.child = None;
         self.stdin = None;
         self.stdout = None;
+        self.stats.exits = self.stats.exits.saturating_add(1);
         Ok(exit)
     }
 
@@ -507,6 +762,7 @@ impl LeanWorker {
         self.child = None;
         self.stdin = None;
         self.stdout = None;
+        self.stats.exits = self.stats.exits.saturating_add(1);
         Some(exit)
     }
 
@@ -524,6 +780,7 @@ impl LeanWorker {
             let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
             let diagnostics = self.read_stderr();
             self.last_exit = Some(LeanWorkerExit::from_status(status, diagnostics));
+            self.stats.exits = self.stats.exits.saturating_add(1);
         }
         self.child = None;
         self.stdin = None;
@@ -551,6 +808,11 @@ impl LeanWorker {
             drop(pipe.read_to_string(&mut diagnostics));
         }
         diagnostics
+    }
+
+    fn child_rss_kib(&mut self) -> Option<u64> {
+        let child = self.child.as_mut()?;
+        child_rss_kib(child.id())
     }
 }
 
@@ -605,4 +867,26 @@ fn unexpected_response(operation: &'static str, response: &Response) -> LeanWork
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+#[cfg(target_os = "linux")]
+fn child_rss_kib(pid: u32) -> Option<u64> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| {
+        let rest = line.strip_prefix("VmRSS:")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn child_rss_kib(pid: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim().parse::<u64>().ok().filter(|value| *value > 0)
 }

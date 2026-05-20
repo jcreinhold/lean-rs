@@ -52,9 +52,9 @@ interned names, allocator state, and other Lean runtime structures.
 
 `SessionPool::drain()` releases cached Rust-owned environment references. It is
 useful at idle boundaries, but it is not an RSS reset. Only exiting the worker
-process resets Lean's process-global state. Future worker policy must therefore
-include explicit cycling triggers such as request count, fresh import count,
-idle drain/restart, and measured RSS ceiling. The measurement baseline remains
+process resets Lean's process-global state. `lean-rs-worker` therefore provides
+process-cycling triggers for explicit cycles, request count, import-like request
+count, idle restart, and measured RSS ceiling. The measurement baseline remains
 [`../safety/long-session-memory.md`](../safety/long-session-memory.md).
 
 ## Rejected Boundaries
@@ -90,7 +90,7 @@ Use `lean-rs-host` directly when the process can trust the Lean workload, when
 latency is the primary concern, and when process-level memory retention is
 acceptable.
 
-Use the future `lean-rs-worker` boundary when the application must continue
-after Lean exits, must classify fatal child exits, or must reset memory after
-large import sweeps. The worker is not a replacement for `lean-rs-host`; it is
-a process boundary around it.
+Use the `lean-rs-worker` boundary when the application must continue after Lean
+exits, must classify fatal child exits, or must reset memory after large import
+sweeps. The worker is not a replacement for `lean-rs-host`; it is a process
+boundary around it.

@@ -1,9 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::Duration;
 
-use lean_rs_worker::{LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerStatus};
+use lean_rs_worker::{
+    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStatus,
+};
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -62,8 +65,115 @@ fn explicit_restart_replaces_live_child() {
     worker.health().expect("health check succeeds before restart");
     worker.restart().expect("worker restarts");
     worker.health().expect("health check succeeds after restart");
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.explicit_cycles, 1);
+    assert_eq!(stats.last_restart_reason, Some(LeanWorkerRestartReason::Explicit));
     let exit = worker.terminate().expect("worker terminates");
     assert!(exit.success, "worker should exit cleanly after restart");
+}
+
+#[test]
+fn explicit_cycle_replaces_child_and_records_reason() {
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    worker.health().expect("health check succeeds before cycle");
+    worker.cycle().expect("worker cycles");
+    worker.health().expect("health check succeeds after cycle");
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.explicit_cycles, 1);
+    assert_eq!(stats.exits, 1);
+    assert_eq!(stats.last_restart_reason, Some(LeanWorkerRestartReason::Explicit));
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after cycle");
+}
+
+#[test]
+fn max_request_policy_restarts_before_next_request() {
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().max_requests(1));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker.health().expect("first request succeeds");
+    assert_eq!(worker.stats().restarts, 0);
+
+    worker.health().expect("second request succeeds after policy restart");
+    let stats = worker.stats();
+    assert_eq!(stats.requests, 2);
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.max_request_restarts, 1);
+    assert_eq!(
+        stats.last_restart_reason,
+        Some(LeanWorkerRestartReason::MaxRequests { limit: 1 })
+    );
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after policy restart");
+}
+
+#[test]
+fn max_import_policy_restarts_before_next_import() {
+    ensure_fixture_built();
+    let fixture = fixture_root();
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().max_imports(1));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker
+        .load_fixture_capability(&fixture)
+        .expect("first import-like request succeeds");
+    assert_eq!(worker.stats().restarts, 0);
+
+    worker
+        .load_fixture_capability(&fixture)
+        .expect("second import-like request succeeds after policy restart");
+    let stats = worker.stats();
+    assert_eq!(stats.imports, 2);
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.max_import_restarts, 1);
+    assert_eq!(
+        stats.last_restart_reason,
+        Some(LeanWorkerRestartReason::MaxImports { limit: 1 })
+    );
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after import policy restart");
+}
+
+#[test]
+fn idle_restart_policy_restarts_before_next_request() {
+    let idle_limit = Duration::from_millis(1);
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().idle_restart_after(idle_limit));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker.health().expect("first request succeeds");
+    thread::sleep(Duration::from_millis(20));
+    worker.health().expect("second request succeeds after idle restart");
+    let stats = worker.stats();
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.idle_restarts, 1);
+    match stats.last_restart_reason {
+        Some(LeanWorkerRestartReason::Idle { limit, .. }) => assert_eq!(limit, idle_limit),
+        other => panic!("expected idle restart reason, got {other:?}"),
+    }
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after idle restart");
+}
+
+#[test]
+fn rss_policy_restarts_or_records_unavailable_sample() {
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().max_rss_kib(1));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker.health().expect("request succeeds with RSS policy");
+    let stats = worker.stats();
+    if stats.rss_samples_unavailable > 0 {
+        assert_eq!(stats.rss_restarts, 0);
+    } else {
+        assert_eq!(stats.restarts, 1);
+        assert_eq!(stats.rss_restarts, 1);
+        match stats.last_restart_reason {
+            Some(LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib }) => {
+                assert!(current_kib >= limit_kib);
+                assert_eq!(limit_kib, 1);
+            }
+            other => panic!("expected RSS restart reason, got {other:?}"),
+        }
+    }
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after RSS policy check");
 }
 
 #[test]
@@ -96,6 +206,26 @@ fn child_crash_is_typed_and_parent_survives() {
             exit.diagnostics,
         );
     }
+}
+
+#[test]
+fn child_crash_and_policy_restart_are_distinguishable() {
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().max_requests(1));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker.health().expect("first request succeeds");
+    worker.health().expect("policy restart happens before second request");
+    assert_eq!(worker.stats().max_request_restarts, 1);
+    let exit = worker.terminate().expect("policy worker terminates");
+    assert!(exit.success, "policy worker should exit cleanly");
+
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    worker.__kill_for_test().expect("worker kill succeeds");
+    let err = worker.health().expect_err("dead worker use should fail");
+    match err {
+        LeanWorkerError::ChildPanicOrAbort { .. } => {}
+        other => panic!("expected child panic/abort error, got {other:?}"),
+    }
+    assert_eq!(worker.stats().restarts, 0);
 }
 
 #[test]

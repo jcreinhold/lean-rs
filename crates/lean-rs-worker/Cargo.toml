@@ -12,6 +12,7 @@ include = [
   "build.rs",
   "src/**/*.rs",
   "tests/**/*.rs",
+  "examples/**/*.rs",
 ]
 keywords = ["bindings", "embedding", "lean", "lean4", "worker"]
 license.workspace = true

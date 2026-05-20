@@ -182,3 +182,23 @@ cadence is policy for the embedding application: drain releases cached
 environments, but cannot bound workloads that continuously create fresh
 import sets. Those still require cycling the worker process at a bounded
 import count or RSS ceiling.
+
+`lean-rs-worker` provides that process-cycling policy. Its restart policy
+can cycle explicitly, before a configured request count, before a
+configured import-like request count, after an idle interval, or when a
+best-effort child RSS sample reaches a ceiling. The worker memory
+reproducer is:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
+LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2 \
+cargo run -p lean-rs-worker --example memory_cycling
+```
+
+On the local macOS aarch64 prompt-58 run, the worker cycled after every
+two import-like fixture requests. Child RSS moved from about 345 MiB after
+the first request in each child to about 717 MiB after the second request,
+then returned to about 345 MiB in the replacement child. This supports the
+operational claim: process cycling bounds retained RSS for this workload;
+in-process drain does not reset it.
