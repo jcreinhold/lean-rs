@@ -17,6 +17,7 @@ include = [
   "shims/**/lakefile.lean",
   "shims/**/lake-manifest.json",
   "shims/**/lean-toolchain",
+  "!shims/**/.lake/**",
   "src/**/*.rs",
   "tests/**/*.rs",
   "tests/compile_fail/**",
