@@ -14,6 +14,11 @@ handle is allocated, no progress shim is called, and bulk methods keep their
 single-dispatch shape. `Some(sink)` registers a temporary callback handle for the
 one call and drops it before the method returns.
 
+The temporary handle is `LeanCallbackHandle<LeanProgressTick>`. The bridge
+converts that L1 tick payload into a host `LeanProgressEvent`; it does not expose
+`LeanStringEvent` or any downstream streaming policy through the host progress
+surface.
+
 `LeanProgressEvent` contains:
 
 - `phase: &'static str` — a stable method-local phase label;
