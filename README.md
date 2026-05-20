@@ -54,6 +54,18 @@ That example uses `LeanCallbackHandle<LeanStringEvent>` to receive JSONL-like
 rows from Lean without importing `lean-rs-host`; see
 [`docs/recipes/string-callback-streaming.md`](docs/recipes/string-callback-streaming.md).
 
+For process isolation, fatal-child-exit reporting, memory cycling, and
+downstream-owned row streaming, run the worker example:
+
+```sh
+cargo run -p lean-rs-worker --example worker_streaming
+```
+
+It starts a `lean-rs-worker` child, runs the prompt-64 streaming export,
+prints JSONL-like rows projected from `LeanWorkerDataRow`, cycles the worker,
+and proves the next request succeeds in a fresh child. See
+[`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
+
 ## Build your own consumer
 
 The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean
@@ -191,8 +203,13 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md)—the host progress-sink contract over the reusable callback substrate.
 - [`14-interop-release-contract.md`](docs/architecture/14-interop-release-contract.md)—the final interop release contract and source-of-truth map.
+- [`15-callback-payloads.md`](docs/architecture/15-callback-payloads.md)—the sealed typed callback payload family.
+- [`16-production-boundary.md`](docs/architecture/16-production-boundary.md)—the worker-process boundary for fatal exits and memory reset.
+- [`17-worker-session-adapter.md`](docs/architecture/17-worker-session-adapter.md)—the narrow process-safe host-session subset.
+- [`18-worker-data-streaming.md`](docs/architecture/18-worker-data-streaming.md)—arbitrary downstream JSON rows over the worker boundary.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the L1 recipe for Lean-to-Rust string streams such as JSONL-like worker output.
+- [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later
 changes diff against those baselines.

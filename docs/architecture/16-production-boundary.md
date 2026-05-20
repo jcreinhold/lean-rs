@@ -102,4 +102,6 @@ acceptable.
 Use the `lean-rs-worker` boundary when the application must continue after Lean
 exits, must classify fatal child exits, or must reset memory after large import
 sweeps. The worker is not a replacement for `lean-rs-host`; it is a process
-boundary around it.
+boundary around it. See
+[`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md)
+for the runnable worker-streaming example.

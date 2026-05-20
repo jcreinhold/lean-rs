@@ -22,3 +22,18 @@ diagnostics and strings; it does not send child-runtime handles such as
 Worker progress and cancellation are parent-side IPC concepts. Progress arrives
 as `LeanWorkerProgressEvent`; in-flight cancellation cycles the child process,
 returns `LeanWorkerError::Cancelled`, and invalidates the open worker session.
+
+Worker data rows carry downstream-owned JSON payloads over the same process
+boundary. `LeanWorkerSession::run_data_stream` runs a fixed-ABI Lean export in
+the child, validates each callback string as `{stream, payload}`, assigns
+per-stream sequence numbers, and reports owned `LeanWorkerDataRow` values to a
+borrowed `LeanWorkerDataSink`. Row schemas belong to the downstream tool.
+
+Run the worked example:
+
+```sh
+cargo run -p lean-rs-worker --example worker_streaming
+```
+
+The recipe is
+[`docs/recipes/worker-process-boundary.md`](../../docs/recipes/worker-process-boundary.md).

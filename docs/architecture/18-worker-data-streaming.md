@@ -114,3 +114,6 @@ and the application does not need crash isolation or memory reset.
 Use worker data rows when the application needs the worker process boundary.
 The row payload can be any JSON value, but `lean-rs-worker` treats it as data.
 Schema ownership remains with the downstream crate.
+
+The worked recipe is
+[`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md).
