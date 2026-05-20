@@ -9,11 +9,10 @@
 //! focused examples when you want to see how a real workload threads
 //! them together.
 //!
-//! Doubles as the cross-call regression probe from prompt 22 (guards
-//! against drift from the borrowed-string `LeanAbi` impl). Output is
-//! one `name=<stage> elapsed_us=<u64>` line per stage, suitable for
-//! `grep`/`awk` — see `docs/performance/interventions.md` for the
-//! recorded numbers.
+//! Doubles as the cross-call regression probe that guards against drift
+//! from the borrowed-string `LeanAbi` impl. Output is one
+//! `name=<stage> elapsed_us=<u64>` line per stage, suitable for
+//! `grep`/`awk`.
 //!
 //! Why an example rather than a Criterion bench: each stage runs once
 //! per process so warm-vs-cold distinctions stay visible.

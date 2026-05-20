@@ -46,7 +46,7 @@ internal modules can reshape without affecting `lean-rs-host` callers, and vice 
 as both crate roots stay stable.
 
 See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decision rationale
-and [`04-host-stack.md`](04-host-stack.md) for `lean-rs-host`'s curated surface.
+and [`03-host-stack.md`](03-host-stack.md) for `lean-rs-host`'s curated surface.
 
 ## Hidden knowledge
 

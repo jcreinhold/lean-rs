@@ -273,5 +273,5 @@ four above.
 
 - Diagnostic catalogue: [`docs/diagnostics.md`](../../../docs/diagnostics.md)
 - Concurrency contract: [`docs/architecture/04-concurrency.md`](../../../docs/architecture/04-concurrency.md)
-- Curated public surface: [`docs/architecture/04-host-stack.md`](../../../docs/architecture/04-host-stack.md)
+- Curated public surface: [`docs/architecture/03-host-stack.md`](../../../docs/architecture/03-host-stack.md)
 - Performance: [`docs/performance.md`](../../../docs/performance.md)

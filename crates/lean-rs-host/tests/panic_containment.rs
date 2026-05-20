@@ -1,4 +1,4 @@
-//! Panic-containment contract for prompt 33.
+//! Panic-containment contract.
 //!
 //! A Lean internal panic is process-scoped, not a typed `LeanError`.
 //! This test proves the contract without killing the main test process:

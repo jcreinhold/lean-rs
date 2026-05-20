@@ -23,15 +23,13 @@ Each is pinned at compile time by
 `crates/lean-rs/tests/compile_fail/runtime_is_not_send_or_sync.rs`. An accidental `impl Send`
 from a refactor is caught by the `.stderr` snapshot before the change can merge.
 
-### `'lean` cascade: belt-and-braces atop `OnceLock`
+### Why the `'lean` parameter, on top of `OnceLock`
 
-In practice the runtime always resolves to `&'static LeanRuntime`—`OnceLock` makes it a
-process-once singleton, and no caller in `lean-rs`, `lean-rs-host`, the fixture, or either
-downstream proof binds `'lean` to a non-static lifetime. The parameter still pays for itself by
-preventing one bug class—a handle outliving the runtime borrow it was constructed
-against—that `OnceLock` alone wouldn't catch in the rare embedder that wraps a scoped runtime view
-(e.g., a future per-task `LeanRuntime`). Cost: lifetime noise at signatures. Benefit:
-structural rejection of an entire shape of misuse. Decision: keep it.
+In practice the runtime resolves to `&'static LeanRuntime`: `OnceLock`
+makes it a process-once singleton, and no current caller binds `'lean`
+to a non-static lifetime. The parameter forecloses one bug class
+`OnceLock` alone cannot catch—a handle outliving a scoped runtime view
+(e.g., a future per-task `LeanRuntime`). The cost is signature noise.
 
 ## What can cross threads
 

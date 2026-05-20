@@ -8,9 +8,9 @@ terminate. Consumers that need to survive that failure class must run
 Lean work in a child worker process and treat worker exit as the recovery
 signal.
 
-This document records the prompt-33 decision. No `LeanError::SessionPoisoned`,
-`LeanDiagnosticCode::SessionPoisoned`, `LeanRuntime::recycle`, or in-process
-`LeanSandbox` API exists.
+No `LeanError::SessionPoisoned`, `LeanDiagnosticCode::SessionPoisoned`,
+`LeanRuntime::recycle`, or in-process `LeanSandbox` API exists, and the
+sections below give the soundness argument for why.
 
 ## Caller Contract
 
@@ -40,18 +40,16 @@ classifies unwinding into Rust through the wrong FFI ABI as undefined
 behavior.
 
 Lean's runtime panic paths are not a single Rust-style unwind mechanism.
-At Lean 4.29.1, local source inspection shows:
+At Lean 4.29.1, two paths in the upstream sources cover the cases:
 
-- `/Users/jcreinhold/Code/lean4/src/runtime/object.cpp`: `lean_internal_panic`
-  prints the panic and exits, and `lean_panic_impl` aborts when
-  `LEAN_ABORT_ON_PANIC` is set.
-- `/Users/jcreinhold/Code/lean4/src/runtime/debug.h`: `lean_unreachable()`
-  throws Lean's C++ `unreachable_reached` exception.
+- `runtime/object.cpp`: `lean_internal_panic` prints and exits;
+  `lean_panic_impl` aborts when `LEAN_ABORT_ON_PANIC` is set.
+- `runtime/debug.h`: `lean_unreachable()` throws Lean's C++
+  `unreachable_reached` exception.
 
 Those mechanisms bypass the error channel that `LeanIo<T>` decodes. A
-session-poisoning API would therefore catch only a subset of the failures
-it claimed to contain, while giving callers the impression that the
-runtime and environment were still trustworthy.
+session-poisoning API would catch only a subset of the failures it
+claimed to contain, masking the rest behind a falsely-typed recovery.
 
 ## Soundness Argument
 
@@ -98,15 +96,16 @@ does not cover `abort`, `std::exit`, `LEAN_ABORT_ON_PANIC`, or the C++
 exception path from `lean_unreachable()`, and it cannot prove refcount or
 Lean-global integrity after a foreign unwind crosses the C ABI.
 
-**`LeanSandbox` child-process API.** Valid architecture, but not shipped in
-this prompt. A child process is the right containment mechanism, but adding
-an IPC protocol would be a new host product surface rather than a
-`LeanSession` contract. Downstreams with service-level containment needs
-should run their own worker process around `lean-rs` today.
+**`LeanSandbox` child-process API.** Valid architecture, not shipped. A
+child process is the right containment mechanism, but the IPC protocol
+needed to make it a `LeanSession`-shaped contract is a separate host
+product. Downstreams with service-level containment needs should run their
+own worker process around `lean-rs` today.
 
-**In-process runtime recycling.** Rejected by prompt 32 and still rejected
-here. Lean runtime state is process-bound, and `lean-rs` has no sound way
-to prove all old `'lean` values are gone before recreating the runtime.
+**In-process runtime recycling.** Rejected. Lean runtime state is
+process-bound, and `lean-rs` cannot prove all old `'lean` values are gone
+before recreating the runtime. See [Long-Session
+Memory](../safety/long-session-memory.md) for the lifetime argument.
 
 ## Verification Fixture
 

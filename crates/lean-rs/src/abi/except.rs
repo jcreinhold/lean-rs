@@ -10,9 +10,9 @@
 //!   | ok    : α → Except ε α   -- tag 1, num_objs 1
 //! ```
 //!
-//! Per `RD-2026-05-17-004` and `docs/architecture/04-host-stack.md`
-//! §"Error model", `Except<E, T>` is **a value type, not part of the
-//! `LeanError` boundary**. Runtime / host failures cross as
+//! `Except<E, T>` is **a value type, not part of the `LeanError`
+//! boundary** (see the "Error model" section of
+//! `docs/architecture/03-host-stack.md`). Runtime / host failures cross as
 //! `LeanError::LeanException`; application-level success-or-error
 //! semantics cross as values. A Lean function returning
 //! `IO (Except E T)` therefore decodes as `LeanResult<Result<T, E>>`

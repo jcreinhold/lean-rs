@@ -1,6 +1,5 @@
 //! Round-trip tests for the `pub(crate) abi` conversions, dispatched
-//! through the typed [`crate::module::LeanExported`] handles landed by
-//! prompt 12.
+//! through the typed [`crate::module::LeanExported`] handles.
 //!
 //! Each test follows the pattern:
 //! 1. Bring up the Lean runtime + open the fixture library via
@@ -12,7 +11,7 @@
 //!    and call it.
 //! 4. Compare the decoded Rust value against the input.
 //!
-//! Compared to the prompt-08/09 tests, the per-test surface shrinks: no
+//! Typed-handle dispatch keeps the per-test surface narrow: no
 //! `unsafe { Obj::from_owned_raw(runtime, fixture(arg.into_raw())) }`
 //! incantation per call site, no `extern "C"` declaration block, no
 //! reliance on the throwaway `lean_rs_test_support::fixture` loader.

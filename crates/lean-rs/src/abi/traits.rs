@@ -14,12 +14,11 @@
 //!   trait drives [`crate::module::LeanExported`]'s typed function-pointer
 //!   cast.
 //!
-//! Per `RD-2026-05-17-007`, `LeanAbi` is the third (and final) conversion
-//! trait. It coexists with `IntoLean`/`TryFromLean` because they encode
-//! different conventions for the same Rust type — `u8 as IntoLean`
-//! produces a polymorphic-boxed `lean_box(u8 as usize)`, while
-//! `u8 as LeanAbi` produces an unboxed `uint8_t` matching Lake's emitted
-//! signature.
+//! `LeanAbi` is the third (and final) conversion trait. It coexists
+//! with `IntoLean`/`TryFromLean` because they encode different
+//! conventions for the same Rust type: `u8 as IntoLean` produces a
+//! polymorphic-boxed `lean_box(u8 as usize)`, while `u8 as LeanAbi`
+//! produces an unboxed `uint8_t` matching Lake's emitted signature.
 //!
 //! Borrowed conversions do not introduce a new trait. Where a Rust
 //! borrowed type appears in a Lean export's argument tuple, the per-type

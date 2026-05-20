@@ -7,7 +7,7 @@
 //! a [`LeanCapabilities`] that subsequent calls dispatch through without
 //! per-call `dlsym`.
 //!
-//! See `docs/architecture/04-host-stack.md` for the full classification
+//! See `docs/architecture/03-host-stack.md` for the full classification
 //! and the host → capabilities → session lifetime cascade.
 
 use core::fmt;

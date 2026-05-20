@@ -92,7 +92,7 @@ must either mirror them in Rust or vendor a C shim built via `cc`.
 
 ### Why a Rust mirror
 
-- **Faster.** A Rust mirror inlines into `lean-rs`'s `Drop`/`Clone` directly. A C shim defeats inlining across the FFI boundary unless cross-LTO is enabled (fragile, environment-dependent).
+- **Inlines at the call site.** A Rust mirror inlines into `lean-rs`'s `Drop`/`Clone` directly. A C shim defeats inlining across the FFI boundary unless cross-LTO is enabled (fragile, environment-dependent).
 - **Fewer build dependencies.** No `cc` build-dep, no `.c` files in the tree, no per-platform compiler shenanigans.
 
 ### Why atomic-relaxed everywhere
@@ -216,4 +216,4 @@ The sections above describe the approved design. Implementation surfaced these d
 - Safety model: [`01-safety-model.md`](01-safety-model.md)—*Unsafe boundary*.
 - Version compatibility: [`02-versioning-and-compatibility.md`](02-versioning-and-compatibility.md)—*Header digest*, *Bumping the Lean version*.
 - L1 safe surface: the `lean-rs` crate (typed FFI primitive). Crate docs at <https://docs.rs/lean-rs>.
-- L2 opinionated stack: [`04-host-stack.md`](04-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the L1 safe surface.
+- L2 opinionated stack: [`03-host-stack.md`](03-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the L1 safe surface.

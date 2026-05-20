@@ -146,7 +146,7 @@ The layering invariant is `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `
 not re-exported by `lean-toolchain` or `lean-rs`. The L1 (`lean-rs`) curated surface is the
 typed FFI primitive plus the four core semantic handle types and the error boundary; the L2
 (`lean-rs-host`) curated surface is the opinionated theorem-prover-host capability stack. See
-[`docs/architecture/04-host-stack.md`](docs/architecture/04-host-stack.md) for the L2
+[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the L2
 classification table.
 
 ## Going deeper
@@ -156,7 +156,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`00-charter.md`](docs/architecture/00-charter.md)—design boundary, hidden knowledge, smallest public interface, rejected alternatives.
 - [`01-safety-model.md`](docs/architecture/01-safety-model.md)—unsafe boundary, reference-counting ownership, proof-object opacity, concurrency stance, and the workspace `unsafe-code = "deny"` policy.
 - [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md)—supported Lean toolchain window, in-tree raw-FFI policy, crate semver, supported platforms.
-- [`04-host-stack.md`](docs/architecture/04-host-stack.md)—the curated `lean-rs-host` surface and its semver boundary.
+- [`03-host-stack.md`](docs/architecture/03-host-stack.md)—the curated `lean-rs-host` surface and its semver boundary.
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md)—the `!Send + !Sync` contract and worker-thread attach discipline.
 - [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md)—per-decision rationale behind `lean-rs-sys`.
 - [`06-panic-containment.md`](docs/architecture/06-panic-containment.md)—why Lean internal panics are contained by process boundaries, not `LeanSession` poisoning.

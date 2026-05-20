@@ -7,7 +7,7 @@
 //! `lean_rs::host::*`, `lean_rs::module::*`, or `lean_rs::error::*`
 //! paths. If it fails to compile because a name is missing, the curated
 //! surface in `crates/lean-rs/src/lib.rs` and the classification table
-//! in `docs/architecture/04-host-stack.md` are out of sync and one of
+//! in `docs/architecture/03-host-stack.md` are out of sync and one of
 //! them must be brought into agreement before widening the imports here.
 
 use std::path::PathBuf;

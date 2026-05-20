@@ -1,5 +1,5 @@
-//! Correctness smoke tests for prompt 24 — concurrent use of the safe
-//! `lean-rs` surface.
+//! Correctness smoke tests for concurrent use of the safe `lean-rs`
+//! surface.
 //!
 //! These tests do **not** measure throughput or parallel speedup; they
 //! verify that the documented concurrency contract holds:

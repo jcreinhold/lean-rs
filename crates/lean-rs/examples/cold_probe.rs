@@ -1,4 +1,4 @@
-//! One-shot cold-path probe for prompt 21's performance baseline.
+//! One-shot cold-path performance probe.
 //!
 //! Runs **once per process** and prints per-stage wall-clock for the
 //! three cold paths Criterion cannot honestly measure: runtime init,

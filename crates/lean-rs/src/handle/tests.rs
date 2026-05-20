@@ -1,6 +1,6 @@
 //! Round-trip tests for the four semantic handles.
 //!
-//! Each handle is exercised through the prompt-12
+//! Each handle is exercised through the
 //! [`crate::module::LeanModule::exported`] dispatch path against the
 //! `LeanRsFixture.Handles` capability. Construction and inspection happen
 //! exclusively in Lean code; the Rust side only carries the handle.

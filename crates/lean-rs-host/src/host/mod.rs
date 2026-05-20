@@ -1,7 +1,7 @@
 //! High-level surface for hosting Lean capabilities.
 //!
 //! Sits on top of the [`lean_rs::module`] dispatch primitives. The four-piece
-//! shape is pinned by `docs/architecture/04-host-stack.md`:
+//! shape is pinned by `docs/architecture/03-host-stack.md`:
 //!
 //! - L1 handles ([`lean_rs::handle::LeanName`],
 //!   [`lean_rs::handle::LeanLevel`], [`lean_rs::handle::LeanExpr`],

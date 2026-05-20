@@ -10,10 +10,11 @@ cargo bench -p lean-rs --bench hot_paths
 cargo bench -p lean-rs-host --bench session
 ```
 
-`hot_paths` covers `lean_rs::module` and `lean_rs::abi` — `LeanExported::call` and the
-`String`/`Vec<String>` round-trip decoders. `session` covers `LeanSession::*` —
-`query_declarations_bulk`, the three `declaration_*_bulk` 5k-vs-loop comparisons,
-`elaborate_small`, `run_meta_whnf`, and `SessionPool` hits.
+`hot_paths` covers `lean_rs::module` and `lean_rs::abi`: `LeanExported::call`
+and the `String`/`Vec<String>` round-trip decoders. `session` covers
+`LeanSession::*`: `query_declarations_bulk`, the three `declaration_*_bulk`
+5k-vs-loop comparisons, `elaborate_small`, `run_meta_whnf`, and
+`SessionPool` hits.
 
 The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion
 benches because they only fire once per process. Run them via:
@@ -69,6 +70,7 @@ mkdir -p /tmp/dhat-runs && cd /tmp/dhat-runs
 # https://nnethercote.github.io/dh_view/dh_view.html
 ```
 
-dhat sees Rust allocations only. Lean's internal mimalloc is statically linked into
-`libleanrt.a` and is invisible to `#[global_allocator]`; allocation numbers capture host-stack
-churn (ABI conversions, `Vec`/`String` buffers, error-message bounding), not kernel-side heap.
+dhat sees Rust allocations only. Lean's internal mimalloc is statically
+linked into `libleanrt.a` and is invisible to `#[global_allocator]`;
+allocation numbers capture ABI conversions, `Vec`/`String` buffers, and
+error-message bounding on the host stack, not the Lean kernel heap.

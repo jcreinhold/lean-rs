@@ -21,7 +21,7 @@
 pub mod host;
 
 /// Bounded `MetaM` service surface. Reachable only at this sub-module
-/// path (Decision 1, prompt 18) so callers opt in explicitly via
+/// path so callers opt in explicitly via
 /// `use lean_rs_host::meta::{...};`.
 pub mod meta {
     pub use crate::host::meta::*;

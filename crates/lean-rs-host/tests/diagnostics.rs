@@ -1,5 +1,5 @@
-//! Integration tests for prompt 25 — structured diagnostic codes and
-//! `tracing` span coverage.
+//! Integration tests for structured diagnostic codes and `tracing` span
+//! coverage.
 //!
 //! One test per major code family (`Linking`, `ModuleInit`,
 //! `SymbolLookup`, `AbiConversion`, `LeanException`, `Elaboration`,

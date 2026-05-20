@@ -2,8 +2,8 @@
 
 The supported Lean toolchain window, the in-tree raw-FFI policy, the header-digest policy,
 crate semver, and supported platforms. The single place to look when deciding whether a given
-Lean toolchain or host OS is supported. Bumping any of these is a compatibility decision, not a
-build fix.
+Lean toolchain or host OS is supported. Each entry is a compatibility commitment; bumping any
+of them requires a versioned proposal, not a build fix.
 
 ## Supported Lean toolchain window
 

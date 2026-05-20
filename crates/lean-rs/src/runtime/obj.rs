@@ -7,8 +7,7 @@
 //! borrowed view: it costs nothing on construction or drop and cannot
 //! outlive either the runtime borrow or the owning [`Obj`].
 //!
-//! Both types are `pub(crate)` per `RD-2026-05-17-004`; the public
-//! handles introduced by later prompts (`LeanExpr<'lean>`,
+//! Both types are `pub(crate)`; the public handles (`LeanExpr<'lean>`,
 //! `LeanName<'lean>`, `LeanSession<'lean, '_>`, …) wrap them. Raw
 //! `lean_*` symbols enter this file from `lean-rs-sys` and never leave
 //! the `pub(crate)` boundary.

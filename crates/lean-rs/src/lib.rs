@@ -1,16 +1,15 @@
 //! Safe Rust FFI primitive for embedding Lean 4 from a host application.
 //!
 //! `lean-rs` is the L1 typed-FFI binding to the Lean 4 runtime — the
-//! minimum surface every (β)-binding Rust crate needs to drive a
-//! compiled Lean library: bring the runtime up, open a Lake-built
-//! dylib, initialise a module, and call typed `@[export]` functions
-//! with first-class type marshalling. Per `RD-2026-05-18-001` the
-//! opinionated theorem-prover-host stack (`LeanHost` /
-//! `LeanCapabilities` / `LeanSession` plus the evidence and meta
-//! surfaces) lives in the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
-//! crate, with its own 18+4 `lean_rs_host_*` Lean shim contract; this
-//! crate has no Lean-side shim contract and ships zero target-language
-//! code.
+//! minimum surface a Rust crate needs to drive a compiled Lean library:
+//! bring the runtime up, open a Lake-built dylib, initialise a module,
+//! and call typed `@[export]` functions with first-class type
+//! marshalling. The opinionated theorem-prover-host stack (`LeanHost`,
+//! `LeanCapabilities`, `LeanSession`, plus the evidence and meta
+//! surfaces) lives in the sibling
+//! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
+//! 18+4 `lean_rs_host_*` Lean shim contract. This crate has no
+//! Lean-side shim contract and ships zero target-language code.
 //!
 //! ## Happy path (L1)
 //!
@@ -93,9 +92,9 @@ pub mod runtime;
 /// **Internal extension point.** Not part of the public API; not covered
 /// by semver. Exists so the sibling `lean-rs-host` crate can construct
 /// `LeanError` values via the narrow constructor wrappers it
-/// uses without bypassing the structural bounding invariant
-/// (`RD-2026-05-17-006`: external callers cannot mint `LeanError`
-/// values with unbounded messages). The seam stays narrow on purpose:
+/// uses without bypassing the structural bounding invariant: external
+/// callers cannot mint `LeanError` values with unbounded messages. The
+/// seam stays narrow on purpose:
 /// every extra re-export here is interface surface external readers
 /// might mistake for a stable API. Add a wrapper only when a real call
 /// site needs it.

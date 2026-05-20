@@ -1,4 +1,4 @@
-//! Integration tests for prompt 20 — bulk session methods,
+//! Integration tests for bulk session methods,
 //! `LeanSession::call_capability`, and the `SessionPool` /
 //! `PooledSession` pair.
 //!

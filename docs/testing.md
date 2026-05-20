@@ -32,11 +32,15 @@ at **4** so total memory stays bounded across CI runners (~7 GiB on
 sets `LEAN_RS_NUM_THREADS=1` so each Lean process spawns a single worker thread; product is at
 most 4 Lean workers across the full run.
 
-| Goal | Override |
-| --- | --- |
-| Use more processes (machine has memory to spare) | `NEXTEST_TEST_THREADS=8 cargo nextest run --workspace` |
-| Single-test debug loop (cumulative-state pathology doesn't fire) | `cargo test -p lean-rs --lib <path::to::test> -- --nocapture` |
-| Bench run that legitimately wants Lean parallelism | `LEAN_RS_NUM_THREADS= cargo bench -p lean-rs` |
+| Knob                            | Effect                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `NEXTEST_TEST_THREADS=8`        | Use more processes when the machine has memory to spare.                              |
+| `cargo test -p lean-rs --lib …` | Single-test debug loop. The cumulative-state pathology doesn't fire at one test.      |
+| `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
+
+Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or
+prefix the command with `LEAN_RS_NUM_THREADS=`) when you need Lean to use
+its own worker-count heuristic—typically for benchmarks.
 
 ## Per-process Lean threads
 
@@ -69,7 +73,7 @@ process boundary.
 
 Two alternatives, both rejected:
 
-- **Hoist `LeanHost` / `LeanCapabilities` into per-binary shared state.** Blocked by the `LeanHost: !Send + !Sync` contract ([`docs/architecture/04-concurrency.md`](architecture/04-concurrency.md)); `OnceLock`/`LazyLock` require `Sync`.
+- **Hoist `LeanHost` / `LeanCapabilities` into per-binary shared state.** The `LeanHost: !Send + !Sync` contract ([`docs/architecture/04-concurrency.md`](architecture/04-concurrency.md)) prevents this; `OnceLock`/`LazyLock` require `Sync`.
 - **Find and fix the leak.** Lean's interned name table and mimalloc retention are process-global by design; the work-to-payoff ratio is poor compared to process isolation.
 
 Nextest's process-per-test model dissolves both problems with no public-API churn. The trade-off

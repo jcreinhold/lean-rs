@@ -1,8 +1,11 @@
 # Safety Model
 
-The safety thesis the `lean-rs` workspace is built to honour. Every change that adds an
-unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
-here. If a planned API cannot be made consistent, stop and rethink—don't weaken the thesis.
+`lean-rs` exposes a fully safe Rust surface over an `unsafe` C ABI by
+confining raw FFI to one crate, denying `Send`/`Sync` on every Lean handle,
+and binding handle lifetimes to a process-once runtime anchor. Every
+change that adds an unsafe block, wrapper type, FFI call, or concurrency
+claim must be consistent with the rules below. An API that cannot be
+made consistent does not ship.
 
 ## Unsafe boundary
 
@@ -44,11 +47,11 @@ expression tree in Rust" is not.
 
 ## Concurrency
 
-The Lean runtime is per-thread (`lean_initialize_thread` / `lean_finalize_thread`), so
-Lean-derived handles must not move between OS threads. `Send` and `Sync` are denied by default
-on every such handle: treating a Lean object as freely portable is a soundness hazard, not an
-ergonomic choice. Opting any handle type into `Send` or `Sync` is a per-type contract change that must be
-justified against the per-thread model.
+The Lean runtime is per-thread (`lean_initialize_thread` /
+`lean_finalize_thread`), so every Lean-derived handle is `!Send + !Sync`
+by default. Treating a Lean object as freely portable is a soundness
+hazard. Opting any handle type into `Send` or `Sync` is a per-type
+contract change that must be justified against the per-thread model.
 
 See [`04-concurrency.md`](04-concurrency.md) for the full thread-attach discipline and the
 async-embedding pattern.

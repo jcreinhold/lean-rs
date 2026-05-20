@@ -3,11 +3,11 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves
-//! eighteen mandatory session symbols — thirteen environment queries plus
-//! the prompt-15 `elaborate` and `kernel_check` pair plus the
-//! prompt-17 `check_evidence` and `evidence_summary` pair — and the
-//! four optional meta-service symbols), starts a session
-//! over an import list, and exercises the typed query methods.
+//! eighteen mandatory session symbols — thirteen environment queries,
+//! the `elaborate`/`kernel_check` pair, and the
+//! `check_evidence`/`evidence_summary` pair — plus the four optional
+//! meta-service symbols), starts a session over an import list, and
+//! exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -162,10 +162,9 @@ fn session_declaration_type_round_trips_as_expr() {
         .declaration_type("LeanRsFixture.Handles.nameAnonymous", None)
         .expect("type query for fixture def")
         .expect("fixture def has a type");
-    // Returned LeanExpr is opaque; passing it through any of the
-    // prompt-13 fixture exports that accept LeanExpr would prove
-    // structural soundness. Here we just confirm the handle exists and
-    // drops without panic.
+    // Returned LeanExpr is opaque; passing it through any fixture export
+    // that accepts LeanExpr would prove structural soundness. Here we
+    // just confirm the handle exists and drops without panic.
     drop(type_handle);
 }
 
@@ -243,7 +242,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
     );
 }
 
-// -- elaborate + kernel_check (prompt 15) -------------------------------
+// -- elaborate + kernel_check -------------------------------------------
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
     caps.session(&["LeanRsHostShims.Elaboration"], None)
@@ -636,7 +635,7 @@ fn session_reuse_amortises_import() {
     );
 }
 
-// -- run_meta (prompt 16) -----------------------------------------------
+// -- run_meta -----------------------------------------------------------
 //
 // Each test imports `LeanRsHostShims.Meta` (which also pulls in
 // `LeanRsHostShims.Elaboration` via the dependency edge). The fixture

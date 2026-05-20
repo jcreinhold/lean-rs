@@ -46,8 +46,8 @@ impl SupportedToolchain {
 // a refcount-path divergence between 4.25 and 4.26 that the current
 // mirrors do not cover. Narrowing the window to the empirically green
 // range (4.26.0 → current head) is the honest v0.1.0 promise; reopening
-// the lower bound is its own follow-up (`RD-2026-05-18-002` Out-of-scope
-// item: investigate the 4.25→4.26 refcount divergence).
+// the lower bound is its own follow-up (investigate the 4.25→4.26
+// refcount divergence).
 pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
     SupportedToolchain {
         versions: &["4.26.0"],

@@ -32,13 +32,13 @@ implemented once and reused. Higher layers should talk in their own terms:
 
 ## Rejected Designs
 
-**No shims.** The no shims design would require a Lean equivalent of Python's
-reflective C API: runtime declaration lookup, dynamic invocation by name, and
-stable object introspection from C. The source survey recorded in
-`RD-2026-05-18-001` found the opposite. Lean offers explicit exported symbols
-and an internal runtime API; theorem-prover operations such as elaboration,
-`MetaM`, and server-style workflows live in Lean code. Rust should not
-reconstruct those semantics through raw object layouts.
+**No shims.** This design would require a Lean equivalent of Python's
+reflective C API: runtime declaration lookup, dynamic invocation by name,
+and stable object introspection from C. A source survey of the Lean
+runtime found the opposite shape: Lean exposes explicit exported symbols
+and an internal runtime API, and theorem-prover operations such as
+elaboration, `MetaM`, and server-style workflows live in Lean code. Rust
+should not reconstruct those semantics through raw object layouts.
 
 **Host-specific shims only.** The host-specific only design would keep all
 callback-bearing work in `lean-rs-host`. The current host shims are appropriate

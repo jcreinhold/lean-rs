@@ -1,8 +1,8 @@
-//! Public callback registry tests for prompt 41.
+//! Public callback registry tests.
 //!
-//! These tests use the prompt-40 Lean callback loop export, but the Rust side
-//! goes through the public RAII registry instead of passing a stack pointer and
-//! test-local trampoline.
+//! These tests reuse the Lean callback-loop export from the trampoline
+//! spike, but the Rust side goes through the public RAII registry
+//! instead of passing a stack pointer and test-local trampoline.
 
 #![allow(clippy::expect_used, clippy::panic)]
 

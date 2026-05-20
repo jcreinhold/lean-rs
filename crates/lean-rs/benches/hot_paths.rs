@@ -1,12 +1,12 @@
 //! Steady-state benchmarks for the `lean_rs::module` + `lean_rs::abi`
 //! hot paths.
 //!
-//! Each workload names the user-visible code path it measures (per
-//! prompt 21's "benchmarks are workloads, not demonstrations" standard).
-//! Cold paths (runtime init, library open, module initializer) live in
+//! Each workload names the user-visible code path it measures:
+//! benchmarks are workloads, not demonstrations. Cold paths (runtime
+//! init, library open, module initializer) live in
 //! `examples/cold_probe.rs` because they are once-per-process and
 //! Criterion's repeated-sampling shape would measure the cached
-//! fast-path instead — see `docs/performance/baseline.md`.
+//! fast-path instead.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
 

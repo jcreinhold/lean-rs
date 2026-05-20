@@ -1,8 +1,8 @@
 //! Typed error boundary for the safe `lean-rs` surface.
 //!
 //! Every fallible public function returns [`LeanResult<T>`]. [`LeanError`]
-//! is the single error type that crosses the boundary; per
-//! `RD-2026-05-17-006` it has three variants:
+//! is the single error type that crosses the boundary; it has three
+//! variants:
 //!
 //! - [`LeanError::LeanException`] when Lean threw through its `IO` error
 //!   channel. The payload reports the `IO.Error` constructor as
@@ -541,22 +541,17 @@ pub fn bound_message(mut s: String) -> String {
 //
 // `LeanError`'s constructors are `pub(crate)` to preserve the structural
 // bounding invariant: external crates cannot mint `LeanError` values
-// directly (per RD-2026-05-17-006). The sibling `lean-rs-host` crate
-// needs to construct host failures and cooperative cancellation reports
-// when it dispatches capability shims; it reaches the constructors it
-// actually uses through this
-// `#[doc(hidden)] pub fn` wrapper, re-exported at
+// directly. The sibling `lean-rs-host` crate needs to construct host
+// failures and cooperative cancellation reports when it dispatches
+// capability shims; it reaches the constructors it actually uses through
+// this `#[doc(hidden)] pub fn` wrapper, re-exported at
 // [`crate::__host_internals`].
 //
-// The original boundary exposed eight constructor wrappers
-// (`host_linking`, `host_module_init_panic`, `host_symbol_lookup`,
-// `host_callback_panic`, `host_internal`, `lean_exception`, plus
-// `bound_message`); the post-RD-2026-05-18-001 audit confirmed only
-// `host_module_init` (called from `lake.rs`) was wired up. Prompt 34
-// added `host_cancelled` for the sibling crate's cancellation token.
-// Carrying the dead seven was 87% speculative surface; they were
-// removed. Add them back the same way (single-call wrapper + re-export
-// in `crate::__host_internals`) if a future call site needs one.
+// The only wrappers live here are those a real call site needs:
+// `host_module_init` (called from `lake.rs`) and `host_cancelled` (for
+// the sibling crate's cancellation token). Add another the same way
+// (single-call wrapper + re-export in `crate::__host_internals`) only
+// when a future call site needs one.
 
 /// Construct a `ModuleInit` host failure. See [`LeanError::module_init`].
 #[doc(hidden)]

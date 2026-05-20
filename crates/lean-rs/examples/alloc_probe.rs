@@ -9,8 +9,8 @@
 //! a separate allocator — it does not flow through `#[global_allocator]`
 //! and is invisible to this probe. The numbers captured here are
 //! host-side Rust churn (`String::from_utf8`, `Vec` resize, ABI buffer
-//! ownership transfers, error-message bounding), which is the surface
-//! prompt 22's interventions target.
+//! ownership transfers, error-message bounding) — the surface the
+//! conversion-path interventions target.
 //!
 //! Usage:
 //!

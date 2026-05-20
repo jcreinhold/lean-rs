@@ -1,4 +1,4 @@
-//! Test-only callback ABI spike for prompt 40.
+//! Test-only callback ABI spike.
 //!
 //! The test intentionally avoids a public callback registry. Rust passes an
 //! opaque handle and a function pointer as `USize` values to a Lean export.
