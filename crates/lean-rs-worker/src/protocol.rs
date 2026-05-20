@@ -82,6 +82,14 @@ pub(crate) enum Request {
         request_json: String,
         progress: bool,
     },
+    CapabilityMetadata {
+        export: String,
+        request_json: String,
+    },
+    CapabilityDoctor {
+        export: String,
+        request_json: String,
+    },
     // Private harness requests used to prove streaming frame behavior before
     // prompt 63 exposes a public row sink API.
     EmitTestRows {
@@ -106,6 +114,10 @@ pub(crate) enum Response {
     StreamExportFailed { status_byte: u8 },
     StreamCallbackFailed { status_byte: u8, description: String },
     StreamRowMalformed { message: String },
+    CapabilityMetadata { metadata: WorkerCapabilityMetadata },
+    CapabilityDoctor { report: WorkerDoctorReport },
+    CapabilityMetadataMalformed { message: String },
+    CapabilityDoctorMalformed { message: String },
     RowsComplete { count: u64 },
     Terminating,
     Error { code: String, message: String },
@@ -137,6 +149,48 @@ pub(crate) struct StreamSummary {
     pub(crate) per_stream_counts: BTreeMap<String, u64>,
     pub(crate) elapsed_micros: u64,
     pub(crate) metadata: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerCapabilityMetadata {
+    pub(crate) commands: Vec<WorkerCommandMetadata>,
+    pub(crate) capabilities: Vec<WorkerCapabilityFact>,
+    pub(crate) lean_version: Option<String>,
+    pub(crate) extra: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerCommandMetadata {
+    pub(crate) name: String,
+    pub(crate) version: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerCapabilityFact {
+    pub(crate) name: String,
+    pub(crate) version: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerDoctorReport {
+    pub(crate) diagnostics: Vec<WorkerDoctorDiagnostic>,
+    pub(crate) metadata: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct WorkerDoctorDiagnostic {
+    pub(crate) severity: WorkerDoctorSeverity,
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) details: Option<Value>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WorkerDoctorSeverity {
+    Pass,
+    Warning,
+    Error,
 }
 
 impl StreamSummary {

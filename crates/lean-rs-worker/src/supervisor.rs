@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerDiagnosticSink, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerProgressSink, LeanWorkerSessionConfig,
-    LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic,
-    report_parent_progress,
+    LeanWorkerCancellationToken, LeanWorkerCapabilityMetadata, LeanWorkerDataSink, LeanWorkerDiagnosticSink,
+    LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult,
+    LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
+    check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic, report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -319,6 +319,10 @@ pub enum LeanWorkerError {
     StreamCallbackFailed { status: u8, description: String },
     /// A streaming callback emitted a malformed row envelope.
     StreamRowMalformed { message: String },
+    /// A capability metadata export returned malformed JSON.
+    CapabilityMetadataMalformed { message: String },
+    /// A capability doctor export returned malformed JSON.
+    CapabilityDoctorMalformed { message: String },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -353,6 +357,12 @@ impl fmt::Display for LeanWorkerError {
                 write!(f, "streaming callback failed with status {status}: {description}")
             }
             Self::StreamRowMalformed { message } => write!(f, "streaming export emitted malformed row: {message}"),
+            Self::CapabilityMetadataMalformed { message } => {
+                write!(f, "capability metadata export returned malformed JSON: {message}")
+            }
+            Self::CapabilityDoctorMalformed { message } => {
+                write!(f, "capability doctor export returned malformed JSON: {message}")
+            }
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -379,6 +389,8 @@ impl std::error::Error for LeanWorkerError {
             | Self::StreamExportFailed { .. }
             | Self::StreamCallbackFailed { .. }
             | Self::StreamRowMalformed { .. }
+            | Self::CapabilityMetadataMalformed { .. }
+            | Self::CapabilityDoctorMalformed { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -397,6 +409,7 @@ pub struct LeanWorker {
     stdout: Option<BufReader<ChildStdout>>,
     stderr: Option<ChildStderr>,
     last_exit: Option<LeanWorkerExit>,
+    runtime_metadata: LeanWorkerRuntimeMetadata,
     stats: LeanWorkerStats,
     requests_since_restart: u64,
     imports_since_restart: u64,
@@ -451,8 +464,8 @@ impl LeanWorker {
             drop(sender.send((stdout, result)));
         });
 
-        let stdout = match receiver.recv_timeout(config.startup_timeout) {
-            Ok((stdout, Ok(()))) => stdout,
+        let (stdout, runtime_metadata) = match receiver.recv_timeout(config.startup_timeout) {
+            Ok((stdout, Ok(metadata))) => (stdout, metadata),
             Ok((_stdout, Err(err))) => {
                 let mut worker = Self {
                     config: config.clone(),
@@ -461,6 +474,11 @@ impl LeanWorker {
                     stdout: None,
                     stderr,
                     last_exit: None,
+                    runtime_metadata: LeanWorkerRuntimeMetadata {
+                        worker_version: String::new(),
+                        protocol_version: crate::protocol::PROTOCOL_VERSION,
+                        lean_version: None,
+                    },
                     stats: LeanWorkerStats::default(),
                     requests_since_restart: 0,
                     imports_since_restart: 0,
@@ -495,6 +513,7 @@ impl LeanWorker {
             stdout: Some(stdout),
             stderr,
             last_exit: None,
+            runtime_metadata,
             stats: LeanWorkerStats::default(),
             requests_since_restart: 0,
             imports_since_restart: 0,
@@ -524,6 +543,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("health", &other)),
@@ -557,6 +580,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("load_fixture_capability", &other)),
@@ -594,6 +621,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("call_fixture_mul", &other)),
@@ -636,6 +667,12 @@ impl LeanWorker {
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {
         self.stats.clone()
+    }
+
+    /// Return protocol/runtime facts reported by the worker child.
+    #[must_use]
+    pub fn runtime_metadata(&self) -> LeanWorkerRuntimeMetadata {
+        self.runtime_metadata.clone()
     }
 
     /// Measure the current child RSS in KiB when supported by the platform.
@@ -734,6 +771,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Error { .. }) => Err(unexpected_response("terminate", &other)),
         }
@@ -793,6 +834,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -826,6 +871,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -859,6 +908,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -893,6 +946,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -925,6 +982,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -957,6 +1018,10 @@ impl LeanWorker {
             | Response::StreamExportFailed { .. }
             | Response::StreamCallbackFailed { .. }
             | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1004,6 +1069,94 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_capability_metadata(
+        &mut self,
+        export: &str,
+        request: &serde_json::Value,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
+        const OPERATION: &str = "worker_capability_metadata";
+        check_cancelled(OPERATION, cancellation)?;
+        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+            message: format!("worker capability metadata request JSON encode failed: {err}"),
+        })?;
+        self.prepare_request(false)?;
+        self.send_request(Request::CapabilityMetadata {
+            export: export.to_owned(),
+            request_json,
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::CapabilityMetadata { metadata } => Ok(metadata.into()),
+            Response::CapabilityMetadataMalformed { message } => {
+                Err(LeanWorkerError::CapabilityMetadataMalformed { message })
+            }
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_capability_doctor(
+        &mut self,
+        export: &str,
+        request: &serde_json::Value,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDoctorReport, LeanWorkerError> {
+        const OPERATION: &str = "worker_capability_doctor";
+        check_cancelled(OPERATION, cancellation)?;
+        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+            message: format!("worker capability doctor request JSON encode failed: {err}"),
+        })?;
+        self.prepare_request(false)?;
+        self.send_request(Request::CapabilityDoctor {
+            export: export.to_owned(),
+            request_json,
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::CapabilityDoctor { report } => Ok(report.into()),
+            Response::CapabilityDoctorMalformed { message } => {
+                Err(LeanWorkerError::CapabilityDoctorMalformed { message })
+            }
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityMetadataMalformed { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1338,7 +1491,7 @@ impl Drop for LeanWorker {
     }
 }
 
-fn expect_handshake(stdout: &mut BufReader<ChildStdout>) -> Result<(), LeanWorkerError> {
+fn expect_handshake(stdout: &mut BufReader<ChildStdout>) -> Result<LeanWorkerRuntimeMetadata, LeanWorkerError> {
     let frame = read_frame(stdout).map_err(|err| {
         if err.is_eof() {
             LeanWorkerError::Handshake {
@@ -1351,7 +1504,14 @@ fn expect_handshake(stdout: &mut BufReader<ChildStdout>) -> Result<(), LeanWorke
         }
     })?;
     match frame.message {
-        Message::Handshake { protocol_version, .. } if protocol_version == crate::protocol::PROTOCOL_VERSION => Ok(()),
+        Message::Handshake {
+            worker_version,
+            protocol_version,
+        } if protocol_version == crate::protocol::PROTOCOL_VERSION => Ok(LeanWorkerRuntimeMetadata {
+            worker_version,
+            protocol_version,
+            lean_version: None,
+        }),
         other @ (Message::Handshake { .. }
         | Message::Request(_)
         | Message::Response(_)

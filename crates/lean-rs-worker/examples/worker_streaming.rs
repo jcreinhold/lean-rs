@@ -34,6 +34,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary))?;
     worker.health()?;
     println!("worker_status=started");
+    println!("worker_runtime_version={}", worker.runtime_metadata().worker_version);
 
     let request = json!({
         "source": "worker_streaming_example",
@@ -69,6 +70,20 @@ fn run_stream_once(
         ["LeanRsInteropConsumer.Callback"],
     );
     let mut session = worker.open_session(&config, None, None)?;
+    let metadata = session.capability_metadata(
+        "lean_rs_interop_consumer_worker_metadata",
+        &json!({"source": "worker_streaming_example"}),
+        None,
+        None,
+    )?;
+    println!("capability_commands={}", metadata.commands.len());
+    let doctor = session.capability_doctor(
+        "lean_rs_interop_consumer_worker_doctor",
+        &json!({"source": "worker_streaming_example"}),
+        None,
+        None,
+    )?;
+    println!("doctor_diagnostics={}", doctor.diagnostics.len());
     let summary = session.run_data_stream(
         "lean_rs_interop_consumer_worker_data_stream",
         request,

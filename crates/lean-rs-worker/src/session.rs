@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::protocol::{
-    DataRow, Diagnostic, StreamSummary, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome,
-    WorkerKernelStatus,
+    DataRow, Diagnostic, StreamSummary, WorkerCapabilityFact, WorkerCapabilityMetadata, WorkerCommandMetadata,
+    WorkerDiagnostic, WorkerDoctorDiagnostic, WorkerDoctorReport, WorkerDoctorSeverity, WorkerElabOptions,
+    WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus,
 };
 use crate::supervisor::{LeanWorker, LeanWorkerError};
 
@@ -125,6 +126,129 @@ impl Default for LeanWorkerElabOptions {
             file_label: "<elaborate>".to_owned(),
             heartbeat_limit: lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT,
             diagnostic_byte_limit: lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
+        }
+    }
+}
+
+/// Protocol/runtime facts reported by the worker child during handshake.
+///
+/// These facts describe the `lean-rs-worker` process and framing contract.
+/// They are separate from downstream capability metadata returned by
+/// `LeanWorkerSession::capability_metadata`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerRuntimeMetadata {
+    pub worker_version: String,
+    pub protocol_version: u16,
+    pub lean_version: Option<String>,
+}
+
+/// Generic metadata reported by one downstream capability package.
+///
+/// Command names, capability names, versions, and `extra` JSON are downstream
+/// semantics. `lean-rs-worker` transports and validates the envelope; it does
+/// not decide which values affect caches.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerCapabilityMetadata {
+    pub commands: Vec<LeanWorkerCommandMetadata>,
+    pub capabilities: Vec<LeanWorkerCapabilityFact>,
+    pub lean_version: Option<String>,
+    pub extra: Option<Value>,
+}
+
+impl From<WorkerCapabilityMetadata> for LeanWorkerCapabilityMetadata {
+    fn from(value: WorkerCapabilityMetadata) -> Self {
+        Self {
+            commands: value.commands.into_iter().map(Into::into).collect(),
+            capabilities: value.capabilities.into_iter().map(Into::into).collect(),
+            lean_version: value.lean_version,
+            extra: value.extra,
+        }
+    }
+}
+
+/// One downstream command advertised by capability metadata.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerCommandMetadata {
+    pub name: String,
+    pub version: String,
+}
+
+impl From<WorkerCommandMetadata> for LeanWorkerCommandMetadata {
+    fn from(value: WorkerCommandMetadata) -> Self {
+        Self {
+            name: value.name,
+            version: value.version,
+        }
+    }
+}
+
+/// One named capability advertised by capability metadata.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerCapabilityFact {
+    pub name: String,
+    pub version: String,
+}
+
+impl From<WorkerCapabilityFact> for LeanWorkerCapabilityFact {
+    fn from(value: WorkerCapabilityFact) -> Self {
+        Self {
+            name: value.name,
+            version: value.version,
+        }
+    }
+}
+
+/// Severity for a capability doctor diagnostic.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum LeanWorkerDoctorSeverity {
+    Pass,
+    Warning,
+    Error,
+}
+
+impl From<WorkerDoctorSeverity> for LeanWorkerDoctorSeverity {
+    fn from(value: WorkerDoctorSeverity) -> Self {
+        match value {
+            WorkerDoctorSeverity::Pass => Self::Pass,
+            WorkerDoctorSeverity::Warning => Self::Warning,
+            WorkerDoctorSeverity::Error => Self::Error,
+        }
+    }
+}
+
+/// One structured capability health diagnostic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerDoctorDiagnostic {
+    pub severity: LeanWorkerDoctorSeverity,
+    pub code: String,
+    pub message: String,
+    pub details: Option<Value>,
+}
+
+impl From<WorkerDoctorDiagnostic> for LeanWorkerDoctorDiagnostic {
+    fn from(value: WorkerDoctorDiagnostic) -> Self {
+        Self {
+            severity: value.severity.into(),
+            code: value.code,
+            message: value.message,
+            details: value.details,
+        }
+    }
+}
+
+/// Capability health report returned by a downstream doctor export.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerDoctorReport {
+    pub diagnostics: Vec<LeanWorkerDoctorDiagnostic>,
+    pub metadata: Option<Value>,
+}
+
+impl From<WorkerDoctorReport> for LeanWorkerDoctorReport {
+    fn from(value: WorkerDoctorReport) -> Self {
+        Self {
+            diagnostics: value.diagnostics.into_iter().map(Into::into).collect(),
+            metadata: value.metadata,
         }
     }
 }
@@ -505,6 +629,72 @@ impl LeanWorkerSession<'_> {
         match self
             .worker
             .worker_run_data_stream(export, request, rows, diagnostics, cancellation, progress)
+        {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Query generic metadata from a downstream capability export.
+    ///
+    /// The Lean export must have ABI `String -> IO String`. The request and
+    /// response strings are JSON, but callers receive a typed metadata
+    /// envelope rather than private protocol frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the session was
+    /// invalidated, the export is missing, request or response JSON is
+    /// malformed, cancellation or timeout is observed, a progress sink panics,
+    /// or protocol communication fails.
+    pub fn capability_metadata(
+        &mut self,
+        export: &str,
+        request: &Value,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_capability_metadata(export, request, cancellation, progress)
+        {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Run a generic doctor check from a downstream capability export.
+    ///
+    /// The Lean export must have ABI `String -> IO String`. Doctor diagnostics
+    /// are capability-layer facts; data rows remain reserved for downstream
+    /// streaming payloads.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the session was
+    /// invalidated, the export is missing, request or response JSON is
+    /// malformed, cancellation or timeout is observed, a progress sink panics,
+    /// or protocol communication fails.
+    pub fn capability_doctor(
+        &mut self,
+        export: &str,
+        request: &Value,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDoctorReport, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_capability_doctor(export, request, cancellation, progress)
         {
             Ok(value) => Ok(value),
             Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {

@@ -98,4 +98,20 @@ def workerDataStreamRowThenPanic (_requestJson : String) (handle trampoline : US
   else
     pure status
 
+@[export lean_rs_interop_consumer_worker_metadata]
+def workerMetadata (_requestJson : String) : IO String :=
+  pure "{\"commands\":[{\"name\":\"version\",\"version\":\"fixture-1\"},{\"name\":\"scan\",\"version\":\"fixture-2\"}],\"capabilities\":[{\"name\":\"rows.json\",\"version\":\"fixture-1\"},{\"name\":\"diagnostics\",\"version\":\"fixture-1\"}],\"lean_version\":\"fixture-lean-4\",\"extra\":{\"fixture\":true}}"
+
+@[export lean_rs_interop_consumer_worker_metadata_malformed]
+def workerMetadataMalformed (_requestJson : String) : IO String :=
+  pure "{not-json"
+
+@[export lean_rs_interop_consumer_worker_doctor]
+def workerDoctor (_requestJson : String) : IO String :=
+  pure "{\"diagnostics\":[{\"severity\":\"pass\",\"code\":\"fixture.ok\",\"message\":\"fixture ready\",\"details\":{\"check\":\"load\"}},{\"severity\":\"warning\",\"code\":\"fixture.warning\",\"message\":\"optional fixture warning\",\"details\":{\"optional\":true}},{\"severity\":\"error\",\"code\":\"fixture.error\",\"message\":\"fixture error example\",\"details\":{\"recoverable\":false}}],\"metadata\":{\"fixture\":\"doctor\"}}"
+
+@[export lean_rs_interop_consumer_worker_doctor_malformed]
+def workerDoctorMalformed (_requestJson : String) : IO String :=
+  pure "{\"diagnostics\":[{\"severity\":\"bogus\",\"code\":\"fixture.bad\",\"message\":\"bad severity\"}]}"
+
 end LeanRsInteropConsumer.Callback

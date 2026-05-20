@@ -64,8 +64,9 @@ cargo run -p lean-rs-worker --example worker_streaming
 It starts a `lean-rs-worker` child, runs the prompt-64 streaming export,
 prints JSONL-like rows projected from live `LeanWorkerDataRow` events, returns
 terminal row counts / metadata separately from diagnostics, applies
-parent-owned request watchdogs, cycles the worker, and proves the next request
-succeeds in a fresh child. See
+parent-owned request watchdogs, exposes generic capability metadata and doctor
+checks, cycles the worker, and proves the next request succeeds in a fresh
+child. See
 [`docs/recipes/worker-process-boundary.md`](docs/recipes/worker-process-boundary.md).
 
 ## Build your own consumer
@@ -209,6 +210,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`16-production-boundary.md`](docs/architecture/16-production-boundary.md)—the worker-process boundary for fatal exits and memory reset.
 - [`17-worker-session-adapter.md`](docs/architecture/17-worker-session-adapter.md)—the narrow process-safe host-session subset.
 - [`18-worker-data-streaming.md`](docs/architecture/18-worker-data-streaming.md)—arbitrary downstream JSON rows over the worker boundary.
+- [`19-worker-capability-layer.md`](docs/architecture/19-worker-capability-layer.md)—the generic worker capability layer above raw row transport.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the L1 recipe for Lean-to-Rust string streams such as JSONL-like worker output.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

@@ -14,8 +14,8 @@ use lean_rs_host::{
 
 use crate::protocol::{
     DataRowEmitter, Diagnostic, Message, ProgressTick, ProtocolError, Request, Response, StreamSummary,
-    WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus, read_frame,
-    write_frame,
+    WorkerCapabilityMetadata, WorkerDiagnostic, WorkerDoctorReport, WorkerElabOptions, WorkerElabOutcome,
+    WorkerKernelOutcome, WorkerKernelStatus, read_frame, write_frame,
 };
 
 #[derive(Clone)]
@@ -179,6 +179,30 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                             description: status.description().to_owned(),
                         },
                         Err(StreamRunError::MalformedRow(message)) => Response::StreamRowMalformed { message },
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::CapabilityMetadata { export, request_json } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.capability_metadata(&export, &request_json) {
+                        Ok(metadata) => Response::CapabilityMetadata { metadata },
+                        Err(CapabilityJsonError::Host(err)) => error_response(&err),
+                        Err(CapabilityJsonError::Malformed(message)) => {
+                            Response::CapabilityMetadataMalformed { message }
+                        }
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::CapabilityDoctor { export, request_json } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.capability_doctor(&export, &request_json) {
+                        Ok(report) => Response::CapabilityDoctor { report },
+                        Err(CapabilityJsonError::Host(err)) => error_response(&err),
+                        Err(CapabilityJsonError::Malformed(message)) => Response::CapabilityDoctorMalformed { message },
                     },
                     None => missing_session_response(),
                 };
@@ -473,6 +497,30 @@ impl HostSessionState {
             .map_err(|_| StreamRunError::MalformedRow("stream forwarder mutex was poisoned".to_owned()))?;
         Ok(guard.summary(started.elapsed()))
     }
+
+    fn capability_metadata(
+        &mut self,
+        export: &str,
+        request_json: &str,
+    ) -> Result<WorkerCapabilityMetadata, CapabilityJsonError> {
+        let raw = self
+            .session
+            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
+            .map_err(CapabilityJsonError::Host)?;
+        serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
+    }
+
+    fn capability_doctor(
+        &mut self,
+        export: &str,
+        request_json: &str,
+    ) -> Result<WorkerDoctorReport, CapabilityJsonError> {
+        let raw = self
+            .session
+            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
+            .map_err(CapabilityJsonError::Host)?;
+        serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -542,6 +590,11 @@ enum StreamRunError {
     ExportStatus(u8),
     CallbackStatus(LeanCallbackStatus),
     MalformedRow(String),
+}
+
+enum CapabilityJsonError {
+    Host(LeanError),
+    Malformed(String),
 }
 
 impl From<crate::protocol::ProtocolError> for StreamRunError {

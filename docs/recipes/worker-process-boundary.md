@@ -136,6 +136,15 @@ caller knows it wants to stop and can wait for a row or progress boundary. Use
 request timeout as a parent-enforced watchdog for unresponsive Lean work; it
 may kill the child without cooperative cleanup.
 
+Capability discovery uses metadata and doctor exports, not row streams. The
+worker's own protocol facts come from `LeanWorker::runtime_metadata`. A
+downstream capability can additionally expose JSON-returning exports with ABI
+`String -> IO String`; `LeanWorkerSession::capability_metadata` decodes command
+names, capability names, semantic versions, optional Lean version text, and
+extra JSON, while `LeanWorkerSession::capability_doctor` decodes pass, warning,
+and error diagnostics. The worker validates the generic envelope, but the
+downstream crate decides which versions affect cache keys.
+
 Cycling the worker is the memory-reset boundary. `SessionPool::drain()` remains
 an in-process cache operation; it is not an RSS reset.
 
@@ -149,6 +158,8 @@ subprocess management:
 - JSONL-like rows are projected from `LeanWorkerDataRow` by the downstream
   tool; `lean-rs-worker` does not define `lean-dup` business objects.
 - Progress and diagnostics use typed worker channels, not stdout conventions.
+- Metadata and doctor checks report cache/support facts without baking
+  `lean-dup` command semantics into `lean-rs-worker`.
 - Fatal exits become typed worker failures that the parent can classify.
 - Cancellation and timeout policy are caller decisions layered over worker
   requests.

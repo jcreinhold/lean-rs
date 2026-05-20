@@ -40,6 +40,14 @@ tentative until terminal success returns `LeanWorkerStreamSummary` with total
 rows, per-stream counts, elapsed time, and optional metadata. Row schemas belong
 to the downstream tool.
 
+Capability metadata and doctor checks are separate from row streams.
+`LeanWorker::runtime_metadata` reports `lean-rs-worker` protocol facts from the
+child handshake. `LeanWorkerSession::capability_metadata` and
+`LeanWorkerSession::capability_doctor` call downstream exports with ABI
+`String -> IO String`, decode the returned JSON into generic command,
+capability, version, and diagnostic envelopes, and leave cache policy and
+semantic command meaning to the downstream tool.
+
 Run the worked example:
 
 ```sh

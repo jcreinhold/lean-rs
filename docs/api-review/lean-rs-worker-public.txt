@@ -1,7 +1,31 @@
 pub mod lean_rs_worker
+#[non_exhaustive] pub enum lean_rs_worker::LeanWorkerDoctorSeverity
+pub lean_rs_worker::LeanWorkerDoctorSeverity::Error
+pub lean_rs_worker::LeanWorkerDoctorSeverity::Pass
+pub lean_rs_worker::LeanWorkerDoctorSeverity::Warning
+impl core::clone::Clone for lean_rs_worker::LeanWorkerDoctorSeverity
+pub fn lean_rs_worker::LeanWorkerDoctorSeverity::clone(&self) -> lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerDoctorSeverity
+pub fn lean_rs_worker::LeanWorkerDoctorSeverity::eq(&self, other: &lean_rs_worker::LeanWorkerDoctorSeverity) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerDoctorSeverity
+pub fn lean_rs_worker::LeanWorkerDoctorSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::Send for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::Sync for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDoctorSeverity
 pub enum lean_rs_worker::LeanWorkerError
 pub lean_rs_worker::LeanWorkerError::Cancelled
 pub lean_rs_worker::LeanWorkerError::Cancelled::operation: &'static str
+pub lean_rs_worker::LeanWorkerError::CapabilityDoctorMalformed
+pub lean_rs_worker::LeanWorkerError::CapabilityDoctorMalformed::message: alloc::string::String
+pub lean_rs_worker::LeanWorkerError::CapabilityMetadataMalformed
+pub lean_rs_worker::LeanWorkerError::CapabilityMetadataMalformed::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::ChildExited
 pub lean_rs_worker::LeanWorkerError::ChildExited::exit: lean_rs_worker::LeanWorkerExit
 pub lean_rs_worker::LeanWorkerError::ChildPanicOrAbort
@@ -131,6 +155,7 @@ pub fn lean_rs_worker::LeanWorker::load_fixture_capability(&mut self, fixture_ro
 pub fn lean_rs_worker::LeanWorker::request_timeout(&self) -> core::time::Duration
 pub fn lean_rs_worker::LeanWorker::restart(&mut self) -> core::result::Result<(), lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorker::rss_kib(&mut self) -> core::option::Option<u64>
+pub fn lean_rs_worker::LeanWorker::runtime_metadata(&self) -> lean_rs_worker::LeanWorkerRuntimeMetadata
 pub fn lean_rs_worker::LeanWorker::set_request_timeout(&mut self, timeout: core::time::Duration)
 pub fn lean_rs_worker::LeanWorker::spawn(config: &lean_rs_worker::LeanWorkerConfig) -> core::result::Result<Self, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorker::stats(&self) -> lean_rs_worker::LeanWorkerStats
@@ -167,6 +192,62 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerCancellationToken
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerCancellationToken
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCancellationToken
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCancellationToken
+pub struct lean_rs_worker::LeanWorkerCapabilityFact
+pub lean_rs_worker::LeanWorkerCapabilityFact::name: alloc::string::String
+pub lean_rs_worker::LeanWorkerCapabilityFact::version: alloc::string::String
+impl core::clone::Clone for lean_rs_worker::LeanWorkerCapabilityFact
+pub fn lean_rs_worker::LeanWorkerCapabilityFact::clone(&self) -> lean_rs_worker::LeanWorkerCapabilityFact
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerCapabilityFact
+pub fn lean_rs_worker::LeanWorkerCapabilityFact::eq(&self, other: &lean_rs_worker::LeanWorkerCapabilityFact) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerCapabilityFact
+pub fn lean_rs_worker::LeanWorkerCapabilityFact::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::marker::Send for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::marker::Sync for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCapabilityFact
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCapabilityFact
+pub struct lean_rs_worker::LeanWorkerCapabilityMetadata
+pub lean_rs_worker::LeanWorkerCapabilityMetadata::capabilities: alloc::vec::Vec<lean_rs_worker::LeanWorkerCapabilityFact>
+pub lean_rs_worker::LeanWorkerCapabilityMetadata::commands: alloc::vec::Vec<lean_rs_worker::LeanWorkerCommandMetadata>
+pub lean_rs_worker::LeanWorkerCapabilityMetadata::extra: core::option::Option<serde_json::value::Value>
+pub lean_rs_worker::LeanWorkerCapabilityMetadata::lean_version: core::option::Option<alloc::string::String>
+impl core::clone::Clone for lean_rs_worker::LeanWorkerCapabilityMetadata
+pub fn lean_rs_worker::LeanWorkerCapabilityMetadata::clone(&self) -> lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerCapabilityMetadata
+pub fn lean_rs_worker::LeanWorkerCapabilityMetadata::eq(&self, other: &lean_rs_worker::LeanWorkerCapabilityMetadata) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerCapabilityMetadata
+pub fn lean_rs_worker::LeanWorkerCapabilityMetadata::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::marker::Send for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::marker::Sync for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCapabilityMetadata
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCapabilityMetadata
+pub struct lean_rs_worker::LeanWorkerCommandMetadata
+pub lean_rs_worker::LeanWorkerCommandMetadata::name: alloc::string::String
+pub lean_rs_worker::LeanWorkerCommandMetadata::version: alloc::string::String
+impl core::clone::Clone for lean_rs_worker::LeanWorkerCommandMetadata
+pub fn lean_rs_worker::LeanWorkerCommandMetadata::clone(&self) -> lean_rs_worker::LeanWorkerCommandMetadata
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerCommandMetadata
+pub fn lean_rs_worker::LeanWorkerCommandMetadata::eq(&self, other: &lean_rs_worker::LeanWorkerCommandMetadata) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerCommandMetadata
+pub fn lean_rs_worker::LeanWorkerCommandMetadata::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::marker::Send for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::marker::Sync for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCommandMetadata
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCommandMetadata
 pub struct lean_rs_worker::LeanWorkerConfig
 impl lean_rs_worker::LeanWorkerConfig
 pub fn lean_rs_worker::LeanWorkerConfig::current_dir(self, path: impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -248,6 +329,44 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerDiagnosticEvent
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDiagnosticEvent
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDiagnosticEvent
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDiagnosticEvent
+pub struct lean_rs_worker::LeanWorkerDoctorDiagnostic
+pub lean_rs_worker::LeanWorkerDoctorDiagnostic::code: alloc::string::String
+pub lean_rs_worker::LeanWorkerDoctorDiagnostic::details: core::option::Option<serde_json::value::Value>
+pub lean_rs_worker::LeanWorkerDoctorDiagnostic::message: alloc::string::String
+pub lean_rs_worker::LeanWorkerDoctorDiagnostic::severity: lean_rs_worker::LeanWorkerDoctorSeverity
+impl core::clone::Clone for lean_rs_worker::LeanWorkerDoctorDiagnostic
+pub fn lean_rs_worker::LeanWorkerDoctorDiagnostic::clone(&self) -> lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerDoctorDiagnostic
+pub fn lean_rs_worker::LeanWorkerDoctorDiagnostic::eq(&self, other: &lean_rs_worker::LeanWorkerDoctorDiagnostic) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerDoctorDiagnostic
+pub fn lean_rs_worker::LeanWorkerDoctorDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::marker::Send for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::marker::Sync for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDoctorDiagnostic
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDoctorDiagnostic
+pub struct lean_rs_worker::LeanWorkerDoctorReport
+pub lean_rs_worker::LeanWorkerDoctorReport::diagnostics: alloc::vec::Vec<lean_rs_worker::LeanWorkerDoctorDiagnostic>
+pub lean_rs_worker::LeanWorkerDoctorReport::metadata: core::option::Option<serde_json::value::Value>
+impl core::clone::Clone for lean_rs_worker::LeanWorkerDoctorReport
+pub fn lean_rs_worker::LeanWorkerDoctorReport::clone(&self) -> lean_rs_worker::LeanWorkerDoctorReport
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerDoctorReport
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerDoctorReport
+pub fn lean_rs_worker::LeanWorkerDoctorReport::eq(&self, other: &lean_rs_worker::LeanWorkerDoctorReport) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerDoctorReport
+pub fn lean_rs_worker::LeanWorkerDoctorReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerDoctorReport
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerDoctorReport
+impl core::marker::Send for lean_rs_worker::LeanWorkerDoctorReport
+impl core::marker::Sync for lean_rs_worker::LeanWorkerDoctorReport
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerDoctorReport
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDoctorReport
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDoctorReport
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDoctorReport
 pub struct lean_rs_worker::LeanWorkerElabOptions
 impl lean_rs_worker::LeanWorkerElabOptions
 pub fn lean_rs_worker::LeanWorkerElabOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
@@ -374,8 +493,29 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerRestartPolicy
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerRestartPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerRestartPolicy
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerRestartPolicy
+pub struct lean_rs_worker::LeanWorkerRuntimeMetadata
+pub lean_rs_worker::LeanWorkerRuntimeMetadata::lean_version: core::option::Option<alloc::string::String>
+pub lean_rs_worker::LeanWorkerRuntimeMetadata::protocol_version: u16
+pub lean_rs_worker::LeanWorkerRuntimeMetadata::worker_version: alloc::string::String
+impl core::clone::Clone for lean_rs_worker::LeanWorkerRuntimeMetadata
+pub fn lean_rs_worker::LeanWorkerRuntimeMetadata::clone(&self) -> lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerRuntimeMetadata
+pub fn lean_rs_worker::LeanWorkerRuntimeMetadata::eq(&self, other: &lean_rs_worker::LeanWorkerRuntimeMetadata) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerRuntimeMetadata
+pub fn lean_rs_worker::LeanWorkerRuntimeMetadata::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::marker::Send for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::marker::Sync for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerRuntimeMetadata
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerRuntimeMetadata
 pub struct lean_rs_worker::LeanWorkerSession<'worker>
 impl lean_rs_worker::LeanWorkerSession<'_>
+pub fn lean_rs_worker::LeanWorkerSession<'_>::capability_doctor(&mut self, export: &str, request: &serde_json::value::Value, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerDoctorReport, lean_rs_worker::LeanWorkerError>
+pub fn lean_rs_worker::LeanWorkerSession<'_>::capability_metadata(&mut self, export: &str, request: &serde_json::value::Value, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerCapabilityMetadata, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerSession<'_>::declaration_kinds(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerSession<'_>::declaration_names(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerSession<'_>::elaborate(&mut self, source: &str, options: &lean_rs_worker::LeanWorkerElabOptions, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerElabResult, lean_rs_worker::LeanWorkerError>

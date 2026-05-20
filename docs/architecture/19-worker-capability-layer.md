@@ -125,6 +125,16 @@ for one request. A timeout kills and replaces the child, records
 and invalidates the open session. Partial rows delivered before the timeout
 remain tentative because no terminal success summary was returned.
 
+As of the metadata and doctor work, runtime metadata and capability metadata are
+separate. `LeanWorker::runtime_metadata` reports worker protocol facts captured
+during handshake. `LeanWorkerSession::capability_metadata` and
+`LeanWorkerSession::capability_doctor` call downstream Lean exports with ABI
+`String -> IO String` and decode returned JSON into generic command,
+capability, version, and diagnostic envelopes. The worker transports and
+validates those envelopes; downstream crates decide which command names,
+capability names, semantic versions, and doctor diagnostics affect caches or
+user-facing support workflows.
+
 Use downstream crates for domain schemas. A `lean-dup` integration should map
 its own request and row types onto the generic worker capability layer; it
 should not require `lean-rs-worker` to know what a declaration row, feature row,
