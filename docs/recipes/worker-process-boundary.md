@@ -162,6 +162,12 @@ and schema-less callers. It returns raw `LeanWorkerDataRow` values with
 commands so row and summary decode errors are reported with command, stream,
 and sequence context.
 
+The typed path is also the high-throughput path. Internally the worker keeps row
+payloads as validated raw JSON until it decodes them into the caller's row type.
+The raw `LeanWorkerDataRow` escape hatch still parses payloads into
+`serde_json::Value`, which is convenient for ad hoc inspection but costs more on
+large streams.
+
 Request timeout is configured on `LeanWorkerConfig` or changed on a live worker
 or session:
 

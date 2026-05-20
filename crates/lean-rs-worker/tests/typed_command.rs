@@ -54,6 +54,12 @@ struct FixtureRow {
     ordinal: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+struct LargeFixtureRow {
+    kind: String,
+    blob: String,
+}
+
 #[derive(Debug, Deserialize, Eq, PartialEq)]
 struct FixtureSummary {
     fixture: String,
@@ -301,6 +307,36 @@ fn typed_streaming_command_summary_decode_error_is_typed() {
         }
         other => panic!("expected typed summary decode error, got {other:?}"),
     }
+}
+
+#[test]
+fn typed_streaming_command_decodes_large_payload_from_performance_path() {
+    let mut capability = builder().open().expect("builder opens capability");
+    let mut session = capability.open_session(None, None).expect("session opens");
+    let command = LeanWorkerStreamingCommand::<FixtureRequest, LargeFixtureRow, FixtureSummary>::new(
+        "lean_rs_interop_consumer_worker_data_stream_large_payload",
+    );
+    let sink = RecordingTypedSink::<LargeFixtureRow>::default();
+
+    let summary = session
+        .run_streaming_command(
+            &command,
+            &FixtureRequest {
+                source: "typed-stream-large-payload-test".to_owned(),
+            },
+            &sink,
+            None,
+            None,
+            None,
+        )
+        .expect("typed streaming command succeeds");
+
+    assert_eq!(summary.total_rows, 1);
+    let rows = sink.rows();
+    assert_eq!(rows.len(), 1);
+    let row = rows.first().expect("one row was recorded");
+    assert_eq!(row.payload.kind, "large");
+    assert_eq!(row.payload.blob.len(), 8192);
 }
 
 #[test]

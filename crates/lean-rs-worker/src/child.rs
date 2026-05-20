@@ -11,6 +11,8 @@ use lean_rs::{
 use lean_rs_host::{
     LeanCapabilities, LeanElabFailure, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
+use serde::Deserialize;
+use serde_json::value::RawValue;
 
 use crate::protocol::{
     DataRowEmitter, Diagnostic, Message, ProgressTick, ProtocolError, Request, Response, StreamSummary,
@@ -541,7 +543,7 @@ impl HostSessionState {
 #[derive(Clone, Debug)]
 struct PendingDataRow {
     stream: String,
-    payload: serde_json::Value,
+    payload: Box<RawValue>,
 }
 
 enum StreamCallbackEvent {
@@ -619,42 +621,45 @@ impl From<crate::protocol::ProtocolError> for StreamRunError {
 }
 
 fn parse_row_envelope(raw: &str) -> Result<StreamCallbackEvent, String> {
-    let value: serde_json::Value =
+    let envelope: RowCallbackEnvelope =
         serde_json::from_str(raw).map_err(|err| format!("row callback payload is not valid JSON: {err}"))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| "row callback payload must be a JSON object".to_owned())?;
-    if let Some(diagnostic) = object.get("diagnostic") {
-        let object = diagnostic
-            .as_object()
-            .ok_or_else(|| "diagnostic callback payload must be a JSON object".to_owned())?;
-        let code = object
-            .get("code")
-            .and_then(serde_json::Value::as_str)
+    if let Some(diagnostic) = envelope.diagnostic {
+        let code = diagnostic
+            .code
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| "diagnostic callback payload must contain a non-empty string field `code`".to_owned())?
-            .to_owned();
-        let message = object
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "diagnostic callback payload must contain a string field `message`".to_owned())?
-            .to_owned();
+            .ok_or_else(|| "diagnostic callback payload must contain a non-empty string field `code`".to_owned())?;
+        let message = diagnostic
+            .message
+            .ok_or_else(|| "diagnostic callback payload must contain a string field `message`".to_owned())?;
         return Ok(StreamCallbackEvent::Diagnostic(Diagnostic { code, message }));
     }
-    if let Some(metadata) = object.get("metadata") {
-        return Ok(StreamCallbackEvent::Metadata(metadata.clone()));
+    if let Some(metadata) = envelope.metadata {
+        let metadata = serde_json::from_str(metadata.get())
+            .map_err(|err| format!("metadata callback payload is not valid JSON: {err}"))?;
+        return Ok(StreamCallbackEvent::Metadata(metadata));
     }
-    let stream = object
-        .get("stream")
-        .and_then(serde_json::Value::as_str)
+    let stream = envelope
+        .stream
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "row callback payload must contain a non-empty string field `stream`".to_owned())?
-        .to_owned();
-    let payload = object
-        .get("payload")
-        .cloned()
+        .ok_or_else(|| "row callback payload must contain a non-empty string field `stream`".to_owned())?;
+    let payload = envelope
+        .payload
         .ok_or_else(|| "row callback payload must contain field `payload`".to_owned())?;
     Ok(StreamCallbackEvent::Row(PendingDataRow { stream, payload }))
+}
+
+#[derive(Deserialize)]
+struct RowCallbackEnvelope {
+    stream: Option<String>,
+    payload: Option<Box<RawValue>>,
+    diagnostic: Option<RowCallbackDiagnostic>,
+    metadata: Option<Box<RawValue>>,
+}
+
+#[derive(Deserialize)]
+struct RowCallbackDiagnostic {
+    code: Option<String>,
+    message: Option<String>,
 }
 
 impl WorkerElabOptions {
@@ -727,13 +732,11 @@ fn emit_progress(writer: &ProtocolWriter, phase: &str, current: u64, total: Opti
 fn emit_test_rows(writer: &ProtocolWriter, streams: &[String]) -> Result<u64, crate::protocol::ProtocolError> {
     let mut emitter = DataRowEmitter::default();
     for (idx, stream) in streams.iter().enumerate() {
-        let row = emitter.next(
-            stream.clone(),
-            serde_json::json!({
-                "stream": stream,
-                "index": idx,
-            }),
-        );
+        let payload = serde_json::value::to_raw_value(&serde_json::json!({
+            "stream": stream,
+            "index": idx,
+        }))?;
+        let row = emitter.next(stream.clone(), payload);
         writer.write(Message::DataRow(row))?;
     }
     Ok(emitter.count())

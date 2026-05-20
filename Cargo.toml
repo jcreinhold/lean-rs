@@ -18,7 +18,7 @@ lean-rs-sys = { path = "crates/lean-rs-sys" }
 lean-toolchain = { path = "crates/lean-toolchain" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.11"
 # Baseline tracing-subscriber surface: `registry` + `std` is enough for the
 # `DiagnosticCapture` plumbing in `lean-rs`. Crates that need `fmt` /

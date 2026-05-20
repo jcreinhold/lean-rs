@@ -8,11 +8,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
+use crate::session::LeanWorkerDataSinkTarget;
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityMetadata, LeanWorkerDataSink, LeanWorkerDiagnosticSink,
     LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult,
-    LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
-    check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic, report_parent_progress,
+    LeanWorkerProgressSink, LeanWorkerRawDataSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig,
+    LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic,
+    report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -894,7 +896,13 @@ impl LeanWorker {
         self.prepare_request(false)?;
         self.send_request(Request::EmitTestRows { streams })?;
         self.record_request(false);
-        match self.read_response_with_events(OPERATION, None, cancellation, data, None)? {
+        match self.read_response_with_events(
+            OPERATION,
+            None,
+            cancellation,
+            data.map(LeanWorkerDataSinkTarget::Value),
+            None,
+        )? {
             Response::RowsComplete { count } => Ok(count),
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
@@ -1112,6 +1120,44 @@ impl LeanWorker {
         export: &str,
         request: &serde_json::Value,
         rows: &dyn LeanWorkerDataSink,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
+        self.worker_run_data_stream_with_sink(
+            export,
+            request,
+            LeanWorkerDataSinkTarget::Value(rows),
+            diagnostics,
+            cancellation,
+            progress,
+        )
+    }
+
+    pub(crate) fn worker_run_data_stream_raw(
+        &mut self,
+        export: &str,
+        request: &serde_json::Value,
+        rows: &dyn LeanWorkerRawDataSink,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
+        self.worker_run_data_stream_with_sink(
+            export,
+            request,
+            LeanWorkerDataSinkTarget::Raw(rows),
+            diagnostics,
+            cancellation,
+            progress,
+        )
+    }
+
+    fn worker_run_data_stream_with_sink(
+        &mut self,
+        export: &str,
+        request: &serde_json::Value,
+        rows: LeanWorkerDataSinkTarget<'_>,
         diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
@@ -1375,7 +1421,7 @@ impl LeanWorker {
         operation: &'static str,
         progress: Option<&dyn LeanWorkerProgressSink>,
         cancellation: Option<&LeanWorkerCancellationToken>,
-        data: Option<&dyn LeanWorkerDataSink>,
+        data: Option<LeanWorkerDataSinkTarget<'_>>,
         diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
     ) -> Result<Response, LeanWorkerError> {
         let started = Instant::now();
@@ -1464,7 +1510,7 @@ impl LeanWorker {
                     }
                 }
                 Message::DataRow(row) => {
-                    report_parent_data_row(data, row.into())?;
+                    report_parent_data_row(data, row)?;
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
                         self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
                         return Err(LeanWorkerError::Cancelled { operation });

@@ -273,7 +273,8 @@ impl WorkerProcess {
                 Message::DataRow(row) => rows.push(WorkerDataRow {
                     stream: row.stream,
                     sequence: row.sequence,
-                    payload: row.payload,
+                    payload: serde_json::from_str(row.payload.get())
+                        .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?,
                 }),
                 Message::Response(Response::RowsComplete { count }) => {
                     let actual = u64::try_from(rows.len()).unwrap_or(u64::MAX);

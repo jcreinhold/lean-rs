@@ -29,6 +29,14 @@ lean-toolchain = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+criterion = { workspace = true }
+dhat = "0.3"
+
+[[bench]]
+harness = false
+name = "row_payload"
+
 [[bin]]
 name = "lean-rs-worker-child"
 path = "src/bin/lean-rs-worker-child.rs"

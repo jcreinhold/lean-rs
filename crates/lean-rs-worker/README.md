@@ -58,6 +58,13 @@ tentative until terminal success returns `LeanWorkerTypedStreamSummary` with
 total rows, per-stream counts, elapsed time, and optional typed metadata. Row
 schemas belong to the downstream tool.
 
+Large row streams use a private raw-JSON payload path. The child validates the
+payload as JSON, the worker protocol carries it without building a
+`serde_json::Value` tree, and typed commands deserialize directly into the
+caller row type at the parent boundary. `LeanWorkerDataRow` remains the
+schema-less escape hatch with a `serde_json::Value` payload; use it when callers
+need arbitrary inspection rather than maximum throughput.
+
 Capability metadata and doctor checks are separate from row streams.
 `LeanWorker::runtime_metadata` reports `lean-rs-worker` protocol facts from the
 child handshake. `LeanWorkerSession::capability_metadata` and

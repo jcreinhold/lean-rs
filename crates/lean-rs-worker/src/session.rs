@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::protocol::{
     DataRow, Diagnostic, StreamSummary, WorkerCapabilityFact, WorkerCapabilityMetadata, WorkerCommandMetadata,
@@ -313,13 +314,18 @@ pub struct LeanWorkerDataRow {
     pub payload: Value,
 }
 
-impl From<DataRow> for LeanWorkerDataRow {
-    fn from(value: DataRow) -> Self {
-        Self {
+impl TryFrom<DataRow> for LeanWorkerDataRow {
+    type Error = LeanWorkerError;
+
+    fn try_from(value: DataRow) -> Result<Self, Self::Error> {
+        let payload = serde_json::from_str(value.payload.get()).map_err(|err| LeanWorkerError::Protocol {
+            message: format!("worker data-row payload decode failed: {err}"),
+        })?;
+        Ok(Self {
             stream: value.stream,
             sequence: value.sequence,
-            payload: value.payload,
-        }
+            payload,
+        })
     }
 }
 
@@ -330,6 +336,32 @@ impl From<DataRow> for LeanWorkerDataRow {
 /// `LeanWorkerError::DataSinkPanic`.
 pub trait LeanWorkerDataSink: Send + Sync {
     fn report(&self, row: LeanWorkerDataRow);
+}
+
+pub(crate) struct LeanWorkerRawDataRow {
+    pub(crate) stream: String,
+    pub(crate) sequence: u64,
+    pub(crate) payload: Box<RawValue>,
+}
+
+impl From<DataRow> for LeanWorkerRawDataRow {
+    fn from(value: DataRow) -> Self {
+        Self {
+            stream: value.stream,
+            sequence: value.sequence,
+            payload: value.payload,
+        }
+    }
+}
+
+pub(crate) trait LeanWorkerRawDataSink: Send + Sync {
+    fn report(&self, row: LeanWorkerRawDataRow);
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum LeanWorkerDataSinkTarget<'a> {
+    Value(&'a dyn LeanWorkerDataSink),
+    Raw(&'a dyn LeanWorkerRawDataSink),
 }
 
 /// One diagnostic message delivered over a worker request.
@@ -778,6 +810,29 @@ impl LeanWorkerSession<'_> {
         }
     }
 
+    fn run_data_stream_raw(
+        &mut self,
+        export: &str,
+        request: &Value,
+        rows: &dyn LeanWorkerRawDataSink,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_run_data_stream_raw(export, request, rows, diagnostics, cancellation, progress)
+        {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     /// Run a typed non-streaming downstream JSON command.
     ///
     /// The Lean export must have ABI `String -> IO String`. The request is
@@ -862,14 +917,14 @@ impl LeanWorkerSession<'_> {
             })?;
         let internal_cancellation = LeanWorkerCancellationToken::new();
         let cancellation_for_stream = cancellation.unwrap_or(&internal_cancellation);
-        let typed_sink = TypedDataSink {
+        let typed_sink = TypedRawDataSink {
             export: command.export(),
             rows,
             cancellation: cancellation_for_stream,
             decode_error: std::sync::Mutex::new(None),
         };
 
-        match self.run_data_stream(
+        match self.run_data_stream_raw(
             command.export(),
             &request_value,
             &typed_sink,
@@ -988,25 +1043,25 @@ impl LeanWorkerSession<'_> {
     }
 }
 
-struct TypedDataSink<'a, Row> {
+struct TypedRawDataSink<'a, Row> {
     export: &'a str,
     rows: &'a dyn LeanWorkerTypedDataSink<Row>,
     cancellation: &'a LeanWorkerCancellationToken,
     decode_error: std::sync::Mutex<Option<LeanWorkerError>>,
 }
 
-impl<Row> TypedDataSink<'_, Row> {
+impl<Row> TypedRawDataSink<'_, Row> {
     fn take_decode_error(&self) -> Option<LeanWorkerError> {
         self.decode_error.lock().ok().and_then(|mut guard| guard.take())
     }
 }
 
-impl<Row> LeanWorkerDataSink for TypedDataSink<'_, Row>
+impl<Row> LeanWorkerRawDataSink for TypedRawDataSink<'_, Row>
 where
     Row: DeserializeOwned,
 {
-    fn report(&self, row: LeanWorkerDataRow) {
-        match serde_json::from_value(row.payload) {
+    fn report(&self, row: LeanWorkerRawDataRow) {
+        match serde_json::from_str(row.payload.get()) {
             Ok(payload) => self.rows.report(LeanWorkerTypedDataRow {
                 stream: row.stream,
                 sequence: row.sequence,
@@ -1058,14 +1113,37 @@ pub(crate) fn report_parent_progress(
 }
 
 pub(crate) fn report_parent_data_row(
-    sink: Option<&dyn LeanWorkerDataSink>,
-    row: LeanWorkerDataRow,
+    sink: Option<LeanWorkerDataSinkTarget<'_>>,
+    row: DataRow,
 ) -> Result<(), LeanWorkerError> {
     let Some(sink) = sink else {
         return Err(LeanWorkerError::Protocol {
             message: "worker sent data row for a request without a row sink".to_owned(),
         });
     };
+    match sink {
+        LeanWorkerDataSinkTarget::Value(sink) => {
+            let row = LeanWorkerDataRow::try_from(row)?;
+            report_value_data_row(sink, row)
+        }
+        LeanWorkerDataSinkTarget::Raw(sink) => report_raw_data_row(sink, row.into()),
+    }
+}
+
+fn report_value_data_row(sink: &dyn LeanWorkerDataSink, row: LeanWorkerDataRow) -> Result<(), LeanWorkerError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(row))).map_err(|payload| {
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            (*s).to_owned()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "worker data sink panicked".to_owned()
+        };
+        LeanWorkerError::DataSinkPanic { message }
+    })
+}
+
+fn report_raw_data_row(sink: &dyn LeanWorkerRawDataSink, row: LeanWorkerRawDataRow) -> Result<(), LeanWorkerError> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(row))).map_err(|payload| {
         let message = if let Some(s) = payload.downcast_ref::<&str>() {
             (*s).to_owned()

@@ -121,6 +121,12 @@ Use worker data rows when the application needs the worker process boundary.
 The row payload can be any JSON value, but `lean-rs-worker` treats it as data.
 Schema ownership remains with the downstream crate.
 
+For throughput, private `DataRow` frames carry validated raw JSON payloads. The
+public schema-less `LeanWorkerDataRow` still exposes `serde_json::Value`; that
+conversion happens only for callers that choose the low-level raw-row API. The
+typed command facade decodes the raw payload directly into the downstream row
+type, avoiding an intermediate JSON tree.
+
 The worked recipe is
 [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md).
 

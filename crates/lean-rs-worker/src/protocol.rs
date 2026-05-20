@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_json::value::RawValue;
 
-pub(crate) const PROTOCOL_VERSION: u16 = 1;
+pub(crate) const PROTOCOL_VERSION: u16 = 2;
 const MAX_FRAME_BYTES: u32 = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -25,7 +26,7 @@ impl Frame {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "body", rename_all = "snake_case")]
 pub(crate) enum Message {
     Handshake {
         worker_version: String,
@@ -141,12 +142,20 @@ pub(crate) struct ProgressTick {
     pub(crate) total: Option<u64>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DataRow {
     pub(crate) stream: String,
     pub(crate) sequence: u64,
-    pub(crate) payload: Value,
+    pub(crate) payload: Box<RawValue>,
 }
+
+impl PartialEq for DataRow {
+    fn eq(&self, other: &Self) -> bool {
+        self.stream == other.stream && self.sequence == other.sequence && self.payload.get() == other.payload.get()
+    }
+}
+
+impl Eq for DataRow {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct StreamSummary {
@@ -221,7 +230,7 @@ pub(crate) struct DataRowEmitter {
 }
 
 impl DataRowEmitter {
-    pub(crate) fn next(&mut self, stream: impl Into<String>, payload: Value) -> DataRow {
+    pub(crate) fn next(&mut self, stream: impl Into<String>, payload: Box<RawValue>) -> DataRow {
         let stream = stream.into();
         let sequence = self.sequences.entry(stream.clone()).or_insert(0);
         let row = DataRow {
@@ -239,9 +248,9 @@ impl DataRowEmitter {
         &mut self,
         writer: &mut impl Write,
         stream: impl Into<String>,
-        payload: Value,
+        payload: &Value,
     ) -> Result<(), ProtocolError> {
-        let row = self.next(stream, payload);
+        let row = self.next(stream, serde_json::value::to_raw_value(payload)?);
         write_frame(writer, Message::DataRow(row))
     }
 
@@ -395,19 +404,23 @@ mod tests {
     use std::io::Cursor;
 
     use serde_json::json;
+    use serde_json::value::RawValue;
 
     use super::{DataRow, DataRowEmitter, MAX_FRAME_BYTES, Message, ProtocolError, Response, read_frame, write_frame};
+
+    fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
+        serde_json::value::to_raw_value(value).expect("test JSON converts to raw value")
+    }
 
     #[test]
     fn data_row_round_trips_through_length_delimited_frame() {
         let row = DataRow {
             stream: "rows".to_owned(),
             sequence: 7,
-            payload: json!({ "name": "Nat.add", "score": 3 }),
+            payload: raw_json(&json!({ "name": "Nat.add", "score": 3 })),
         };
         let mut bytes = Vec::new();
         write_frame(&mut bytes, Message::DataRow(row.clone())).expect("data row writes");
-
         let frame = read_frame(&mut Cursor::new(bytes)).expect("data row reads");
         assert_eq!(frame.message, Message::DataRow(row));
     }
@@ -417,13 +430,13 @@ mod tests {
         let mut emitter = DataRowEmitter::default();
         let mut bytes = Vec::new();
         emitter
-            .emit(&mut bytes, "rows", json!({ "i": 0 }))
+            .emit(&mut bytes, "rows", &json!({ "i": 0 }))
             .expect("first row writes");
         emitter
-            .emit(&mut bytes, "warnings", json!({ "i": 1 }))
+            .emit(&mut bytes, "warnings", &json!({ "i": 1 }))
             .expect("second row writes");
         emitter
-            .emit(&mut bytes, "rows", json!({ "i": 2 }))
+            .emit(&mut bytes, "rows", &json!({ "i": 2 }))
             .expect("third row writes");
         assert_eq!(emitter.count(), 3);
 
@@ -439,17 +452,17 @@ mod tests {
                 Message::DataRow(DataRow {
                     stream: "rows".to_owned(),
                     sequence: 0,
-                    payload: json!({ "i": 0 }),
+                    payload: raw_json(&json!({ "i": 0 })),
                 }),
                 Message::DataRow(DataRow {
                     stream: "warnings".to_owned(),
                     sequence: 0,
-                    payload: json!({ "i": 1 }),
+                    payload: raw_json(&json!({ "i": 1 })),
                 }),
                 Message::DataRow(DataRow {
                     stream: "rows".to_owned(),
                     sequence: 1,
-                    payload: json!({ "i": 2 }),
+                    payload: raw_json(&json!({ "i": 2 })),
                 }),
             ],
         );
@@ -460,7 +473,7 @@ mod tests {
         let row = DataRow {
             stream: "rows".to_owned(),
             sequence: 0,
-            payload: json!({ "blob": "x".repeat(MAX_FRAME_BYTES as usize) }),
+            payload: raw_json(&json!({ "blob": "x".repeat(MAX_FRAME_BYTES as usize) })),
         };
         let mut bytes = Vec::new();
         let err = write_frame(&mut bytes, Message::DataRow(row)).expect_err("oversized frame is rejected");

@@ -159,3 +159,10 @@ timeouts, cancellation, and terminal completion. Typed row decode failures
 carry the command export, stream, and sequence; raw `LeanWorkerDataRow` access
 remains available through `run_data_stream` for callers that intentionally want
 schema-less rows.
+
+As of the row performance work, the private worker protocol uses an adjacent
+tag shape so `DataRow` can carry a `serde_json::value::RawValue` payload.
+Typed streaming commands deserialize that validated raw JSON directly into
+downstream row types. The public `LeanWorkerDataRow { payload:
+serde_json::Value }` surface remains for schema-less tooling, but it is no
+longer on the typed command hot path.

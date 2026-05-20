@@ -55,6 +55,14 @@ def manyWorkerDataRows (count : Nat) : Array String := Id.run do
 def workerDataStreamMany (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline (manyWorkerDataRows 512)
 
+def largeWorkerPayload : String :=
+  String.ofList (List.replicate 8192 'x')
+
+@[export lean_rs_interop_consumer_worker_data_stream_large_payload]
+def workerDataStreamLargePayload (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  LeanRsInterop.Callback.String.loop handle trampoline
+    #[ "{\"stream\":\"rows\",\"payload\":{\"kind\":\"large\",\"blob\":\"" ++ largeWorkerPayload ++ "\"}}" ]
+
 @[export lean_rs_interop_consumer_worker_data_stream_slow_after_row]
 def workerDataStreamSlowAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
   let status ← LeanRsInterop.Callback.String.loop handle trampoline
