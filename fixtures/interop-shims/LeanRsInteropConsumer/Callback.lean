@@ -17,4 +17,8 @@ def add (a b : UInt64) : UInt64 :=
 def callbackLoop (handle trampoline : USize) (total : UInt64) : IO UInt8 :=
   LeanRsInterop.Callback.loop handle trampoline total
 
+@[export lean_rs_interop_consumer_string_callback_loop]
+def stringCallbackLoop (handle trampoline : USize) (payloads : Array String) : IO UInt8 :=
+  LeanRsInterop.Callback.stringLoop handle trampoline payloads
+
 end LeanRsInteropConsumer.Callback

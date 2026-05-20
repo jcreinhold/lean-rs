@@ -85,6 +85,14 @@ jobs:
           cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
             --test callback_registry -- --test-threads=1
 
+      - name: ASan string callback ABI fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
+            --test string_callback_abi -- --test-threads=1
+
       - name: ASan host progress fixture
         env:
           RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
