@@ -45,8 +45,10 @@ The L1/L2 crate split gives each layer its own semver and refactor surface: `lea
 internal modules can reshape without affecting `lean-rs-host` callers, and vice versa, as long
 as both crate roots stay stable.
 
-See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decision rationale
-and [`03-host-stack.md`](03-host-stack.md) for `lean-rs-host`'s curated surface.
+See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decision rationale,
+[`03-host-stack.md`](03-host-stack.md) for `lean-rs-host`'s curated surface, and
+[`14-interop-release-contract.md`](14-interop-release-contract.md) for the final reusable
+interop release contract.
 
 ## Hidden knowledge
 

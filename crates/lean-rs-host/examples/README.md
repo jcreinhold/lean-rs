@@ -4,7 +4,7 @@
 `lean_rs_host::*` surfaces end to end against the in-tree fixture; reading them is the
 fastest path from a blank consumer project to a working integration.
 
-Five focused single-concern examples, one end-to-end tour, and one RSS reproducer. Each
+Six focused examples, one end-to-end tour, and one RSS reproducer. Each
 focused example sticks to one verb so a reader can scan it in a minute and reach for the
 matching crate API by analogy.
 
@@ -14,6 +14,7 @@ matching crate API by analogy.
 | [`evaluate`](#evaluate) | Call a typed Lean export through `LeanSession::call_capability`. |
 | [`proof_check`](#proof_check) | Kernel-check a theorem, re-validate the evidence, project a bounded summary. |
 | [`meta_query`](#meta_query) | Run a bounded `MetaM` service and branch on every status. |
+| [`progress`](#progress) | Observe structured progress and cooperative cancellation on long-running calls. |
 | [`tour`](#tour) | All four flows composed end to end in one process. |
 | [`lake_build_helper`](#lake_build_helper) | Build a Lake shared-library target through `lean-toolchain` without hand-written dylib path mangling. |
 | [`long_session_memory`](#long_session_memory) | RSS checkpoints for a long-lived process using fresh imports, pooled reuse, introspection, and elaboration. |
@@ -190,6 +191,28 @@ ok
 - `status=TimeoutOrHeartbeat: ...`—the heartbeat ceiling tripped
   before `infer_type` finished. Raise `LeanMetaOptions::new()
   .heartbeat_limit(N)`.
+
+### progress
+
+**Goal:** attach a `LeanProgressSink` to a bulk query, then show a progress sink
+triggering a shared `LeanCancellationToken`.
+
+**Run:**
+
+```sh
+cargo run -p lean-rs-host --example progress
+```
+
+**Expected output:** one or more `progress phase=... current=... total=...`
+lines, followed by `queried_declarations=3`, a `cancel_progress ...` line,
+`cancelled_code=lean_rs.cancelled`, and `ok`.
+
+**Common failures:**
+
+- `[lean_rs.module_init] ... failed to open Lean library`—the Lake fixture has
+  not been built. See *Prerequisites*.
+- No progress output—check that the example passes `Some(&sink)` as the final
+  progress argument; `None` is intentionally silent and keeps the fast path.
 
 ### tour
 

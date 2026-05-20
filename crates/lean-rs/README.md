@@ -96,9 +96,9 @@ For a complete downstream-style example that also lets Lean call a Rust callback
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
 
-Pre-publish (`lean-rs 0.1.0` is not yet on crates.io), pin against the workspace by adding
+Before the matching workspace version is published, pin against a checkout by adding
 `path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.
-Same for `lean-toolchain`.
+Do the same for `lean-toolchain`.
 
 The `Args` and `R` generics on `LeanModule::exported` are sealed by the `LeanAbi` /
 `LeanArgs` / `DecodeCallResult` traits, so unsupported types fail at compile time rather than

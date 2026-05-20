@@ -2,7 +2,10 @@
 //!
 //! Every field is a `&'static str` resolved at build time — by
 //! `lean-rs-sys`'s build script (`LEAN_VERSION`, `LEAN_HEADER_DIGEST`) or by
-//! this crate's `build.rs` (`LAKE_FIXTURE_DIGEST`, `HOST_TRIPLE`). The
+//! this crate's `build.rs` (`LAKE_FIXTURE_DIGEST`, `HOST_TRIPLE`). Published
+//! crate builds that do not contain the workspace fixture record a zero
+//! `LAKE_FIXTURE_DIGEST`; the value is a workspace regression key, not a
+//! downstream compatibility promise. The
 //! fingerprint is therefore stable across runs for a given build and cheap to
 //! use as a cache key.
 
@@ -28,7 +31,8 @@ pub struct ToolchainFingerprint {
     pub resolved_version: &'static str,
     /// SHA-256 of the `lean.h` this build was resolved against.
     pub header_sha256: &'static str,
-    /// SHA-256 of the bundled Lake fixture artifacts.
+    /// SHA-256 of the workspace Lake fixture artifacts, or zero when the
+    /// crate is built from a published tarball without workspace fixtures.
     pub fixture_sha256: &'static str,
     /// Target triple this crate was built for.
     pub host_triple: &'static str,

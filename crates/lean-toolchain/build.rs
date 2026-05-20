@@ -1,11 +1,13 @@
 //! Build script for `lean-toolchain`.
 //!
 //! 1. Walk parents of `$CARGO_MANIFEST_DIR` until `fixtures/lean/lakefile.lean`
-//!    is found; that directory roots the Lake fixture.
-//! 2. Compute a SHA-256 over a stable ordered concatenation of the fixture
+//!    is found; that directory roots the workspace Lake fixture.
+//! 2. In a workspace checkout, compute a SHA-256 over a stable ordered concatenation of the fixture
 //!    Lake manifest plus the compiled `.olean` and shared-library artifacts.
 //!    If any artifact is absent, abort with a `cargo:warning=` line naming
 //!    the path and the recovery command.
+//!    Published crate tarballs do not include the workspace fixture; those builds
+//!    record a zero digest instead.
 //! 3. Write `$OUT_DIR/metadata.rs` with `LAKE_FIXTURE_DIGEST` and
 //!    `HOST_TRIPLE` so `fingerprint.rs` can `include!` them.
 //! 4. Emit `cargo:rerun-if-changed=*` for every input the digest depends on
@@ -34,59 +36,68 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
-    let fixture_dir = find_fixture_dir(&manifest_dir);
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let dylib_ext = match target_os.as_str() {
-        "macos" => "dylib",
-        "linux" => "so",
-        other => panic!("lean-toolchain: unsupported target_os `{other}`; only macos and linux are tested"),
-    };
-
-    // Lake's shared-library filename changed between Lean 4.26 and 4.27:
-    // older versions emit `liblean_rs_fixture.{dylib,so}` (just the lib
-    // name); 4.27+ emit `liblean__rs__fixture_LeanRsFixture.{dylib,so}`
-    // (package-escaped + lib name). Probe both candidates so the build
-    // works across the supported window.
-    let lib_dir = fixture_dir.join(".lake/build/lib");
-    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
-    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
-    let fixture_dylib = if new_style.is_file() {
-        (new_style, "liblean__rs__fixture_LeanRsFixture")
-    } else {
-        (old_style, "libLeanRsFixture")
-    };
-    let inputs: Vec<(PathBuf, &str)> = vec![
-        (fixture_dir.join("lakefile.lean"), "lakefile.lean"),
-        (fixture_dir.join("lake-manifest.json"), "lake-manifest.json"),
-        (
-            fixture_dir.join(".lake/build/lib/lean/LeanRsFixture.olean"),
-            "LeanRsFixture.olean",
-        ),
-        fixture_dylib,
-    ];
-
-    let mut hasher = Sha256::new();
-    for (path, label) in &inputs {
-        if !path.is_file() {
+    let (digest, inputs) = find_fixture_dir(&manifest_dir).map_or_else(
+        || {
             println!(
-                "cargo:warning=lean-toolchain: missing fixture artifact {} (run `cd fixtures/lean && lake build`)",
-                path.display()
+                "cargo:warning=lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero"
             );
-            panic!(
-                "lean-toolchain: missing fixture artifact {} ({label}); run `cd fixtures/lean && lake build`",
-                path.display()
-            );
-        }
-        let bytes =
-            fs::read(path).unwrap_or_else(|err| panic!("lean-toolchain: cannot read {}: {err}", path.display()));
-        // Domain-separated, length-prefixed: label, length, bytes. Prevents
-        // boundary ambiguity between concatenated inputs.
-        hasher.update((label.len() as u64).to_le_bytes());
-        hasher.update(label.as_bytes());
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(&bytes);
-    }
-    let digest = hex(&hasher.finalize());
+            ("0".repeat(64), Vec::new())
+        },
+        |fixture_dir| {
+            let dylib_ext = match target_os.as_str() {
+                "macos" => "dylib",
+                "linux" => "so",
+                other => panic!("lean-toolchain: unsupported target_os `{other}`; only macos and linux are tested"),
+            };
+
+            // Lake's shared-library filename changed between Lean 4.26 and 4.27:
+            // older versions emit `liblean_rs_fixture.{dylib,so}` (just the lib
+            // name); 4.27+ emit `liblean__rs__fixture_LeanRsFixture.{dylib,so}`
+            // (package-escaped + lib name). Probe both candidates so the build
+            // works across the supported window.
+            let lib_dir = fixture_dir.join(".lake/build/lib");
+            let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
+            let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
+            let fixture_dylib = if new_style.is_file() {
+                (new_style, "liblean__rs__fixture_LeanRsFixture")
+            } else {
+                (old_style, "libLeanRsFixture")
+            };
+            let inputs: Vec<(PathBuf, &str)> = vec![
+                (fixture_dir.join("lakefile.lean"), "lakefile.lean"),
+                (fixture_dir.join("lake-manifest.json"), "lake-manifest.json"),
+                (
+                    fixture_dir.join(".lake/build/lib/lean/LeanRsFixture.olean"),
+                    "LeanRsFixture.olean",
+                ),
+                fixture_dylib,
+            ];
+
+            let mut hasher = Sha256::new();
+            for (path, label) in &inputs {
+                if !path.is_file() {
+                    println!(
+                        "cargo:warning=lean-toolchain: missing fixture artifact {} (run `cd fixtures/lean && lake build`)",
+                        path.display()
+                    );
+                    panic!(
+                        "lean-toolchain: missing fixture artifact {} ({label}); run `cd fixtures/lean && lake build`",
+                        path.display()
+                    );
+                }
+                let bytes = fs::read(path)
+                    .unwrap_or_else(|err| panic!("lean-toolchain: cannot read {}: {err}", path.display()));
+                // Domain-separated, length-prefixed: label, length, bytes. Prevents
+                // boundary ambiguity between concatenated inputs.
+                hasher.update((label.len() as u64).to_le_bytes());
+                hasher.update(label.as_bytes());
+                hasher.update((bytes.len() as u64).to_le_bytes());
+                hasher.update(&bytes);
+            }
+            (hex(&hasher.finalize()), inputs)
+        },
+    );
 
     let host_triple = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
 
@@ -143,19 +154,16 @@ fn discover_prefix() -> Option<PathBuf> {
     }
 }
 
-fn find_fixture_dir(start: &Path) -> PathBuf {
+fn find_fixture_dir(start: &Path) -> Option<PathBuf> {
     let mut cursor = start;
     loop {
         let candidate = cursor.join("fixtures").join("lean");
         if candidate.join("lakefile.lean").is_file() {
-            return candidate;
+            return Some(candidate);
         }
         match cursor.parent() {
             Some(parent) => cursor = parent,
-            None => panic!(
-                "lean-toolchain: could not find `fixtures/lean/lakefile.lean` walking up from {}",
-                start.display()
-            ),
+            None => return None,
         }
     }
 }

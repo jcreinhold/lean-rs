@@ -83,3 +83,5 @@ Structured host progress is documented in
 [`13-structured-progress.md`](13-structured-progress.md).
 Shim packaging is crate-owned: `lean-rs` ships the L1 generic interop shims,
 and `lean-rs-host` ships the host shims it loads.
+The release contract and source-of-truth map are in
+[`14-interop-release-contract.md`](14-interop-release-contract.md).

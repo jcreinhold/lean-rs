@@ -3,7 +3,7 @@
 //! Sits one layer above the workspace crate [`lean_rs_sys`], which owns the raw `extern "C"`
 //! declarations, the hand-written refcount inline helpers, the signature-checked symbol
 //! allowlist, the header SHA-256 digest, and the link directives. This crate composes on top:
-//! a typed [`ToolchainFingerprint`], the Lake [`LAKE_FIXTURE_DIGEST`], a layered
+//! a typed [`ToolchainFingerprint`], the workspace-only Lake [`LAKE_FIXTURE_DIGEST`], a layered
 //! [`LinkDiagnostics`] error type, and reusable build-script helpers
 //! ([`emit_lean_link_directives_checked`], [`build_lake_target`],
 //! [`build_lake_target_quiet`]) that downstream embedders and higher layers can use to get

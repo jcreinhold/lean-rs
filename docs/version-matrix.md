@@ -23,6 +23,8 @@ versions are not supported.
 The bundled Lake packages under `crates/lean-rs/shims/` and
 `crates/lean-rs-host/shims/`, plus `fixtures/lean` and `fixtures/interop-shims`,
 use the same toolchain window.
+The reusable interop release contract is documented in
+[`docs/architecture/14-interop-release-contract.md`](architecture/14-interop-release-contract.md).
 
 ## `lean-rs-sys` symbol coverage
 

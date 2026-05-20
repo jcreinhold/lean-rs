@@ -13,6 +13,47 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 
 _Nothing yet._
 
+## [0.1.1] — 2026-05-20
+
+Hardening release for the reusable Lean/Rust interop stack. This release keeps the same Lean
+toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
+
+### `lean-rs-sys` 0.1.1
+
+- Added the internal `metadata-only` feature so `lean-toolchain` can depend on build-time Lean
+  metadata without linking downstream `build.rs` binaries to `libleanshared`.
+
+### `lean-toolchain` 0.1.1
+
+- Added `build_lake_target(project_root, target_name)` and
+  `build_lake_target_quiet(project_root, target_name)` for Lake shared-library targets. The
+  helpers hide Lake output naming, cache hits, cache misses, and Cargo rerun directives behind
+  typed `LinkDiagnostics`.
+- Added `emit_lean_link_directives_checked()` for callers that want typed link diagnostics rather
+  than warning-only output.
+
+### `lean-rs` 0.1.1
+
+- Added the L1 callback registry: `LeanCallbackHandle`, `LeanCallbackEvent`, and
+  `LeanCallbackStatus`. Lean can call Rust through opaque handles and the crate-owned trampoline
+  without exposing public raw callback pointers.
+- Bundled the generic `lean-rs-interop-shims` Lake package under the crate so downstream L1
+  consumers do not depend on in-tree development paths.
+- Added the downstream interop example and recipe covering Rust-to-Lean exported calls plus
+  Lean-to-Rust callbacks without `lean-rs-host`.
+
+### `lean-rs-host` 0.1.1
+
+- Added cooperative cancellation (`LeanCancellationToken`) and structured progress
+  (`LeanProgressSink`, `LeanProgressEvent`) to long-running host-session operations.
+- Added source-range lookup, filtered declaration listing, `is_def_eq`, and the three bulk
+  declaration-property methods.
+- Bundled the host and generic shim packages under the crate. Consumers no longer add
+  `lean_rs_host_shims` or `lean_rs_interop_shims` to their own `lakefile.lean`; the host loader
+  builds and opens the bundled shims on demand.
+- Added release-contract docs, sanitizer coverage for callbacks/progress, and Criterion guard
+  commands for the no-callback/no-progress fast paths.
+
 ## [0.1.0] — 2026-05-18
 
 First public release of **four** crates. Crate-publish order is load-bearing:
@@ -166,4 +207,5 @@ Known gaps:
 - See `docs/lean-rs-host-capability-contract.md` for the full 13+3 shim contract and the
   `LeanDiagnosticCode` taxonomy that surfaces capability-loading failures.
 
+[0.1.1]: https://github.com/jcreinhold/lean-rs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jcreinhold/lean-rs/releases/tag/v0.1.0

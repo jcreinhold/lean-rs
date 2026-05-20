@@ -30,6 +30,19 @@ cargo bench -p lean-rs-host --bench session -- \
 `progress = None` should stay within Criterion noise because it allocates no
 callback handle and dispatches the same bulk shim as before.
 
+Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
+
+```text
+cargo bench -p lean-rs-host --bench session -- \
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline prompt47-before
+baseline time: [99.764 µs 100.01 µs 100.36 µs]
+
+cargo bench -p lean-rs-host --bench session -- \
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline prompt47-before
+comparison time: [100.58 µs 101.11 µs 101.52 µs]
+Criterion: No change in performance detected.
+```
+
 The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion
 benches because they only fire once per process. Run them via:
 

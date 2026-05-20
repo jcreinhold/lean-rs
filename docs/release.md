@@ -9,7 +9,7 @@ order, and opens a GitHub Release whose body is the matching `## [<version>]` se
 This document is the **human checklist** for the steps before the tag push. The steps after
 the tag push are owned by the workflow.
 
-**Supported Lean window for v0.1.0:** 4.26.0 through 4.29.1. Adding the next release follows
+**Supported Lean window for v0.1.x:** 4.26.0 through 4.29.1. Adding the next release follows
 the [bump procedure](bump-toolchain.md); re-confirm against the
 [version matrix](version-matrix.md) and `crates/lean-rs-sys/src/supported.rs` before any
 release.
@@ -42,7 +42,7 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see
 
 ## Step 2—CHANGELOG + version bump
 
-1. Move `## [Unreleased]` entries into a new `## [vX.Y.Z]` section (or compose fresh). The workflow extracts the section body whose heading matches the pushed tag—heading text must match exactly (e.g., `## [0.1.0]` for tag `v0.1.0`).
+1. Move `## [Unreleased]` entries into a new `## [X.Y.Z]` section (or compose fresh). The workflow extracts the section body whose heading matches the pushed tag—heading text must match exactly (e.g., `## [0.1.1]` for tag `v0.1.1`).
 2. Bump `[workspace.package].version` and `[workspace.dependencies]` in the root `Cargo.toml` if they don't already match. The workflow asserts `"v${workspace.package.version}" == "${GITHUB_REF_NAME}"` before any publish.
 3. If the public API changed intentionally, regenerate the baselines in the same commit:
 
@@ -74,8 +74,8 @@ sanity check that doesn't show up in the regular CI run.
 Only after the merge commit is on `main`:
 
 ```sh
-git tag -s v0.1.0 -m "lean-rs v0.1.0"
-git push origin v0.1.0
+git tag -s v0.1.1 -m "lean-rs v0.1.1"
+git push origin v0.1.1
 ```
 
 `-s` for a signed tag (recommended) or `-a` for unsigned annotated. The tag fires the
@@ -115,15 +115,18 @@ wrong workspace version.
 Use only when CI is genuinely blocked (account suspension, runner outage, secret loss).
 
 ```sh
+version=$(cargo metadata --no-deps --format-version 1 \
+  | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
+
 cargo publish -p lean-rs-sys
 sleep 90 && cargo publish -p lean-toolchain
 sleep 90 && cargo publish -p lean-rs
 sleep 90 && cargo publish -p lean-rs-host
 
-git tag -s v0.1.0 -m "lean-rs v0.1.0"
-git push origin v0.1.0
-gh release create v0.1.0 \
-  --notes-file <(awk '/^## \[0\.1\.0\]/{f=1;next} f&&/^## \[/{exit} f' CHANGELOG.md)
+git tag -s "v${version}" -m "lean-rs v${version}"
+git push origin "v${version}"
+gh release create "v${version}" \
+  --notes-file <(awk -v ver="$version" '$0 ~ "^## \\[" ver "\\]" {f=1;next} f&&/^## \\[/{exit} f' CHANGELOG.md)
 ```
 
 Prerequisite: `cargo login` once with the same scoped publish token.

@@ -1,7 +1,7 @@
 [package]
 authors.workspace = true
 categories = ["api-bindings", "external-ffi-bindings"]
-description = "Safe Rust bindings for hosting Lean 4 capabilities: runtime initialization, owned and borrowed object handles, typed first-order ABI conversions, compiled module loading, exported function calls, semantic handles, bounded meta services, batching, and session pooling."
+description = "Safe Rust bindings for Lean 4 interop: runtime initialization, object handles, typed ABI conversions, module loading, exported function calls, semantic handles, and callback handles."
 documentation = "https://docs.rs/lean-rs"
 edition.workspace = true
 include = [

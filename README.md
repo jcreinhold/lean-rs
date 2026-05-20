@@ -19,7 +19,7 @@ does not reconstruct Lean semantic facts; that responsibility stays in Lean.
 
 ## Run the worked examples
 
-Seven host-stack examples live under
+Eight host-stack examples live under
 [`crates/lean-rs-host/examples/`](crates/lean-rs-host/examples/). Build the in-tree fixture
 once, then run any of them:
 
@@ -29,8 +29,8 @@ cargo run -p lean-rs-host --example tour
 ```
 
 `tour` composes the full host-stack flow (open → load capabilities → import session →
-elaborate → kernel-check → bulk query → `Meta.whnf`) in one process; four focused examples
-(`theorem_query`, `evaluate`, `proof_check`, `meta_query`) each isolate one verb. See
+elaborate → kernel-check → bulk query → `Meta.whnf`) in one process; five focused examples
+(`theorem_query`, `evaluate`, `proof_check`, `meta_query`, `progress`) each isolate one verb. See
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md) for the
 per-example walkthrough—what each one teaches, expected output, and common failures.
 
@@ -181,6 +181,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md)—the reusable Lean-side interop shim package.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md)—the downstream build-script helper path and cache/diagnostic contract.
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md)—the host progress-sink contract over the reusable callback substrate.
+- [`14-interop-release-contract.md`](docs/architecture/14-interop-release-contract.md)—the final interop release contract and source-of-truth map.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the L1 recipe for Rust-to-Lean exported calls and Lean-to-Rust callbacks without `lean-rs-host`.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later

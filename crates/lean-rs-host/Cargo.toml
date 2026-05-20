@@ -1,7 +1,7 @@
 [package]
 authors.workspace = true
 categories = ["api-bindings"]
-description = "Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability: typed sessions, kernel-check evidence handles, bounded MetaM services, batching, and session pooling. Built on top of the `lean-rs` FFI primitive."
+description = "Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability: typed sessions, kernel-check evidence handles, bounded MetaM services, progress, batching, and session pooling."
 documentation = "https://docs.rs/lean-rs-host"
 edition.workspace = true
 include = [
