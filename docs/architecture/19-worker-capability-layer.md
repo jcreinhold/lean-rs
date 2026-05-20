@@ -2,9 +2,8 @@
 
 Prompt 65 proved the transport mechanics for worker data rows: a child process
 can run a downstream Lean export and send JSON-shaped rows to the parent as
-`LeanWorkerDataRow` values. That proof is necessary, but it is not yet a
-complete replacement for a production subprocess worker such as
-`lean-dup-worker`.
+`LeanWorkerDataRow` values. Prompts 67-75 turned that transport proof into the
+generic worker capability layer described here.
 
 A subprocess worker does more than move rows. It defines when rows become
 committable, how diagnostics are separated from data, how request timeouts are
@@ -14,7 +13,7 @@ transport and below downstream business schemas.
 
 ## Chosen Boundary
 
-`lean-rs-worker` should grow a generic worker capability layer. That layer owns:
+`lean-rs-worker` exposes a generic worker capability layer. That layer owns:
 
 - process lifecycle and restart behavior;
 - private worker framing and live bounded row forwarding;
@@ -57,34 +56,35 @@ framing, live streaming, timeout, cancellation, diagnostics, metadata,
 completion, and restart behavior. Downstream crates own schemas and semantic
 commands.
 
-## Missing Capabilities
+## Capability Surface
 
-The next prompts fill the gap between row transport and a production worker
-replacement:
+The capability layer fills the gap between row transport and a production
+worker replacement:
 
-1. **Live bounded forwarding.** Rows must reach the parent while Lean produces
-   them. The worker needs bounded buffering, backpressure rules, cancellation at
-   row boundaries, and sink-failure handling.
-2. **Terminal completion and diagnostics.** A stream needs per-stream row
+1. **Live bounded forwarding.** Rows reach the parent while Lean produces them.
+   The worker owns bounded buffering, pipe backpressure at row boundaries,
+   cancellation checks, and sink-failure handling.
+2. **Terminal completion and diagnostics.** Streams return per-stream row
    counts, elapsed time, optional downstream terminal JSON, and clear
-   commit-after-success semantics. Diagnostics must not be smuggled through row
-   payloads.
+   commit-after-success semantics. Diagnostics have a separate sink and are not
+   smuggled through row payloads.
 3. **Timeouts and watchdogs.** Startup timeout, request timeout, cancellation,
-   child crash, and policy restart are different outcomes and need different
-   typed errors.
-4. **Capability metadata and doctor checks.** Downstream tools need a generic
-   way to report protocol versions, capability versions, supported commands,
-   supported features, Lean version, and health diagnostics without hard-coding
-   one tool's command set into `lean-rs-worker`.
-5. **Builder ergonomics.** A normal downstream path should compose Lake target
+   child crash, and policy restart are distinct outcomes with distinct typed
+   errors or restart reasons.
+4. **Capability metadata and doctor checks.** Downstream tools can report
+   protocol versions, capability versions, supported commands, supported
+   features, Lean version, and health diagnostics without hard-coding one tool's
+   command set into `lean-rs-worker`.
+5. **Builder ergonomics.** `LeanWorkerCapabilityBuilder` composes Lake target
    build, shim resolution, worker child path, capability dylib path, imports,
-   restart policy, and session opening without handwritten path mangling.
-6. **Typed command facade.** Downstream callers should be able to use serde
-   request, row, and summary types while `lean-rs-worker` owns transport,
-   lifecycle, diagnostics, timeout, cancellation, and completion.
-7. **High-throughput row payload path.** Large streams need measured choices
-   around `serde_json::Value`, raw JSON values, owned bytes, allocation count,
-   row throughput, and parent/child RSS.
+   restart policy, metadata validation, and session opening without handwritten
+   path mangling.
+6. **Typed command facade.** Downstream callers use serde request, row, and
+   summary types while `lean-rs-worker` owns transport, lifecycle, diagnostics,
+   timeout, cancellation, and completion.
+7. **High-throughput row payload path.** Large streams use a private raw-JSON
+   representation so typed commands can deserialize directly into downstream
+   row types without first building a `serde_json::Value` tree.
 
 ## Relationship To Callback Payloads
 
@@ -97,10 +97,12 @@ worker boundary, the parent receives worker rows and diagnostics. Callback
 handles, raw Lean object lifetimes, and trampoline values remain in-process
 mechanisms.
 
-Byte and object callback prompts remain L1 `lean-rs` payload work. They are not
-shortcuts for worker capability streaming, and worker capability streaming is
-not a reason to expose arbitrary downstream `LeanCallbackPayload`
-implementations.
+Future byte or object callback work remains L1 `lean-rs` payload work. It is
+not a shortcut for worker capability streaming, and worker capability streaming
+is not a reason to expose arbitrary downstream `LeanCallbackPayload`
+implementations. Byte callbacks need a concrete same-process binary callback
+caller before they earn public surface. Object callbacks remain rejected for
+this release unless a future soundness prompt proves a scoped API.
 
 ## Consumer Guidance
 

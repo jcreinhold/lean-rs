@@ -101,6 +101,22 @@ jobs:
           cargo +nightly test -p lean-rs-host --target x86_64-unknown-linux-gnu \
             --test progress -- --test-threads=1
 
+      - name: ASan worker crash-containment fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
+            --test supervisor child_crash_is_typed_and_parent_survives -- --test-threads=1
+
+      - name: ASan worker streaming fatal-exit fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
+            --test streaming_runner child_fatal_exit_is_reported_to_parent -- --test-threads=1
+
   fuzz:
     name: ABI fuzz smoke
     runs-on: ubuntu-latest

@@ -6,10 +6,11 @@ failure and memory contracts. It is not the containment boundary for production
 systems that must survive Lean internal panics, aborts, foreign unwinds, or
 long-running import sweeps that retain process-global memory.
 
-The production boundary is a worker process. Future `lean-rs-worker` support
-will own child processes, framed IPC, restart policy, fatal-exit diagnostics,
-and memory cycling. `lean-rs-host` remains the in-process API that the worker
-uses inside the child.
+The production boundary is a worker process. `lean-rs-worker` owns child
+processes, framed IPC, restart policy, fatal-exit diagnostics, request
+timeouts, live row streaming, typed command facades, and memory cycling.
+`lean-rs-host` remains the in-process API that the worker uses inside the
+child.
 
 ## Chosen Boundary
 
@@ -19,8 +20,9 @@ The crate split is:
   payloads.
 - `lean-rs-host` owns in-process sessions, imports, elaboration, kernel checks,
   declaration introspection, `MetaM`, pooling, cancellation, and progress.
-- `lean-rs-worker` will own process supervision, worker protocol framing,
-  restart policy, lifecycle, memory cycling, and fatal-exit reporting.
+- `lean-rs-worker` owns process supervision, worker protocol framing, restart
+  policy, lifecycle, request watchdogs, row streaming, typed commands, memory
+  cycling, and fatal-exit reporting.
 
 This boundary keeps each layer at a different abstraction. `lean-rs-host`
 answers theorem-prover questions in one process. `lean-rs-worker` answers an

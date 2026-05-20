@@ -132,7 +132,8 @@ regression toward one of them.
 - **Conflate L1 FFI primitive and L2 host stack in one crate.** Putting both layers behind one default entry point (`LeanHost`) made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without first satisfying the `lean_rs_host_*` shim contract. Generic callback helpers belong below the host stack; theorem-prover host shims do not.
 
 The adopted shape is deeper than each rejected alternative: fewer caller-facing details, less
-temporal coupling, a small unsafe surface, and a one-line layering invariant
-(`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`). It matches the dominant Rust
-binding shape, so contributors arrive with correct expectations, and it contains no Rust-side
-dependent-type imitation.
+temporal coupling, a small unsafe surface, and a one-line in-process layering invariant
+(`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`) with `lean-rs-worker` wrapping the
+host stack when callers need a process boundary. It matches the dominant Rust binding shape,
+so contributors arrive with correct expectations, and it contains no Rust-side dependent-type
+imitation.

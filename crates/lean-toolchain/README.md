@@ -37,7 +37,7 @@ emits only `cargo:` directives on stdout, and returns typed `LinkDiagnostics`
 for missing `lake`, target lookup failures, Lake build failures, and unresolved
 outputs.
 
-See the [workspace README](https://github.com/jcreinhold/lean-rs) for the four-crate
+See the [workspace README](https://github.com/jcreinhold/lean-rs) for the five-crate
 architecture overview and [`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)
 for the supported Lean window.
 

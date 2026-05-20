@@ -1,20 +1,24 @@
 # Diagnostics and Observability
 
-Both crates project errors to the same stable [`lean_rs::LeanDiagnosticCode`] taxonomy and
-emit structured `tracing` spans against the `lean_rs` target. Long-running host
-session operations can also report live progress through
+`lean-rs` and `lean-rs-host` project errors to the same stable
+[`lean_rs::LeanDiagnosticCode`] taxonomy and emit structured `tracing` spans against the
+`lean_rs` target. Long-running host session operations can also report live progress through
 `lean_rs_host::LeanProgressSink`; see
 [`architecture/13-structured-progress.md`](architecture/13-structured-progress.md).
-A downstream caller gets:
+`lean-rs-worker` uses its own `LeanWorkerError` surface for process-boundary outcomes such as
+child exit, request timeout, cancellation, data-sink panic, diagnostic-sink panic, and typed
+command decode failures. A downstream caller gets:
 
 - a stable identifier (`err.code()`) to react by family, independent of internal stage tags that may grow new variants;
 - visibility into where time is spent and where failures originate, without rebuilding the crates.
 
-The taxonomy is unified across both crates (every recoverable failure on either side maps to
-a stable code); the span catalogue is split by emitting crate so the layer boundary is
+The taxonomy is unified across `lean-rs` and `lean-rs-host` (every recoverable failure on
+either side maps to a stable code); the span catalogue is split by emitting crate so the layer boundary is
 visible at the log line. Lean internal panics are outside this error taxonomy: there is no
 `SessionPoisoned` code. A Lean runtime panic during a `LeanSession` call may terminate the
 process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md).
+When the same failure happens inside `lean-rs-worker`, the parent observes a typed worker exit
+instead of an in-process `LeanDiagnosticCode`.
 
 ## Diagnostic codes
 
@@ -87,8 +91,9 @@ shapes (which carry a `LeanElabFailure`). `LeanElabFailure::code()` always retur
 
 ## Tracing
 
-Both crates declare spans against the `lean_rs` target. Neither installs a subscriber—pick
-one downstream, or use [`DiagnosticCapture`](#capturing-diagnostics-in-tests) for tests.
+`lean-rs` and `lean-rs-host` declare spans against the `lean_rs` target. Neither installs a
+subscriber—pick one downstream, or use [`DiagnosticCapture`](#capturing-diagnostics-in-tests)
+for tests.
 
 Recommended `RUST_LOG` scopes:
 
@@ -199,8 +204,8 @@ that drops the relevant fields.
 
 ## Cross-references
 
-- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; defined on L1, both crates project to it.
-- [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from both crates against the shared `lean_rs` target.
+- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; defined on L1, `lean-rs` and `lean-rs-host` project to it.
+- [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
 - [Host stack surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.

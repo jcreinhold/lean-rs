@@ -1,6 +1,6 @@
 # Version Matrix
 
-Tested configurations for the four published `lean-rs` crates.
+Tested configurations for the five published `lean-rs` crates.
 Configurations outside these tables are unsupported, even if they happen to compile.
 
 - Policy: [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md)
@@ -23,6 +23,8 @@ versions are not supported.
 The bundled Lake packages under `crates/lean-rs/shims/` and
 `crates/lean-rs-host/shims/`, plus `fixtures/lean` and `fixtures/interop-shims`,
 use the same toolchain window.
+`lean-rs-worker` uses the same window because its child process loads the host
+stack and fixture/capability dylibs built against that toolchain.
 The reusable interop release contract is documented in
 [`docs/architecture/14-interop-release-contract.md`](architecture/14-interop-release-contract.md).
 

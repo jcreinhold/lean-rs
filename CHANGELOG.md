@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the four published `lean-rs` workspace crates are recorded here. The
+All notable changes to the five published `lean-rs` workspace crates are recorded here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each crate version is
 governed by Cargo's `0.x` semver. Items inside `pub(crate)` modules are not part of the public
 API and are excluded from this log.
@@ -59,6 +59,24 @@ toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
   builds and opens the bundled shims on demand.
 - Added release-contract docs, sanitizer coverage for callbacks/progress, and Criterion guard
   commands for the no-callback/no-progress fast paths.
+
+### `lean-rs-worker` 0.1.1
+
+- Added the worker-process boundary around `lean-rs-host`: `LeanWorker`,
+  `LeanWorkerConfig`, typed child-exit errors, explicit restart, clean shutdown, and worker
+  statistics. The worker hides process spawning, pipes, frame decoding, fatal-child-exit
+  classification, and cleanup from callers.
+- Added process-cycling policy for Lean process-global memory retention:
+  explicit cycling, max-request and max-import-like thresholds, idle cycling, best-effort RSS
+  ceilings, and restart reasons that distinguish policy cycling from child crashes and request
+  timeouts.
+- Added the narrow worker session adapter for copied host-session results, then the generic
+  worker capability layer: live bounded row forwarding, `LeanWorkerDataRow`,
+  `LeanWorkerDataSink`, diagnostics, terminal summaries, request watchdogs, capability metadata,
+  doctor checks, `LeanWorkerCapabilityBuilder`, typed JSON commands, and typed streaming
+  commands.
+- Added worker examples and recipes for process-boundary use, memory cycling, arbitrary
+  downstream-owned rows, capability startup, typed commands, timeouts, and performance probes.
 
 ## [0.1.0] — 2026-05-18
 

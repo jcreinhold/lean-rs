@@ -209,7 +209,7 @@ service registry, and `SessionPool` / `PooledSession`. Requires the 26 + 4 `lean
 Lean shim contract shipped with the crate and loaded alongside the consumer capability dylib.
 Long-running calls can report live progress through `LeanProgressSink`.
 
-**`lean-rs-worker` is the process-boundary host stack.** It supervises a
+**`lean-rs-worker` is the process-boundary worker stack.** It supervises a
 `lean-rs-worker-child` process around `lean-rs-host` for fatal-exit containment
 and memory cycling. `LeanWorkerCapabilityBuilder` is the normal downstream
 entry point: it builds the Lake target, starts the worker, opens imports,

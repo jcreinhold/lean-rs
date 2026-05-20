@@ -2,7 +2,7 @@
 
 The `lean-rs` workspace publishes via [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 Pushing a `v<semver>` git tag fires the workflow, which runs the pre-flight gate set, the
-public-API diff, the workspace publish dry-run, the four-crate live publish in dependency
+public-API diff, the workspace publish dry-run, the five-crate live publish in dependency
 order, and opens a GitHub Release whose body is the matching `## [<version>]` section of
 [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -15,7 +15,7 @@ the [bump procedure](bump-toolchain.md); re-confirm against the
 release.
 
 **Crate publish order is load-bearing:** `lean-rs-sys` →
-`lean-toolchain` → `lean-rs` → `lean-rs-host`. `cargo publish` enforces the dependency
+`lean-toolchain` → `lean-rs` → `lean-rs-host` → `lean-rs-worker`. `cargo publish` enforces the dependency
 direction via the crates.io index—downstream publishes fail with "no matching package"
 until upstream is indexed. The workflow sleeps 90s between each publish step.
 
@@ -47,7 +47,7 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see
 3. If the public API changed intentionally, regenerate the baselines in the same commit:
 
    ```sh
-   for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host; do
+   for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
      cargo public-api -p "$c" --simplified > "docs/api-review/${c}-public.txt"
    done
    ```
@@ -94,7 +94,7 @@ The workflow:
 3. Runs `fmt`, `clippy`, `nextest`, doctests, `doc` build.
 4. Runs the public-API diff against the committed baselines.
 5. Runs `cargo publish --workspace --dry-run`.
-6. Publishes the four crates in order with 90s sleeps between steps.
+6. Publishes the five crates in order with 90s sleeps between steps.
 7. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
 8. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease automatically.
 
@@ -105,8 +105,8 @@ wrong workspace version.
 
 ## Step 7—Post-publish
 
-- Verify the release on crates.io: `cargo search lean-rs` (all four crates should appear with the new version).
-- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other three) within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
+- Verify the release on crates.io: `cargo search lean-rs` (all five crates should appear with the new version).
+- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other four) within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
 - Open PRs against the downstream proof repos (`lean-rs-downstream`, `lean-rs-host-downstream`) to bump crate dependencies. Shim sources are bundled with `lean-rs` and `lean-rs-host`, so downstream Lake files should not pin a separate shim tag.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 
@@ -122,6 +122,7 @@ cargo publish -p lean-rs-sys
 sleep 90 && cargo publish -p lean-toolchain
 sleep 90 && cargo publish -p lean-rs
 sleep 90 && cargo publish -p lean-rs-host
+sleep 90 && cargo publish -p lean-rs-worker
 
 git tag -s "v${version}" -m "lean-rs v${version}"
 git push origin "v${version}"

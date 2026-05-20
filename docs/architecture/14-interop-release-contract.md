@@ -86,14 +86,19 @@ Before a release that changes interop or host progress, run:
 cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example string_streaming
 cargo run -p lean-rs-host --example progress
+cargo run -p lean-rs-worker --example worker_capability_runner
 cargo test -p lean-rs --test callback_trampoline -- --nocapture
 cargo test -p lean-rs --test callback_registry -- --nocapture
 cargo test -p lean-rs-host --test progress -- --nocapture
+cargo test -p lean-rs-worker --test streaming_runner -- --nocapture
+cargo test -p lean-rs-worker --test typed_command -- --nocapture
 cargo bench -p lean-rs-host --bench session -- \
   host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline <saved-baseline>
+cargo bench -p lean-rs-worker --bench row_payload -- --baseline <saved-baseline>
+cargo bench -p lean-rs-worker --bench worker_capability -- --sample-size 10
 ```
 
 The sanitizer workflow must continue to run the callback trampoline, callback registry, panic
-containment, and host progress fixtures on Linux ASan. Public API baselines under
+containment, host progress, and worker fatal-exit fixtures on Linux ASan. Public API baselines under
 [`../api-review/`](../api-review/) are regenerated in the same commit as any intentional public
 surface change.

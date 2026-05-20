@@ -8,6 +8,8 @@ they are non-portable across machines and ship with each capture.
 ```sh
 cargo bench -p lean-rs --bench hot_paths
 cargo bench -p lean-rs-host --bench session
+cargo bench -p lean-rs-worker --bench row_payload
+cargo bench -p lean-rs-worker --bench worker_capability
 ```
 
 `hot_paths` covers `lean_rs::module` and `lean_rs::abi`: `LeanExported::call`
@@ -15,6 +17,12 @@ and the `String`/`Vec<String>` round-trip decoders. `session` covers
 `LeanSession::*`: `query_declarations_bulk`, the three `declaration_*_bulk`
 5k-vs-loop comparisons, `elaborate_small`, `run_meta_whnf`, and
 `SessionPool` hits.
+
+`row_payload` covers the worker row transport hot path: JSON tree rows versus
+validated raw-JSON rows, typed command decode, row throughput, and allocation
+pressure. `worker_capability` covers the downstream-shaped worker fixture:
+cold startup, first import, import-once streaming, cancellation latency,
+fatal-exit recovery, worker cycling, row throughput, and memory growth.
 
 Progress changes must benchmark the no-progress path explicitly. The retained
 fast path for bulk introspection is:
@@ -29,6 +37,26 @@ cargo bench -p lean-rs-host --bench session -- \
 
 `progress = None` should stay within Criterion noise because it allocates no
 callback handle and dispatches the same bulk shim as before.
+
+Worker row-performance changes must benchmark the worker row path explicitly:
+
+```sh
+cargo bench -p lean-rs-worker --bench row_payload -- --save-baseline before
+# ... make row transport changes ...
+cargo bench -p lean-rs-worker --bench row_payload -- --baseline before
+```
+
+Capability-layer changes should also run the downstream-shaped scenario bench:
+
+```sh
+cargo bench -p lean-rs-worker --bench worker_capability -- --sample-size 10
+```
+
+Record parent/child RSS alongside throughput with:
+
+```sh
+cargo run --release -p lean-rs-worker --example worker_capability_probe
+```
 
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
 
