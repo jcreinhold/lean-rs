@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Read, Write};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub(crate) const PROTOCOL_VERSION: u16 = 1;
 const MAX_FRAME_BYTES: u32 = 1024 * 1024;
@@ -32,6 +34,7 @@ pub(crate) enum Message {
     Response(Response),
     Diagnostic(Diagnostic),
     ProgressTick(ProgressTick),
+    DataRow(DataRow),
     FatalExit(FatalExit),
 }
 
@@ -73,6 +76,13 @@ pub(crate) enum Request {
         names: Vec<String>,
         progress: bool,
     },
+    // Private harness requests used to prove streaming frame behavior before
+    // prompt 63 exposes a public row sink API.
+    EmitTestRows {
+        streams: Vec<String>,
+    },
+    EmitTestRowsThenExit,
+    EmitTestRowsThenPanic,
     Terminate,
 }
 
@@ -86,6 +96,7 @@ pub(crate) enum Response {
     Elaboration { outcome: WorkerElabOutcome },
     KernelCheck { outcome: WorkerKernelOutcome },
     Strings { values: Vec<String> },
+    RowsComplete { count: u64 },
     Terminating,
     Error { code: String, message: String },
 }
@@ -101,6 +112,43 @@ pub(crate) struct ProgressTick {
     pub(crate) phase: String,
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct DataRow {
+    pub(crate) stream: String,
+    pub(crate) sequence: u64,
+    pub(crate) payload: Value,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DataRowEmitter {
+    sequences: BTreeMap<String, u64>,
+    count: u64,
+}
+
+impl DataRowEmitter {
+    pub(crate) fn emit(
+        &mut self,
+        writer: &mut impl Write,
+        stream: impl Into<String>,
+        payload: Value,
+    ) -> Result<(), ProtocolError> {
+        let stream = stream.into();
+        let sequence = self.sequences.entry(stream.clone()).or_insert(0);
+        let row = DataRow {
+            stream,
+            sequence: *sequence,
+            payload,
+        };
+        *sequence = sequence.saturating_add(1);
+        self.count = self.count.saturating_add(1);
+        write_frame(writer, Message::DataRow(row))
+    }
+
+    pub(crate) fn count(&self) -> u64 {
+        self.count
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -235,4 +283,132 @@ pub(crate) fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError>
         });
     }
     Ok(frame)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
+    use std::io::Cursor;
+
+    use serde_json::json;
+
+    use super::{DataRow, DataRowEmitter, MAX_FRAME_BYTES, Message, ProtocolError, Response, read_frame, write_frame};
+
+    #[test]
+    fn data_row_round_trips_through_length_delimited_frame() {
+        let row = DataRow {
+            stream: "rows".to_owned(),
+            sequence: 7,
+            payload: json!({ "name": "Nat.add", "score": 3 }),
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, Message::DataRow(row.clone())).expect("data row writes");
+
+        let frame = read_frame(&mut Cursor::new(bytes)).expect("data row reads");
+        assert_eq!(frame.message, Message::DataRow(row));
+    }
+
+    #[test]
+    fn data_row_emitter_assigns_per_stream_sequences() {
+        let mut emitter = DataRowEmitter::default();
+        let mut bytes = Vec::new();
+        emitter
+            .emit(&mut bytes, "rows", json!({ "i": 0 }))
+            .expect("first row writes");
+        emitter
+            .emit(&mut bytes, "warnings", json!({ "i": 1 }))
+            .expect("second row writes");
+        emitter
+            .emit(&mut bytes, "rows", json!({ "i": 2 }))
+            .expect("third row writes");
+        assert_eq!(emitter.count(), 3);
+
+        let mut cursor = Cursor::new(bytes);
+        let rows = [
+            read_frame(&mut cursor).expect("first row reads"),
+            read_frame(&mut cursor).expect("second row reads"),
+            read_frame(&mut cursor).expect("third row reads"),
+        ];
+        assert_eq!(
+            rows.map(|frame| frame.message),
+            [
+                Message::DataRow(DataRow {
+                    stream: "rows".to_owned(),
+                    sequence: 0,
+                    payload: json!({ "i": 0 }),
+                }),
+                Message::DataRow(DataRow {
+                    stream: "warnings".to_owned(),
+                    sequence: 0,
+                    payload: json!({ "i": 1 }),
+                }),
+                Message::DataRow(DataRow {
+                    stream: "rows".to_owned(),
+                    sequence: 1,
+                    payload: json!({ "i": 2 }),
+                }),
+            ],
+        );
+    }
+
+    #[test]
+    fn oversized_data_row_is_rejected_before_write() {
+        let row = DataRow {
+            stream: "rows".to_owned(),
+            sequence: 0,
+            payload: json!({ "blob": "x".repeat(MAX_FRAME_BYTES as usize) }),
+        };
+        let mut bytes = Vec::new();
+        let err = write_frame(&mut bytes, Message::DataRow(row)).expect_err("oversized frame is rejected");
+        match err {
+            ProtocolError::FrameTooLarge { len, max } => {
+                assert!(len > max);
+                assert_eq!(max, MAX_FRAME_BYTES);
+            }
+            other @ (ProtocolError::Io(_) | ProtocolError::Json(_) | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected FrameTooLarge, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_data_row_is_rejected_before_read_allocation() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(MAX_FRAME_BYTES.saturating_add(1)).to_be_bytes());
+        let err = read_frame(&mut Cursor::new(bytes)).expect_err("oversized frame is rejected");
+        match err {
+            ProtocolError::FrameTooLarge { len, max } => {
+                assert_eq!(len, MAX_FRAME_BYTES + 1);
+                assert_eq!(max, MAX_FRAME_BYTES);
+            }
+            other @ (ProtocolError::Io(_) | ProtocolError::Json(_) | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected FrameTooLarge, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_frame_payload_is_protocol_error() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1_u32.to_be_bytes());
+        bytes.push(b'{');
+        let err = read_frame(&mut Cursor::new(bytes)).expect_err("malformed JSON is rejected");
+        match err {
+            ProtocolError::Json(_) => {}
+            other @ (ProtocolError::Io(_)
+            | ProtocolError::FrameTooLarge { .. }
+            | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected Json error, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rows_complete_response_round_trips() {
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, Message::Response(Response::RowsComplete { count: 2 })).expect("rows complete writes");
+        let frame = read_frame(&mut Cursor::new(bytes)).expect("rows complete reads");
+        assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
+    }
 }

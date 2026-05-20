@@ -14,6 +14,8 @@ use std::io::{BufReader, BufWriter, Read as _};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
+use serde_json::Value;
+
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 
 #[derive(Debug)]
@@ -38,6 +40,13 @@ pub enum WorkerHarnessError {
 pub struct WorkerFatalExit {
     pub status: String,
     pub stderr: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkerDataRow {
+    pub stream: String,
+    pub sequence: u64,
+    pub payload: Value,
 }
 
 impl fmt::Display for WorkerHarnessError {
@@ -153,6 +162,83 @@ impl WorkerProcess {
         }
     }
 
+    pub fn emit_test_rows(&mut self, streams: Vec<String>) -> Result<Vec<WorkerDataRow>, WorkerHarnessError> {
+        self.send_request(Request::EmitTestRows { streams })?;
+        self.read_rows_until_complete()
+    }
+
+    pub fn emit_rows_then_exit(mut self) -> Result<Vec<WorkerDataRow>, WorkerHarnessError> {
+        self.send_request(Request::EmitTestRowsThenExit)?;
+        let mut row_count = 0_u64;
+        loop {
+            match read_frame(&mut self.stdout) {
+                Ok(frame) => match frame.message {
+                    Message::DataRow(_row) => {
+                        row_count = row_count.saturating_add(1);
+                    }
+                    Message::Response(response) => return Err(Self::unexpected_response(&response)),
+                    other => return Err(WorkerHarnessError::UnexpectedMessage(format!("{other:?}"))),
+                },
+                Err(err) if err.is_eof() => {
+                    let status = self.child.wait().map_err(WorkerHarnessError::Wait)?;
+                    if row_count == 0 {
+                        return Err(WorkerHarnessError::Protocol(
+                            "worker exited before sending any row frame".to_owned(),
+                        ));
+                    }
+                    if status.success() {
+                        return Err(WorkerHarnessError::Protocol(
+                            "worker exited before terminal row response".to_owned(),
+                        ));
+                    }
+                    return Err(WorkerHarnessError::FatalExit(WorkerFatalExit {
+                        status: status.to_string(),
+                        stderr: String::new(),
+                    }));
+                }
+                Err(err) => return Err(WorkerHarnessError::Protocol(err.to_string())),
+            }
+        }
+    }
+
+    pub fn emit_rows_then_panic(mut self) -> Result<Vec<WorkerDataRow>, WorkerHarnessError> {
+        self.send_request(Request::EmitTestRowsThenPanic)?;
+        let mut row_count = 0_u64;
+        loop {
+            match read_frame(&mut self.stdout) {
+                Ok(frame) => match frame.message {
+                    Message::DataRow(_row) => {
+                        row_count = row_count.saturating_add(1);
+                    }
+                    Message::Response(response) => return Err(Self::unexpected_response(&response)),
+                    other => return Err(WorkerHarnessError::UnexpectedMessage(format!("{other:?}"))),
+                },
+                Err(err) if err.is_eof() => {
+                    let status = self.child.wait().map_err(WorkerHarnessError::Wait)?;
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = self.child.stderr.take() {
+                        drop(pipe.read_to_string(&mut stderr));
+                    }
+                    if status.success() {
+                        return Err(WorkerHarnessError::UnexpectedMessage(
+                            "panic row request exited successfully".to_owned(),
+                        ));
+                    }
+                    if row_count == 0 {
+                        return Err(WorkerHarnessError::UnexpectedMessage(
+                            "panic row request exited before sending any row frame".to_owned(),
+                        ));
+                    }
+                    return Err(WorkerHarnessError::FatalExit(WorkerFatalExit {
+                        status: status.to_string(),
+                        stderr,
+                    }));
+                }
+                Err(err) => return Err(WorkerHarnessError::Protocol(err.to_string())),
+            }
+        }
+    }
+
     fn expect_handshake(&mut self) -> Result<(), WorkerHarnessError> {
         let frame = read_frame(&mut self.stdout).map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
         match frame.message {
@@ -176,6 +262,34 @@ impl WorkerProcess {
             }
             Message::Response(response) => Ok(response),
             other => Err(WorkerHarnessError::UnexpectedMessage(format!("{other:?}"))),
+        }
+    }
+
+    fn read_rows_until_complete(&mut self) -> Result<Vec<WorkerDataRow>, WorkerHarnessError> {
+        let mut rows = Vec::new();
+        loop {
+            let frame = read_frame(&mut self.stdout).map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
+            match frame.message {
+                Message::DataRow(row) => rows.push(WorkerDataRow {
+                    stream: row.stream,
+                    sequence: row.sequence,
+                    payload: row.payload,
+                }),
+                Message::Response(Response::RowsComplete { count }) => {
+                    let actual = u64::try_from(rows.len()).unwrap_or(u64::MAX);
+                    if actual == count {
+                        return Ok(rows);
+                    }
+                    return Err(WorkerHarnessError::UnexpectedMessage(format!(
+                        "row count mismatch: terminal response reported {count}, received {actual}"
+                    )));
+                }
+                Message::Response(Response::Error { code, message }) => {
+                    return Err(WorkerHarnessError::WorkerError { code, message });
+                }
+                Message::Response(response) => return Err(Self::unexpected_response(&response)),
+                other => return Err(WorkerHarnessError::UnexpectedMessage(format!("{other:?}"))),
+            }
         }
     }
 

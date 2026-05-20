@@ -458,6 +458,7 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("health", &other)),
         }
@@ -486,6 +487,7 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("load_fixture_capability", &other)),
         }
@@ -518,6 +520,7 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("call_fixture_mul", &other)),
         }
@@ -639,6 +642,7 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Error { .. }) => Err(unexpected_response("terminate", &other)),
         }
     }
@@ -690,6 +694,7 @@ impl LeanWorker {
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -718,6 +723,7 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::KernelCheck { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -747,6 +753,7 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::Strings { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -774,6 +781,7 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -801,6 +809,7 @@ impl LeanWorker {
             | Response::HostSessionOpened
             | Response::Elaboration { .. }
             | Response::KernelCheck { .. }
+            | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -900,6 +909,7 @@ impl LeanWorker {
             | Message::Request(_)
             | Message::Diagnostic(_)
             | Message::ProgressTick(_)
+            | Message::DataRow(_)
             | Message::FatalExit(_)) => Err(LeanWorkerError::Protocol {
                 message: format!("worker sent unexpected {operation} message: {other:?}"),
             }),
@@ -941,6 +951,7 @@ impl LeanWorker {
                 other @ (Message::Handshake { .. }
                 | Message::Request(_)
                 | Message::Diagnostic(_)
+                | Message::DataRow(_)
                 | Message::FatalExit(_)) => {
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
@@ -1064,6 +1075,7 @@ fn expect_handshake(stdout: &mut BufReader<ChildStdout>) -> Result<(), LeanWorke
         | Message::Response(_)
         | Message::Diagnostic(_)
         | Message::ProgressTick(_)
+        | Message::DataRow(_)
         | Message::FatalExit(_)) => Err(LeanWorkerError::Handshake {
             message: format!("unexpected handshake frame: {other:?}"),
         }),

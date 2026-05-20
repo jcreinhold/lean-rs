@@ -7,7 +7,7 @@ use lean_rs_host::{
 };
 
 use crate::protocol::{
-    Message, ProgressTick, Request, Response, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome,
+    DataRowEmitter, Message, ProgressTick, Request, Response, WorkerDiagnostic, WorkerElabOptions, WorkerElabOutcome,
     WorkerKernelOutcome, WorkerKernelStatus, read_frame, write_frame,
 };
 
@@ -140,6 +140,18 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     None => missing_session_response(),
                 };
                 write_frame(&mut writer, Message::Response(response))?;
+            }
+            Request::EmitTestRows { streams } => {
+                let count = emit_test_rows(&mut writer, &streams)?;
+                write_frame(&mut writer, Message::Response(Response::RowsComplete { count }))?;
+            }
+            Request::EmitTestRowsThenExit => {
+                let _count = emit_test_rows(&mut writer, &["rows".to_owned()])?;
+                return Ok(());
+            }
+            Request::EmitTestRowsThenPanic => {
+                let _count = emit_test_rows(&mut writer, &["rows".to_owned()])?;
+                std::process::abort();
             }
             Request::Terminate => {
                 write_frame(&mut writer, Message::Response(Response::Terminating))?;
@@ -378,6 +390,21 @@ fn emit_progress(writer: &mut impl std::io::Write, phase: &str, current: u64, to
             total,
         }),
     ));
+}
+
+fn emit_test_rows(writer: &mut impl std::io::Write, streams: &[String]) -> Result<u64, crate::protocol::ProtocolError> {
+    let mut emitter = DataRowEmitter::default();
+    for (idx, stream) in streams.iter().enumerate() {
+        emitter.emit(
+            writer,
+            stream.clone(),
+            serde_json::json!({
+                "stream": stream,
+                "index": idx,
+            }),
+        )?;
+    }
+    Ok(emitter.count())
 }
 
 #[allow(dead_code, reason = "reserved for prompt 57 worker configuration")]

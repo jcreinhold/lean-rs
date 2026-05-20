@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use lean_rs_worker::__test_support::{WorkerHarnessError, WorkerProcess};
+use lean_rs_worker::__test_support::{WorkerDataRow, WorkerHarnessError, WorkerProcess};
+use serde_json::json;
 
 fn worker_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lean-rs-worker-child"))
@@ -99,4 +100,80 @@ fn missing_fixture_path_reports_worker_error_without_crashing_child() {
     }
     let status = worker.terminate().expect("worker terminates after typed error");
     assert!(status.success(), "worker should stay alive after typed load error");
+}
+
+#[test]
+fn data_rows_are_delivered_in_pipe_order_with_per_stream_sequences() {
+    let mut worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let rows = worker
+        .emit_test_rows(vec![
+            "rows".to_owned(),
+            "warnings".to_owned(),
+            "rows".to_owned(),
+            "warnings".to_owned(),
+        ])
+        .expect("worker emits data rows");
+
+    assert_eq!(
+        rows,
+        vec![
+            WorkerDataRow {
+                stream: "rows".to_owned(),
+                sequence: 0,
+                payload: json!({ "stream": "rows", "index": 0 }),
+            },
+            WorkerDataRow {
+                stream: "warnings".to_owned(),
+                sequence: 0,
+                payload: json!({ "stream": "warnings", "index": 1 }),
+            },
+            WorkerDataRow {
+                stream: "rows".to_owned(),
+                sequence: 1,
+                payload: json!({ "stream": "rows", "index": 2 }),
+            },
+            WorkerDataRow {
+                stream: "warnings".to_owned(),
+                sequence: 1,
+                payload: json!({ "stream": "warnings", "index": 3 }),
+            },
+        ],
+    );
+
+    let status = worker.terminate().expect("worker terminates after row stream");
+    assert!(status.success(), "worker should exit cleanly");
+}
+
+#[test]
+fn eof_before_rows_complete_is_reported_as_protocol_failure() {
+    let worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let err = worker
+        .emit_rows_then_exit()
+        .expect_err("child exit before terminal response should fail");
+    match err {
+        WorkerHarnessError::Protocol(message) => {
+            assert!(
+                message.contains("before terminal row response"),
+                "failure should name missing terminal response, got {message}",
+            );
+        }
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+}
+
+#[test]
+fn fatal_exit_after_partial_rows_is_reported_as_worker_failure() {
+    let worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let err = worker
+        .emit_rows_then_panic()
+        .expect_err("fatal exit before terminal response should fail");
+    match err {
+        WorkerHarnessError::FatalExit(exit) => {
+            assert!(
+                !exit.status.is_empty(),
+                "fatal exit should include rendered child status"
+            );
+        }
+        other => panic!("expected FatalExit, got {other:?}"),
+    }
 }
