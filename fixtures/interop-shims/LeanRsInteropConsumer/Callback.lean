@@ -250,6 +250,94 @@ def workerShapeIndex (_requestJson : String) (handle trampoline : USize) : IO UI
 def workerShapeProbe (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
   Stream.emitAll handle trampoline (workerShapeProbeRows ())
 
+def mathlibScaleModuleCount : Nat :=
+  16
+
+def mathlibScaleModuleName (index : Nat) : String :=
+  "Mathlib.Scale.Module" ++ toString index
+
+def mathlibScaleMetadataFor (command : String) (rows modules : Nat) : String :=
+  Stream.metadata
+    ("{\"fixture\":\"mathlib-scale-shaped\",\"command\":" ++ Stream.jsonString command ++
+      ",\"ok\":true,\"rows\":" ++ toString rows ++ ",\"modules\":" ++ toString modules ++ "}")
+
+def mathlibScaleDeclarationPayload (module : String) (ordinal : Nat) : String :=
+  let _ := module
+  "{\"kind\":\"declaration\",\"module\":\"Mathlib.Scale\",\"name\":\"Mathlib.Scale.decl" ++ toString ordinal ++ "\"" ++
+    ",\"ordinal\":" ++ toString ordinal ++ "}"
+
+def mathlibScaleFeaturePayload (module : String) (ordinal : Nat) : String :=
+  let _ := module
+  "{\"kind\":\"feature\",\"module\":\"Mathlib.Scale\",\"name\":\"Mathlib.Scale.decl" ++ toString ordinal ++ "\"" ++
+    ",\"feature\":\"module-shape\",\"score\":" ++ toString ((ordinal % 17) + 1) ++
+    ",\"ordinal\":" ++ toString ordinal ++ "}"
+
+def mathlibScaleProbePayload (left right : String) (ordinal : Nat) : String :=
+  let _ := left
+  let _ := right
+  "{\"kind\":\"probe\",\"left\":\"Mathlib.Scale.left\",\"right\":\"Mathlib.Scale.right\"" ++
+    ",\"relation\":\"same-import-batch\",\"ordinal\":" ++ toString ordinal ++ "}"
+
+def mathlibScaleIndexRows (_requestJson : String) : Array String := Id.run do
+  let limit := 256
+  let mut rows := #[Stream.diagnostic "scale.index.started" "mathlib-scale fixture started"]
+  let mut emitted := 0
+  for moduleIndex in [0:mathlibScaleModuleCount] do
+    let module := mathlibScaleModuleName moduleIndex
+    if emitted < limit then
+      rows := rows.push (Stream.row "declarations" (mathlibScaleDeclarationPayload module emitted))
+      emitted := emitted + 1
+    if emitted < limit then
+      rows := rows.push (Stream.row "features" (mathlibScaleFeaturePayload module emitted))
+      emitted := emitted + 1
+    if moduleIndex > 0 then
+      let previous := mathlibScaleModuleName (moduleIndex - 1)
+      if emitted < limit then
+        rows := rows.push (Stream.row "probes" (mathlibScaleProbePayload previous module emitted))
+        emitted := emitted + 1
+    if (moduleIndex + 1) % 4 == 0 then
+      rows := rows.push (Stream.chunkProgress "scale.index" (moduleIndex / 4) 4)
+  rows := rows.push (Stream.diagnostic "scale.index.finished" "mathlib-scale fixture finished")
+  rows := rows.push (mathlibScaleMetadataFor "index" emitted mathlibScaleModuleCount)
+  rows
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_index]
+def workerShapeMathlibScaleIndex (requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  Stream.emitAll handle trampoline (mathlibScaleIndexRows requestJson)
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_extract]
+def workerShapeMathlibScaleExtract (requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  Stream.emitAll handle trampoline (mathlibScaleIndexRows requestJson)
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_features]
+def workerShapeMathlibScaleFeatures (requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  Stream.emitAll handle trampoline (mathlibScaleIndexRows requestJson)
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_probe]
+def workerShapeMathlibScaleProbe (requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  Stream.emitAll handle trampoline (mathlibScaleIndexRows requestJson)
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_timeout_after_row]
+def workerShapeMathlibScaleTimeoutAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "declarations"
+      (mathlibScaleDeclarationPayload "Mathlib.Fixture.Timeout" 0)]
+  if status == 0 then
+    IO.sleep 200
+    pure 0
+  else
+    pure status
+
+@[export lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row]
+def workerShapeMathlibScalePanicAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "declarations"
+      (mathlibScaleDeclarationPayload "Mathlib.Fixture.Panic" 0)]
+  if status == 0 then
+    panic! "lean-rs mathlib-scale fixture panic after row"
+  else
+    pure status
+
 @[export lean_rs_interop_consumer_worker_shape_timeout_after_row]
 def workerShapeTimeoutAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
   let status ← Stream.emitAll handle trampoline

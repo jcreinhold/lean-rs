@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use lean_rs_worker::{
-    LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig,
+    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -178,6 +178,19 @@ fn run_stream(export: &'static str) -> Result<LeanWorkerTypedStreamSummary<Shape
     Ok(summary)
 }
 
+fn run_pool_stream(
+    max_workers: usize,
+    export: &'static str,
+) -> Result<LeanWorkerTypedStreamSummary<ShapeSummary>, LeanWorkerError> {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(max_workers).max_total_child_rss_kib(u64::MAX));
+    let mut lease = pool.acquire_lease(capability_builder())?;
+    let command = LeanWorkerStreamingCommand::<ShapeRequest, ShapeRow, ShapeSummary>::new(export);
+    let sink = CountingSink::default();
+    let summary = lease.run_streaming_command(&command, &ShapeRequest::default(), &sink, None, None, None)?;
+    assert_eq!(summary.total_rows, sink.count());
+    Ok(summary)
+}
+
 fn bench_operational_shape(c: &mut Criterion) {
     if skip_if_missing_worker() {
         return;
@@ -267,6 +280,24 @@ fn bench_operational_shape(c: &mut Criterion) {
                 assert!(matches!(err, LeanWorkerError::Cancelled { .. }));
             }
             started.elapsed()
+        });
+    });
+
+    group.throughput(Throughput::Elements(47));
+    group.bench_function("mathlib_scale_single_worker_pool", |b| {
+        b.iter(|| {
+            let summary = run_pool_stream(1, "lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+                .expect("mathlib-scale pool stream succeeds");
+            std::hint::black_box(summary.total_rows);
+        });
+    });
+
+    group.throughput(Throughput::Elements(47));
+    group.bench_function("mathlib_scale_pool_max_2", |b| {
+        b.iter(|| {
+            let summary = run_pool_stream(2, "lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+                .expect("mathlib-scale pool stream succeeds");
+            std::hint::black_box(summary.total_rows);
         });
     });
 

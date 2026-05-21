@@ -88,6 +88,22 @@ cargo run --release -p lean-rs-worker --example worker_capability_probe
 cargo run --release -p lean-rs-worker --example row_perf_probe
 ```
 
+Prompt 84 adds the mathlib-scale fixture. It should run through the planner,
+pool, session lease, and typed command path:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo run -p lean-rs-worker --example mathlib_scale_probe
+cargo bench -p lean-rs-worker --bench worker_capability -- mathlib_scale
+```
+
+Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` and
+`LEAN_RS_MATHLIB_SCALE_LIMIT=<n>` to use a real mathlib module list as the
+planning workload. The fixture emits deterministic generic rows, so only claim
+mathlib-scale behavior for the parts actually measured: planning, pool leases,
+session reuse, row throughput, cancellation, fatal-exit recovery, worker
+cycling, and RSS sampling availability.
+
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
 
 ```text

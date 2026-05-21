@@ -159,6 +159,20 @@ mathlib-shaped fallback, and repeated cycle/reuse under a small import policy.
 The numbers are workload evidence, not a claim that `SessionPool::drain()` can
 reset Lean process-global RSS.
 
+Run the mathlib-scale fixture probe:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo run -p lean-rs-worker --example mathlib_scale_probe
+```
+
+That probe exercises the planner -> pool -> session lease -> typed command path
+with mixed declaration-like, feature-like, and probe-like rows, diagnostics,
+progress, terminal metadata, cancellation, fatal-exit recovery, and worker
+cycling. Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a discovered
+mathlib module list as the workload shape. The fixture rows remain generic test
+data, not downstream schemas.
+
 The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).
 The lower-level process-boundary recipe is
