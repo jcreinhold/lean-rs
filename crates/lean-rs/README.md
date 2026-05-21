@@ -83,12 +83,9 @@ use lean_rs::{LeanBuiltCapability, LeanCapability, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
-    let capability = LeanCapability::from_build_env(
+    let capability = LeanCapability::from_build_manifest(
         runtime,
-        LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
-            .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
-            .package("my_app")
-            .module("MyCapability"),
+        LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
     )?;
     let module = capability.module()?;
 
@@ -105,13 +102,13 @@ cargo run
 ```
 
 `CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache,
-filename convention, and dylib-path env-var plumbing. `LeanCapability` keeps the built path,
-dependency bundle, and initializer names together at runtime. Use `build_lake_target`,
+filename convention, and the artifact manifest handoff. `LeanCapability` reads that manifest
+and keeps the built path, dependency bundle, and initializer names together at runtime. Use `build_lake_target`,
 `LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
 
 See the complete shipping recipe at
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
-Worker applications use the same built capability path with
+Worker applications use the same built capability descriptor with
 `lean-rs-worker` and point `LeanWorkerChild` at an app-owned worker-child binary; the recipe
 shows that packaging path as well.
 

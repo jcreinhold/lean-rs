@@ -41,9 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `CargoLeanCapability` emits Lean link directives, Cargo rerun triggers, runs
-`lake build <target>:shared`, resolves the built dylib path, and emits a
-deterministic `LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time environment
-variable. `build_lake_target` remains available as the lower-level escape
+`lake build <target>:shared`, resolves the built dylib path, writes a JSON
+artifact manifest, and emits deterministic
+`LEAN_RS_CAPABILITY_<TARGET>_MANIFEST` plus compatibility
+`LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time environment variables.
+`build_lake_target` remains available as the lower-level escape
 hatch and also covers Lake targets that depend on the generic
 `lean-rs-interop-shims` package. It reports cache hits and misses on stderr,
 emits only `cargo:` directives on stdout, and returns typed `LinkDiagnostics`

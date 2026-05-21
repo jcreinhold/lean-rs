@@ -16,6 +16,8 @@ use crate::runtime::LeanRuntime;
 pub struct LeanBuiltCapability {
     dylib_path: Option<PathBuf>,
     env_var: Option<String>,
+    manifest_path: Option<PathBuf>,
+    manifest_env_var: Option<String>,
     package: Option<String>,
     module: Option<String>,
     dependencies: Vec<LeanLibraryDependency>,
@@ -24,7 +26,9 @@ pub struct LeanBuiltCapability {
 impl LeanBuiltCapability {
     /// Build a descriptor from an embedded dylib path.
     ///
-    /// This is the canonical form for shipped binaries:
+    /// This remains supported for simple or compatibility cases. Prefer
+    /// [`Self::manifest_path`] for shipped binaries because the manifest also
+    /// carries dependency and loader-order facts:
     ///
     /// ```ignore
     /// let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
@@ -36,6 +40,8 @@ impl LeanBuiltCapability {
         Self {
             dylib_path: Some(path.into()),
             env_var: None,
+            manifest_path: None,
+            manifest_env_var: None,
             package: None,
             module: None,
             dependencies: Vec::new(),
@@ -53,6 +59,50 @@ impl LeanBuiltCapability {
         Self {
             dylib_path: None,
             env_var: Some(env_var.into()),
+            manifest_path: None,
+            manifest_env_var: None,
+            package: None,
+            module: None,
+            dependencies: Vec::new(),
+        }
+    }
+
+    /// Build a descriptor from an embedded artifact manifest path.
+    ///
+    /// This is the canonical form for shipped binaries using
+    /// `CargoLeanCapability`'s manifest output:
+    ///
+    /// ```ignore
+    /// let spec = lean_rs::LeanBuiltCapability::manifest_path(
+    ///     env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
+    /// );
+    /// ```
+    #[must_use]
+    pub fn manifest_path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            dylib_path: None,
+            env_var: None,
+            manifest_path: Some(path.into()),
+            manifest_env_var: None,
+            package: None,
+            module: None,
+            dependencies: Vec::new(),
+        }
+    }
+
+    /// Build a descriptor that resolves the artifact manifest path from a
+    /// runtime environment variable.
+    ///
+    /// Prefer [`Self::manifest_path`] with Rust's `env!` macro for
+    /// redistributable binaries. Runtime environment lookup is useful for
+    /// tests, local overrides, and launcher-managed deployments.
+    #[must_use]
+    pub fn manifest_env(env_var: impl Into<String>) -> Self {
+        Self {
+            dylib_path: None,
+            env_var: None,
+            manifest_path: None,
+            manifest_env_var: Some(env_var.into()),
             package: None,
             module: None,
             dependencies: Vec::new(),
@@ -63,6 +113,13 @@ impl LeanBuiltCapability {
     #[must_use]
     pub fn env_var(mut self, env_var: impl Into<String>) -> Self {
         self.env_var = Some(env_var.into());
+        self
+    }
+
+    /// Preserve the Cargo manifest environment variable name for diagnostics.
+    #[must_use]
+    pub fn manifest_env_var(mut self, env_var: impl Into<String>) -> Self {
+        self.manifest_env_var = Some(env_var.into());
         self
     }
 
@@ -136,14 +193,39 @@ impl LeanBuiltCapability {
             ))
         })
     }
+
+    /// Resolve the build artifact manifest path.
+    ///
+    /// # Errors
+    ///
+    /// Returns a host module-initialization error if neither a path nor a
+    /// readable manifest environment variable is configured.
+    pub fn resolved_manifest_path(&self) -> LeanResult<PathBuf> {
+        if let Some(path) = &self.manifest_path {
+            return Ok(path.clone());
+        }
+        let env_var = self.manifest_env_var.as_deref().ok_or_else(|| {
+            LeanError::module_init("LeanBuiltCapability needs either a manifest path or manifest environment variable")
+        })?;
+        std::env::var_os(env_var).map(PathBuf::from).ok_or_else(|| {
+            LeanError::module_init(format!(
+                "environment variable {env_var} is not set for Lean capability manifest"
+            ))
+        })
+    }
 }
 
 impl From<&lean_toolchain::BuiltLeanCapability> for LeanBuiltCapability {
     fn from(value: &lean_toolchain::BuiltLeanCapability) -> Self {
-        Self::path(value.dylib_path())
-            .env_var(value.env_var())
-            .package(value.package())
-            .module(value.module())
+        Self {
+            dylib_path: Some(value.dylib_path().to_path_buf()),
+            env_var: Some(value.env_var().to_owned()),
+            manifest_path: Some(value.manifest_path().to_path_buf()),
+            manifest_env_var: Some(value.manifest_env_var().to_owned()),
+            package: Some(value.package().to_owned()),
+            module: Some(value.module().to_owned()),
+            dependencies: Vec::new(),
+        }
     }
 }
 
@@ -156,7 +238,32 @@ pub struct LeanCapability<'lean> {
 }
 
 impl<'lean> LeanCapability<'lean> {
-    /// Open and initialize a build-script produced Lean capability.
+    /// Open and initialize a build-script produced Lean capability from its
+    /// JSON artifact manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError`] when the manifest path cannot be resolved, the
+    /// manifest is missing, malformed, or unsupported, or the bundle described
+    /// by the manifest cannot be opened.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn from_build_manifest(runtime: &'lean LeanRuntime, spec: LeanBuiltCapability) -> LeanResult<Self> {
+        let manifest_path = spec.resolved_manifest_path()?;
+        let manifest = ParsedCapabilityManifest::read(&manifest_path)?;
+        Self::open_with_dependencies(
+            runtime,
+            manifest.primary_dylib,
+            manifest.package,
+            manifest.module,
+            manifest.dependencies,
+        )
+    }
+
+    /// Open and initialize a build-script produced Lean capability from a
+    /// direct dylib path.
+    ///
+    /// This compatibility path cannot carry dependency ordering by itself.
+    /// Prefer [`Self::from_build_manifest`] for shipped crates.
     ///
     /// # Errors
     ///
@@ -195,9 +302,9 @@ impl<'lean> LeanCapability<'lean> {
     /// Open and initialize a capability with explicitly described dependency
     /// dylibs.
     ///
-    /// This is the runtime form prompt 90's artifact manifest will feed. Use
-    /// [`LeanCapability::from_build_env`] for shipped crates when build-script
-    /// metadata is available.
+    /// This is the runtime form artifact manifests feed. Use
+    /// [`LeanCapability::from_build_manifest`] for shipped crates when
+    /// build-script metadata is available.
     ///
     /// # Errors
     ///
@@ -259,10 +366,108 @@ impl<'lean> LeanCapability<'lean> {
     }
 }
 
+struct ParsedCapabilityManifest {
+    primary_dylib: PathBuf,
+    package: String,
+    module: String,
+    dependencies: Vec<LeanLibraryDependency>,
+}
+
+impl ParsedCapabilityManifest {
+    fn read(path: &Path) -> LeanResult<Self> {
+        let bytes = std::fs::read(path).map_err(|err| {
+            LeanError::module_init(format!(
+                "failed to read Lean capability manifest '{}': {err}",
+                path.display()
+            ))
+        })?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|err| {
+            LeanError::module_init(format!(
+                "Lean capability manifest '{}' is not valid JSON: {err}",
+                path.display()
+            ))
+        })?;
+        let schema_version = required_u64(&value, "schema_version", path)?;
+        if schema_version != u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION) {
+            return Err(LeanError::module_init(format!(
+                "unsupported Lean capability manifest schema {schema_version} in '{}'; supported schema is {}",
+                path.display(),
+                lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
+            )));
+        }
+        let primary_dylib = PathBuf::from(required_string(&value, "primary_dylib", path)?);
+        let package = required_string(&value, "package", path)?;
+        let module = required_string(&value, "module", path)?;
+        let dependencies = dependencies_from_manifest(&value, path)?;
+        Ok(Self {
+            primary_dylib,
+            package,
+            module,
+            dependencies,
+        })
+    }
+}
+
+fn dependencies_from_manifest(value: &serde_json::Value, path: &Path) -> LeanResult<Vec<LeanLibraryDependency>> {
+    let Some(raw_dependencies) = value.get("dependencies") else {
+        return Ok(Vec::new());
+    };
+    let dependencies = raw_dependencies.as_array().ok_or_else(|| {
+        LeanError::module_init(format!(
+            "Lean capability manifest '{}' field `dependencies` must be an array",
+            path.display()
+        ))
+    })?;
+    let mut out = Vec::with_capacity(dependencies.len());
+    for dependency in dependencies {
+        let dylib = required_string(dependency, "dylib_path", path)?;
+        let mut descriptor = LeanLibraryDependency::path(dylib);
+        if dependency
+            .get("export_symbols_for_dependents")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            descriptor = descriptor.export_symbols_for_dependents();
+        }
+        if let Some(initializer) = dependency.get("initializer") {
+            let package = required_string(initializer, "package", path)?;
+            let module = required_string(initializer, "module", path)?;
+            descriptor = descriptor.initializer(package, module);
+        }
+        out.push(descriptor);
+    }
+    Ok(out)
+}
+
+fn required_string(value: &serde_json::Value, field: &str, path: &Path) -> LeanResult<String> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            LeanError::module_init(format!(
+                "Lean capability manifest '{}' is missing non-empty string field `{field}`",
+                path.display()
+            ))
+        })
+}
+
+fn required_u64(value: &serde_json::Value, field: &str, path: &Path) -> LeanResult<u64> {
+    value.get(field).and_then(serde_json::Value::as_u64).ok_or_else(|| {
+        LeanError::module_init(format!(
+            "Lean capability manifest '{}' is missing unsigned integer field `{field}`",
+            path.display()
+        ))
+    })
+}
+
 #[cfg(test)]
-#[allow(clippy::panic)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{LeanBuiltCapability, LeanLibraryDependency};
+    use super::{LeanBuiltCapability, LeanLibraryDependency, ParsedCapabilityManifest};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn built_capability_path_is_resolved_without_runtime_env() {
@@ -293,6 +498,77 @@ mod tests {
     }
 
     #[test]
+    fn missing_runtime_manifest_env_is_typed() {
+        let spec = LeanBuiltCapability::manifest_env("LEAN_RS_TEST_MISSING_CAPABILITY_MANIFEST");
+        let err = match spec.resolved_manifest_path() {
+            Ok(path) => panic!("expected missing manifest env error, got {}", path.display()),
+            Err(err) => err,
+        };
+        assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
+    }
+
+    #[test]
+    fn manifest_descriptor_parses_dependencies() {
+        let path = temp_manifest_path("manifest_descriptor_parses_dependencies");
+        write_manifest(
+            &path,
+            r#"{
+  "schema_version": 1,
+  "target_name": "Cap",
+  "package": "pkg",
+  "module": "Cap",
+  "primary_dylib": "/tmp/libcap.so",
+  "dependencies": [
+    {
+      "dylib_path": "/tmp/libdep.so",
+      "export_symbols_for_dependents": true,
+      "initializer": { "package": "dep_pkg", "module": "Dep" }
+    }
+  ]
+}"#,
+        );
+
+        let manifest = match ParsedCapabilityManifest::read(&path) {
+            Ok(manifest) => manifest,
+            Err(err) => panic!("expected manifest to parse, got {err}"),
+        };
+        assert_eq!(manifest.primary_dylib, PathBuf::from("/tmp/libcap.so"));
+        assert_eq!(manifest.package, "pkg");
+        assert_eq!(manifest.module, "Cap");
+        assert_eq!(manifest.dependencies.len(), 1);
+        let Some(dependency) = manifest.dependencies.first() else {
+            panic!("expected one dependency");
+        };
+        assert!(dependency.exports_symbols_for_dependents());
+        assert_eq!(dependency.path_ref(), std::path::Path::new("/tmp/libdep.so"));
+        let Some(initializer) = dependency.module_initializer() else {
+            panic!("expected dependency initializer");
+        };
+        assert_eq!(initializer.package_name(), "dep_pkg");
+        assert_eq!(initializer.module_name(), "Dep");
+    }
+
+    #[test]
+    fn unsupported_manifest_schema_is_typed() {
+        let path = temp_manifest_path("unsupported_manifest_schema_is_typed");
+        write_manifest(
+            &path,
+            r#"{
+  "schema_version": 999,
+  "package": "pkg",
+  "module": "Cap",
+  "primary_dylib": "/tmp/libcap.so"
+}"#,
+        );
+
+        let Err(err) = ParsedCapabilityManifest::read(&path) else {
+            panic!("expected unsupported schema error");
+        };
+        assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
+        assert!(err.to_string().contains("unsupported Lean capability manifest schema"));
+    }
+
+    #[test]
     fn built_capability_records_dependency_descriptors() {
         let spec = LeanBuiltCapability::path("/tmp/libcap.so").dependency(
             LeanLibraryDependency::path("/tmp/libdep.so")
@@ -311,5 +587,16 @@ mod tests {
         };
         assert_eq!(initializer.package_name(), "dep_pkg");
         assert_eq!(initializer.module_name(), "Dep");
+    }
+
+    fn temp_manifest_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lean-rs-manifest-{}-{name}", std::process::id()));
+        drop(fs::remove_dir_all(&dir));
+        fs::create_dir_all(&dir).expect("create manifest test dir");
+        dir.join("capability.json")
+    }
+
+    fn write_manifest(path: &std::path::Path, contents: &str) {
+        fs::write(path, contents).expect("write manifest fixture");
     }
 }

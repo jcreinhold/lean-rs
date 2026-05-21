@@ -19,11 +19,9 @@
 //!
 //! ```ignore
 //! let runtime = lean_rs::LeanRuntime::init()?;
-//! let capability = lean_rs::LeanCapability::from_build_env(
+//! let capability = lean_rs::LeanCapability::from_build_manifest(
 //!     runtime,
-//!     lean_rs::LeanBuiltCapability::path(env!("MY_CAPABILITY_DYLIB"))
-//!         .package("my_pkg")
-//!         .module("MyMod"),
+//!     lean_rs::LeanBuiltCapability::manifest_path(env!("MY_CAPABILITY_MANIFEST")),
 //! )?;
 //! let module  = capability.module()?;
 //! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;

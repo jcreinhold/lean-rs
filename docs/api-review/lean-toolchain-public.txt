@@ -104,6 +104,8 @@ pub struct lean_toolchain::BuiltLeanCapability
 impl lean_toolchain::BuiltLeanCapability
 pub fn lean_toolchain::BuiltLeanCapability::dylib_path(&self) -> &std::path::Path
 pub fn lean_toolchain::BuiltLeanCapability::env_var(&self) -> &str
+pub fn lean_toolchain::BuiltLeanCapability::manifest_env_var(&self) -> &str
+pub fn lean_toolchain::BuiltLeanCapability::manifest_path(&self) -> &std::path::Path
 pub fn lean_toolchain::BuiltLeanCapability::module(&self) -> &str
 pub fn lean_toolchain::BuiltLeanCapability::package(&self) -> &str
 pub fn lean_toolchain::BuiltLeanCapability::project_root(&self) -> &std::path::Path
@@ -128,6 +130,7 @@ impl lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::new(project_root: impl core::convert::Into<std::path::PathBuf>, target_name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
@@ -291,12 +294,14 @@ impl core::marker::Unpin for lean_toolchain::ToolchainInfo
 impl core::marker::UnsafeUnpin for lean_toolchain::ToolchainInfo
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::ToolchainInfo
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainInfo
+pub const lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION: u32
 pub const lean_toolchain::HOST_TRIPLE: &str
 pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
 pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::build_lake_target(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::build_lake_target_quiet(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::capability_env_var(target_name: &str) -> alloc::string::String
+pub fn lean_toolchain::capability_manifest_env_var(target_name: &str) -> alloc::string::String
 pub fn lean_toolchain::discover_lake_modules(options: lean_toolchain::LeanModuleDiscoveryOptions) -> core::result::Result<lean_toolchain::LeanLakeProjectModules, lean_toolchain::LeanModuleDiscoveryDiagnostic>
 pub fn lean_toolchain::discover_toolchain(opts: &lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()

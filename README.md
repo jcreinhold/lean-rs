@@ -178,12 +178,9 @@ use lean_rs::{LeanBuiltCapability, LeanCapability, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
-    let capability = LeanCapability::from_build_env(
+    let capability = LeanCapability::from_build_manifest(
         runtime,
-        LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
-            .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
-            .package("my_app")
-            .module("MyCapability"),
+        LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
     )?;
     let module = capability.module()?;
 
@@ -200,9 +197,10 @@ cargo run
 ```
 
 `CargoLeanCapability` hides Lean link directives, Lake's shared-library facet,
-Cargo rerun triggers, cache, filename convention, and dylib-path env-var
-plumbing. `LeanCapability` keeps the build-time path, dependency bundle, and
-initializer names together at runtime. Use `build_lake_target`,
+Cargo rerun triggers, cache, filename convention, and the artifact manifest
+handoff. `LeanCapability` reads that manifest and keeps the build-time path,
+dependency bundle, and initializer names together at runtime. Use
+`build_lake_target`,
 `LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom
 interop.
 

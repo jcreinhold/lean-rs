@@ -557,11 +557,15 @@ pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs:
 pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
 pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
 pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs::LeanBuiltCapability::resolved_manifest_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 impl core::clone::Clone for lean_rs::LeanBuiltCapability
 pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
 impl core::cmp::Eq for lean_rs::LeanBuiltCapability
@@ -583,6 +587,7 @@ pub struct lean_rs::module::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
@@ -1110,11 +1115,15 @@ pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs:
 pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::manifest_path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
 pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
 pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs::LeanBuiltCapability::resolved_manifest_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 impl core::clone::Clone for lean_rs::LeanBuiltCapability
 pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
 impl core::cmp::Eq for lean_rs::LeanBuiltCapability
@@ -1173,6 +1182,7 @@ pub struct lean_rs::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str

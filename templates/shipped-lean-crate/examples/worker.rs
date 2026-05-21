@@ -1,6 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_DYLIB"))
         .env_var("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_DYLIB")
+        .manifest_env_var("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST")
         .package("ship_lean_demo")
         .module("ShipLeanDemo");
     let mut capability = lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(

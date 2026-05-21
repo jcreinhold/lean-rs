@@ -67,11 +67,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 This emits Lean link directives, Cargo rerun triggers, runs
 `lake build MyCapability:shared`, resolves Lake's supported dylib naming
-conventions, and emits:
+conventions, writes a JSON artifact manifest, and emits:
 
 ```text
+cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB=<built dylib path>
 ```
+
+The manifest path is the canonical runtime handoff. The dylib env var remains
+for compatibility and simple low-level callers.
 
 Use `build_lake_target` directly only when a crate really needs lower-level
 control over the build-script policy.
@@ -82,12 +86,11 @@ For trusted same-process interop, embed the compile-time path with `env!`:
 
 ```rust,ignore
 let runtime = lean_rs::LeanRuntime::init()?;
-let capability = lean_rs::LeanCapability::from_build_env(
+let capability = lean_rs::LeanCapability::from_build_manifest(
     runtime,
-    lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
-        .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
-        .package("my_app")
-        .module("MyCapability"),
+    lean_rs::LeanBuiltCapability::manifest_path(
+        env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
+    ),
 )?;
 
 let module = capability.module()?;
@@ -95,9 +98,9 @@ let add = module.exported::<(u64, u64), u64>("my_app_add")?;
 let answer = add.call(40, 2)?;
 ```
 
-`LeanCapability` is a convenience layer over `LeanLibrary`: it resolves the
-build-time path, opens the dylib, initializes the configured module, and keeps
-the initializer names with the opened library.
+`LeanCapability` is a convenience layer over `LeanLibrary`: it reads the
+manifest, opens the primary dylib and dependency bundle, initializes the
+configured module, and keeps the initializer names with the opened library.
 
 ## Run The Capability In A Worker
 
@@ -116,6 +119,7 @@ Then point the worker builder at that binary:
 ```rust,ignore
 let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
     .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
+    .manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")
     .package("my_app")
     .module("MyCapability");
 let mut capability =
@@ -153,8 +157,8 @@ for its local platform and Lean toolchain.
 
 ## Gotchas
 
-- Use `env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")`, not a runtime
-  environment lookup, when the path is emitted by your own `build.rs`.
+- Use `env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")`, not a runtime
+  environment lookup, when the manifest is emitted by your own `build.rs`.
 - Include Lean sources, `lakefile.lean`, `lean-toolchain`, and
   `lake-manifest.json` in the published crate.
 - Exclude `.lake/`; it is platform- and toolchain-specific build output.

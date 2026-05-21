@@ -40,6 +40,7 @@ libloading = "0.8"
 # function-vs-global distinction stays invisible to callers of
 # `LeanModule::exported`.
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+serde_json = { workspace = true }
 # Structured spans + events around runtime init, module load + dispatch,
 # host session calls, and bulk/pool paths. No subscriber is installed by
 # the crate; downstream consumers attach their own (or `DiagnosticCapture`

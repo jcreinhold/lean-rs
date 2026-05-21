@@ -19,9 +19,10 @@
 //! ```
 //!
 //! That one call covers link-time (the `cargo:rustc-link-search` /
-//! `link-lib` directives) and load-time (the rpath into the Lean toolchain's
-//! `lib/lean` directory) so a consumer binary runs without
-//! `DYLD_FALLBACK_LIBRARY_PATH` / `LD_LIBRARY_PATH` set.
+//! `link-lib` directives), load-time (the rpath into the Lean toolchain's
+//! `lib/lean` directory), and the build artifact manifest consumed by
+//! `lean-rs` at runtime. A consumer binary should not need to construct Lake
+//! output paths or set `DYLD_FALLBACK_LIBRARY_PATH` / `LD_LIBRARY_PATH`.
 
 use std::env;
 use std::fmt::Write as _;
@@ -36,6 +37,10 @@ use sha2::{Digest, Sha256};
 
 use crate::diagnostics::LinkDiagnostics;
 use crate::discover::{DiscoverOptions, ToolchainInfo, discover_toolchain};
+use crate::fingerprint::ToolchainFingerprint;
+
+/// Current JSON schema version for `CargoLeanCapability` artifact manifests.
+pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Set once after a successful link-directive emission to make repeat calls
 /// (e.g. multiple `build.rs` invocations within one process) cheap and
@@ -153,8 +158,8 @@ pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result
 ///
 /// This is the canonical downstream `build.rs` entry point. It composes
 /// [`emit_lean_link_directives_checked`], [`build_lake_target`], and the
-/// `cargo:rustc-env=...` directive that carries the built capability path
-/// into Rust code at compile time.
+/// `cargo:rustc-env=...` directives that carry a JSON artifact manifest and a
+/// backward-compatible dylib path into Rust code at compile time.
 ///
 /// ```ignore
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -172,6 +177,7 @@ pub struct CargoLeanCapability {
     package: Option<String>,
     module: Option<String>,
     env_var: Option<String>,
+    manifest_env_var: Option<String>,
 }
 
 impl CargoLeanCapability {
@@ -184,6 +190,7 @@ impl CargoLeanCapability {
             package: None,
             module: None,
             env_var: None,
+            manifest_env_var: None,
         }
     }
 
@@ -216,8 +223,20 @@ impl CargoLeanCapability {
         self
     }
 
-    /// Emit link directives, build the Lake shared library, and emit the
-    /// `cargo:rustc-env` directive for the built dylib.
+    /// Override the generated Cargo environment variable name for the artifact
+    /// manifest.
+    ///
+    /// The default is `LEAN_RS_CAPABILITY_<TARGET>_MANIFEST`, with the target
+    /// converted to screaming snake case.
+    #[must_use]
+    pub fn manifest_env_var(mut self, env_var: impl Into<String>) -> Self {
+        self.manifest_env_var = Some(env_var.into());
+        self
+    }
+
+    /// Emit link directives, build the Lake shared library, write the
+    /// artifact manifest, and emit `cargo:rustc-env` directives for the
+    /// manifest and compatibility dylib path.
     ///
     /// # Errors
     ///
@@ -263,10 +282,27 @@ impl CargoLeanCapability {
         };
         let module = self.module.unwrap_or_else(|| self.target_name.clone());
         let env_var = self.env_var.unwrap_or_else(|| capability_env_var(&self.target_name));
+        let manifest_env_var = self
+            .manifest_env_var
+            .unwrap_or_else(|| capability_manifest_env_var(&self.target_name));
+        let manifest_path = write_capability_manifest(
+            &project_root,
+            &self.target_name,
+            &package,
+            &module,
+            &dylib_path,
+            &manifest_env_var,
+        )?;
         cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
+        cargo_metadata.println(format_args!(
+            "cargo:rustc-env={manifest_env_var}={}",
+            manifest_path.display()
+        ));
         Ok(BuiltLeanCapability {
             dylib_path,
             env_var,
+            manifest_path,
+            manifest_env_var,
             package,
             module,
             target_name: self.target_name,
@@ -280,6 +316,8 @@ impl CargoLeanCapability {
 pub struct BuiltLeanCapability {
     dylib_path: PathBuf,
     env_var: String,
+    manifest_path: PathBuf,
+    manifest_env_var: String,
     package: String,
     module: String,
     target_name: String,
@@ -297,6 +335,18 @@ impl BuiltLeanCapability {
     #[must_use]
     pub fn env_var(&self) -> &str {
         &self.env_var
+    }
+
+    /// JSON artifact manifest path emitted by the build helper.
+    #[must_use]
+    pub fn manifest_path(&self) -> &Path {
+        &self.manifest_path
+    }
+
+    /// Cargo environment variable that stores the artifact manifest path.
+    #[must_use]
+    pub fn manifest_env_var(&self) -> &str {
+        &self.manifest_env_var
     }
 
     /// Lake package name.
@@ -328,6 +378,12 @@ impl BuiltLeanCapability {
 #[must_use]
 pub fn capability_env_var(target_name: &str) -> String {
     format!("LEAN_RS_CAPABILITY_{}_DYLIB", screaming_snake(target_name))
+}
+
+/// Default Cargo environment variable for a Lean capability artifact manifest.
+#[must_use]
+pub fn capability_manifest_env_var(target_name: &str) -> String {
+    format!("LEAN_RS_CAPABILITY_{}_MANIFEST", screaming_snake(target_name))
 }
 
 fn emit_for(info: &ToolchainInfo) {
@@ -704,6 +760,144 @@ fn cache_path(project_root: &Path, target_name: &str) -> PathBuf {
         .join(format!("{}.cache", sanitize_target_name(target_name)))
 }
 
+fn write_capability_manifest(
+    project_root: &Path,
+    target_name: &str,
+    package: &str,
+    module: &str,
+    dylib_path: &Path,
+    manifest_env_var: &str,
+) -> Result<PathBuf, LinkDiagnostics> {
+    let manifest_path = capability_manifest_path(project_root, target_name);
+    let dependencies = capability_dependencies(project_root, target_name)?;
+    let fingerprint = ToolchainFingerprint::current();
+    let search_dirs = capability_search_dirs(project_root, dylib_path);
+    let manifest = serde_json::json!({
+        "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
+        "target_name": target_name,
+        "package": package,
+        "module": module,
+        "primary_dylib": dylib_path.display().to_string(),
+        "manifest_env_var": manifest_env_var,
+        "lean_version": &fingerprint.lean_version,
+        "resolved_lean_version": &fingerprint.resolved_version,
+        "lean_header_sha256": &fingerprint.header_sha256,
+        "toolchain_fingerprint": {
+            "lean_version": &fingerprint.lean_version,
+            "resolved_version": &fingerprint.resolved_version,
+            "header_sha256": &fingerprint.header_sha256,
+            "fixture_sha256": &fingerprint.fixture_sha256,
+            "host_triple": &fingerprint.host_triple,
+        },
+        "search_dirs": search_dirs
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>(),
+        "dependencies": dependencies,
+    });
+    let bytes = serde_json::to_vec_pretty(&manifest).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("could not encode Lean capability manifest ({err})"),
+    })?;
+    if let Some(parent) = manifest_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("could not create manifest directory {} ({err})", parent.display()),
+        })?;
+    }
+    fs::write(&manifest_path, bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!(
+            "could not write Lean capability manifest {} ({err})",
+            manifest_path.display()
+        ),
+    })?;
+    Ok(manifest_path)
+}
+
+fn capability_manifest_path(project_root: &Path, target_name: &str) -> PathBuf {
+    if let Some(out_dir) = env::var_os("OUT_DIR") {
+        PathBuf::from(out_dir).join(format!("{}.lean-rs-capability.json", sanitize_target_name(target_name)))
+    } else {
+        project_root
+            .join(".lake")
+            .join("lean-rs-build-cache")
+            .join(format!("{}.lean-rs-capability.json", sanitize_target_name(target_name)))
+    }
+}
+
+fn capability_search_dirs(project_root: &Path, dylib_path: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(parent) = dylib_path.parent() {
+        dirs.push(parent.to_path_buf());
+    }
+    dirs.push(project_root.join(".lake").join("build").join("lib"));
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn capability_dependencies(project_root: &Path, target_name: &str) -> Result<Vec<serde_json::Value>, LinkDiagnostics> {
+    let manifest_path = project_root.join("lake-manifest.json");
+    let bytes = match fs::read(&manifest_path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(LinkDiagnostics::LakeOutputUnresolved {
+                project_root: project_root.to_path_buf(),
+                target_name: target_name.to_owned(),
+                reason: format!("could not read {} ({err})", manifest_path.display()),
+            });
+        }
+    };
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("{} is not valid JSON ({err})", manifest_path.display()),
+        })?;
+    let packages = manifest
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .map_or([].as_slice(), Vec::as_slice);
+    let mut dependencies = Vec::new();
+    for package in packages {
+        let Some(name) = package.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if name != "lean_rs_interop_shims" {
+            continue;
+        }
+        let Some(dir) = package.get("dir").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let dependency_root = project_root.join(dir);
+        let dependency_root =
+            fs::canonicalize(&dependency_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+                project_root: project_root.to_path_buf(),
+                target_name: target_name.to_owned(),
+                reason: format!(
+                    "could not canonicalize dependency root {} ({err})",
+                    dependency_root.display()
+                ),
+            })?;
+        let dylib = resolve_dylib_path(&dependency_root, "lean_rs_interop_shims", "LeanRsInterop");
+        dependencies.push(serde_json::json!({
+            "name": name,
+            "dylib_path": dylib.display().to_string(),
+            "export_symbols_for_dependents": true,
+            "initializer": {
+                "package": "lean_rs_interop_shims",
+                "module": "LeanRsInterop",
+            }
+        }));
+    }
+    Ok(dependencies)
+}
+
 fn sanitize_target_name(target_name: &str) -> String {
     target_name
         .chars()
@@ -795,8 +989,8 @@ fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::{
-        CargoLeanCapability, CargoMetadata, LakeRun, LakeRunner, build_lake_target_with_runner, capability_env_var,
-        command_detail,
+        CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, LakeRun, LakeRunner,
+        build_lake_target_with_runner, capability_env_var, capability_manifest_env_var, command_detail,
     };
     use crate::LinkDiagnostics;
     use std::cell::Cell;
@@ -1032,6 +1226,18 @@ mod tests {
     }
 
     #[test]
+    fn capability_manifest_env_var_is_deterministic() {
+        assert_eq!(
+            capability_manifest_env_var("MyCapability"),
+            "LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"
+        );
+        assert_eq!(
+            capability_manifest_env_var("lean-dup_index"),
+            "LEAN_RS_CAPABILITY_LEAN_DUP_INDEX_MANIFEST"
+        );
+    }
+
+    #[test]
     fn cargo_capability_build_quiet_returns_metadata() {
         let root = make_project("cargo-capability", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
@@ -1041,14 +1247,41 @@ mod tests {
             .package("my_pkg")
             .module("MyCapability")
             .env_var("MY_CAPABILITY_DYLIB")
+            .manifest_env_var("MY_CAPABILITY_MANIFEST")
             .build_quiet()
             .expect("cargo helper build");
 
         assert_eq!(built.dylib_path(), dylib.as_path());
         assert_eq!(built.env_var(), "MY_CAPABILITY_DYLIB");
+        assert_eq!(built.manifest_env_var(), "MY_CAPABILITY_MANIFEST");
+        assert!(built.manifest_path().is_file());
         assert_eq!(built.package(), "my_pkg");
         assert_eq!(built.module(), "MyCapability");
         assert_eq!(built.target_name(), "MyCapability");
         assert!(built.project_root().is_absolute());
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
+                .expect("manifest is valid JSON");
+        assert_eq!(
+            manifest.get("schema_version").and_then(serde_json::Value::as_u64),
+            Some(u64::from(CAPABILITY_MANIFEST_SCHEMA_VERSION)),
+        );
+        assert_eq!(
+            manifest.get("package").and_then(serde_json::Value::as_str),
+            Some("my_pkg")
+        );
+        assert_eq!(
+            manifest.get("module").and_then(serde_json::Value::as_str),
+            Some("MyCapability")
+        );
+        assert_eq!(
+            manifest
+                .get("primary_dylib")
+                .and_then(serde_json::Value::as_str)
+                .map(Path::new),
+            Some(dylib.as_path()),
+        );
+        assert!(manifest.get("toolchain_fingerprint").is_some());
     }
 }

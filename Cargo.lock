@@ -344,6 +344,7 @@ dependencies = [
  "lean-toolchain",
  "libloading",
  "object 0.36.7",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

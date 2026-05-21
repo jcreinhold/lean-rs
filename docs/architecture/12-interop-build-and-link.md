@@ -20,15 +20,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 The helper emits the Lean link-search, link-lib, runtime rpath, Cargo rerun
-directives, and a deterministic compile-time environment variable:
+directives, a deterministic manifest compile-time environment variable, and a
+compatibility dylib-path variable:
 
 ```text
+cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB=<built dylib path>
 ```
 
 It runs `lake build MyCapability:shared`, resolves Lake's supported dylib
-naming conventions, and returns `BuiltLeanCapability` for build scripts that
-want to inspect the result.
+naming conventions, writes a self-describing artifact manifest, and returns
+`BuiltLeanCapability` for build scripts that want to inspect the result. The
+manifest is the canonical runtime handoff for shipped crates; the direct dylib
+path remains a lower-level compatibility path.
 
 Lower-level helpers remain available for custom build flows:
 
