@@ -178,4 +178,6 @@ harden batching, data-plane choices, Lean-side streaming helpers,
 mathlib-scale fixtures, and pool observability. The observability record is
 [`26-worker-pool-observability.md`](26-worker-pool-observability.md). Prompts
 86-87 cover downstream readiness and the final scale contract. The readiness
-proof is [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md).
+proof is [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md), and the
+production-scale release contract is
+[`28-production-scale-release.md`](28-production-scale-release.md).

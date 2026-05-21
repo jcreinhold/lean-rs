@@ -76,7 +76,10 @@ measured decision to keep the current row format until an end-to-end worker
 workload justifies a replacement, and
 [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) for the
 Lean-side worker envelope helpers capability authors use without importing host
-policy.
+policy, [`20-worker-pool.md`](20-worker-pool.md) for the local worker-pool
+boundary, and
+[`28-production-scale-release.md`](28-production-scale-release.md) for the
+final production-scale worker contract.
 
 ## Hidden knowledge
 

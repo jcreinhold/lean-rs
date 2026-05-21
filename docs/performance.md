@@ -135,6 +135,17 @@ backpressure, pool stats, parent/child RSS when available, and optional
 subprocess comparison status. Treat its rows as generic fixture data, not
 downstream schemas.
 
+Prompt 87 is the production-scale hardening pass. It does not add new worker
+features. It re-runs the focused pool, scheduling, planning, batching,
+data-plane, Lean helper, mathlib-scale, observability, and readiness workloads,
+then records the final local scale contract in
+[`docs/architecture/28-production-scale-release.md`](architecture/28-production-scale-release.md).
+The supported scale path remains planner -> pool -> session lease -> typed
+command -> live rows -> terminal summary -> pool stats. Any future throughput
+change must still report a named workload, row counts, throughput, allocation
+or payload-size evidence where relevant, and parent/child RSS or explicit
+RSS-unavailable status.
+
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
 
 ```text

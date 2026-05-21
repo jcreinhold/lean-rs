@@ -315,6 +315,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`25-mathlib-scale-worker-fixture.md`](docs/architecture/25-mathlib-scale-worker-fixture.md)—the planner, pool, typed-command scale fixture and mathlib-module-list probe.
 - [`26-worker-pool-observability.md`](docs/architecture/26-worker-pool-observability.md)—pool snapshots and bounded row-delivery backpressure.
 - [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md)—readiness proof for replacing a subprocess-worker shape without importing downstream schemas.
+- [`28-production-scale-release.md`](docs/architecture/28-production-scale-release.md)—the final local worker-pool scale contract and non-goals.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

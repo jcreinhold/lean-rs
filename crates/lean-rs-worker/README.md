@@ -201,3 +201,5 @@ The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).
 The lower-level process-boundary recipe is
 [`docs/recipes/worker-process-boundary.md`](../../docs/recipes/worker-process-boundary.md).
+The final local scale contract is
+[`docs/architecture/28-production-scale-release.md`](../../docs/architecture/28-production-scale-release.md).

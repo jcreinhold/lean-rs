@@ -109,6 +109,14 @@ jobs:
           cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
             --test supervisor child_crash_is_typed_and_parent_survives -- --test-threads=1
 
+      - name: ASan worker pool fatal-exit recovery fixture
+        env:
+          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
+          RUSTDOCFLAGS: '-Z sanitizer=address'
+        run: |
+          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
+            --test pool child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker -- --test-threads=1
+
       - name: ASan worker streaming fatal-exit fixture
         env:
           RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'

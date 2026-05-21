@@ -61,6 +61,21 @@ See [`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-
 Progress sink panics are caught at the Rust callback boundary and surfaced as
 `LeanError::Host` with stage `CallbackPanic`, code `lean_rs.internal`.
 
+## Worker process diagnostics and pool snapshots
+
+`lean-rs-worker` deliberately uses a separate worker error surface for process
+boundary failures. Child panic/abort, request timeout, cancellation-triggered
+cycle, stale lease use, row sink panic, diagnostic sink panic, and typed command
+decode failure are worker outcomes, not `LeanDiagnosticCode` values from the
+in-process host stack.
+
+For large local runs, use `LeanWorkerPoolSnapshot` and
+`LeanWorkerSessionLease::snapshot()` for operational state. Snapshots summarize
+queue depth, active workers, warm leases, restart reasons, best-effort child
+RSS, stream outcomes, delivered row counts, payload bytes, elapsed stream time,
+and backpressure counters. They intentionally do not expose child pids, worker
+ids, pipe handles, protocol frames, or scheduling internals.
+
 ## Matching on codes
 
 `LeanError`, `LeanElabFailure`, and `LeanMetaResponse` all project to the same taxonomy via

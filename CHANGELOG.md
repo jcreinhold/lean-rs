@@ -11,7 +11,13 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 
 ## [Unreleased]
 
-_Nothing yet._
+### `lean-rs-worker`
+
+- Added the production-scale worker contract docs for the local
+  `LeanWorkerPool` foundation: planner -> pool -> session lease -> typed
+  command -> live rows -> terminal summary -> pool stats. The contract records
+  remote workers, byte callbacks, object callbacks, and downstream schemas as
+  non-goals for the current scale release.
 
 ## [0.1.1] — 2026-05-20
 
