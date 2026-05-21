@@ -105,6 +105,14 @@ jobs:
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            lean_lib_paths="$GITHUB_WORKSPACE/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/lean/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
+            echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
 
       - name: cargo fmt --check
         run: cargo fmt --check
@@ -184,6 +192,14 @@ jobs:
           (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            lean_lib_paths="$GITHUB_WORKSPACE/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/lean/.lake/build/lib"
+            lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
+            echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
 
       - name: Verify tag matches workspace version
         if: github.event_name == 'push'
