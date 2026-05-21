@@ -10,6 +10,8 @@
 //!   dylibs anchored for the same lifetime.
 //! - [`LeanModule`] — proof that a named Lean module hosted by a
 //!   [`LeanLibrary`] has been initialized to `IO.ok(())`.
+//! - [`LeanCapabilityPreflight`] — manifest and artifact checks that turn
+//!   package/loader failures into stable repair hints before opening.
 //!
 //! Construction of either type requires a [`crate::LeanRuntime`]
 //! borrow, so use-before-init is structurally impossible. The
@@ -36,12 +38,16 @@ pub(crate) mod exported;
 pub(crate) mod initializer;
 pub(crate) mod library;
 pub(crate) mod loaded;
+pub(crate) mod preflight;
 
 pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
 pub use capability::{LeanBuiltCapability, LeanCapability};
 pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;
+pub use preflight::{
+    LeanCapabilityPreflight, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity,
+};
 
 // `LeanAbi` lives in `crate::abi::traits` but appears in the public
 // signature of [`LeanModule::exported`] (as a per-arg bound) and in the

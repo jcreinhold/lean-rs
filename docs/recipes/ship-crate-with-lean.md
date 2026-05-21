@@ -101,6 +101,10 @@ let answer = add.call(40, 2)?;
 `LeanCapability` is a convenience layer over `LeanLibrary`: it reads the
 manifest, opens the primary dylib and dependency bundle, initializes the
 configured module, and keeps the initializer names with the opened library.
+For doctor commands or installer checks, run `LeanCapabilityPreflight` against
+the same manifest descriptor first; it reports missing package files,
+unsupported toolchain fingerprints, stale manifests, and missing initializers
+with stable loader codes and repair hints.
 
 ## Run The Capability In A Worker
 

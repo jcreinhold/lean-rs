@@ -50,9 +50,10 @@
 //!   events without installing a global subscriber.
 //! - [`module`] — load a Lake-built Lean capability and call typed
 //!   exported functions. [`LeanCapability`] is the normal shipped-crate
-//!   surface; [`LeanLibraryBundle`] anchors dependency dylibs; [`LeanLibrary`]
-//!   is the advanced one-dylib RAII handle; [`LeanModule`] proves a module's
-//!   initializer succeeded;
+//!   surface; [`LeanCapabilityPreflight`] reports package/loader problems
+//!   before `dlopen`; [`LeanLibraryBundle`] anchors dependency dylibs;
+//!   [`LeanLibrary`] is the advanced one-dylib RAII handle; [`LeanModule`]
+//!   proves a module's initializer succeeded;
 //!   [`LeanExported`] is a single generic typed function handle whose
 //!   `.call` impl is macro-stamped per arity `0..=12`.
 //! - [`handle`] — opaque, lifetime-bound receipts for the four core
@@ -128,8 +129,9 @@ pub use crate::error::{
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{
-    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanExported, LeanIo, LeanLibrary,
-    LeanLibraryBundle, LeanLibraryDependency, LeanModule, LeanModuleInitializer,
+    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCapabilityPreflight, LeanExported, LeanIo,
+    LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport,
+    LeanLoaderSeverity, LeanModule, LeanModuleInitializer,
 };
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};

@@ -27,8 +27,9 @@ CargoLeanCapability artifact description
   reopen the same capability without rediscovering Lake output conventions.
 - `lean-rs` owns runtime loader lifetime and symbol visibility. It opens the
   capability and any dependent Lean dylibs in the required order, keeps those
-  handles alive for the full capability lifetime, initializes the requested
-  module, and hides platform loader differences.
+  handles alive for the full capability lifetime, preflights the manifest and
+  artifacts into stable diagnostics, initializes the requested module, and
+  hides platform loader differences.
 - `lean-rs-worker` owns the process boundary. It locates and starts the
   app-owned worker child, builds the child environment, opens the capability in
   the child, reports bootstrap diagnostics, and keeps protocol pipes private.
@@ -130,14 +131,17 @@ advanced build systems. They are not the canonical shipped-crate path.
 - `LeanLibrary` handle lifetime;
 - dependency open order;
 - global symbol visibility;
+- manifest preflight and repair hints;
 - module initializer symbol names and sequencing;
 - platform loader differences;
 - nullary Lean global-vs-function export classification.
 
 `LeanCapability` is the normal same-process runtime surface for shipped
-capabilities. `LeanLibrary::open` and `LeanLibrary::open_globally` remain
-public for advanced L1 interop and focused tests, but they are escape hatches:
-using them means the caller has chosen to manage loader details explicitly.
+capabilities. `LeanCapabilityPreflight` is the doctor-style surface for
+checking a manifest-backed capability before opening it. `LeanLibrary::open`
+and `LeanLibrary::open_globally` remain public for advanced L1 interop and
+focused tests, but they are escape hatches: using them means the caller has
+chosen to manage loader details explicitly.
 
 ### `lean-rs-worker`
 

@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::preflight::{CapabilityManifest, LeanCapabilityPreflight, manifest_error_to_lean_error};
 use super::{LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
@@ -248,8 +249,12 @@ impl<'lean> LeanCapability<'lean> {
     /// by the manifest cannot be opened.
     #[allow(clippy::needless_pass_by_value)]
     pub fn from_build_manifest(runtime: &'lean LeanRuntime, spec: LeanBuiltCapability) -> LeanResult<Self> {
+        let report = LeanCapabilityPreflight::new(spec.clone()).check();
+        if !report.is_ok() {
+            return Err(report.into_error());
+        }
         let manifest_path = spec.resolved_manifest_path()?;
-        let manifest = ParsedCapabilityManifest::read(&manifest_path)?;
+        let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;
         Self::open_with_dependencies(
             runtime,
             manifest.primary_dylib,
@@ -366,106 +371,10 @@ impl<'lean> LeanCapability<'lean> {
     }
 }
 
-struct ParsedCapabilityManifest {
-    primary_dylib: PathBuf,
-    package: String,
-    module: String,
-    dependencies: Vec<LeanLibraryDependency>,
-}
-
-impl ParsedCapabilityManifest {
-    fn read(path: &Path) -> LeanResult<Self> {
-        let bytes = std::fs::read(path).map_err(|err| {
-            LeanError::module_init(format!(
-                "failed to read Lean capability manifest '{}': {err}",
-                path.display()
-            ))
-        })?;
-        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|err| {
-            LeanError::module_init(format!(
-                "Lean capability manifest '{}' is not valid JSON: {err}",
-                path.display()
-            ))
-        })?;
-        let schema_version = required_u64(&value, "schema_version", path)?;
-        if schema_version != u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION) {
-            return Err(LeanError::module_init(format!(
-                "unsupported Lean capability manifest schema {schema_version} in '{}'; supported schema is {}",
-                path.display(),
-                lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
-            )));
-        }
-        let primary_dylib = PathBuf::from(required_string(&value, "primary_dylib", path)?);
-        let package = required_string(&value, "package", path)?;
-        let module = required_string(&value, "module", path)?;
-        let dependencies = dependencies_from_manifest(&value, path)?;
-        Ok(Self {
-            primary_dylib,
-            package,
-            module,
-            dependencies,
-        })
-    }
-}
-
-fn dependencies_from_manifest(value: &serde_json::Value, path: &Path) -> LeanResult<Vec<LeanLibraryDependency>> {
-    let Some(raw_dependencies) = value.get("dependencies") else {
-        return Ok(Vec::new());
-    };
-    let dependencies = raw_dependencies.as_array().ok_or_else(|| {
-        LeanError::module_init(format!(
-            "Lean capability manifest '{}' field `dependencies` must be an array",
-            path.display()
-        ))
-    })?;
-    let mut out = Vec::with_capacity(dependencies.len());
-    for dependency in dependencies {
-        let dylib = required_string(dependency, "dylib_path", path)?;
-        let mut descriptor = LeanLibraryDependency::path(dylib);
-        if dependency
-            .get("export_symbols_for_dependents")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            descriptor = descriptor.export_symbols_for_dependents();
-        }
-        if let Some(initializer) = dependency.get("initializer") {
-            let package = required_string(initializer, "package", path)?;
-            let module = required_string(initializer, "module", path)?;
-            descriptor = descriptor.initializer(package, module);
-        }
-        out.push(descriptor);
-    }
-    Ok(out)
-}
-
-fn required_string(value: &serde_json::Value, field: &str, path: &Path) -> LeanResult<String> {
-    value
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            LeanError::module_init(format!(
-                "Lean capability manifest '{}' is missing non-empty string field `{field}`",
-                path.display()
-            ))
-        })
-}
-
-fn required_u64(value: &serde_json::Value, field: &str, path: &Path) -> LeanResult<u64> {
-    value.get(field).and_then(serde_json::Value::as_u64).ok_or_else(|| {
-        LeanError::module_init(format!(
-            "Lean capability manifest '{}' is missing unsigned integer field `{field}`",
-            path.display()
-        ))
-    })
-}
-
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{LeanBuiltCapability, LeanLibraryDependency, ParsedCapabilityManifest};
+    use super::{CapabilityManifest, LeanBuiltCapability, LeanLibraryDependency};
     use std::fs;
     use std::path::PathBuf;
 
@@ -528,7 +437,7 @@ mod tests {
 }"#,
         );
 
-        let manifest = match ParsedCapabilityManifest::read(&path) {
+        let manifest = match CapabilityManifest::read(&path) {
             Ok(manifest) => manifest,
             Err(err) => panic!("expected manifest to parse, got {err}"),
         };
@@ -561,11 +470,11 @@ mod tests {
 }"#,
         );
 
-        let Err(err) = ParsedCapabilityManifest::read(&path) else {
+        let Err(err) = CapabilityManifest::read(&path) else {
             panic!("expected unsupported schema error");
         };
-        assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
-        assert!(err.to_string().contains("unsupported Lean capability manifest schema"));
+        assert_eq!(err.code(), crate::LeanLoaderDiagnosticCode::UnsupportedManifestSchema);
+        assert!(err.message().contains("unsupported Lean capability manifest schema"));
     }
 
     #[test]

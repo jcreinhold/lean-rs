@@ -38,6 +38,44 @@ instead of an in-process `LeanDiagnosticCode`.
 The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids
 are stable across patch releases.
 
+## Loader preflight
+
+Manifest-backed shipped capabilities can be checked before `LeanCapability`
+opens any dylib:
+
+```rust
+let report = lean_rs::LeanCapabilityPreflight::new(
+    lean_rs::LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
+)
+.check();
+
+if let Some(check) = report.first_error() {
+    eprintln!("{}: {}", check.code(), check.repair_hint());
+}
+```
+
+`LeanCapability::from_build_manifest` runs the same preflight internally when
+that produces a clearer failure. The broad `LeanError` still reports
+`LeanDiagnosticCode::ModuleInit`, but the bounded message includes the stable
+loader code and repair hint.
+
+| Loader code | `as_str()` | Meaning | Common fix |
+| --- | --- | --- | --- |
+| `MissingManifest` | `lean_rs.loader.missing_manifest` | The manifest path was absent, unreadable, or pointed at a missing file. | Rebuild through `CargoLeanCapability` and package the emitted manifest. |
+| `MalformedManifest` | `lean_rs.loader.malformed_manifest` | The manifest was not valid JSON or missed required fields. | Rebuild the Lean capability with the same `lean-rs` toolchain helper. |
+| `UnsupportedManifestSchema` | `lean_rs.loader.unsupported_manifest_schema` | The manifest schema is not understood by this runtime crate. | Rebuild with matching `lean-toolchain` and `lean-rs` versions. |
+| `MissingPrimaryDylib` | `lean_rs.loader.missing_primary_dylib` | The primary capability dylib named by the manifest is missing. | Rebuild and package the built shared library. |
+| `MissingTransitiveDependency` | `lean_rs.loader.missing_transitive_dependency` | A dependency dylib named by the manifest is missing. | Package every manifest dependency, including generic interop shims when used. |
+| `UnsupportedArchitecture` | `lean_rs.loader.unsupported_architecture` | A dylib is not a native object for this target architecture. | Rebuild the Lean capability for the current Cargo target. |
+| `UnsupportedToolchainFingerprint` | `lean_rs.loader.unsupported_toolchain_fingerprint` | The manifest was built with a mismatched or unsupported Lean toolchain fingerprint. | Rebuild the Lean capability with the same Lean toolchain as the Rust binary. |
+| `StaleManifest` | `lean_rs.loader.stale_manifest` | The manifest appears older than the primary dylib it describes. | Rebuild through `CargoLeanCapability` so the manifest and dylib match. |
+| `MissingInitializer` | `lean_rs.loader.missing_initializer` | The primary dylib does not export the package/module initializer named by the manifest. | Check package/module names and rebuild the shared target. |
+| `MissingImportedSymbol` | `lean_rs.loader.missing_imported_symbol` | A Lean/imported symbol is not supplied by the manifest dependency set. | Rebuild through `CargoLeanCapability` so dependency dylibs are recorded. |
+
+Normal users should not repair shipped apps by setting `LD_LIBRARY_PATH` or
+`DYLD_*`. A missing search path in the canonical flow is a packaging or
+artifact-manifest problem, not a caller-managed loader-flag problem.
+
 `Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not
 mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
 boundary.
