@@ -75,11 +75,12 @@ state; it does not know what a downstream row means.
 
 ## Comparison Input
 
-`/Users/jcreinhold/Code/lean-dup` is read-only comparison input. The readiness
-example records the checkout revision when present. If
-`LEAN_RS_WORKER_COMPARE_COMMAND` is set, the example runs that command and
-prints its status and elapsed time. The comparison is optional because
-`lean-rs-worker` should not depend on a local downstream checkout.
+A read-only downstream checkout (e.g., a `lean-dup` clone) can be supplied via the
+`LEAN_RS_LEAN_DUP_ROOT` environment variable. The readiness example records the checkout
+revision when the path is set and points to a git repository. If
+`LEAN_RS_WORKER_COMPARE_COMMAND` is also set, the example runs that command and prints its
+status and elapsed time. The comparison is optional because `lean-rs-worker` should not depend
+on a local downstream checkout.
 
 Any comparison must name the command, revision, workload, and limits. Without
 that, the readiness proof only claims generic coverage and local worker-pool

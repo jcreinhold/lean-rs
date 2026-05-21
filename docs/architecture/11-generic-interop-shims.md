@@ -58,11 +58,11 @@ reentrancy, and Rust panic containment are Rust-side registry contracts; see
 policy symbols. Host-specific environment queries, elaboration, kernel
 checking, and `MetaM` services stay out of `LeanRsInterop`.
 
-The prompt-40 host compatibility export is loaded from the host dylib directly,
-so it keeps a local Lean loop and compiles the bundled generic package's C
-helper source into the host shared facet.
+The host compatibility export is loaded from the host dylib directly, so it
+keeps a local Lean loop and compiles the bundled generic package's C helper
+source into the host shared facet.
 
-The host package keeps its prompt-40 test export:
+The host package keeps its test export:
 
 ```text
 lean_rs_interop_test_callback_loop : USize -> USize -> UInt64 -> IO UInt8

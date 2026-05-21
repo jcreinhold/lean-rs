@@ -785,7 +785,7 @@ fn emit_test_rows(writer: &ProtocolWriter, streams: &[String]) -> Result<u64, cr
     Ok(emitter.count())
 }
 
-#[allow(dead_code, reason = "reserved for prompt 57 worker configuration")]
+#[allow(dead_code, reason = "reserved for future worker configuration paths")]
 fn _path_for_diagnostics(path: &Path) -> PathBuf {
     path.to_path_buf()
 }

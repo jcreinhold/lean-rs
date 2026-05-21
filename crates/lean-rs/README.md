@@ -102,10 +102,6 @@ Worker-style tools that need process isolation, live rows, diagnostics, terminal
 timeouts, or memory cycling should use `lean-rs-worker` typed commands instead of exposing
 callback handles.
 
-Before the matching workspace version is published, pin against a checkout by adding
-`path = "../path/to/lean-rs/crates/lean-rs"` alongside `version = "0.1"` in `Cargo.toml`.
-Do the same for `lean-toolchain`.
-
 The `Args` and `R` generics on `LeanModule::exported` are sealed by the `LeanAbi` /
 `LeanArgs` / `DecodeCallResult` traits, so unsupported types fail at compile time rather than
 producing wrong decodes at runtime.

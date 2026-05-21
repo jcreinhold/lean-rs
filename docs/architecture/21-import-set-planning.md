@@ -76,7 +76,7 @@ define `extract`, `features`, `index`, or `probe` methods.
 
 The fixture test records the shape rather than claiming universal speedup:
 naive per-module execution opened one worker capability per module, while the
-planned path used one batch and one pool worker. On the local prompt-80 run,
-two interop fixture modules took 1049 ms in the naive path and 573 ms through a
-single planned pool lease. Larger projects should use their own workload
+planned path used one batch and one pool worker. On a local run, two interop
+fixture modules took 1049 ms in the naive path and 573 ms through a single
+planned pool lease. Larger projects should use their own workload
 numbers before turning a batch plan into a cache or scheduling policy.

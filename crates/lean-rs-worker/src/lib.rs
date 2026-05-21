@@ -39,11 +39,11 @@ pub use supervisor::{
     LeanWorkerStatus,
 };
 
-/// Run the prompt-56 child process on stdin/stdout.
+/// Run the worker child process on stdin/stdout.
 ///
 /// This entry point exists for the `lean-rs-worker-child` binary. It is not
-/// the public worker API; prompt 57 will add a supervisor surface over this
-/// child runner.
+/// the public worker API; the supervisor (`LeanWorker`) is the consumer
+/// surface over this child runner.
 #[doc(hidden)]
 pub fn __run_child_stdio() -> std::process::ExitCode {
     child::run_stdio()

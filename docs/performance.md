@@ -20,12 +20,12 @@ and the `String`/`Vec<String>` round-trip decoders. `session` covers
 
 `row_payload` covers the worker row transport hot path: JSON tree rows versus
 validated raw-JSON rows, typed command decode, row throughput, and allocation
-pressure. It also contains `worker::row_payload::protocol_batching`, the
-prompt-81 guard that compares simulated per-row raw JSON frames with batched
-raw JSON frames before any batch protocol is added, and
-`worker::row_payload::data_plane`, the prompt-82 guard comparing JSON,
-raw JSON, simulated binary envelopes, MessagePack, and CBOR before any worker
-format is changed. `worker_capability` covers
+pressure. Two guards live alongside it:
+`worker::row_payload::protocol_batching` compares per-row raw JSON frames with
+batched raw JSON frames so any future batch protocol must justify itself
+against the current per-row baseline. `worker::row_payload::data_plane`
+compares JSON, raw JSON, simulated binary envelopes, MessagePack, and CBOR so
+any future format change must show a measured win. `worker_capability` covers
 the downstream-shaped worker fixture:
 cold startup, first import, import-once streaming, cancellation latency,
 fatal-exit recovery, worker cycling, row throughput, and memory growth.
@@ -146,15 +146,15 @@ change must still report a named workload, row counts, throughput, allocation
 or payload-size evidence where relevant, and parent/child RSS or explicit
 RSS-unavailable status.
 
-Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
+Release-hardening capture on macOS / Lean 4.29.1:
 
 ```text
 cargo bench -p lean-rs-host --bench session -- \
-  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline prompt47-before
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline before
 baseline time: [99.764 µs 100.01 µs 100.36 µs]
 
 cargo bench -p lean-rs-host --bench session -- \
-  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline prompt47-before
+  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline before
 comparison time: [100.58 µs 101.11 µs 101.52 µs]
 Criterion: No change in performance detected.
 ```

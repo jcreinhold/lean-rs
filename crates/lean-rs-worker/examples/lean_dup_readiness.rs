@@ -521,7 +521,10 @@ struct BackpressureCapture {
 }
 
 fn print_optional_comparison() -> Result<(), Box<dyn std::error::Error>> {
-    let lean_dup_root = PathBuf::from("/Users/jcreinhold/Code/lean-dup");
+    let Some(lean_dup_root) = std::env::var_os("LEAN_RS_LEAN_DUP_ROOT").map(PathBuf::from) else {
+        println!("lean_dup_checkout=unset");
+        return Ok(());
+    };
     if lean_dup_root.is_dir() {
         let revision = Command::new("git")
             .arg("-C")

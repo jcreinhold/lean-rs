@@ -203,7 +203,7 @@ may kill the child without cooperative cleanup.
 
 Capability discovery uses metadata and doctor exports, not row streams. The
 worker's own protocol facts come from `LeanWorker::runtime_metadata`. A
-downstream capability can additionally expose JSON-returning exports with ABI
+downstream capability can also expose JSON-returning exports with ABI
 `String -> IO String`; `LeanWorkerSession::capability_metadata` decodes command
 names, capability names, semantic versions, optional Lean version text, and
 extra JSON, while `LeanWorkerSession::capability_doctor` decodes pass, warning,

@@ -95,8 +95,8 @@ pub(crate) enum Request {
         export: String,
         request_json: String,
     },
-    // Private harness requests used to prove streaming frame behavior before
-    // prompt 63 exposes a public row sink API.
+    // Private harness requests that exercise streaming frame behavior.
+    // Not part of the public row sink API.
     EmitTestRows {
         streams: Vec<String>,
     },

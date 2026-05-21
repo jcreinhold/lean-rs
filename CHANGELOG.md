@@ -88,30 +88,29 @@ toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
 
 First public release of **four** crates. Crate-publish order is load-bearing:
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The publish is mediated by
-[`.github/workflows/release.yml`](.github/workflows/release.yml) — pushing the `v0.1.0` tag
+[`.github/workflows/release.yml`](.github/workflows/release.yml): pushing the `v0.1.0` tag
 runs the pre-flight gates, the public-API diff, the workspace publish dry-run, and the live
 four-crate publish under a single `CARGO_REGISTRY_TOKEN`, then creates the GitHub Release whose
 body is this section. See [`docs/release.md`](docs/release.md) for the procedure (CI-mediated
 form, with a local fallback for when the workflow is unavailable).
 
-The four-crate shape (rather than three) is the outcome of `RD-2026-05-18-001`: the opinionated
-theorem-prover-host stack (`LeanHost` / `LeanCapabilities` / `LeanSession` and their
-elaboration / evidence / meta / pool surfaces) split out of `lean-rs` into the new sibling crate
-**`lean-rs-host`**. The L1 FFI primitive `lean-rs` now matches the (β)-binding norm — the
-OCaml-shaped pattern every mainstream Rust ↔ GC-language binding follows. Downstream consumers
-that want only the typed FFI surface depend on `lean-rs` and write their own `@[export]` Lean
-shims; consumers that want the curated theorem-prover-host capability stack add `lean-rs-host`.
+The opinionated theorem-prover-host stack (`LeanHost` / `LeanCapabilities` / `LeanSession`
+and their elaboration / evidence / meta / pool surfaces) ships as the sibling crate
+**`lean-rs-host`** rather than living inside `lean-rs`. L1 consumers that just want the typed
+FFI surface depend on `lean-rs` and write their own `@[export]` Lean shims; consumers that want
+the curated theorem-prover-host capability stack add `lean-rs-host`. This matches the standard
+two-crate shape of mainstream Rust bindings (a raw `*-sys` plus a safe front door).
 
 The supported Lean toolchain window for v0.1.0 is **4.26.0 through 4.29.1** (six releases),
-CI-tested in full on `{ubuntu-latest, macos-latest}` per `RD-2026-05-18-002`. The lower bound
-was set empirically: a multi-toolchain sweep showed releases ≤ 4.25.x crash inside
-`lean_dec_ref_cold` from the L2 host stack — a refcount divergence between 4.25 and 4.26 the
-Rust mirrors don't cover. See [`docs/version-matrix.md`](docs/version-matrix.md) and
+CI-tested in full on `{ubuntu-latest, macos-latest}`. The lower bound was set empirically: a
+multi-toolchain sweep showed releases ≤ 4.25.x crash inside `lean_dec_ref_cold` from the L2
+host stack: a refcount divergence between 4.25 and 4.26 the Rust mirrors don't cover. See
+[`docs/version-matrix.md`](docs/version-matrix.md) and
 [`docs/bump-toolchain.md`](docs/bump-toolchain.md) for the bump procedure.
 
 ### `lean-rs-sys` 0.1.0
 
-Initial release. Raw FFI bindings for the Lean 4 C ABI, published per `RD-2026-05-17-005`.
+Initial release. Raw FFI bindings for the Lean 4 C ABI.
 
 - Opaque public types. `lean_object` is `[u8; 0]` plus phantom markers (`!Send + !Sync + !Unpin`);
   the layout struct `LeanObjectRepr` is `pub(crate)`. Downstream code reaches refcount, tag, and
@@ -123,17 +122,17 @@ Initial release. Raw FFI bindings for the Lean 4 C ABI, published per `RD-2026-0
   specific invariant. The lint at `crates/lean-rs-sys/tests/safety_grep.rs` enforces presence.
 - Pure-Rust mirrors of `lean.h`'s `static inline` refcount helpers, alongside the extern declarations
   for the matching category (refcount, string, array, …).
-- `REQUIRED_SYMBOLS` allowlist — 87 `LEAN_EXPORT`'d symbol names this crate's `extern "C"` blocks
+- `REQUIRED_SYMBOLS` allowlist: 87 `LEAN_EXPORT`'d symbol names this crate's `extern "C"` blocks
   declare; `tests/linkage.rs` resolves every entry against `libleanshared` at link time.
-- `SUPPORTED_TOOLCHAINS` window table — every Lean release in the supported window with its
+- `SUPPORTED_TOOLCHAINS` window table: every Lean release in the supported window with its
   `lean.h` SHA-256 and `missing_symbols` set. `build.rs` accepts any matching digest and emits
   `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry; a non-match fails the build with the
   discovered digest and the full window. As of v0.1.0 the window is 4.26.0 through 4.29.1
   (six entries). Lower bound 4.26.0 was set empirically: a multi-toolchain sweep showed
-  releases ≤ 4.25.x crash inside `lean_dec_ref_cold` from the L2 host stack — a refcount
+  releases ≤ 4.25.x crash inside `lean_dec_ref_cold` from the L2 host stack: a refcount
   divergence between 4.25 and 4.26 the current mirrors don't cover.
 - Features: `dynamic` + `mimalloc` (default), `static` (opt-in; selecting it requires extending the
-  link set beyond what `lean.h` alone demands — see `build.rs`).
+  link set beyond what `lean.h` alone demands; see `build.rs`).
 
 Known gaps:
 
@@ -159,32 +158,32 @@ reusable `build.rs` helpers for downstream embedders.
 
 ### `lean-rs` 0.1.0
 
-Initial release. The L1 FFI primitive — the (β)-binding minimum every embedder needs to call any
-`@[export]` Lean function from Rust. Per `RD-2026-05-18-001` this crate no longer ships the
-opinionated theorem-prover-host stack (that lives in `lean-rs-host`); `lean-rs` is the typed-FFI
-surface plus the four core semantic handle types and the error boundary.
+Initial release. The L1 FFI primitive: the minimum every embedder needs to call any
+`@[export]` Lean function from Rust. `lean-rs` is the typed-FFI surface plus the four core
+semantic handle types and the error boundary; the opinionated theorem-prover-host stack lives
+in the sibling `lean-rs-host` crate.
 
 - Single `'lean` lifetime cascade. `LeanRuntime::init` returns a token whose borrow guards every
   downstream handle (`LeanLibrary`, `LeanModule`, `LeanExported`, the four semantic handles).
   Compile-fail tests under `tests/compile_fail/` pin the invariants: handles cannot outlive their
   runtime borrow; runtime and handles are `!Send + !Sync`.
-- Curated public surface — three publicly visible modules (`module`, `host`, `error`) plus two
-  `pub(crate)` infrastructure modules (`runtime`, `abi`) per `RD-2026-05-17-004`. Boundaries are
-  policed by `pub(crate)` rather than crate splits, so they can be reorganized without semver
-  breakage. Per-crate baselines under `docs/api-review/`.
+- Curated public surface: three publicly visible modules (`module`, `host`, `error`) plus two
+  `pub(crate)` infrastructure modules (`runtime`, `abi`). Boundaries are policed by `pub(crate)`
+  rather than crate splits, so they can be reorganized without semver breakage. Per-crate
+  baselines under `docs/api-review/`.
 - Runtime version probe. After `LeanRuntime::init` succeeds, the runtime cross-checks the active
   `LEAN_VERSION_STRING` against `lean_rs_sys::SUPPORTED_TOOLCHAINS` and returns
   `LeanError::runtime_init_unsupported_toolchain` when the loaded `libleanshared` drifted out
   of the window (e.g., production rolled forward while the binary did not rebuild).
-- Typed exported function calls. `LeanExported<'lean, 'lib, Args, R>` per `RD-2026-05-17-007`
-  collapsed the prompt-08 arity family into a single generic over a sealed `LeanArgs` trait, an
-  `R: DecodeCallResult` return type, and a `LeanAbi` per-type C-ABI representation. `LeanIo<T>`
-  expresses the pure-vs-IO return-shape distinction at the type level.
-- Two-variant `LeanError` per `RD-2026-05-17-006` — `Lean(LeanException)` for Lean-side exceptions
-  and `Host(HostFailure { stage: HostStage })` for host-side setup failures. Structural message
-  bounding keeps diagnostics fixed-size. The `LeanDiagnosticCode` projection layered on top
-  (`OBSERVABILITY-DIAGNOSTICS`) gives callers a stable caller-facing taxonomy.
-- Structured diagnostics — every error-bearing public type projects to `LeanDiagnosticCode` via
+- Typed exported function calls. `LeanExported<'lean, 'lib, Args, R>` is one generic over a
+  sealed `LeanArgs` trait, an `R: DecodeCallResult` return type, and a `LeanAbi` per-type
+  C-ABI representation. `LeanIo<T>` expresses the pure-vs-IO return-shape distinction at the
+  type level.
+- Two-variant `LeanError`: `Lean(LeanException)` for Lean-side exceptions and
+  `Host(HostFailure { stage: HostStage })` for host-side setup failures. Structural message
+  bounding keeps diagnostics fixed-size. A `LeanDiagnosticCode` projection layered on top
+  gives callers a stable caller-facing taxonomy.
+- Structured diagnostics: every error-bearing public type projects to `LeanDiagnosticCode` via
   `.code()`. The crate emits `tracing` spans against the `lean_rs` target; in-process tests can
   capture them via `DiagnosticCapture`. No subscriber is installed by the crate; downstream
   consumers attach their own. See `docs/diagnostics.md`.
@@ -203,30 +202,28 @@ Known gaps:
 
 ### `lean-rs-host` 0.1.0
 
-Initial release. The L2 opinionated theorem-prover-host stack — the curated session + kernel-check
-evidence + bounded `MetaM` + session-pool surface that splits out of `lean-rs` per
-`RD-2026-05-18-001`. Consumers add `lean-rs-host = "0.1"` alongside the `lean-rs-host-shims` Lake
-package; capability dylibs that load through `LeanCapabilities::load_capabilities` get a full
-`LeanSession` cascade.
+Initial release. The L2 theorem-prover-host stack: the curated session + kernel-check
+evidence + bounded `MetaM` + session-pool surface built on top of `lean-rs`. Consumers add
+`lean-rs-host = "0.1"` alongside the `lean-rs-host-shims` Lake package; capability dylibs
+that load through `LeanCapabilities::load_capabilities` get a full `LeanSession` cascade.
 
 - `LeanHost` / `LeanCapabilities` / `LeanSession` trio. `LeanHost` is the per-runtime entry point;
   `LeanCapabilities` is the two-dylib loader (consumer dylib + shim dylib, opened in the correct
   order with `RTLD_GLOBAL` so the consumer's transitive references to the shim's
   `initialize_*` symbols resolve); `LeanSession` is the per-call execution context with bulk and
   pool methods.
-- Kernel-checked `LeanEvidence` and `ProofSummary` — typed handles for kernel-validated theorems
+- Kernel-checked `LeanEvidence` and `ProofSummary`: typed handles for kernel-validated theorems
   with structural diagnostics on elaboration failures (`LeanElabFailure` chain).
-- Bounded `MetaM` service registry — `LeanMetaService`, `LeanMetaResponse`, `LeanMetaOptions`,
-  and the three pinned constructors `infer_type` / `whnf` / `heartbeat_burn` per
-  `RD-2026-05-17-004` Decision 1.
+- Bounded `MetaM` service registry: `LeanMetaService`, `LeanMetaResponse`, `LeanMetaOptions`,
+  and the three pinned constructors `infer_type` / `whnf` / `heartbeat_burn`.
 - `SessionPool` / `PooledSession` for fixed-cardinality session reuse; `BATCHING-SESSION-REUSE`
   policy is the initial cut. Cardinality-limit policy and back-pressure shapes may evolve in
   subsequent `0.x` minors.
-- 13 mandatory + 3 optional `lean_rs_host_*` `@[export]` Lean shim contract — shipped as the
+- 13 mandatory + 3 optional `lean_rs_host_*` `@[export]` Lean shim contract: shipped as the
   in-repo `lake/lean-rs-host-shims` package. Consumers `require` it from
   `git "https://github.com/jcreinhold/lean-rs" @ "v0.1.0" / "lake/lean-rs-host-shims"`; the
   shim package's source is part of this release's tagged commit, not a separate publish.
-- Hybrid two-dylib layout — the consumer dylib loads against the shim dylib at runtime via
+- Hybrid two-dylib layout: the consumer dylib loads against the shim dylib at runtime via
   `LeanCapabilities`. Both Lake naming conventions (Lean ≤ 4.26 vs Lean ≥ 4.27) are probed by
   the loader; consumers don't have to care which convention their Lake version emits.
 

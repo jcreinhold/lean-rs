@@ -1,13 +1,12 @@
 # Architecture Charter
 
-The first thing every later prompt in the `lean-rs` sequence reads. It pins the design boundary
-between Lean and `lean-rs`, the smallest public interface that supports it, and the alternative
-designs we considered and rejected. When a later prompt proposes an API or behaviour, the
-charter is the bar it must clear: does the API hide what it should hide, preserve what it should
-preserve, discard what it should discard.
+The design boundary between Lean and `lean-rs`, the smallest public interface that supports
+it, and the alternatives that were considered and rejected. Any new API or behavior must
+clear three questions: does it hide what should be hidden, preserve what should be preserved,
+discard what should be discarded?
 
-The charter pins intent, not Rust items or symbol names—those live in `00-current-state.md`
-and the per-prompt contracts.
+The charter pins intent, not Rust items or symbol names; those live in the per-crate API
+review baselines under [`docs/api-review/`](../api-review/).
 
 ## Purpose
 
@@ -83,22 +82,36 @@ final production-scale worker contract.
 
 ## Hidden knowledge
 
-The binding stack encapsulates the following so no public Rust API requires a caller to know
-any of it. The list splits across the L1/L2 boundary so each crate owns the knowledge nearest
-its purpose.
+No public Rust API requires a caller to know any of this. If an L1 item appears in `lean-rs`'s
+public surface, or an L2 item in `lean-rs-host`'s, the wrong layer has taken ownership.
 
-| Hidden by `lean-rs` (L1) | Hidden by `lean-rs-host` (L2) |
-| --- | --- |
-| Runtime init order: `lean_initialize_runtime_module`, `lean_initialize`, per-thread `lean_initialize_thread` / `lean_finalize_thread`, process-args setup, `LEAN_INIT_MUTEX` | Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order, imports cache, capability refresh, the 26 + 4 `lean_rs_host_*` Lean shim contract |
-| `lean_object` layout: tag bits, packed scalar encoding, ctor field placement, scalar vs heap distinction (`lean_is_scalar`) | Capability dispatch: `SessionSymbols` cached address tables, `Args` / `R` propagation through `call_capability`, tracing-span shape and metrics |
-| Reference counting: `lean_inc` / `lean_dec`, owned vs borrowed args (`lean_obj_arg` vs `b_lean_obj_arg`), owned results (`lean_obj_res`), in-place reuse rules | Batching: per-source result aggregation, `N + 1` vs `2N` FFI-cost analysis behind bulk methods, strict / skip-missing semantics |
-| Module initializer names and ordering: per-module `initialize_<Module>` symbols, dependency order, idempotent flag | Pool capacity: FIFO-take / LIFO-push reuse, capability-agnostic storage (entries are bare `Obj<'lean>` environments rewrapped at acquire), over-capacity drop accounting |
-| Object conversion: boxed scalars (`lean_box` / `lean_unbox`), strings, bytearrays, arrays, ctor structures, closures | |
-| Exception and panic boundary: Lean exceptions → typed Rust errors; Rust panics caught before unwinding across a C frame | |
-| Seam between Lean semantic authority and Rust hosting: Rust never owns a semantic fact about a Lean term | |
+**Hidden by `lean-rs` (L1):**
 
-If any L1 row appears in `lean-rs`'s public surface, that is a charter violation. Same for L2
-rows in `lean-rs-host`. Either symptom means the wrong layer is taking ownership.
+- Runtime init order: `lean_initialize_runtime_module`, `lean_initialize`, per-thread
+  `lean_initialize_thread` / `lean_finalize_thread`, process-args setup, `LEAN_INIT_MUTEX`.
+- `lean_object` layout: tag bits, packed scalar encoding, ctor field placement, scalar vs
+  heap distinction (`lean_is_scalar`).
+- Reference counting: `lean_inc` / `lean_dec`, owned vs borrowed args (`lean_obj_arg` vs
+  `b_lean_obj_arg`), owned results (`lean_obj_res`), in-place reuse rules.
+- Module initializer names and ordering: per-module `initialize_<Module>` symbols, dependency
+  order, idempotent flag.
+- Object conversion: boxed scalars (`lean_box` / `lean_unbox`), strings, bytearrays, arrays,
+  ctor structures, closures.
+- Exception and panic boundary: Lean exceptions to typed Rust errors; Rust panics caught
+  before unwinding across a C frame.
+- The seam between Lean semantic authority and Rust hosting: Rust never owns a semantic fact
+  about a Lean term.
+
+**Hidden by `lean-rs-host` (L2):**
+
+- Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order,
+  imports cache, capability refresh, the 26 + 4 `lean_rs_host_*` Lean shim contract.
+- Capability dispatch: `SessionSymbols` cached address tables, `Args` / `R` propagation
+  through `call_capability`, tracing-span shape and metrics.
+- Batching: per-source result aggregation, `N + 1` vs `2N` FFI-cost analysis behind bulk
+  methods, strict / skip-missing semantics.
+- Pool capacity: FIFO-take / LIFO-push reuse, capability-agnostic storage (entries are bare
+  `Obj<'lean>` environments rewrapped at acquire), over-capacity drop accounting.
 
 ## Decisions that must not leak
 

@@ -21,10 +21,10 @@ surface.
 
 `LeanProgressEvent` contains:
 
-- `phase: &'static str` — a stable method-local phase label;
-- `current: u64` — a phase-local counter;
-- `total: Option<u64>` — a known phase-local bound when cheap;
-- `elapsed: Duration` — time since that phase began.
+- `phase: &'static str`: a stable method-local phase label;
+- `current: u64`: a phase-local counter;
+- `total: Option<u64>`: a known phase-local bound when cheap;
+- `elapsed: Duration`: time since that phase began.
 
 Events are delivered synchronously on the Lean-bound worker thread. A sink must
 not call back into the same `LeanSession` or re-enter the same Lean call stack.

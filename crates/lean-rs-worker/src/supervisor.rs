@@ -680,10 +680,11 @@ impl LeanWorker {
         }
     }
 
-    /// Load the prompt fixture capability in the worker child.
+    /// Load the in-tree fixture capability in the worker child.
     ///
-    /// This prompt-57 method proves the supervisor path. Prompt 59 adds the
-    /// supported host-session adapter instead of expanding this fixture surface.
+    /// This is a fixture-only entry point used to exercise the supervisor path
+    /// in tests. The supported public path is `open_session`, which returns the
+    /// host-session adapter instead of expanding this fixture surface.
     ///
     /// # Errors
     ///

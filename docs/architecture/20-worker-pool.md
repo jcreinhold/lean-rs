@@ -112,7 +112,7 @@ row, index, probe, or report is semantically valid. The pool key only answers a
 worker question: can this already-open child session run the next compatible
 request without repeating setup or violating policy?
 
-The prompt-78 key records capability metadata expectations as opaque generic
+The key records capability metadata expectations as opaque generic
 metadata facts. `lean-rs-worker` can compare the expected and actual metadata
 envelopes, but it does not interpret downstream command versions or decide
 cache invalidation.

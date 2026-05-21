@@ -23,8 +23,8 @@ use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStat
 ///
 /// The pool key records whether a session was opened under the default policy
 /// or a caller-selected policy class. It deliberately does not expose every
-/// restart-policy knob as key material; prompt 79 owns memory-aware scheduling
-/// and richer policy admission.
+/// restart-policy knob as key material; memory-aware scheduling and richer
+/// policy admission are not part of the session-key contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum LeanWorkerRestartPolicyClass {

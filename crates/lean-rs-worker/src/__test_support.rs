@@ -1,4 +1,4 @@
-//! Hidden harness for prompt-56 integration tests.
+//! Hidden harness for child-protocol integration tests.
 //!
 //! This is not a supervisor API. It exists so tests can drive the private
 //! worker protocol without exposing protocol frames as the crate's public

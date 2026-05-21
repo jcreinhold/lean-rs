@@ -119,9 +119,6 @@ Lake produces your `libmy__app_MyCapability.{dylib,so}`. `load_capabilities` als
 opens the crate-bundled `LeanRsInterop` and `LeanRsHostShims` dylibs, sharing one Lean
 runtime; per-module `initialize_*` functions are idempotent.
 
-Pre-publish, pin against the workspace by adding `path =` lines alongside the `version`
-constraints in `Cargo.toml` (same as the L1 setup).
-
 ## Capability contract
 
 The full per-symbol contract—each Lean signature, the Rust call site it maps to, and the
@@ -144,11 +141,6 @@ def decideTrue (_ : Unit) : Bool := decide (1 + 1 = 2)
 ```
 
 The Rust call site then becomes `module.exported::<((),), bool>(...).call(())`.
-
-**Pre-publish `lean-rs = "0.1"` and `lean-rs-host = "0.1"` need path pins.** Until the crates
-land on crates.io, the consumer's `Cargo.toml` pins both `version = "0.1"` and
-`path = "..."`. Cargo enforces the version constraint at build time; once published, drop
-the `path =` attribute.
 
 ## Worked examples
 

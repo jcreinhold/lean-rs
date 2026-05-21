@@ -196,7 +196,7 @@ LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2 \
 cargo run -p lean-rs-worker --example memory_cycling
 ```
 
-On the local macOS aarch64 prompt-58 run, the worker cycled after every
+On a local macOS aarch64 run, the worker cycled after every
 two import-like fixture requests. Child RSS moved from about 345 MiB after
 the first request in each child to about 717 MiB after the second request,
 then returned to about 345 MiB in the replacement child. This supports the
