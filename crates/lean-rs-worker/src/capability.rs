@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityMetadata, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata,
     LeanWorkerSession, LeanWorkerSessionConfig,
@@ -122,8 +123,59 @@ impl LeanWorkerCapabilityBuilder {
         self.metadata_check = Some(CapabilityMetadataCheck {
             export: export.into(),
             request,
+            expected: None,
         });
         self
+    }
+
+    /// Validate that a capability metadata export returns the expected facts.
+    ///
+    /// This is the pool-facing metadata expectation hook. The metadata remains
+    /// downstream-defined; `lean-rs-worker` only checks that the generic
+    /// metadata envelope matches the caller's requested expectation.
+    #[must_use]
+    pub fn expect_metadata(
+        mut self,
+        export: impl Into<String>,
+        request: Value,
+        expected: LeanWorkerCapabilityMetadata,
+    ) -> Self {
+        self.metadata_check = Some(CapabilityMetadataCheck {
+            export: export.into(),
+            request,
+            expected: Some(expected),
+        });
+        self
+    }
+
+    /// Return the session reuse key represented by this builder.
+    ///
+    /// The key is for worker-pool reuse only. It is not a downstream cache key
+    /// and does not encode row schemas, ranking, reporting, or source
+    /// provenance.
+    #[must_use]
+    pub fn session_key(&self) -> LeanWorkerSessionKey {
+        let restart_policy_class = match &self.restart_policy {
+            Some(policy) if policy == &LeanWorkerRestartPolicy::default() => LeanWorkerRestartPolicyClass::Default,
+            Some(_policy) => LeanWorkerRestartPolicyClass::Custom,
+            None => LeanWorkerRestartPolicyClass::Default,
+        };
+        let mut key = LeanWorkerSessionKey::new(
+            self.project_root.clone(),
+            self.package.clone(),
+            self.lib_name.clone(),
+            self.imports.clone(),
+        )
+        .restart_policy_class(restart_policy_class);
+        if let Some(check) = &self.metadata_check {
+            key = key.metadata_expectation(check.export.clone(), check.request.clone(), check.expected.clone());
+        }
+        key
+    }
+
+    pub(crate) fn pool_request_timeout(&self) -> Duration {
+        self.request_timeout
+            .unwrap_or(crate::supervisor::LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT)
     }
 
     /// Build the Lake target, start the worker, open the session, and return a ready capability.
@@ -164,7 +216,19 @@ impl LeanWorkerCapabilityBuilder {
         let validated_metadata = {
             let mut session = worker.open_session(&session_config, None, None)?;
             match self.metadata_check {
-                Some(check) => Some(session.capability_metadata(&check.export, &check.request, None, None)?),
+                Some(check) => {
+                    let metadata = session.capability_metadata(&check.export, &check.request, None, None)?;
+                    if let Some(expected) = check.expected
+                        && metadata != expected
+                    {
+                        return Err(LeanWorkerError::CapabilityMetadataMismatch {
+                            export: check.export,
+                            expected: Box::new(expected),
+                            actual: Box::new(metadata),
+                        });
+                    }
+                    Some(metadata)
+                }
                 None => None,
             }
         };
@@ -262,6 +326,7 @@ impl LeanWorkerCapability {
 struct CapabilityMetadataCheck {
     export: String,
     request: Value,
+    expected: Option<LeanWorkerCapabilityMetadata>,
 }
 
 fn resolve_default_worker_executable() -> Result<PathBuf, LeanWorkerError> {

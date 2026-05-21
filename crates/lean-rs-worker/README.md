@@ -24,6 +24,16 @@ profile paths, and the in-tree workspace development build. Packaged
 applications may set `LEAN_RS_WORKER_CHILD` or pass `worker_executable` when
 the child binary is shipped elsewhere.
 
+`LeanWorkerPool` is the local multi-worker entry point for scale work. Callers
+acquire a `LeanWorkerSessionLease` from capability requirements and then run
+typed commands through the lease. The pool reuses compatible warm workers,
+replaces dead workers, enforces a fixed local worker limit, and invalidates
+leases after timeout, cancellation, child failure, explicit cycle, or metadata
+mismatch. It does not expose child pids, worker ids, pipes, protocol frames, or
+which warm worker was selected. A `LeanWorkerSessionKey` is only a worker reuse
+key; downstream tools still own row schemas, cache validity, ranking,
+reporting, and source provenance.
+
 Startup timeout and request timeout are separate. Startup timeout covers the
 child handshake. Request timeout covers one request after its frame is written,
 including live rows, diagnostics, progress, and terminal response. If the
@@ -106,6 +116,16 @@ against an existing downstream subprocess worker in a local checkout, set
 `LEAN_RS_WORKER_COMPARE_COMMAND` to the shell command you want timed; the probe
 reports the command status and elapsed time without treating that command as
 part of the `lean-rs-worker` API.
+
+Run the local pool lease example:
+
+```sh
+cargo run -p lean-rs-worker --example worker_pool
+```
+
+That example opens a pool, acquires a compatible lease, runs a typed streaming
+command, cycles the leased worker, and leaves worker selection hidden behind
+the lease.
 
 The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).

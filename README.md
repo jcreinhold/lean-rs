@@ -97,6 +97,18 @@ typed commands, live rows, diagnostics, progress ticks, terminal completion,
 request timeout handling, and worker cycling. See
 [`docs/recipes/worker-capability-runner.md`](docs/recipes/worker-capability-runner.md).
 
+For local multi-worker orchestration, use `LeanWorkerPool`:
+
+```sh
+cargo run -p lean-rs-worker --example worker_pool
+```
+
+The pool acquires `LeanWorkerSessionLease` values from capability requirements
+and runs typed commands through the lease. It hides child selection, warm
+worker reuse, replacement after fatal exits, lease invalidation, and fixed
+local worker admission. Session keys are worker reuse keys, not downstream
+cache keys.
+
 ## Build your own consumer
 
 The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean
@@ -214,7 +226,9 @@ Long-running calls can report live progress through `LeanProgressSink`.
 and memory cycling. `LeanWorkerCapabilityBuilder` is the normal downstream
 entry point: it builds the Lake target, starts the worker, opens imports,
 optionally validates metadata, and leaves request/row schemas to the downstream
-crate.
+crate. `LeanWorkerPool` sits above the builder for local fanout and session
+leasing; callers still use typed commands instead of choosing worker children
+or protocol frames.
 
 Compose at the highest layer that matches the workload. Use `lean-rs` for
 custom same-process ABI work, `lean-rs-host` for trusted in-process
@@ -259,6 +273,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`17-worker-session-adapter.md`](docs/architecture/17-worker-session-adapter.md)—the narrow process-safe host-session subset.
 - [`18-worker-data-streaming.md`](docs/architecture/18-worker-data-streaming.md)—arbitrary downstream JSON rows over the worker boundary.
 - [`19-worker-capability-layer.md`](docs/architecture/19-worker-capability-layer.md)—the generic worker capability layer above raw row transport.
+- [`20-worker-pool.md`](docs/architecture/20-worker-pool.md)—the local worker pool and session-lease boundary.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

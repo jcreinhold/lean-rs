@@ -9,11 +9,16 @@
 
 mod capability;
 mod child;
+mod pool;
 mod protocol;
 mod session;
 mod supervisor;
 
 pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
+pub use pool::{
+    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
+    LeanWorkerSessionLease,
+};
 pub use session::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
     LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,

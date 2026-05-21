@@ -29,6 +29,19 @@ sits above them: the builder describes how to open one capability-backed worker
 session, while the pool decides which local child should host that session for
 one piece of work.
 
+Prompt 78 implements the first public surface as a lease-first API:
+
+- `LeanWorkerPool` owns a bounded set of local capability workers;
+- `LeanWorkerPoolConfig` currently exposes a fixed `max_workers` limit;
+- `LeanWorkerSessionKey` records the worker reuse facts;
+- `LeanWorkerSessionLease` runs typed JSON and streaming commands without
+  exposing `LeanWorkerSession` as the primary pool API.
+
+A lease becomes invalid after timeout, cancellation, child fatal exit,
+explicit cycle, or capability metadata mismatch. The caller acquires a fresh
+lease for follow-up work. That rule keeps session invalidation explicit without
+making callers learn which child process or warm worker was selected.
+
 ## Designs Considered
 
 **Single worker only.** Rejected as the scale foundation. It preserves a clean
@@ -67,6 +80,11 @@ The key is not a downstream cache key. Downstream crates still decide whether a
 row, index, probe, or report is semantically valid. The pool key only answers a
 worker question: can this already-open child session run the next compatible
 request without repeating setup or violating policy?
+
+The prompt-78 key records capability metadata expectations as opaque generic
+metadata facts. `lean-rs-worker` can compare the expected and actual metadata
+envelopes, but it does not interpret downstream command versions or decide
+cache invalidation.
 
 ## What The Pool Hides
 
@@ -118,8 +136,8 @@ when measured policy says a reset is needed.
 
 ## Next Prompts
 
-Prompt 78 adds the public pool API and session leasing. Prompt 79 adds
-memory-aware scheduling. Prompt 80 adds import-set planning so callers can
-produce stable work batches that make pool reuse effective. Prompts 81-87 then
-harden batching, data-plane choices, Lean-side streaming helpers, mathlib-scale
-fixtures, observability, downstream readiness, and the final scale contract.
+Prompt 79 adds memory-aware scheduling on top of the lease-first API. Prompt 80
+adds import-set planning so callers can produce stable work batches that make
+pool reuse effective. Prompts 81-87 then harden batching, data-plane choices,
+Lean-side streaming helpers, mathlib-scale fixtures, observability, downstream
+readiness, and the final scale contract.

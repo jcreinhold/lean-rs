@@ -333,6 +333,12 @@ pub enum LeanWorkerError {
     StreamRowMalformed { message: String },
     /// A capability metadata export returned malformed JSON.
     CapabilityMetadataMalformed { message: String },
+    /// Capability metadata did not match the caller's requested expectation.
+    CapabilityMetadataMismatch {
+        export: String,
+        expected: Box<LeanWorkerCapabilityMetadata>,
+        actual: Box<LeanWorkerCapabilityMetadata>,
+    },
     /// A capability doctor export returned malformed JSON.
     CapabilityDoctorMalformed { message: String },
     /// A typed command request could not be serialized as JSON.
@@ -348,6 +354,10 @@ pub enum LeanWorkerError {
     },
     /// A typed streaming command terminal summary could not be decoded.
     TypedCommandSummaryDecode { export: String, message: String },
+    /// A pool session lease was invalidated by a worker lifecycle transition.
+    LeaseInvalidated { reason: String },
+    /// A local worker pool cannot admit another distinct session key.
+    WorkerPoolExhausted { max_workers: usize },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -399,6 +409,9 @@ impl fmt::Display for LeanWorkerError {
             Self::CapabilityMetadataMalformed { message } => {
                 write!(f, "capability metadata export returned malformed JSON: {message}")
             }
+            Self::CapabilityMetadataMismatch { export, .. } => {
+                write!(f, "capability metadata from {export} did not match expectation")
+            }
             Self::CapabilityDoctorMalformed { message } => {
                 write!(f, "capability doctor export returned malformed JSON: {message}")
             }
@@ -426,6 +439,13 @@ impl fmt::Display for LeanWorkerError {
                 write!(
                     f,
                     "typed worker command {export} terminal summary decode failed: {message}"
+                )
+            }
+            Self::LeaseInvalidated { reason } => write!(f, "worker pool lease was invalidated: {reason}"),
+            Self::WorkerPoolExhausted { max_workers } => {
+                write!(
+                    f,
+                    "worker pool cannot admit another session key; max_workers={max_workers}"
                 )
             }
             Self::UnsupportedRequest { operation } => {
@@ -457,11 +477,14 @@ impl std::error::Error for LeanWorkerError {
             | Self::StreamCallbackFailed { .. }
             | Self::StreamRowMalformed { .. }
             | Self::CapabilityMetadataMalformed { .. }
+            | Self::CapabilityMetadataMismatch { .. }
             | Self::CapabilityDoctorMalformed { .. }
             | Self::TypedCommandRequestEncode { .. }
             | Self::TypedCommandResponseDecode { .. }
             | Self::TypedCommandRowDecode { .. }
             | Self::TypedCommandSummaryDecode { .. }
+            | Self::LeaseInvalidated { .. }
+            | Self::WorkerPoolExhausted { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
