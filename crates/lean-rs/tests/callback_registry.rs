@@ -9,9 +9,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use lean_rs::module::{LeanIo, LeanLibrary};
+use lean_rs::module::{LeanIo, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency};
 use lean_rs::{
-    HostStage, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanDiagnosticCode, LeanError,
+    HostStage, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanCapability, LeanDiagnosticCode, LeanError,
     LeanProgressTick, LeanRuntime, LeanStringEvent,
 };
 
@@ -69,7 +69,7 @@ fn consumer_dylib_path() -> PathBuf {
     )
 }
 
-fn consumer_library() -> LeanLibrary<'static> {
+fn consumer_bundle() -> LeanLibraryBundle<'static> {
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
     let interop_path = interop_dylib_path();
     assert!(
@@ -77,22 +77,34 @@ fn consumer_library() -> LeanLibrary<'static> {
         "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
         interop_path.display(),
     );
-    // Keep the RTLD_GLOBAL handle alive; Linux can otherwise unload the shim
-    // before the consumer initializer resolves its imported symbols.
-    let interop = Box::leak(Box::new(
-        LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly"),
-    ));
-    let _interop_module = interop
-        .initialize_module("lean_rs_interop_shims", "LeanRsInterop")
-        .expect("interop root module initializes");
-
     let path = consumer_dylib_path();
     assert!(
         path.exists(),
         "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
         path.display(),
     );
-    LeanLibrary::open(runtime, &path).expect("interop consumer dylib opens cleanly")
+    LeanLibraryBundle::open(
+        runtime,
+        &path,
+        [LeanLibraryDependency::path(interop_path)
+            .export_symbols_for_dependents()
+            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+    )
+    .expect("interop consumer bundle opens cleanly")
+}
+
+fn consumer_capability() -> LeanCapability<'static> {
+    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
+    LeanCapability::open_with_dependencies(
+        runtime,
+        consumer_dylib_path(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        [LeanLibraryDependency::path(interop_dylib_path())
+            .export_symbols_for_dependents()
+            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+    )
+    .expect("interop consumer capability opens cleanly")
 }
 
 fn callback_loop<'lean, 'lib>(
@@ -119,8 +131,8 @@ fn string_callback_loop<'lean, 'lib>(
 
 #[test]
 fn registered_callback_runs_through_typed_lean_export() {
-    let library = consumer_library();
-    let callback_loop = callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
     let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
@@ -151,9 +163,25 @@ fn registered_callback_runs_through_typed_lean_export() {
 }
 
 #[test]
+fn capability_bundle_keeps_dependency_alive_after_open_helper_returns() {
+    let capability = consumer_capability();
+    assert_eq!(capability.bundle().dependency_count(), 1);
+    let callback_loop = callback_loop(capability.library());
+    let callback = LeanCallbackHandle::<LeanProgressTick>::register(|_| LeanCallbackFlow::Continue)
+        .expect("callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(handle, trampoline, 1)
+        .expect("callback loop returns after helper-created capability opened");
+
+    assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Ok));
+}
+
+#[test]
 fn registered_string_callback_decodes_owned_events() {
-    let library = consumer_library();
-    let callback_loop = string_callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = string_callback_loop(bundle.library());
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
     let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
@@ -184,8 +212,8 @@ fn registered_string_callback_decodes_owned_events() {
 
 #[test]
 fn callback_can_stop_lean_loop_cleanly() {
-    let library = consumer_library();
-    let callback_loop = callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
     let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
@@ -220,8 +248,8 @@ fn callback_can_stop_lean_loop_cleanly() {
 
 #[test]
 fn wrong_payload_returns_status_without_calling_callback() {
-    let library = consumer_library();
-    let callback_loop = callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
     let callback = LeanCallbackHandle::<LeanStringEvent>::register(move |event| {
@@ -247,8 +275,8 @@ fn wrong_payload_returns_status_without_calling_callback() {
 
 #[test]
 fn wrong_string_payload_returns_status_without_calling_tick_callback() {
-    let library = consumer_library();
-    let callback_loop = string_callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = string_callback_loop(bundle.library());
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
     let callback = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
@@ -274,8 +302,8 @@ fn wrong_string_payload_returns_status_without_calling_tick_callback() {
 
 #[test]
 fn dropped_handle_reports_stale_without_use_after_drop() {
-    let library = consumer_library();
-    let callback_loop = callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
     let callback = LeanCallbackHandle::<LeanProgressTick>::register(|_| LeanCallbackFlow::Continue)
         .expect("callback registration succeeds");
     let (handle, trampoline) = callback.abi_parts();
@@ -293,8 +321,8 @@ fn dropped_handle_reports_stale_without_use_after_drop() {
 
 #[test]
 fn callback_panic_is_contained_at_registry_trampoline() {
-    let library = consumer_library();
-    let callback_loop = callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
     let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
         assert_ne!(
             event.current, 2,

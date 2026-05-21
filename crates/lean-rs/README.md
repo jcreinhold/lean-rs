@@ -105,9 +105,9 @@ cargo run
 ```
 
 `CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache,
-filename convention, and dylib-path env-var plumbing. `LeanCapability` keeps the built path
-and initializer names together at runtime. Use `build_lake_target` and `LeanLibrary`
-directly only for lower-level custom interop.
+filename convention, and dylib-path env-var plumbing. `LeanCapability` keeps the built path,
+dependency bundle, and initializer names together at runtime. Use `build_lake_target`,
+`LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
 
 See the complete shipping recipe at
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).

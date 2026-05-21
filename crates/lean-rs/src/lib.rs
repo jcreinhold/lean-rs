@@ -2,8 +2,8 @@
 //!
 //! `lean-rs` is the L1 typed-FFI binding to the Lean 4 runtime — the
 //! minimum surface a Rust crate needs to drive a compiled Lean library:
-//! bring the runtime up, open a Lake-built dylib, initialise a module,
-//! and call typed `@[export]` functions with first-class type
+//! bring the runtime up, open a Lake-built capability bundle, initialise a
+//! module, and call typed `@[export]` functions with first-class type
 //! marshalling. The opinionated theorem-prover-host stack (`LeanHost`,
 //! `LeanCapabilities`, `LeanSession`, plus the evidence and meta
 //! surfaces) lives in the sibling
@@ -14,13 +14,18 @@
 //!
 //! ## Happy path (L1)
 //!
-//! Bring the runtime up once, open the Lake-built dylib, initialise the
-//! module, look up a typed export, and call it:
+//! Bring the runtime up once, open the build-script produced capability,
+//! initialise the module, look up a typed export, and call it:
 //!
 //! ```ignore
 //! let runtime = lean_rs::LeanRuntime::init()?;
-//! let library = lean_rs::LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
-//! let module  = library.initialize_module("my_pkg", "MyMod")?;
+//! let capability = lean_rs::LeanCapability::from_build_env(
+//!     runtime,
+//!     lean_rs::LeanBuiltCapability::path(env!("MY_CAPABILITY_DYLIB"))
+//!         .package("my_pkg")
+//!         .module("MyMod"),
+//! )?;
+//! let module  = capability.module()?;
 //! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;
 //! let sum     = add.call(3, 4)?;
 //! ```
@@ -45,9 +50,11 @@
 //!   [`LeanDiagnosticCode`] via `.code()`. The in-process
 //!   [`DiagnosticCapture`] RAII guard lets tests assert on `tracing`
 //!   events without installing a global subscriber.
-//! - [`module`] — load a Lake-built Lean shared object and call typed
-//!   exported functions. [`LeanLibrary`] is the RAII dylib handle;
-//!   [`LeanModule`] proves a module's initializer succeeded;
+//! - [`module`] — load a Lake-built Lean capability and call typed
+//!   exported functions. [`LeanCapability`] is the normal shipped-crate
+//!   surface; [`LeanLibraryBundle`] anchors dependency dylibs; [`LeanLibrary`]
+//!   is the advanced one-dylib RAII handle; [`LeanModule`] proves a module's
+//!   initializer succeeded;
 //!   [`LeanExported`] is a single generic typed function handle whose
 //!   `.call` impl is macro-stamped per arity `0..=12`.
 //! - [`handle`] — opaque, lifetime-bound receipts for the four core
@@ -123,7 +130,8 @@ pub use crate::error::{
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{
-    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanExported, LeanIo, LeanLibrary, LeanModule,
+    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanExported, LeanIo, LeanLibrary,
+    LeanLibraryBundle, LeanLibraryDependency, LeanModule, LeanModuleInitializer,
 };
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};

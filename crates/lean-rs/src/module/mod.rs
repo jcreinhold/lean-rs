@@ -1,9 +1,13 @@
 //! Loading and initializing compiled Lean modules.
 //!
-//! The public surface of this module is two RAII types:
+//! The normal shipped-capability path is [`LeanCapability`], which stores a
+//! [`LeanLibraryBundle`] internally. The lower-level surface has three RAII
+//! types:
 //!
 //! - [`LeanLibrary`] — a Lake-built native shared object opened through
 //!   the platform dynamic loader.
+//! - [`LeanLibraryBundle`] — a primary shared object plus dependent Lean
+//!   dylibs anchored for the same lifetime.
 //! - [`LeanModule`] — proof that a named Lean module hosted by a
 //!   [`LeanLibrary`] has been initialized to `IO.ok(())`.
 //!
@@ -26,12 +30,14 @@
 //! boundary as [`LeanExported`] and [`LeanIo`]; see `exported` for
 //! the call shape.
 
+pub(crate) mod bundle;
 pub(crate) mod capability;
 pub(crate) mod exported;
 pub(crate) mod initializer;
 pub(crate) mod library;
 pub(crate) mod loaded;
 
+pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
 pub use capability::{LeanBuiltCapability, LeanCapability};
 pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
 pub use library::LeanLibrary;

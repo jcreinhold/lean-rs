@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{LeanLibrary, LeanModule};
+use super::{LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 
@@ -18,6 +18,7 @@ pub struct LeanBuiltCapability {
     env_var: Option<String>,
     package: Option<String>,
     module: Option<String>,
+    dependencies: Vec<LeanLibraryDependency>,
 }
 
 impl LeanBuiltCapability {
@@ -37,6 +38,7 @@ impl LeanBuiltCapability {
             env_var: None,
             package: None,
             module: None,
+            dependencies: Vec::new(),
         }
     }
 
@@ -53,6 +55,7 @@ impl LeanBuiltCapability {
             env_var: Some(env_var.into()),
             package: None,
             module: None,
+            dependencies: Vec::new(),
         }
     }
 
@@ -77,6 +80,25 @@ impl LeanBuiltCapability {
         self
     }
 
+    /// Add a dependent Lean dylib that must stay alive with this capability.
+    ///
+    /// This is primarily a bridge until `lean-toolchain` emits artifact
+    /// manifests. Manifest-backed opening will feed the same dependency
+    /// descriptors into the bundle loader.
+    #[must_use]
+    pub fn dependency(mut self, dependency: LeanLibraryDependency) -> Self {
+        self.dependencies.push(dependency);
+        self
+    }
+
+    /// Add multiple dependent Lean dylibs that must stay alive with this
+    /// capability.
+    #[must_use]
+    pub fn dependencies(mut self, dependencies: impl IntoIterator<Item = LeanLibraryDependency>) -> Self {
+        self.dependencies.extend(dependencies);
+        self
+    }
+
     /// Return the configured package name.
     #[must_use]
     pub fn package_name(&self) -> Option<&str> {
@@ -87,6 +109,12 @@ impl LeanBuiltCapability {
     #[must_use]
     pub fn module_name(&self) -> Option<&str> {
         self.module.as_deref()
+    }
+
+    /// Dependency dylibs that will be opened before the primary capability.
+    #[must_use]
+    pub fn dependency_descriptors(&self) -> &[LeanLibraryDependency] {
+        &self.dependencies
     }
 
     /// Resolve the capability dylib path.
@@ -122,7 +150,7 @@ impl From<&lean_toolchain::BuiltLeanCapability> for LeanBuiltCapability {
 /// Opened Lean capability whose dylib path and initializer names came from
 /// the build-script pairing.
 pub struct LeanCapability<'lean> {
-    library: LeanLibrary<'lean>,
+    bundle: LeanLibraryBundle<'lean>,
     package: String,
     module: String,
 }
@@ -143,7 +171,7 @@ impl<'lean> LeanCapability<'lean> {
         let module = spec.module.take().ok_or_else(|| {
             LeanError::linking("LeanBuiltCapability is missing the root Lean module name; call `.module(...)`")
         })?;
-        Self::open(runtime, dylib_path, package, module)
+        Self::open_with_dependencies(runtime, dylib_path, package, module, spec.dependencies)
     }
 
     /// Open and initialize a capability from an explicit dylib path and
@@ -161,10 +189,33 @@ impl<'lean> LeanCapability<'lean> {
     ) -> LeanResult<Self> {
         let package = package.into();
         let module = module.into();
-        let library = LeanLibrary::open(runtime, dylib_path)?;
-        let _module = library.initialize_module(&package, &module)?;
+        Self::open_with_dependencies(runtime, dylib_path, package, module, [])
+    }
+
+    /// Open and initialize a capability with explicitly described dependency
+    /// dylibs.
+    ///
+    /// This is the runtime form prompt 90's artifact manifest will feed. Use
+    /// [`LeanCapability::from_build_env`] for shipped crates when build-script
+    /// metadata is available.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError`] when a dependency or primary dylib cannot be
+    /// loaded, or when a dependency or primary module initializer fails.
+    pub fn open_with_dependencies(
+        runtime: &'lean LeanRuntime,
+        dylib_path: impl AsRef<Path>,
+        package: impl Into<String>,
+        module: impl Into<String>,
+        dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
+    ) -> LeanResult<Self> {
+        let package = package.into();
+        let module = module.into();
+        let bundle = LeanLibraryBundle::open(runtime, dylib_path, dependencies)?;
+        let _module = bundle.initialize_module(&package, &module)?;
         Ok(Self {
-            library,
+            bundle,
             package,
             module,
         })
@@ -180,13 +231,19 @@ impl<'lean> LeanCapability<'lean> {
     /// Returns [`LeanError`] if the module initializer unexpectedly fails when
     /// invoked again.
     pub fn module(&self) -> LeanResult<LeanModule<'lean, '_>> {
-        self.library.initialize_module(&self.package, &self.module)
+        self.bundle.initialize_module(&self.package, &self.module)
     }
 
     /// Borrow the underlying library for advanced symbol access.
     #[must_use]
     pub fn library(&self) -> &LeanLibrary<'lean> {
-        &self.library
+        self.bundle.library()
+    }
+
+    /// Borrow the bundle that anchors this capability and its dependencies.
+    #[must_use]
+    pub fn bundle(&self) -> &LeanLibraryBundle<'lean> {
+        &self.bundle
     }
 
     /// Lake package name used by the initializer.
@@ -205,7 +262,7 @@ impl<'lean> LeanCapability<'lean> {
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use super::LeanBuiltCapability;
+    use super::{LeanBuiltCapability, LeanLibraryDependency};
 
     #[test]
     fn built_capability_path_is_resolved_without_runtime_env() {
@@ -233,5 +290,26 @@ mod tests {
             Err(err) => err,
         };
         assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
+    }
+
+    #[test]
+    fn built_capability_records_dependency_descriptors() {
+        let spec = LeanBuiltCapability::path("/tmp/libcap.so").dependency(
+            LeanLibraryDependency::path("/tmp/libdep.so")
+                .export_symbols_for_dependents()
+                .initializer("dep_pkg", "Dep"),
+        );
+
+        let dependencies = spec.dependency_descriptors();
+        assert_eq!(dependencies.len(), 1);
+        let Some(dependency) = dependencies.first() else {
+            panic!("expected one dependency descriptor");
+        };
+        assert!(dependency.exports_symbols_for_dependents());
+        let Some(initializer) = dependency.module_initializer() else {
+            panic!("dependency initializer is recorded");
+        };
+        assert_eq!(initializer.package_name(), "dep_pkg");
+        assert_eq!(initializer.module_name(), "Dep");
     }
 }

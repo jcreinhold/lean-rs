@@ -13,7 +13,7 @@ use std::slice;
 use std::sync::Mutex;
 
 use lean_rs::LeanRuntime;
-use lean_rs::module::{LeanIo, LeanLibrary};
+use lean_rs::module::{LeanIo, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency};
 use lean_rs_sys::lean_object;
 use lean_rs_sys::object::{lean_is_scalar, lean_is_string};
 use lean_rs_sys::string::{lean_string_cstr, lean_string_size};
@@ -158,7 +158,7 @@ fn consumer_dylib_path() -> PathBuf {
     )
 }
 
-fn consumer_library() -> LeanLibrary<'static> {
+fn consumer_bundle() -> LeanLibraryBundle<'static> {
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
     let interop_path = interop_dylib_path();
     assert!(
@@ -166,22 +166,20 @@ fn consumer_library() -> LeanLibrary<'static> {
         "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
         interop_path.display(),
     );
-    // Keep the RTLD_GLOBAL handle alive; Linux can otherwise unload the shim
-    // before the consumer initializer resolves its imported symbols.
-    let interop = Box::leak(Box::new(
-        LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly"),
-    ));
-    let _interop_module = interop
-        .initialize_module("lean_rs_interop_shims", "LeanRsInterop")
-        .expect("interop root module initializes");
-
     let path = consumer_dylib_path();
     assert!(
         path.exists(),
         "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
         path.display(),
     );
-    LeanLibrary::open(runtime, &path).expect("interop consumer dylib opens cleanly")
+    LeanLibraryBundle::open(
+        runtime,
+        &path,
+        [LeanLibraryDependency::path(interop_path)
+            .export_symbols_for_dependents()
+            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+    )
+    .expect("interop consumer bundle opens cleanly")
 }
 
 fn string_callback_loop<'lean, 'lib>(
@@ -208,8 +206,8 @@ fn tick_callback_loop<'lean, 'lib>(
 
 #[test]
 fn lean_loop_invokes_string_trampoline_in_order() {
-    let library = consumer_library();
-    let callback_loop = string_callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = string_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(None);
     let status = callback_loop
         .call(
@@ -228,8 +226,8 @@ fn lean_loop_invokes_string_trampoline_in_order() {
 
 #[test]
 fn wrong_payload_returns_status_without_panic() {
-    let library = consumer_library();
-    let callback_loop = tick_callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = tick_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(None);
     let status = callback_loop
         .call(
@@ -245,8 +243,8 @@ fn wrong_payload_returns_status_without_panic() {
 
 #[test]
 fn rust_string_callback_panic_is_caught_before_returning_to_lean() {
-    let library = consumer_library();
-    let callback_loop = string_callback_loop(&library);
+    let bundle = consumer_bundle();
+    let callback_loop = string_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(Some("panic"));
     let status = callback_loop
         .call(

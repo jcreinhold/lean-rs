@@ -10,7 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lean_rs::module::{LeanIo, LeanLibrary};
+use lean_rs::module::{LeanIo, LeanLibraryBundle, LeanLibraryDependency};
 use lean_rs::{LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanRuntime, LeanStringEvent};
 
 fn workspace_root() -> PathBuf {
@@ -46,11 +46,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let runtime = LeanRuntime::init()?;
-    let interop_library = LeanLibrary::open_globally(runtime, &interop_shims)?;
-    let _interop_module = interop_library.initialize_module("lean_rs_interop_shims", "LeanRsInterop")?;
-
-    let consumer_library = LeanLibrary::open(runtime, &consumer)?;
-    let consumer_module = consumer_library.initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")?;
+    let consumer_bundle = LeanLibraryBundle::open(
+        runtime,
+        &consumer,
+        [LeanLibraryDependency::path(interop_shims)
+            .export_symbols_for_dependents()
+            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+    )?;
+    let consumer_module = consumer_bundle.initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")?;
     let add = consumer_module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
     let stream = consumer_module.exported::<(usize, usize), LeanIo<u8>>("lean_rs_interop_consumer_jsonl_stream")?;
 

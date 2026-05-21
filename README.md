@@ -201,9 +201,10 @@ cargo run
 
 `CargoLeanCapability` hides Lean link directives, Lake's shared-library facet,
 Cargo rerun triggers, cache, filename convention, and dylib-path env-var
-plumbing. `LeanCapability` keeps the build-time path and initializer names
-together at runtime. Use `build_lake_target` and `LeanLibrary` directly only
-for lower-level custom interop.
+plumbing. `LeanCapability` keeps the build-time path, dependency bundle, and
+initializer names together at runtime. Use `build_lake_target`,
+`LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom
+interop.
 
 For sessions, kernel checking, and `MetaM`, add `lean-rs-host = "0.1"` and follow
 [`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). The host crate ships and

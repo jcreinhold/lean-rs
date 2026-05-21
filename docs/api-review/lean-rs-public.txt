@@ -551,6 +551,9 @@ impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
 pub mod lean_rs::module
 pub struct lean_rs::module::LeanBuiltCapability
 impl lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::dependencies(self, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> Self
+pub fn lean_rs::LeanBuiltCapability::dependency(self, dependency: lean_rs::LeanLibraryDependency) -> Self
+pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs::LeanLibraryDependency]
 pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
@@ -578,11 +581,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanBuiltCapability
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanBuiltCapability
 pub struct lean_rs::module::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
+pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
 pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
 impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
@@ -656,6 +661,44 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibrary<'lean>
+pub struct lean_rs::module::LeanLibraryBundle<'lean>
+impl<'lean> lean_rs::LeanLibraryBundle<'lean>
+pub fn lean_rs::LeanLibraryBundle<'lean>::dependency_count(&self) -> usize
+pub fn lean_rs::LeanLibraryBundle<'lean>::initialize_module<'bundle>(&'bundle self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'bundle>>
+pub fn lean_rs::LeanLibraryBundle<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+impl core::fmt::Debug for lean_rs::LeanLibraryBundle<'_>
+pub fn lean_rs::LeanLibraryBundle<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> core::marker::Freeze for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
+pub struct lean_rs::module::LeanLibraryDependency
+impl lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::export_symbols_for_dependents(self) -> Self
+pub fn lean_rs::LeanLibraryDependency::exports_symbols_for_dependents(&self) -> bool
+pub fn lean_rs::LeanLibraryDependency::initializer(self, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanLibraryDependency::module_initializer(&self) -> core::option::Option<&lean_rs::LeanModuleInitializer>
+pub fn lean_rs::LeanLibraryDependency::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs::LeanLibraryDependency::path_ref(&self) -> &std::path::Path
+impl core::clone::Clone for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::clone(&self) -> lean_rs::LeanLibraryDependency
+impl core::cmp::Eq for lean_rs::LeanLibraryDependency
+impl core::cmp::PartialEq for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::eq(&self, other: &lean_rs::LeanLibraryDependency) -> bool
+impl core::fmt::Debug for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanLibraryDependency
+impl core::marker::Freeze for lean_rs::LeanLibraryDependency
+impl core::marker::Send for lean_rs::LeanLibraryDependency
+impl core::marker::Sync for lean_rs::LeanLibraryDependency
+impl core::marker::Unpin for lean_rs::LeanLibraryDependency
+impl core::marker::UnsafeUnpin for lean_rs::LeanLibraryDependency
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryDependency
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryDependency
 pub struct lean_rs::module::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
@@ -670,6 +713,26 @@ impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
+pub struct lean_rs::module::LeanModuleInitializer
+impl lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::module_name(&self) -> &str
+pub fn lean_rs::LeanModuleInitializer::new(package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanModuleInitializer::package_name(&self) -> &str
+impl core::clone::Clone for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::clone(&self) -> lean_rs::LeanModuleInitializer
+impl core::cmp::Eq for lean_rs::LeanModuleInitializer
+impl core::cmp::PartialEq for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::eq(&self, other: &lean_rs::LeanModuleInitializer) -> bool
+impl core::fmt::Debug for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanModuleInitializer
+impl core::marker::Freeze for lean_rs::LeanModuleInitializer
+impl core::marker::Send for lean_rs::LeanModuleInitializer
+impl core::marker::Sync for lean_rs::LeanModuleInitializer
+impl core::marker::Unpin for lean_rs::LeanModuleInitializer
+impl core::marker::UnsafeUnpin for lean_rs::LeanModuleInitializer
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModuleInitializer
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModuleInitializer
 pub trait lean_rs::module::DecodeCallResult<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedResult
 pub type lean_rs::module::DecodeCallResult::CRepr: core::marker::Copy
 pub type lean_rs::module::DecodeCallResult::Output
@@ -1041,6 +1104,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
 pub struct lean_rs::LeanBuiltCapability
 impl lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::dependencies(self, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> Self
+pub fn lean_rs::LeanBuiltCapability::dependency(self, dependency: lean_rs::LeanLibraryDependency) -> Self
+pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs::LeanLibraryDependency]
 pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
 pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
@@ -1105,11 +1171,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanCancelled
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
 pub struct lean_rs::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
+pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
 pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
 impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
@@ -1250,6 +1318,44 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibrary<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibrary<'lean>
+pub struct lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> lean_rs::LeanLibraryBundle<'lean>
+pub fn lean_rs::LeanLibraryBundle<'lean>::dependency_count(&self) -> usize
+pub fn lean_rs::LeanLibraryBundle<'lean>::initialize_module<'bundle>(&'bundle self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'bundle>>
+pub fn lean_rs::LeanLibraryBundle<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+impl core::fmt::Debug for lean_rs::LeanLibraryBundle<'_>
+pub fn lean_rs::LeanLibraryBundle<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> core::marker::Freeze for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBundle<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
+pub struct lean_rs::LeanLibraryDependency
+impl lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::export_symbols_for_dependents(self) -> Self
+pub fn lean_rs::LeanLibraryDependency::exports_symbols_for_dependents(&self) -> bool
+pub fn lean_rs::LeanLibraryDependency::initializer(self, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanLibraryDependency::module_initializer(&self) -> core::option::Option<&lean_rs::LeanModuleInitializer>
+pub fn lean_rs::LeanLibraryDependency::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs::LeanLibraryDependency::path_ref(&self) -> &std::path::Path
+impl core::clone::Clone for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::clone(&self) -> lean_rs::LeanLibraryDependency
+impl core::cmp::Eq for lean_rs::LeanLibraryDependency
+impl core::cmp::PartialEq for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::eq(&self, other: &lean_rs::LeanLibraryDependency) -> bool
+impl core::fmt::Debug for lean_rs::LeanLibraryDependency
+pub fn lean_rs::LeanLibraryDependency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanLibraryDependency
+impl core::marker::Freeze for lean_rs::LeanLibraryDependency
+impl core::marker::Send for lean_rs::LeanLibraryDependency
+impl core::marker::Sync for lean_rs::LeanLibraryDependency
+impl core::marker::Unpin for lean_rs::LeanLibraryDependency
+impl core::marker::UnsafeUnpin for lean_rs::LeanLibraryDependency
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryDependency
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryDependency
 pub struct lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
@@ -1264,6 +1370,26 @@ impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
+pub struct lean_rs::LeanModuleInitializer
+impl lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::module_name(&self) -> &str
+pub fn lean_rs::LeanModuleInitializer::new(package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanModuleInitializer::package_name(&self) -> &str
+impl core::clone::Clone for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::clone(&self) -> lean_rs::LeanModuleInitializer
+impl core::cmp::Eq for lean_rs::LeanModuleInitializer
+impl core::cmp::PartialEq for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::eq(&self, other: &lean_rs::LeanModuleInitializer) -> bool
+impl core::fmt::Debug for lean_rs::LeanModuleInitializer
+pub fn lean_rs::LeanModuleInitializer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanModuleInitializer
+impl core::marker::Freeze for lean_rs::LeanModuleInitializer
+impl core::marker::Send for lean_rs::LeanModuleInitializer
+impl core::marker::Sync for lean_rs::LeanModuleInitializer
+impl core::marker::Unpin for lean_rs::LeanModuleInitializer
+impl core::marker::UnsafeUnpin for lean_rs::LeanModuleInitializer
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModuleInitializer
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModuleInitializer
 pub struct lean_rs::LeanName<'lean>
 impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self

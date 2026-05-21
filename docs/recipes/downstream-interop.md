@@ -30,8 +30,8 @@ A downstream package needs the same pieces as
 - Explicit `@[export]` definitions for every Rust-callable Lean entry point.
 - A Rust build script that calls `lean_toolchain::emit_lean_link_directives_checked`
   and `lean_toolchain::build_lake_target`.
-- Rust code that opens the generic shim dylib globally before opening the
-  downstream capability dylib when callback helpers are used.
+- Rust code that opens the downstream capability as a `LeanLibraryBundle` when
+  callback helpers add dependent Lean dylibs.
 
 The build helper returns the dylib path. Consumers should pass that path through
 `cargo:rustc-env=...` or another build-script output of their choosing; they
@@ -47,12 +47,17 @@ def add (a b : UInt64) : UInt64 :=
   a + b
 ```
 
-Rust opens the dylib, initializes the Lake module, resolves the exported
-symbol, and calls it through a typed handle:
+Rust opens the build-script capability, initializes the Lake module, resolves
+the exported symbol, and calls it through a typed handle:
 
 ```rust
-let library = LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
-let module = library.initialize_module("my_package", "MyCapability")?;
+let capability = LeanCapability::from_build_env(
+    runtime,
+    LeanBuiltCapability::path(env!("MY_CAPABILITY_DYLIB"))
+        .package("my_package")
+        .module("MyCapability"),
+)?;
+let module = capability.module()?;
 let add = module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
 let answer = add.call(20, 22)?;
 ```
@@ -74,6 +79,17 @@ Rust registers a callback and passes the opaque handle plus crate-owned
 trampoline to Lean:
 
 ```rust
+let bundle = LeanLibraryBundle::open(
+    runtime,
+    env!("MY_CAPABILITY_DYLIB"),
+    [LeanLibraryDependency::path(env!("LEAN_RS_INTEROP_SHIMS_DYLIB"))
+        .export_symbols_for_dependents()
+        .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+)?;
+let module = bundle.initialize_module("my_package", "MyCapability")?;
+let callback_loop =
+    module.exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")?;
+
 let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
     eprintln!("{} / {}", event.current, event.total);
     LeanCallbackFlow::Continue
