@@ -358,6 +358,10 @@ pub enum LeanWorkerError {
     LeaseInvalidated { reason: String },
     /// A local worker pool cannot admit another distinct session key.
     WorkerPoolExhausted { max_workers: usize },
+    /// A local worker pool cannot admit work without exceeding its RSS budget.
+    WorkerPoolMemoryBudgetExceeded { current_kib: u64, limit_kib: u64 },
+    /// Waiting for local worker-pool admission exceeded the configured limit.
+    WorkerPoolQueueTimeout { waited: Duration },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -448,6 +452,15 @@ impl fmt::Display for LeanWorkerError {
                     "worker pool cannot admit another session key; max_workers={max_workers}"
                 )
             }
+            Self::WorkerPoolMemoryBudgetExceeded { current_kib, limit_kib } => {
+                write!(
+                    f,
+                    "worker pool cannot admit work within RSS budget; current_kib={current_kib} limit_kib={limit_kib}"
+                )
+            }
+            Self::WorkerPoolQueueTimeout { waited } => {
+                write!(f, "worker pool admission timed out after {waited:?}")
+            }
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -485,6 +498,8 @@ impl std::error::Error for LeanWorkerError {
             | Self::TypedCommandSummaryDecode { .. }
             | Self::LeaseInvalidated { .. }
             | Self::WorkerPoolExhausted { .. }
+            | Self::WorkerPoolMemoryBudgetExceeded { .. }
+            | Self::WorkerPoolQueueTimeout { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -816,6 +831,10 @@ impl LeanWorker {
     /// the replacement child cannot be spawned and handshaken.
     pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
         self.restart_with_reason(LeanWorkerRestartReason::Explicit)
+    }
+
+    pub(crate) fn cycle_with_restart_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
+        self.restart_with_reason(reason)
     }
 
     /// Restart this worker using its original configuration.

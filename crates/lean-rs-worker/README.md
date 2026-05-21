@@ -27,12 +27,16 @@ the child binary is shipped elsewhere.
 `LeanWorkerPool` is the local multi-worker entry point for scale work. Callers
 acquire a `LeanWorkerSessionLease` from capability requirements and then run
 typed commands through the lease. The pool reuses compatible warm workers,
-replaces dead workers, enforces a fixed local worker limit, and invalidates
-leases after timeout, cancellation, child failure, explicit cycle, or metadata
-mismatch. It does not expose child pids, worker ids, pipes, protocol frames, or
-which warm worker was selected. A `LeanWorkerSessionKey` is only a worker reuse
-key; downstream tools still own row schemas, cache validity, ranking,
-reporting, and source provenance.
+replaces dead workers, enforces a fixed local worker limit, applies optional
+memory-aware admission and cycling policy, and invalidates leases after timeout,
+cancellation, child failure, explicit cycle, metadata mismatch, or policy cycle.
+The pool can bound known total child RSS, cycle warm workers that exceed a
+per-worker RSS ceiling, cycle idle workers, and bound synchronous admission waits
+for a full pool. RSS sampling is best effort; unavailable samples are recorded
+rather than presented as false memory claims. The pool does not expose child
+pids, worker ids, pipes, protocol frames, or which warm worker was selected. A
+`LeanWorkerSessionKey` is only a worker reuse key; downstream tools still own
+row schemas, cache validity, ranking, reporting, and source provenance.
 
 Startup timeout and request timeout are separate. Startup timeout covers the
 child handshake. Request timeout covers one request after its frame is written,
@@ -126,6 +130,19 @@ cargo run -p lean-rs-worker --example worker_pool
 That example opens a pool, acquires a compatible lease, runs a typed streaming
 command, cycles the leased worker, and leaves worker selection hidden behind
 the lease.
+
+Run the pool memory-scheduling workload:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo run -p lean-rs-worker --example pool_memory_scheduling
+```
+
+That workload records parent RSS, child RSS snapshots, unavailable RSS samples,
+budget admission behavior, policy restarts, fixture import reuse, a documented
+mathlib-shaped fallback, and repeated cycle/reuse under a small import policy.
+The numbers are workload evidence, not a claim that `SessionPool::drain()` can
+reset Lean process-global RSS.
 
 The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).

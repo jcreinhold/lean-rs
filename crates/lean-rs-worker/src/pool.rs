@@ -5,7 +5,8 @@
 //! only see session requirements and a lease that can run typed commands.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -16,7 +17,7 @@ use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressSink,
     LeanWorkerRuntimeMetadata, LeanWorkerStreamingCommand, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
-use crate::supervisor::{LeanWorkerError, LeanWorkerStatus};
+use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStatus};
 
 /// Coarse restart-policy class used in pool session keys.
 ///
@@ -143,6 +144,10 @@ struct LeanWorkerMetadataExpectationKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerPoolConfig {
     max_workers: usize,
+    max_total_child_rss_kib: Option<u64>,
+    per_worker_rss_ceiling_kib: Option<u64>,
+    idle_cycle_after: Option<Duration>,
+    queue_wait_timeout: Duration,
 }
 
 impl LeanWorkerPoolConfig {
@@ -151,6 +156,10 @@ impl LeanWorkerPoolConfig {
     pub fn new(max_workers: usize) -> Self {
         Self {
             max_workers: max_workers.max(1),
+            max_total_child_rss_kib: None,
+            per_worker_rss_ceiling_kib: None,
+            idle_cycle_after: None,
+            queue_wait_timeout: Duration::ZERO,
         }
     }
 
@@ -158,6 +167,65 @@ impl LeanWorkerPoolConfig {
     #[must_use]
     pub fn max_workers(&self) -> usize {
         self.max_workers
+    }
+
+    /// Reject new distinct workers when known total child RSS reaches `limit`.
+    ///
+    /// RSS sampling is best effort. On platforms where the pool cannot obtain
+    /// samples, it records unavailable samples and does not make a false
+    /// admission claim.
+    #[must_use]
+    pub fn max_total_child_rss_kib(mut self, limit: u64) -> Self {
+        self.max_total_child_rss_kib = Some(limit.max(1));
+        self
+    }
+
+    /// Cycle a worker before assigning work when its sampled RSS reaches `limit`.
+    #[must_use]
+    pub fn per_worker_rss_ceiling_kib(mut self, limit: u64) -> Self {
+        self.per_worker_rss_ceiling_kib = Some(limit.max(1));
+        self
+    }
+
+    /// Cycle an idle worker before assigning more work through an old lease.
+    #[must_use]
+    pub fn idle_cycle_after(mut self, limit: Duration) -> Self {
+        self.idle_cycle_after = Some(limit);
+        self
+    }
+
+    /// Wait this long for local pool admission before returning a typed error.
+    ///
+    /// The current pool is synchronous. This timeout documents and bounds the
+    /// admission point without exposing worker ids or queue internals.
+    #[must_use]
+    pub fn queue_wait_timeout(mut self, timeout: Duration) -> Self {
+        self.queue_wait_timeout = timeout;
+        self
+    }
+
+    /// Return the configured total child RSS budget in KiB.
+    #[must_use]
+    pub fn max_total_child_rss_kib_limit(&self) -> Option<u64> {
+        self.max_total_child_rss_kib
+    }
+
+    /// Return the configured per-worker RSS ceiling in KiB.
+    #[must_use]
+    pub fn per_worker_rss_ceiling_kib_limit(&self) -> Option<u64> {
+        self.per_worker_rss_ceiling_kib
+    }
+
+    /// Return the configured idle-cycle duration.
+    #[must_use]
+    pub fn idle_cycle_after_limit(&self) -> Option<Duration> {
+        self.idle_cycle_after
+    }
+
+    /// Return the configured pool admission wait timeout.
+    #[must_use]
+    pub fn queue_wait_timeout_limit(&self) -> Duration {
+        self.queue_wait_timeout
     }
 }
 
@@ -175,6 +243,19 @@ impl Default for LeanWorkerPoolConfig {
 pub struct LeanWorkerPoolSnapshot {
     pub max_workers: usize,
     pub workers: usize,
+    pub total_child_rss_kib: Option<u64>,
+    pub rss_samples_unavailable: u64,
+    pub worker_restarts: u64,
+    pub max_request_restarts: u64,
+    pub max_import_restarts: u64,
+    pub rss_restarts: u64,
+    pub idle_restarts: u64,
+    pub cancelled_restarts: u64,
+    pub timeout_restarts: u64,
+    pub policy_restarts: u64,
+    pub queue_timeouts: u64,
+    pub memory_budget_rejections: u64,
+    pub last_restart_reason: Option<LeanWorkerRestartReason>,
 }
 
 /// Local pool for worker-backed capability sessions.
@@ -182,6 +263,8 @@ pub struct LeanWorkerPoolSnapshot {
 pub struct LeanWorkerPool {
     config: LeanWorkerPoolConfig,
     entries: Vec<PoolEntry>,
+    queue_timeouts: u64,
+    memory_budget_rejections: u64,
 }
 
 impl LeanWorkerPool {
@@ -191,6 +274,8 @@ impl LeanWorkerPool {
         Self {
             config,
             entries: Vec::new(),
+            queue_timeouts: 0,
+            memory_budget_rejections: 0,
         }
     }
 
@@ -213,11 +298,13 @@ impl LeanWorkerPool {
         let key = builder.session_key();
         if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
             self.ensure_entry_running(index)?;
+            self.enforce_entry_policy_before_assignment(index)?;
             let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
                 message: "worker pool entry disappeared during lease acquisition".to_owned(),
             })?;
             return Ok(LeanWorkerSessionLease {
                 entry,
+                config: self.config.clone(),
                 valid: true,
                 invalidation_reason: None,
                 request_timeout_override: None,
@@ -225,10 +312,9 @@ impl LeanWorkerPool {
         }
 
         if self.entries.len() >= self.config.max_workers {
-            return Err(LeanWorkerError::WorkerPoolExhausted {
-                max_workers: self.config.max_workers,
-            });
+            return self.pool_full_error();
         }
+        self.ensure_spawn_within_total_rss_budget()?;
 
         let capability = builder.clone().open()?;
         let base_request_timeout = builder.pool_request_timeout();
@@ -237,12 +323,19 @@ impl LeanWorkerPool {
             builder,
             capability,
             base_request_timeout,
+            last_rss_kib: None,
+            rss_samples_unavailable: 0,
+            last_activity: Instant::now(),
+            last_restart_reason: None,
+            policy_restarts: 0,
         });
         let entry = self.entries.last_mut().ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool failed to retain newly opened entry".to_owned(),
         })?;
+        let _ = entry.sample_rss();
         Ok(LeanWorkerSessionLease {
             entry,
+            config: self.config.clone(),
             valid: true,
             invalidation_reason: None,
             request_timeout_override: None,
@@ -255,6 +348,51 @@ impl LeanWorkerPool {
         LeanWorkerPoolSnapshot {
             max_workers: self.config.max_workers,
             workers: self.entries.len(),
+            total_child_rss_kib: self.total_known_child_rss_kib(),
+            rss_samples_unavailable: self.entries.iter().map(|entry| entry.rss_samples_unavailable).sum(),
+            worker_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().restarts)
+                .sum(),
+            max_request_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().max_request_restarts)
+                .sum(),
+            max_import_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().max_import_restarts)
+                .sum(),
+            rss_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().rss_restarts)
+                .sum(),
+            idle_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().idle_restarts)
+                .sum(),
+            cancelled_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().cancelled_restarts)
+                .sum(),
+            timeout_restarts: self
+                .entries
+                .iter()
+                .map(|entry| entry.capability.worker().stats().timeout_restarts)
+                .sum(),
+            policy_restarts: self.entries.iter().map(|entry| entry.policy_restarts).sum(),
+            queue_timeouts: self.queue_timeouts,
+            memory_budget_rejections: self.memory_budget_rejections,
+            last_restart_reason: self
+                .entries
+                .iter()
+                .rev()
+                .find_map(|entry| entry.last_restart_reason.clone()),
         }
     }
 
@@ -266,9 +404,75 @@ impl LeanWorkerPool {
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(_exit) => {
                 entry.capability = entry.builder.clone().open()?;
+                entry.last_activity = Instant::now();
                 Ok(())
             }
         }
+    }
+
+    fn enforce_entry_policy_before_assignment(&mut self, index: usize) -> Result<(), LeanWorkerError> {
+        let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
+            message: "worker pool entry disappeared during policy check".to_owned(),
+        })?;
+        entry.enforce_policy(&self.config).map(|_| ())
+    }
+
+    fn ensure_spawn_within_total_rss_budget(&mut self) -> Result<(), LeanWorkerError> {
+        let Some(limit_kib) = self.config.max_total_child_rss_kib else {
+            return Ok(());
+        };
+        let rss = self.refresh_total_child_rss();
+        if rss.unavailable > 0 {
+            return Ok(());
+        }
+        if rss.total_kib >= limit_kib {
+            self.memory_budget_rejections = self.memory_budget_rejections.saturating_add(1);
+            return Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
+                current_kib: rss.total_kib,
+                limit_kib,
+            });
+        }
+        Ok(())
+    }
+
+    fn refresh_total_child_rss(&mut self) -> PoolRssTotal {
+        let mut total_kib = 0_u64;
+        let mut unavailable = 0_u64;
+        for entry in &mut self.entries {
+            match entry.sample_rss() {
+                Some(value) => {
+                    total_kib = total_kib.saturating_add(value);
+                }
+                None => {
+                    unavailable = unavailable.saturating_add(1);
+                }
+            }
+        }
+        PoolRssTotal { total_kib, unavailable }
+    }
+
+    fn total_known_child_rss_kib(&self) -> Option<u64> {
+        self.entries
+            .iter()
+            .map(|entry| entry.last_rss_kib)
+            .try_fold(0_u64, |acc, value| value.map(|rss| acc.saturating_add(rss)))
+    }
+
+    fn pool_full_error<T>(&mut self) -> Result<T, LeanWorkerError> {
+        if self.config.queue_wait_timeout.is_zero() {
+            return Err(LeanWorkerError::WorkerPoolExhausted {
+                max_workers: self.config.max_workers,
+            });
+        }
+        let started = Instant::now();
+        while started.elapsed() < self.config.queue_wait_timeout {
+            let remaining = self.config.queue_wait_timeout.saturating_sub(started.elapsed());
+            thread::sleep(remaining.min(Duration::from_millis(10)));
+        }
+        self.queue_timeouts = self.queue_timeouts.saturating_add(1);
+        Err(LeanWorkerError::WorkerPoolQueueTimeout {
+            waited: self.config.queue_wait_timeout,
+        })
     }
 }
 
@@ -284,6 +488,69 @@ struct PoolEntry {
     builder: LeanWorkerCapabilityBuilder,
     capability: LeanWorkerCapability,
     base_request_timeout: Duration,
+    last_rss_kib: Option<u64>,
+    rss_samples_unavailable: u64,
+    last_activity: Instant,
+    last_restart_reason: Option<LeanWorkerRestartReason>,
+    policy_restarts: u64,
+}
+
+impl PoolEntry {
+    fn sample_rss(&mut self) -> Option<u64> {
+        match self.capability.worker_mut().rss_kib() {
+            Some(value) => {
+                self.last_rss_kib = Some(value);
+                Some(value)
+            }
+            None => {
+                self.rss_samples_unavailable = self.rss_samples_unavailable.saturating_add(1);
+                None
+            }
+        }
+    }
+
+    fn enforce_policy(&mut self, config: &LeanWorkerPoolConfig) -> Result<Option<String>, LeanWorkerError> {
+        if let Some(limit_kib) = config.per_worker_rss_ceiling_kib {
+            match self.sample_rss() {
+                Some(current_kib) if current_kib >= limit_kib => {
+                    let reason = LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib };
+                    self.cycle_for_policy(reason)?;
+                    return Ok(Some(format!(
+                        "memory policy cycled worker at {current_kib} KiB RSS with limit {limit_kib} KiB"
+                    )));
+                }
+                Some(_) | None => {}
+            }
+        }
+
+        if let Some(limit) = config.idle_cycle_after {
+            let idle_for = self.last_activity.elapsed();
+            if idle_for >= limit {
+                let reason = LeanWorkerRestartReason::Idle { idle_for, limit };
+                self.cycle_for_policy(reason)?;
+                return Ok(Some(format!(
+                    "idle policy cycled worker after {idle_for:?} idle with limit {limit:?}"
+                )));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn cycle_for_policy(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
+        self.capability.worker_mut().cycle_with_restart_reason(reason.clone())?;
+        self.last_restart_reason = Some(reason);
+        self.last_activity = Instant::now();
+        self.last_rss_kib = None;
+        self.policy_restarts = self.policy_restarts.saturating_add(1);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PoolRssTotal {
+    total_kib: u64,
+    unavailable: u64,
 }
 
 /// Borrowed lease for running typed commands on a compatible worker session.
@@ -294,6 +561,7 @@ struct PoolEntry {
 #[derive(Debug)]
 pub struct LeanWorkerSessionLease<'pool> {
     entry: &'pool mut PoolEntry,
+    config: LeanWorkerPoolConfig,
     valid: bool,
     invalidation_reason: Option<String>,
     request_timeout_override: Option<Duration>,
@@ -368,6 +636,7 @@ impl LeanWorkerSessionLease<'_> {
         Resp: DeserializeOwned,
     {
         self.ensure_valid()?;
+        self.enforce_policy_before_request()?;
         let request_timeout = self.request_timeout_override;
         let result = self
             .entry
@@ -404,6 +673,7 @@ impl LeanWorkerSessionLease<'_> {
         Summary: DeserializeOwned,
     {
         self.ensure_valid()?;
+        self.enforce_policy_before_request()?;
         let request_timeout = self.request_timeout_override;
         let result = self
             .entry
@@ -431,6 +701,14 @@ impl LeanWorkerSessionLease<'_> {
         }
     }
 
+    fn enforce_policy_before_request(&mut self) -> Result<(), LeanWorkerError> {
+        if let Some(reason) = self.entry.enforce_policy(&self.config)? {
+            self.invalidate(reason.clone());
+            return Err(LeanWorkerError::LeaseInvalidated { reason });
+        }
+        Ok(())
+    }
+
     fn map_lifecycle_result<T>(&mut self, result: Result<T, LeanWorkerError>) -> Result<T, LeanWorkerError> {
         if self.request_timeout_override.is_some() {
             self.entry
@@ -439,8 +717,12 @@ impl LeanWorkerSessionLease<'_> {
                 .set_request_timeout(self.entry.base_request_timeout);
         }
         match result {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                self.entry.last_activity = Instant::now();
+                Ok(value)
+            }
             Err(err) => {
+                self.entry.last_activity = Instant::now();
                 if invalidates_lease(&err) {
                     self.invalidate(invalidation_reason(&err));
                 }

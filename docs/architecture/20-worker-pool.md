@@ -32,7 +32,7 @@ one piece of work.
 Prompt 78 implements the first public surface as a lease-first API:
 
 - `LeanWorkerPool` owns a bounded set of local capability workers;
-- `LeanWorkerPoolConfig` currently exposes a fixed `max_workers` limit;
+- `LeanWorkerPoolConfig` exposes a fixed `max_workers` limit;
 - `LeanWorkerSessionKey` records the worker reuse facts;
 - `LeanWorkerSessionLease` runs typed JSON and streaming commands without
   exposing `LeanWorkerSession` as the primary pool API.
@@ -41,6 +41,20 @@ A lease becomes invalid after timeout, cancellation, child fatal exit,
 explicit cycle, or capability metadata mismatch. The caller acquires a fresh
 lease for follow-up work. That rule keeps session invalidation explicit without
 making callers learn which child process or warm worker was selected.
+
+Prompt 79 adds local memory-aware scheduling to that same pool boundary:
+
+- `max_total_child_rss_kib` rejects a new distinct worker when known total
+  child RSS already reaches the configured budget;
+- `per_worker_rss_ceiling_kib` cycles a warm worker before assigning more work
+  when its sampled RSS reaches the configured ceiling;
+- `idle_cycle_after` cycles an idle worker before stale leased work continues;
+- `queue_wait_timeout` bounds synchronous admission waits for a full pool.
+
+RSS sampling is best effort and platform-specific. Unsupported samples are
+recorded as unavailable; the pool does not claim a budget decision from missing
+RSS data. Memory-driven cycles are reported as policy restarts and invalidate
+stale leases before downstream command execution.
 
 ## Designs Considered
 
@@ -134,10 +148,13 @@ child, but it is not an RSS reset. Pool memory policy therefore operates by
 admitting work, selecting warm sessions carefully, and cycling child processes
 when measured policy says a reset is needed.
 
+The pool memory policy is local-child policy, not a remote placement model.
+Callers may configure worker count and RSS budgets, but they do not poll child
+RSS, inspect child pids, or decide which child to cycle.
+
 ## Next Prompts
 
-Prompt 79 adds memory-aware scheduling on top of the lease-first API. Prompt 80
-adds import-set planning so callers can produce stable work batches that make
-pool reuse effective. Prompts 81-87 then harden batching, data-plane choices,
-Lean-side streaming helpers, mathlib-scale fixtures, observability, downstream
-readiness, and the final scale contract.
+Prompt 80 adds import-set planning so callers can produce stable work batches
+that make pool reuse effective. Prompts 81-87 then harden batching, data-plane
+choices, Lean-side streaming helpers, mathlib-scale fixtures, observability,
+downstream readiness, and the final scale contract.

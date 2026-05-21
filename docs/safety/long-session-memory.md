@@ -202,3 +202,20 @@ the first request in each child to about 717 MiB after the second request,
 then returned to about 345 MiB in the replacement child. This supports the
 operational claim: process cycling bounds retained RSS for this workload;
 in-process drain does not reset it.
+
+`LeanWorkerPool` applies the same memory fact at the local orchestration
+layer. Pool policy can reject new distinct workers when known total child
+RSS reaches a budget, cycle a warm worker when its sampled RSS reaches a
+per-worker ceiling, cycle idle workers, and bound admission waits for a
+full pool. RSS sampling remains best effort and platform-specific: an
+unavailable sample is recorded as unavailable, not treated as proof that
+the pool is under budget. The pool memory-scheduling workload is:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo run -p lean-rs-worker --example pool_memory_scheduling
+```
+
+Use the pool knobs to avoid multiplying Lean import RSS across many local
+children. They do not change the underlying reset rule: only process exit
+resets Lean process-global retained memory.

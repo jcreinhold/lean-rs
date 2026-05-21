@@ -2,12 +2,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::thread;
 use std::time::Duration;
 
 use lean_rs_worker::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
-    LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
+    LeanWorkerRestartReason, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -37,6 +38,10 @@ fn builder() -> LeanWorkerCapabilityBuilder {
         ["LeanRsInteropConsumer.Callback"],
     )
     .worker_executable(worker_binary())
+}
+
+fn distinct_valid_builder() -> LeanWorkerCapabilityBuilder {
+    builder().restart_policy(LeanWorkerRestartPolicy::default().max_requests(99))
 }
 
 #[derive(Debug, Serialize)]
@@ -190,6 +195,11 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
         .run_json_command(&json_command(), &request("pool-after-fatal"), None, None)
         .expect("typed command succeeds after replacement");
     assert!(response.accepted);
+    assert_eq!(
+        pool.snapshot().last_restart_reason,
+        None,
+        "crash replacement should not be reported as a policy restart",
+    );
 }
 
 #[test]
@@ -326,5 +336,143 @@ fn metadata_mismatch_is_typed() {
             assert_eq!(export, "lean_rs_interop_consumer_worker_metadata");
         }
         other => panic!("expected metadata mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2).max_total_child_rss_kib(1));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let response = lease
+            .run_json_command(&json_command(), &request("pool-rss-budget"), None, None)
+            .expect("typed command succeeds");
+        assert!(response.accepted);
+    }
+
+    match pool.acquire_lease(distinct_valid_builder()) {
+        Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded { current_kib, limit_kib }) => {
+            assert_eq!(limit_kib, 1);
+            assert!(current_kib >= limit_kib);
+            assert_eq!(pool.snapshot().memory_budget_rejections, 1);
+        }
+        Ok(_lease) => {
+            assert!(
+                pool.snapshot().rss_samples_unavailable > 0,
+                "budget admission should only proceed when RSS samples are unavailable",
+            );
+        }
+        Err(other) => panic!("expected memory budget error or RSS-unavailable admission, got {other:?}"),
+    }
+}
+
+#[test]
+fn queue_wait_timeout_is_typed_when_pool_is_full() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).queue_wait_timeout(Duration::from_millis(10)));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let response = lease
+            .run_json_command(&json_command(), &request("pool-queue-timeout"), None, None)
+            .expect("typed command succeeds");
+        assert!(response.accepted);
+    }
+
+    let err = pool
+        .acquire_lease(distinct_valid_builder())
+        .expect_err("full pool should wait only until the configured queue timeout");
+    match err {
+        LeanWorkerError::WorkerPoolQueueTimeout { waited } => assert_eq!(waited, Duration::from_millis(10)),
+        other => panic!("expected queue timeout, got {other:?}"),
+    }
+    assert_eq!(pool.snapshot().queue_timeouts, 1);
+}
+
+#[test]
+fn per_worker_rss_policy_invalidates_old_lease_before_work() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).per_worker_rss_ceiling_kib(1));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let err = lease
+            .run_json_command(&json_command(), &request("pool-memory-cycle"), None, None)
+            .expect_err("low RSS ceiling should cycle before assigning work");
+        match err {
+            LeanWorkerError::LeaseInvalidated { reason } => {
+                assert!(reason.contains("memory policy"), "unexpected reason: {reason}");
+            }
+            other => panic!("expected lease invalidation, got {other:?}"),
+        }
+    }
+
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.policy_restarts, 1);
+    assert!(matches!(
+        snapshot.last_restart_reason,
+        Some(LeanWorkerRestartReason::RssCeiling { limit_kib: 1, .. })
+    ));
+}
+
+#[test]
+fn idle_policy_invalidates_lease_and_fresh_lease_can_continue() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).idle_cycle_after(Duration::from_millis(1)));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        thread::sleep(Duration::from_millis(15));
+        let err = lease
+            .run_json_command(&json_command(), &request("pool-idle-cycle"), None, None)
+            .expect_err("idle cycle should invalidate the stale lease before work");
+        match err {
+            LeanWorkerError::LeaseInvalidated { reason } => {
+                assert!(reason.contains("idle policy"), "unexpected reason: {reason}");
+            }
+            other => panic!("expected lease invalidation, got {other:?}"),
+        }
+    }
+
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.policy_restarts, 1);
+    assert!(matches!(
+        snapshot.last_restart_reason,
+        Some(LeanWorkerRestartReason::Idle { .. })
+    ));
+
+    let mut lease = pool
+        .acquire_lease(builder())
+        .expect("fresh lease opens after idle policy cycle");
+    let response = lease
+        .run_json_command(&json_command(), &request("pool-after-idle-cycle"), None, None)
+        .expect("typed command succeeds after fresh lease");
+    assert!(response.accepted);
+}
+
+#[test]
+fn rss_snapshot_records_available_samples_on_supported_platforms() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2).max_total_child_rss_kib(u64::MAX));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+        let response = lease
+            .run_json_command(&json_command(), &request("pool-rss-snapshot"), None, None)
+            .expect("typed command succeeds");
+        assert!(response.accepted);
+    }
+
+    let _lease = pool
+        .acquire_lease(distinct_valid_builder())
+        .expect("second lease admission samples existing worker RSS");
+    let snapshot = pool.snapshot();
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
+        assert!(
+            snapshot.total_child_rss_kib.is_some(),
+            "supported RSS platforms should record a total sample",
+        );
+    } else {
+        assert!(
+            snapshot.rss_samples_unavailable > 0,
+            "unsupported RSS platforms should record unavailable samples",
+        );
     }
 }

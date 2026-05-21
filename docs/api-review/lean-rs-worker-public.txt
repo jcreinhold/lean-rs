@@ -88,6 +88,11 @@ pub lean_rs_worker::LeanWorkerError::WorkerChildUnresolved
 pub lean_rs_worker::LeanWorkerError::WorkerChildUnresolved::tried: alloc::vec::Vec<std::path::PathBuf>
 pub lean_rs_worker::LeanWorkerError::WorkerPoolExhausted
 pub lean_rs_worker::LeanWorkerError::WorkerPoolExhausted::max_workers: usize
+pub lean_rs_worker::LeanWorkerError::WorkerPoolMemoryBudgetExceeded
+pub lean_rs_worker::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::current_kib: u64
+pub lean_rs_worker::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::limit_kib: u64
+pub lean_rs_worker::LeanWorkerError::WorkerPoolQueueTimeout
+pub lean_rs_worker::LeanWorkerError::WorkerPoolQueueTimeout::waited: core::time::Duration
 impl core::error::Error for lean_rs_worker::LeanWorkerError
 pub fn lean_rs_worker::LeanWorkerError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for lean_rs_worker::LeanWorkerError
@@ -572,8 +577,16 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerPool
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerPool
 pub struct lean_rs_worker::LeanWorkerPoolConfig
 impl lean_rs_worker::LeanWorkerPoolConfig
+pub fn lean_rs_worker::LeanWorkerPoolConfig::idle_cycle_after(self, limit: core::time::Duration) -> Self
+pub fn lean_rs_worker::LeanWorkerPoolConfig::idle_cycle_after_limit(&self) -> core::option::Option<core::time::Duration>
+pub fn lean_rs_worker::LeanWorkerPoolConfig::max_total_child_rss_kib(self, limit: u64) -> Self
+pub fn lean_rs_worker::LeanWorkerPoolConfig::max_total_child_rss_kib_limit(&self) -> core::option::Option<u64>
 pub fn lean_rs_worker::LeanWorkerPoolConfig::max_workers(&self) -> usize
 pub fn lean_rs_worker::LeanWorkerPoolConfig::new(max_workers: usize) -> Self
+pub fn lean_rs_worker::LeanWorkerPoolConfig::per_worker_rss_ceiling_kib(self, limit: u64) -> Self
+pub fn lean_rs_worker::LeanWorkerPoolConfig::per_worker_rss_ceiling_kib_limit(&self) -> core::option::Option<u64>
+pub fn lean_rs_worker::LeanWorkerPoolConfig::queue_wait_timeout(self, timeout: core::time::Duration) -> Self
+pub fn lean_rs_worker::LeanWorkerPoolConfig::queue_wait_timeout_limit(&self) -> core::time::Duration
 impl core::clone::Clone for lean_rs_worker::LeanWorkerPoolConfig
 pub fn lean_rs_worker::LeanWorkerPoolConfig::clone(&self) -> lean_rs_worker::LeanWorkerPoolConfig
 impl core::cmp::Eq for lean_rs_worker::LeanWorkerPoolConfig
@@ -592,7 +605,20 @@ impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerPoolConfig
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerPoolConfig
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerPoolConfig
 pub struct lean_rs_worker::LeanWorkerPoolSnapshot
+pub lean_rs_worker::LeanWorkerPoolSnapshot::cancelled_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::idle_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::last_restart_reason: core::option::Option<lean_rs_worker::LeanWorkerRestartReason>
+pub lean_rs_worker::LeanWorkerPoolSnapshot::max_import_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::max_request_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::max_workers: usize
+pub lean_rs_worker::LeanWorkerPoolSnapshot::memory_budget_rejections: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::policy_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::queue_timeouts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::rss_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::rss_samples_unavailable: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::timeout_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::total_child_rss_kib: core::option::Option<u64>
+pub lean_rs_worker::LeanWorkerPoolSnapshot::worker_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::workers: usize
 impl core::clone::Clone for lean_rs_worker::LeanWorkerPoolSnapshot
 pub fn lean_rs_worker::LeanWorkerPoolSnapshot::clone(&self) -> lean_rs_worker::LeanWorkerPoolSnapshot
