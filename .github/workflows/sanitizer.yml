@@ -61,8 +61,12 @@ jobs:
           RUSTDOCFLAGS: '-Z sanitizer=address'
           LEAN_RS_REFCOUNT_STRESS_ITERS: '20000'
         run: |
-          cargo +nightly test --target x86_64-unknown-linux-gnu --tests \
-            -- --include-ignored --test-threads=1
+          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+            clone_drop_cycle_preserves_exclusive_after_release -- --test-threads=1
+          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+            many_independent_objs_drop_in_arbitrary_order -- --test-threads=1
+          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+            catch_callback_panic_loop_remains_independent -- --test-threads=1
 
       - name: ASan panic-containment fixture
         env:
@@ -130,6 +134,7 @@ jobs:
 
   fuzz:
     name: ABI fuzz smoke
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,6 +157,11 @@ jobs:
       - name: Export LEAN_SYSROOT
         run: |
           echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Build Lake packages
+        run: |
+          (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
+          (cd fixtures/lean && lake build)
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked

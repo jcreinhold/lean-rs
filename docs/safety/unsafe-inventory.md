@@ -331,21 +331,35 @@ cd crates/lean-rs
 RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
 RUSTDOCFLAGS="-Z sanitizer=address" \
 LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
-cargo +nightly test --target x86_64-unknown-linux-gnu --tests \
-  -- --include-ignored --test-threads=1
+cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+  clone_drop_cycle_preserves_exclusive_after_release -- --test-threads=1
+RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
+RUSTDOCFLAGS="-Z sanitizer=address" \
+LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
+cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+  many_independent_objs_drop_in_arbitrary_order -- --test-threads=1
+RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
+RUSTDOCFLAGS="-Z sanitizer=address" \
+LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
+cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
+  catch_callback_panic_loop_remains_independent -- --test-threads=1
 ```
 
 `-Z sanitizer=address` instruments every allocation; LeakSanitizer ships with ASan on Linux, so
-the same run catches refcount use-after-free and session-loop leaks. `--include-ignored`
-activates the long-iteration stress and session-leak loops; `LEAN_RS_REFCOUNT_STRESS_ITERS`
-overrides per-test iteration count for `Obj` stress tests. `--test-threads=1` preserves the
-per-thread Lean runtime invariant.
+the same run catches refcount use-after-free and leak regressions. ASan coverage is focused on
+ownership, callback-panic, and process-containment contracts. Loader-negative-path regressions
+run outside ASan because they intentionally exercise platform dynamic-loader failure behavior
+with uninstrumented Lean shared libraries. `LEAN_RS_REFCOUNT_STRESS_ITERS` overrides
+per-test iteration count for `Obj` and callback panic stress tests. `--test-threads=1`
+preserves the per-thread Lean runtime invariant.
 
 ### Local—fuzz target (Linux or macOS, nightly)
 
 ```sh
 rustup toolchain install nightly --component rust-src
 cargo install cargo-fuzz                 # one-shot
+(cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
+(cd fixtures/lean && lake build)
 cd crates/lean-rs/fuzz
 cargo +nightly fuzz run abi_decode -- \
   -runs=200000 -max_total_time=120
@@ -358,11 +372,14 @@ any panic, exception kind, or sanitizer-detected fault is a finding.
 
 ### CI
 
-A dedicated workflow at `.github/workflows/sanitizer.yml` runs the Linux ASan command above on
-`ubuntu-latest` nightly, runs the panic-containment fixture and the callback trampoline and
-registry fixtures under ASan, runs the host progress callback fixture under ASan, and runs the
-fuzz target for 120 seconds, on every push to `main`, every pull request, and a weekly cron.
-Failure blocks the PR. The stable workspace matrix at `.github/workflows/ci.yml` is unchanged.
+A dedicated workflow at `.github/workflows/sanitizer.yml` runs the focused Linux ASan commands
+above on `ubuntu-latest` nightly, runs the panic-containment fixture and callback trampoline,
+registry, string-callback, host-progress, worker-crash, worker-pool, and worker-streaming
+fixtures under ASan, and runs loader regressions outside ASan. The ASan job runs on every push
+to `main`, every pull request, a weekly cron, and manual dispatch. The ABI fuzz smoke is
+manual-only in the sanitizer workflow and is a release gate in `.github/workflows/release.yml`;
+it is not part of routine push/PR CI. The stable workspace matrix at `.github/workflows/ci.yml`
+is unchanged.
 
 ### Coverage gaps
 

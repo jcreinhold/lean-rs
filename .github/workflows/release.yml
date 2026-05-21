@@ -120,6 +120,19 @@ jobs:
             echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           fi
 
+      - name: Install Rust nightly for ABI fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: rustup toolchain install nightly --component rust-src
+
+      - name: Install cargo-fuzz
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo install cargo-fuzz --locked
+
+      - name: ABI fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: crates/lean-rs/fuzz
+        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120
+
       - name: cargo fmt --check
         run: cargo fmt --check
 
