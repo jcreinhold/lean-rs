@@ -73,7 +73,10 @@ downstream row streams over the worker process boundary,
 decision not to add row-batch frames yet, and
 [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) for the
 measured decision to keep the current row format until an end-to-end worker
-workload justifies a replacement.
+workload justifies a replacement, and
+[`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) for the
+Lean-side worker envelope helpers capability authors use without importing host
+policy.
 
 ## Hidden knowledge
 

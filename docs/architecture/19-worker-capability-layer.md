@@ -188,6 +188,13 @@ schemas are intentionally small fixture schemas. They do not define
 declaration rows, feature rows, probe results, cache policy, ranking, or any
 other downstream semantic contract.
 
+Lean capability authors can use
+[`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md)'s
+`LeanRsInterop.Worker.Stream` helpers to build worker row, diagnostic,
+progress, and terminal-metadata envelopes. Those helpers live below the worker
+capability facade: they reduce Lean-side envelope boilerplate, but they do not
+define command semantics, row schemas, pool scheduling, or session keys.
+
 The scenario benchmark and `worker_capability_probe` example are the
 performance envelope for this shape. They measure cold startup, first import,
 import-once streaming, row throughput, cancellation latency, fatal-exit

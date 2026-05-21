@@ -88,6 +88,13 @@ caller row type at the parent boundary. `LeanWorkerDataRow` remains the
 schema-less escape hatch with a `serde_json::Value` payload; use it when callers
 need arbitrary inspection rather than maximum throughput.
 
+Lean capability packages should use the generic
+`LeanRsInterop.Worker.Stream` helpers from `lean-rs-interop-shims` when
+emitting worker streams. Those helpers build row, diagnostic, progress,
+terminal metadata, and status envelopes for the child-local string callback
+path. They do not define downstream row schemas, command names, session keys,
+or pool scheduling policy.
+
 Capability metadata and doctor checks are separate from row streams.
 `LeanWorker::runtime_metadata` reports `lean-rs-worker` protocol facts from the
 child handshake. `LeanWorkerSession::capability_metadata` and

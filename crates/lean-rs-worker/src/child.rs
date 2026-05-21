@@ -459,6 +459,25 @@ impl HostSessionState {
                         LeanCallbackFlow::Stop
                     }
                 },
+                Ok(StreamCallbackEvent::Progress(progress)) => match callback_forwarder.lock() {
+                    Ok(guard) => match guard.emit_progress(progress) {
+                        Ok(()) => LeanCallbackFlow::Continue,
+                        Err(err) => {
+                            if let Ok(mut guard) = callback_error.lock() {
+                                *guard = Some(StreamCallbackError::Write(err.to_string()));
+                            }
+                            LeanCallbackFlow::Stop
+                        }
+                    },
+                    Err(_) => {
+                        if let Ok(mut guard) = callback_error.lock() {
+                            *guard = Some(StreamCallbackError::Malformed(
+                                "stream forwarder mutex was poisoned".to_owned(),
+                            ));
+                        }
+                        LeanCallbackFlow::Stop
+                    }
+                },
                 Ok(StreamCallbackEvent::Metadata(metadata)) => match callback_forwarder.lock() {
                     Ok(mut guard) => {
                         guard.set_metadata(metadata);
@@ -549,6 +568,7 @@ struct PendingDataRow {
 enum StreamCallbackEvent {
     Row(PendingDataRow),
     Diagnostic(Diagnostic),
+    Progress(ProgressTick),
     Metadata(serde_json::Value),
 }
 
@@ -585,6 +605,10 @@ impl StreamForwarder {
 
     fn emit_diagnostic(&self, diagnostic: Diagnostic) -> Result<(), ProtocolError> {
         self.writer.write(Message::Diagnostic(diagnostic))
+    }
+
+    fn emit_progress(&self, progress: ProgressTick) -> Result<(), ProtocolError> {
+        self.writer.write(Message::ProgressTick(progress))
     }
 
     fn set_metadata(&mut self, metadata: serde_json::Value) {
@@ -633,6 +657,17 @@ fn parse_row_envelope(raw: &str) -> Result<StreamCallbackEvent, String> {
             .ok_or_else(|| "diagnostic callback payload must contain a string field `message`".to_owned())?;
         return Ok(StreamCallbackEvent::Diagnostic(Diagnostic { code, message }));
     }
+    if let Some(progress) = envelope.progress {
+        let phase = progress
+            .phase
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "progress callback payload must contain a non-empty string field `phase`".to_owned())?;
+        return Ok(StreamCallbackEvent::Progress(ProgressTick {
+            phase,
+            current: progress.current,
+            total: progress.total,
+        }));
+    }
     if let Some(metadata) = envelope.metadata {
         let metadata = serde_json::from_str(metadata.get())
             .map_err(|err| format!("metadata callback payload is not valid JSON: {err}"))?;
@@ -653,6 +688,7 @@ struct RowCallbackEnvelope {
     stream: Option<String>,
     payload: Option<Box<RawValue>>,
     diagnostic: Option<RowCallbackDiagnostic>,
+    progress: Option<RowCallbackProgress>,
     metadata: Option<Box<RawValue>>,
 }
 
@@ -660,6 +696,13 @@ struct RowCallbackEnvelope {
 struct RowCallbackDiagnostic {
     code: Option<String>,
     message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RowCallbackProgress {
+    phase: Option<String>,
+    current: u64,
+    total: Option<u64>,
 }
 
 impl WorkerElabOptions {

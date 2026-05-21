@@ -9,6 +9,8 @@ import LeanRsInterop
 
 namespace LeanRsInteropConsumer.Callback
 
+open LeanRsInterop.Worker
+
 @[export lean_rs_interop_consumer_add]
 def add (a b : UInt64) : UInt64 :=
   a + b
@@ -32,41 +34,89 @@ def jsonlRows : Array String :=
 def jsonlStream (handle trampoline : USize) : IO UInt8 :=
   LeanRsInterop.Callback.String.loop handle trampoline jsonlRows
 
-def workerDataRows : Array String :=
+def workerDataRows (_ : Unit) : Array String :=
   #[
-    "{\"stream\":\"rows\",\"payload\":{\"kind\":\"request\",\"ordinal\":0}}",
-    "{\"diagnostic\":{\"code\":\"lean_rs.worker.fixture.started\",\"message\":\"started\"}}",
-    "{\"stream\":\"rows\",\"payload\":{\"kind\":\"done\",\"ordinal\":1}}",
-    "{\"diagnostic\":{\"code\":\"lean_rs.worker.fixture.finished\",\"message\":\"finished\"}}",
-    "{\"metadata\":{\"fixture\":\"worker_data_stream\",\"ok\":true}}"
+    Stream.row "rows" "{\"kind\":\"request\",\"ordinal\":0}",
+    Stream.diagnostic "lean_rs.worker.fixture.started" "started",
+    Stream.row "rows" "{\"kind\":\"done\",\"ordinal\":1}",
+    Stream.diagnostic "lean_rs.worker.fixture.finished" "finished",
+    Stream.metadata "{\"fixture\":\"worker_data_stream\",\"ok\":true}"
   ]
 
 @[export lean_rs_interop_consumer_worker_data_stream]
 def workerDataStream (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline workerDataRows
+  Stream.emitAll handle trampoline (workerDataRows ())
 
 def manyWorkerDataRows (count : Nat) : Array String := Id.run do
   let mut rows := #[]
   for i in [0:count] do
-    rows := rows.push ("{\"stream\":\"rows\",\"payload\":{\"i\":" ++ toString i ++ "}}")
+    rows := rows.push (Stream.row "rows" ("{\"i\":" ++ toString i ++ "}"))
   rows
 
 @[export lean_rs_interop_consumer_worker_data_stream_many]
 def workerDataStreamMany (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline (manyWorkerDataRows 512)
+  Stream.emitAll handle trampoline (manyWorkerDataRows 512)
+
+def chunkFixturePayload (i : Nat) : String :=
+  "{\"kind\":\"chunk\",\"ordinal\":" ++ toString i ++ "}"
+
+def chunkRows (_ : Unit) : Array String :=
+  #[
+    Stream.row "chunks" (chunkFixturePayload 0),
+    Stream.row "chunks" (chunkFixturePayload 1),
+    Stream.chunkProgress "fixture.chunk" 0 3,
+    Stream.row "chunks" (chunkFixturePayload 2),
+    Stream.row "chunks" (chunkFixturePayload 3),
+    Stream.chunkProgress "fixture.chunk" 1 3,
+    Stream.row "chunks" (chunkFixturePayload 4),
+    Stream.row "chunks" (chunkFixturePayload 5),
+    Stream.chunkProgress "fixture.chunk" 2 3
+  ]
+
+def chunkedStreamRows (_ : Unit) : Array String :=
+  Id.run do
+    let mut rows := #[Stream.diagnostic "lean_rs.worker.fixture.chunk.started" "chunk stream started"]
+    for row in chunkRows () do
+      rows := rows.push row
+    rows := rows.push (Stream.diagnostic "lean_rs.worker.fixture.chunk.finished" "chunk stream finished")
+    rows := rows.push (Stream.metadata "{\"fixture\":\"worker_data_stream_chunks\",\"ok\":true}")
+    rows
+
+def chunkErrorRows (_ : Unit) : Array String :=
+  #[
+    Stream.row "chunks" (chunkFixturePayload 0),
+    Stream.row "chunks" (chunkFixturePayload 1),
+    Stream.diagnostic "lean_rs.worker.stream.chunk_error" "fixture chunk error"
+  ]
+
+@[export lean_rs_interop_consumer_worker_data_stream_chunked]
+def workerDataStreamChunked (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
+  Stream.emitAll handle trampoline (chunkedStreamRows ())
+
+@[export lean_rs_interop_consumer_worker_data_stream_chunked_completion]
+def workerDataStreamChunkedCompletion (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  Stream.emitAll handle trampoline (chunkedStreamRows ())
+
+@[export lean_rs_interop_consumer_worker_data_stream_chunk_error]
+def workerDataStreamChunkError (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← Stream.emitAll handle trampoline (chunkErrorRows ())
+  if status != 0 then
+    pure status
+  else
+    pure 10
 
 def largeWorkerPayload : String :=
   String.ofList (List.replicate 8192 'x')
 
 @[export lean_rs_interop_consumer_worker_data_stream_large_payload]
 def workerDataStreamLargePayload (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline
-    #[ "{\"stream\":\"rows\",\"payload\":{\"kind\":\"large\",\"blob\":\"" ++ largeWorkerPayload ++ "\"}}" ]
+  Stream.emitAll handle trampoline
+    #[Stream.row "rows" ("{\"kind\":\"large\",\"blob\":" ++ Stream.jsonString largeWorkerPayload ++ "}")]
 
 @[export lean_rs_interop_consumer_worker_data_stream_slow_after_row]
 def workerDataStreamSlowAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
-  let status ← LeanRsInterop.Callback.String.loop handle trampoline
-    #["{\"stream\":\"rows\",\"payload\":{\"kind\":\"before-timeout\"}}"]
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "rows" "{\"kind\":\"before-timeout\"}"]
   if status == 0 then
     IO.sleep 200
     pure 0
@@ -75,15 +125,15 @@ def workerDataStreamSlowAfterRow (_requestJson : String) (handle trampoline : US
 
 @[export lean_rs_interop_consumer_worker_data_stream_malformed_json]
 def workerDataStreamMalformedJson (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline #["{not-json"]
+  Stream.emitAll handle trampoline #["{not-json"]
 
 @[export lean_rs_interop_consumer_worker_data_stream_missing_stream]
 def workerDataStreamMissingStream (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline #["{\"payload\":{\"kind\":\"missing-stream\"}}"]
+  Stream.emitAll handle trampoline #["{\"payload\":{\"kind\":\"missing-stream\"}}"]
 
 @[export lean_rs_interop_consumer_worker_data_stream_missing_payload]
 def workerDataStreamMissingPayload (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline #["{\"stream\":\"rows\"}"]
+  Stream.emitAll handle trampoline #["{\"stream\":\"rows\"}"]
 
 @[export lean_rs_interop_consumer_worker_data_stream_status]
 def workerDataStreamStatus (_requestJson : String) (_handle _trampoline : USize) : IO UInt8 :=
@@ -99,8 +149,8 @@ def workerDataStreamPanic (_requestJson : String) (_handle _trampoline : USize) 
 
 @[export lean_rs_interop_consumer_worker_data_stream_row_then_panic]
 def workerDataStreamRowThenPanic (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
-  let status ← LeanRsInterop.Callback.String.loop handle trampoline
-    #["{\"stream\":\"rows\",\"payload\":{\"kind\":\"before-panic\"}}"]
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "rows" "{\"kind\":\"before-panic\"}"]
   if status == 0 then
     panic! "lean-rs worker stream panic after row"
   else
@@ -143,66 +193,68 @@ def workerShapeVersion (_requestJson : String) : IO String :=
   pure "{\"worker\":\"lean-rs-worker-fixture\",\"protocol\":\"shape-1\",\"commands\":[\"version\",\"doctor\",\"extract\",\"features\",\"index\",\"probe\"],\"capabilities\":[\"rows\",\"diagnostics\",\"metadata\"]}"
 
 def workerShapeMetadataFor (command : String) (rows : Nat) : String :=
-  "{\"metadata\":{\"fixture\":\"lean-dup-shaped\",\"command\":\"" ++ command ++
-    "\",\"ok\":true,\"rows\":" ++ toString rows ++ "}}"
+  Stream.metadata
+    ("{\"fixture\":\"lean-dup-shaped\",\"command\":" ++ Stream.jsonString command ++
+      ",\"ok\":true,\"rows\":" ++ toString rows ++ "}")
 
-def workerShapeExtractRows : Array String :=
+def workerShapeExtractRows (_ : Unit) : Array String :=
   #[
-    "{\"diagnostic\":{\"code\":\"shape.extract.started\",\"message\":\"extract started\"}}",
-    "{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"ordinal\":0}}",
-    "{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"ordinal\":1}}",
-    "{\"diagnostic\":{\"code\":\"shape.extract.finished\",\"message\":\"extract finished\"}}",
+    Stream.diagnostic "shape.extract.started" "extract started",
+    Stream.row "declarations" "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"ordinal\":0}",
+    Stream.row "declarations" "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"ordinal\":1}",
+    Stream.diagnostic "shape.extract.finished" "extract finished",
     workerShapeMetadataFor "extract" 2
   ]
 
-def workerShapeFeatureRows : Array String :=
+def workerShapeFeatureRows (_ : Unit) : Array String :=
   #[
-    "{\"diagnostic\":{\"code\":\"shape.features.started\",\"message\":\"features started\"}}",
-    "{\"stream\":\"features\",\"payload\":{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"feature\":\"namespace\",\"score\":1,\"ordinal\":0}}",
-    "{\"stream\":\"features\",\"payload\":{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"feature\":\"type-shape\",\"score\":2,\"ordinal\":1}}",
-    "{\"diagnostic\":{\"code\":\"shape.features.finished\",\"message\":\"features finished\"}}",
+    Stream.diagnostic "shape.features.started" "features started",
+    Stream.row "features" "{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"feature\":\"namespace\",\"score\":1,\"ordinal\":0}",
+    Stream.row "features" "{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"feature\":\"type-shape\",\"score\":2,\"ordinal\":1}",
+    Stream.diagnostic "shape.features.finished" "features finished",
     workerShapeMetadataFor "features" 2
   ]
 
-def workerShapeIndexRows : Array String :=
+def workerShapeIndexRows (_ : Unit) : Array String :=
   #[
-    "{\"diagnostic\":{\"code\":\"shape.index.imported\",\"message\":\"import-once fixture ready\"}}",
-    "{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"ordinal\":0}}",
-    "{\"stream\":\"features\",\"payload\":{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"feature\":\"namespace\",\"score\":1,\"ordinal\":0}}",
-    "{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"ordinal\":1}}",
-    "{\"stream\":\"features\",\"payload\":{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"feature\":\"type-shape\",\"score\":2,\"ordinal\":1}}",
-    "{\"diagnostic\":{\"code\":\"shape.index.finished\",\"message\":\"index finished\"}}",
+    Stream.diagnostic "shape.index.imported" "import-once fixture ready",
+    Stream.row "declarations" "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"ordinal\":0}",
+    Stream.row "features" "{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.alpha\",\"feature\":\"namespace\",\"score\":1,\"ordinal\":0}",
+    Stream.row "declarations" "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"ordinal\":1}",
+    Stream.row "features" "{\"kind\":\"feature\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beta\",\"feature\":\"type-shape\",\"score\":2,\"ordinal\":1}",
+    Stream.diagnostic "shape.index.finished" "index finished",
     workerShapeMetadataFor "index" 4
   ]
 
-def workerShapeProbeRows : Array String :=
+def workerShapeProbeRows (_ : Unit) : Array String :=
   #[
-    "{\"diagnostic\":{\"code\":\"shape.probe.started\",\"message\":\"probe started\"}}",
-    "{\"stream\":\"probes\",\"payload\":{\"kind\":\"probe\",\"left\":\"Fixture.alpha\",\"right\":\"Fixture.beta\",\"relation\":\"related\",\"ordinal\":0}}",
-    "{\"diagnostic\":{\"code\":\"shape.probe.finished\",\"message\":\"probe finished\"}}",
+    Stream.diagnostic "shape.probe.started" "probe started",
+    Stream.row "probes" "{\"kind\":\"probe\",\"left\":\"Fixture.alpha\",\"right\":\"Fixture.beta\",\"relation\":\"related\",\"ordinal\":0}",
+    Stream.diagnostic "shape.probe.finished" "probe finished",
     workerShapeMetadataFor "probe" 1
   ]
 
 @[export lean_rs_interop_consumer_worker_shape_extract]
 def workerShapeExtract (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline workerShapeExtractRows
+  Stream.emitAll handle trampoline (workerShapeExtractRows ())
 
 @[export lean_rs_interop_consumer_worker_shape_features]
 def workerShapeFeatures (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline workerShapeFeatureRows
+  Stream.emitAll handle trampoline (workerShapeFeatureRows ())
 
 @[export lean_rs_interop_consumer_worker_shape_index]
 def workerShapeIndex (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline workerShapeIndexRows
+  Stream.emitAll handle trampoline (workerShapeIndexRows ())
 
 @[export lean_rs_interop_consumer_worker_shape_probe]
 def workerShapeProbe (_requestJson : String) (handle trampoline : USize) : IO UInt8 :=
-  LeanRsInterop.Callback.String.loop handle trampoline workerShapeProbeRows
+  Stream.emitAll handle trampoline (workerShapeProbeRows ())
 
 @[export lean_rs_interop_consumer_worker_shape_timeout_after_row]
 def workerShapeTimeoutAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
-  let status ← LeanRsInterop.Callback.String.loop handle trampoline
-    #["{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.timeout\",\"ordinal\":0}}"]
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "declarations"
+      "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.timeout\",\"ordinal\":0}"]
   if status == 0 then
     IO.sleep 200
     pure 0
@@ -211,8 +263,9 @@ def workerShapeTimeoutAfterRow (_requestJson : String) (handle trampoline : USiz
 
 @[export lean_rs_interop_consumer_worker_shape_panic_after_row]
 def workerShapePanicAfterRow (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
-  let status ← LeanRsInterop.Callback.String.loop handle trampoline
-    #["{\"stream\":\"declarations\",\"payload\":{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beforePanic\",\"ordinal\":0}}"]
+  let status ← Stream.emitAll handle trampoline
+    #[Stream.row "declarations"
+      "{\"kind\":\"declaration\",\"module\":\"Fixture.Basic\",\"name\":\"Fixture.beforePanic\",\"ordinal\":0}"]
   if status == 0 then
     panic! "lean-rs worker shape panic after row"
   else

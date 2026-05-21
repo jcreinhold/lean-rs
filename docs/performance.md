@@ -62,6 +62,18 @@ Prompt 82 measured small-row and large-row format candidates and kept the
 current raw-JSON typed decode path until an end-to-end worker workload proves a
 protocol replacement. See
 [`docs/architecture/23-worker-data-plane-format.md`](architecture/23-worker-data-plane-format.md).
+Prompt 83 added Lean-side worker envelope helpers. The helper fixture should
+continue to run through the typed command path:
+
+```sh
+cargo test -p lean-rs-worker --test typed_command helper_ -- --nocapture
+```
+
+The focused chunked-stream test prints the named helper workload as
+`helper_chunked_stream rows=<n> chunks=<n> chunk_size=<n> parallelism=1
+elapsed_ms=<n>`. Keep `parallelism=1` unless a future prompt proves a safe
+Lean-side parallel chunk emitter; Rust worker pools remain the supported
+parallelism boundary.
 
 Capability-layer changes should also run the downstream-shaped scenario bench:
 

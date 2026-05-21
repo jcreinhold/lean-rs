@@ -109,6 +109,12 @@ worker reuse, replacement after fatal exits, lease invalidation, and fixed
 local worker admission. Session keys are worker reuse keys, not downstream
 cache keys.
 
+Lean capability packages that emit worker rows can use the generic
+`LeanRsInterop.Worker.Stream` helpers from `lean-rs-interop-shims` for row,
+diagnostic, progress, terminal metadata, and status envelopes. The helpers keep
+callback-envelope mechanics out of downstream Lean code; downstream packages
+still own request parsing, row schemas, semantic commands, and chunk contents.
+
 ## Build your own consumer
 
 The minimum L1 setup is five files. The example below calls a user-authored `@[export]` Lean
@@ -277,6 +283,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`21-import-set-planning.md`](docs/architecture/21-import-set-planning.md)—Lake module discovery and worker session batch planning.
 - [`22-worker-row-batching.md`](docs/architecture/22-worker-row-batching.md)—the measured decision not to add row-batch frames or a public batch sink yet.
 - [`23-worker-data-plane-format.md`](docs/architecture/23-worker-data-plane-format.md)—the measured decision to keep the current worker row format until an end-to-end workload justifies a replacement.
+- [`24-lean-side-worker-streaming.md`](docs/architecture/24-lean-side-worker-streaming.md)—generic Lean-side worker envelope helpers for capability authors.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

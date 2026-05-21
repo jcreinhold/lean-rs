@@ -122,9 +122,11 @@ format that should replace the worker protocol now:
 The winning microbenchmarks do not yet have a Lean-side, end-to-end worker
 path. Implementing either a binary envelope or MessagePack now would add
 protocol complexity before proving that it improves the real child process
-stream. Prompt 83 should address Lean-side chunking and emission ergonomics;
-future format work must then show a broader worker or pool/lease benchmark win
-before changing the protocol or public API.
+stream. The Lean-side worker helpers in
+[`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) remove
+envelope boilerplate while keeping the current raw-JSON row path. Future format
+work must show a broader worker or pool/lease benchmark win before changing the
+protocol or public API.
 
 No `LeanBytesEvent`, object callback, raw frame API, MessagePack API, CBOR API,
 or binary row API is added by this prompt.

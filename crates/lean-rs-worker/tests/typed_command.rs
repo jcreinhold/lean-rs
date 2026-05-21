@@ -2,9 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use lean_rs_worker::{
-    LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError, LeanWorkerJsonCommand,
+    LeanWorkerCapabilityBuilder, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
+    LeanWorkerDiagnosticSink, LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,
     LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use serde::{Deserialize, Serialize};
@@ -125,6 +127,46 @@ impl LeanWorkerDataSink for RecordingRawSink {
     }
 }
 
+#[derive(Default)]
+struct RecordingDiagnostics {
+    diagnostics: Mutex<Vec<LeanWorkerDiagnosticEvent>>,
+}
+
+impl RecordingDiagnostics {
+    fn diagnostics(&self) -> Vec<LeanWorkerDiagnosticEvent> {
+        self.diagnostics
+            .lock()
+            .expect("diagnostic lock is not poisoned")
+            .clone()
+    }
+}
+
+impl LeanWorkerDiagnosticSink for RecordingDiagnostics {
+    fn report(&self, diagnostic: LeanWorkerDiagnosticEvent) {
+        self.diagnostics
+            .lock()
+            .expect("diagnostic lock is not poisoned")
+            .push(diagnostic);
+    }
+}
+
+#[derive(Default)]
+struct RecordingProgress {
+    events: Mutex<Vec<LeanWorkerProgressEvent>>,
+}
+
+impl RecordingProgress {
+    fn events(&self) -> Vec<LeanWorkerProgressEvent> {
+        self.events.lock().expect("progress lock is not poisoned").clone()
+    }
+}
+
+impl LeanWorkerProgressSink for RecordingProgress {
+    fn report(&self, event: LeanWorkerProgressEvent) {
+        self.events.lock().expect("progress lock is not poisoned").push(event);
+    }
+}
+
 #[test]
 fn typed_json_command_decodes_response() {
     let mut capability = builder().open().expect("builder opens capability");
@@ -232,6 +274,141 @@ fn typed_streaming_command_decodes_rows_and_summary() {
             },
         ],
     );
+}
+
+#[test]
+fn helper_chunked_stream_delivers_rows_diagnostics_progress_and_metadata() {
+    let mut capability = builder().open().expect("builder opens capability");
+    let mut session = capability.open_session(None, None).expect("session opens");
+    let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
+        "lean_rs_interop_consumer_worker_data_stream_chunked",
+    );
+    let sink = RecordingTypedSink::<FixtureRow>::default();
+    let diagnostics = RecordingDiagnostics::default();
+    let progress = RecordingProgress::default();
+    let started = Instant::now();
+
+    let summary = session
+        .run_streaming_command(
+            &command,
+            &FixtureRequest {
+                source: "chunked-helper-test".to_owned(),
+            },
+            &sink,
+            Some(&diagnostics),
+            None,
+            Some(&progress),
+        )
+        .expect("helper chunked stream succeeds");
+    let elapsed = started.elapsed();
+    eprintln!(
+        "helper_chunked_stream rows={} chunks=3 chunk_size=2 parallelism=1 elapsed_ms={:.2}",
+        summary.total_rows,
+        elapsed.as_secs_f64() * 1000.0
+    );
+
+    assert_eq!(summary.total_rows, 6);
+    assert_eq!(summary.per_stream_counts.get("chunks"), Some(&6));
+    assert_eq!(
+        summary.metadata,
+        Some(FixtureSummary {
+            fixture: "worker_data_stream_chunks".to_owned(),
+            ok: true,
+        }),
+    );
+    assert_eq!(
+        sink.rows()
+            .iter()
+            .map(|row| (row.sequence, row.payload.ordinal))
+            .collect::<Vec<_>>(),
+        vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)],
+    );
+    assert_eq!(
+        diagnostics
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "lean_rs.worker.fixture.chunk.started",
+            "lean_rs.worker.fixture.chunk.finished",
+        ],
+    );
+    let chunk_progress = progress
+        .events()
+        .into_iter()
+        .filter(|event| event.phase == "fixture.chunk")
+        .map(|event| (event.current, event.total))
+        .collect::<Vec<_>>();
+    assert_eq!(chunk_progress, vec![(1, Some(3)), (2, Some(3)), (3, Some(3))]);
+}
+
+#[test]
+fn helper_chunked_stream_reports_bounded_chunk_errors() {
+    let mut capability = builder().open().expect("builder opens capability");
+    let mut session = capability.open_session(None, None).expect("session opens");
+    let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
+        "lean_rs_interop_consumer_worker_data_stream_chunk_error",
+    );
+    let sink = RecordingTypedSink::<FixtureRow>::default();
+    let diagnostics = RecordingDiagnostics::default();
+
+    let err = session
+        .run_streaming_command(
+            &command,
+            &FixtureRequest {
+                source: "chunked-helper-error-test".to_owned(),
+            },
+            &sink,
+            Some(&diagnostics),
+            None,
+            None,
+        )
+        .expect_err("chunk helper error should become a typed export status");
+
+    match err {
+        LeanWorkerError::StreamExportFailed { status } => assert_eq!(status, 10),
+        other => panic!("expected stream export failure, got {other:?}"),
+    }
+    assert_eq!(
+        sink.rows().len(),
+        2,
+        "the first chunk is delivered before the chunk error"
+    );
+    assert_eq!(
+        diagnostics
+            .diagnostics()
+            .last()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("lean_rs.worker.stream.chunk_error"),
+    );
+}
+
+#[test]
+fn helper_completion_order_stream_uses_same_typed_surface() {
+    let mut capability = builder().open().expect("builder opens capability");
+    let mut session = capability.open_session(None, None).expect("session opens");
+    let command = LeanWorkerStreamingCommand::<FixtureRequest, FixtureRow, FixtureSummary>::new(
+        "lean_rs_interop_consumer_worker_data_stream_chunked_completion",
+    );
+    let sink = RecordingTypedSink::<FixtureRow>::default();
+
+    let summary = session
+        .run_streaming_command(
+            &command,
+            &FixtureRequest {
+                source: "chunked-helper-completion-test".to_owned(),
+            },
+            &sink,
+            None,
+            None,
+            None,
+        )
+        .expect("completion-order helper stream succeeds");
+
+    assert_eq!(summary.total_rows, 6);
+    assert_eq!(summary.per_stream_counts.get("chunks"), Some(&6));
+    assert_eq!(sink.rows().len(), 6);
 }
 
 #[test]
