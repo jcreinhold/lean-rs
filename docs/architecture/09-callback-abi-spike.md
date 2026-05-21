@@ -1,7 +1,7 @@
 # Callback ABI Spike
 
-Prompt 40 proved the minimum Lean-to-Rust callback ABI. The public registry
-that uses this ABI is documented in
+The minimum Lean-to-Rust callback ABI that the public registry sits on top of.
+The registry itself is documented in
 [`10-callback-registry.md`](10-callback-registry.md).
 
 ## ABI Shape
@@ -63,10 +63,10 @@ foreign unwinds. Lean's FFI model still uses explicit `@[extern]` and
 - Rust fixture: `crates/lean-rs/tests/callback_trampoline.rs`
 - Sanitizer job: `.github/workflows/sanitizer.yml`
 
-## Status
+## Out of scope at this layer
 
-The spike proves event order and panic-boundary behavior. It deliberately leaves
-these items to the public registry and later interop prompts:
+The ABI proves event order and panic-boundary behavior. Two things are left
+to the public registry and to higher layers:
 
 - object payload conversion beyond `(current, total)` integers;
 - host progress events.

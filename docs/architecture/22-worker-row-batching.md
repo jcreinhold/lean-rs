@@ -58,12 +58,12 @@ cargo test -p lean-rs-worker --test streaming_runner \
 
 ## Decision
 
-Do not add `LeanWorkerDataBatch`, a typed batch sink, or private `DataRowBatch`
-frames in this release. The existing live per-row protocol keeps stronger
-failure behavior: rows are forwarded as soon as Lean emits them, fatal exits
-after a row can still be reported after the parent observes that row, and
-sink-driven cancellation remains row-boundary precise.
+`LeanWorkerDataBatch`, a typed batch sink, and private `DataRowBatch` frames
+are not implemented. The live per-row protocol keeps stronger failure
+behavior: rows are forwarded as soon as Lean emits them, fatal exits after a
+row are still reported once the parent observes that row, and sink-driven
+cancellation remains row-boundary precise.
 
-A future data-plane format change may still be benchmarked separately. Any future batch
-work must show both a microbenchmark win and a broader pool/lease scenario win
-before adding public surface area.
+A future data-plane format change may still be benchmarked separately. Any
+batch work must show both a microbenchmark win and a broader pool/lease
+scenario win before adding public surface area.

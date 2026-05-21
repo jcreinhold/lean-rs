@@ -1,10 +1,9 @@
 # Worker Pool
 
-Prompt 76 hardened the single-worker production boundary. A single worker is
-the right unit for panic containment and process-global memory reset, but it is
-not enough for mathlib-scale or multi-package workloads. Those workloads need
-parallelism, warm session reuse, memory admission, and failure isolation across
-more than one child process.
+A single worker is the right unit for panic containment and process-global
+memory reset, but it is not enough for mathlib-scale or multi-package
+workloads. Those workloads need parallelism, warm session reuse, memory
+admission, and failure isolation across more than one child process.
 
 The pool boundary keeps that operational machinery inside `lean-rs-worker`.
 Downstream callers submit capability work keyed by session requirements. The
@@ -29,7 +28,7 @@ sits above them: the builder describes how to open one capability-backed worker
 session, while the pool decides which local child should host that session for
 one piece of work.
 
-Prompt 78 implements the first public surface as a lease-first API:
+The public surface is a lease-first API:
 
 - `LeanWorkerPool` owns a bounded set of local capability workers;
 - `LeanWorkerPoolConfig` exposes a fixed `max_workers` limit;
@@ -42,7 +41,7 @@ explicit cycle, or capability metadata mismatch. The caller acquires a fresh
 lease for follow-up work. That rule keeps session invalidation explicit without
 making callers learn which child process or warm worker was selected.
 
-Prompt 79 adds local memory-aware scheduling to that same pool boundary:
+The same pool boundary carries local memory-aware scheduling:
 
 - `max_total_child_rss_kib` rejects a new distinct worker when known total
   child RSS already reaches the configured budget;
@@ -56,8 +55,8 @@ recorded as unavailable; the pool does not claim a budget decision from missing
 RSS data. Memory-driven cycles are reported as policy restarts and invalidate
 stale leases before downstream command execution.
 
-Prompt 85 adds pool-level observability and bounded row-delivery backpressure
-to that same boundary:
+Pool-level observability and bounded row-delivery backpressure also live at
+this boundary:
 
 - `LeanWorkerPoolSnapshot` summarizes worker counts, warm leases, queue depth,
   restart reasons, child RSS samples, stream request outcomes, delivered row
@@ -169,15 +168,20 @@ The pool memory policy is local-child policy, not a remote placement model.
 Callers may configure worker count and RSS budgets, but they do not poll child
 RSS, inspect child pids, or decide which child to cycle.
 
-## Next Prompts
+## Related docs
 
-Prompt 80 adds import-set planning so callers can produce stable work batches
-that make pool reuse effective; see
-[`21-import-set-planning.md`](21-import-set-planning.md). Prompts 81-85 then
-harden batching, data-plane choices, Lean-side streaming helpers,
-mathlib-scale fixtures, and pool observability. The observability record is
-[`26-worker-pool-observability.md`](26-worker-pool-observability.md). Prompts
-86-87 cover downstream readiness and the final scale contract. The readiness
-proof is [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md), and the
-production-scale release contract is
-[`28-production-scale-release.md`](28-production-scale-release.md).
+- [`21-import-set-planning.md`](21-import-set-planning.md) — stable work
+  batches that make pool reuse effective.
+- [`22-worker-row-batching.md`](22-worker-row-batching.md),
+  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) —
+  batching and data-plane format decisions.
+- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) —
+  Lean-side streaming helpers.
+- [`25-mathlib-scale-worker-fixture.md`](25-mathlib-scale-worker-fixture.md)
+  — mathlib-scale fixture.
+- [`26-worker-pool-observability.md`](26-worker-pool-observability.md) —
+  pool observability.
+- [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md) — downstream
+  readiness proof.
+- [`28-production-scale-release.md`](28-production-scale-release.md) —
+  production-scale contract.

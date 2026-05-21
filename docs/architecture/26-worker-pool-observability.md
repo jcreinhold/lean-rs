@@ -1,8 +1,8 @@
 # Worker Pool Observability
 
-Prompt 85 adds the operating view for large local worker runs. The pool now
-reports cheap snapshots and applies bounded row-delivery backpressure without
-turning worker internals into the public API.
+The operating view for large local worker runs. The pool reports cheap
+snapshots and applies bounded row-delivery backpressure without exposing
+worker internals.
 
 ## Boundary
 
@@ -88,7 +88,7 @@ under mathlib-scale streams.
 **Dropped rows.** Rejected. Worker streams have commit-after-success semantics;
 dropping rows would make terminal success ambiguous for downstream schemas.
 
-**Metrics framework integration.** Rejected for this layer. The pool exposes a
-cheap snapshot. Applications can adapt it to logs, tracing, Prometheus, or
+**Metrics framework integration.** Rejected for this layer. The pool exposes
+a cheap snapshot. Applications adapt it to logs, tracing, Prometheus, or
 another metrics backend outside `lean-rs-worker`.
 

@@ -1,7 +1,6 @@
 # Import Set Planning
 
-Prompt 79 made the local worker pool memory-aware. Prompt 80 adds a smaller
-piece above it: stable import-set planning. The planner groups module work by
+The planner sits above the memory-aware worker pool and groups module work by
 the same facts the pool uses for session reuse, so downstream tools can avoid
 repeating Lean imports without learning worker process mechanics.
 

@@ -1,8 +1,8 @@
 # Mathlib-Scale Worker Fixture
 
-Prompt 84 adds a large-workload fixture for the worker capability layer. The
-fixture is deliberately not a `lean-dup` implementation. It uses mathlib-shaped
-module names and command-like exports to stress the same operational boundary:
+A large-workload fixture for the worker capability layer. It is deliberately
+not a `lean-dup` implementation; it uses mathlib-shaped module names and
+command-like exports to stress the operational boundary:
 
 ```text
 import planner -> LeanWorkerPool -> session lease -> typed command
@@ -81,45 +81,16 @@ cargo build --release -p lean-rs-worker --bin lean-rs-worker-child
 cargo bench -p lean-rs-worker --bench worker_capability -- mathlib_scale
 ```
 
-## Local Capture
+## Sample capture
 
-The initial fallback probe on macOS/aarch64 with Lean 4.29.1 recorded:
-
-```text
-workload=mathlib_scale_worker_fixture
-module_source=fallback
-module_count=16
-mathlib_available=false
-single_worker rows=47 rows_per_second=141.9
-pool_max_2 rows=47 rows_per_second=149.3
-cancellation=true
-fatal_exit=true
-post_cycle_rows=47
-parent_rss_start_kib=unavailable
-parent_rss_end_kib=unavailable
-```
-
-RSS was unavailable in that local `ps` sample, so the capture is throughput and
-behavior evidence only. A future mathlib run must record the command, module
-limit, Lean version, and whether RSS sampling was available before making any
-mathlib-scale performance claim.
-
-The first Criterion capture for the same fallback path recorded:
-
-```text
-cargo bench -p lean-rs-worker --bench worker_capability -- mathlib_scale --sample-size 10
-worker::capability_shape/mathlib_scale_single_worker_pool
-  time: [346.18 ms 350.61 ms 355.55 ms]
-  throughput: [132.19 elem/s 134.05 elem/s 135.77 elem/s]
-worker::capability_shape/mathlib_scale_pool_max_2
-  time: [337.82 ms 342.28 ms 347.35 ms]
-  throughput: [135.31 elem/s 137.31 elem/s 139.13 elem/s]
-```
-
-This benchmark uses the same typed command and pool lease surface. The
-`pool_max_2` fallback path creates one planned batch, so it is a pool API
-comparison, not evidence for parallel speedup. Parallel scaling requires a
-multi-batch workload or a real mathlib module list.
+On macOS/aarch64 with Lean 4.29.1, the fallback probe (16 modules, 47 rows)
+ran at ~140 rows/s for both `single_worker` and `pool_max_2` (the fallback
+produces one planned batch, so `pool_max_2` is a pool-API smoke test, not
+evidence of parallel speedup). Cancellation, fatal-exit recovery, and
+post-cycle replay all worked; RSS sampling was unavailable from `ps` on
+that machine. A claim about mathlib-scale performance must record the
+command, module limit, Lean version, and whether RSS sampling was available.
+Re-capture on the same hardware before declaring a regression.
 
 ## Non-Goals
 

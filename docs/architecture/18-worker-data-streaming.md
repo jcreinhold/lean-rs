@@ -98,25 +98,6 @@ payloads. Worker-class data already travels to the parent as JSON or validated
 raw JSON frames. Add byte or object callback payloads only for real
 same-process L1 interop needs, not to improve worker ergonomics.
 
-## Prompt 60 Replan
-
-Prompt 60 originally targeted worker recipes and `lean-dup` readiness after the
-host-session adapter. That was too early. The adapter can return host-session
-responses, progress, and diagnostics, but it cannot yet carry arbitrary
-downstream row streams.
-
-Prompt 60 is therefore replanned. The executable sequence is:
-
-1. Add private `DataRow` protocol frames.
-2. Add the public row sink API.
-3. Add a streaming capability runner that turns child-local string callbacks
-   into worker data rows.
-4. Add worker recipes and the `lean-dup` readiness proof on top of those row
-   contracts.
-
-This keeps the recipe honest: it demonstrates the production worker stream
-boundary instead of falling back to raw stdout JSONL.
-
 ## Consumer Guidance
 
 Use direct L1 string callbacks when the Lean extension is trusted, in-process,

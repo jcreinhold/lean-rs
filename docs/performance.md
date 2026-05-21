@@ -53,17 +53,16 @@ cargo bench -p lean-rs-worker --bench row_payload -- --baseline before
 ```
 
 Do not add public worker batch sinks or private row-batch protocol frames from
-a microbenchmark alone. Prompt 81 measured `protocol_batching` and the broader
-`typed_many_512` worker stream; batching did not improve the real worker path,
-so row delivery remains per-row for this release. See
+a microbenchmark alone. The `protocol_batching` and `typed_many_512` measurements
+showed no improvement over per-row delivery on the real worker path; row
+delivery stays per-row. See
 [`docs/architecture/22-worker-row-batching.md`](architecture/22-worker-row-batching.md).
 Do not replace the worker data-plane format from a microbenchmark alone either.
-Prompt 82 measured small-row and large-row format candidates and kept the
-current raw-JSON typed decode path until an end-to-end worker workload proves a
-protocol replacement. See
+Small- and large-row format candidates were measured; the raw-JSON typed decode
+path stays until an end-to-end worker workload justifies a replacement. See
 [`docs/architecture/23-worker-data-plane-format.md`](architecture/23-worker-data-plane-format.md).
-Prompt 83 added Lean-side worker envelope helpers. The helper fixture should
-continue to run through the typed command path:
+
+The Lean-side worker envelope helper fixture runs through the typed command path:
 
 ```sh
 cargo test -p lean-rs-worker --test typed_command helper_ -- --nocapture
@@ -71,9 +70,9 @@ cargo test -p lean-rs-worker --test typed_command helper_ -- --nocapture
 
 The focused chunked-stream test prints the named helper workload as
 `helper_chunked_stream rows=<n> chunks=<n> chunk_size=<n> parallelism=1
-elapsed_ms=<n>`. Keep `parallelism=1` unless a future prompt proves a safe
-Lean-side parallel chunk emitter; Rust worker pools remain the supported
-parallelism boundary.
+elapsed_ms=<n>`. Keep `parallelism=1`; Rust worker pools are the supported
+parallelism boundary. A safe Lean-side parallel chunk emitter would have to
+be proved out before raising this.
 
 Capability-layer changes should also run the downstream-shaped scenario bench:
 
@@ -88,8 +87,8 @@ cargo run --release -p lean-rs-worker --example worker_capability_probe
 cargo run --release -p lean-rs-worker --example row_perf_probe
 ```
 
-Prompt 84 adds the mathlib-scale fixture. It should run through the planner,
-pool, session lease, and typed command path:
+The mathlib-scale fixture runs through the planner, pool, session lease, and
+typed command path:
 
 ```sh
 cargo build -p lean-rs-worker --bin lean-rs-worker-child
@@ -104,13 +103,13 @@ mathlib-scale behavior for the parts actually measured: planning, pool leases,
 session reuse, row throughput, cancellation, fatal-exit recovery, worker
 cycling, and RSS sampling availability.
 
-Prompt 85 adds pool snapshots and bounded row-delivery backpressure to the
-same probe. The `single_worker`, `pool_max_2`, and `post_cycle` lines print
-active workers, warm leases, queue depth, stream request outcomes, delivered
-rows, payload bytes, stream elapsed time, and backpressure counters. The
+The same probe records pool snapshots and bounded row-delivery backpressure.
+The `single_worker`, `pool_max_2`, and `post_cycle` lines print active
+workers, warm leases, queue depth, stream request outcomes, delivered rows,
+payload bytes, stream elapsed time, and backpressure counters. The
 `slow_sink` line runs a deliberately slow row sink and records parent RSS
-before/after, child RSS, delivered row count, payload bytes, and
-backpressure waits/failures:
+before/after, child RSS, delivered row count, payload bytes, and backpressure
+waits/failures:
 
 ```sh
 cargo build -p lean-rs-worker --bin lean-rs-worker-child
@@ -121,43 +120,30 @@ Rows are not dropped under backpressure. A delivered row is still tentative
 until terminal success. Use the snapshot counters as operating evidence and
 terminal summaries as committed row counts.
 
-Prompt 86 adds a `lean-dup`-class readiness proof:
+The `lean-dup`-class readiness fixture exercises the full path end to end:
 
 ```sh
 cargo run -p lean-rs-worker --example lean_dup_readiness
 ```
 
-The example uses the planner, pool, session lease, and typed command facade for
+It drives the planner, pool, session lease, and typed command facade for
 generic `version`, `doctor`, `extract`, `features`, `index`, and `probe`
-command shapes. It records row throughput, diagnostics, progress, terminal
+command shapes, and records row throughput, diagnostics, progress, terminal
 summaries, timeout/cancellation/fatal-exit recovery, explicit cycling,
 backpressure, pool stats, parent/child RSS when available, and optional
 subprocess comparison status. Treat its rows as generic fixture data, not
 downstream schemas.
 
-Prompt 87 is the production-scale hardening pass. It does not add new worker
-features. It re-runs the focused pool, scheduling, planning, batching,
-data-plane, Lean helper, mathlib-scale, observability, and readiness workloads,
-then records the final local scale contract in
+The supported scale path is planner → pool → session lease → typed command
+→ live rows → terminal summary → pool stats. Any throughput change must
+report a named workload, row counts, throughput, allocation or payload-size
+evidence where relevant, and parent/child RSS (or explicit
+RSS-unavailable status). The standing scale contract is
 [`docs/architecture/28-production-scale-release.md`](architecture/28-production-scale-release.md).
-The supported scale path remains planner -> pool -> session lease -> typed
-command -> live rows -> terminal summary -> pool stats. Any future throughput
-change must still report a named workload, row counts, throughput, allocation
-or payload-size evidence where relevant, and parent/child RSS or explicit
-RSS-unavailable status.
 
-Release-hardening capture on macOS / Lean 4.29.1:
-
-```text
-cargo bench -p lean-rs-host --bench session -- \
-  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline before
-baseline time: [99.764 µs 100.01 µs 100.36 µs]
-
-cargo bench -p lean-rs-host --bench session -- \
-  host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline before
-comparison time: [100.58 µs 101.11 µs 101.52 µs]
-Criterion: No change in performance detected.
-```
+Sample capture (macOS, Lean 4.29.1, `declaration_kind_bulk_vs_loop/bulk_5000`):
+baseline 100.0 µs vs. comparison 101.1 µs; Criterion reports no change.
+Re-capture on the same hardware before declaring a regression.
 
 The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion
 benches because they only fire once per process. Run them via:

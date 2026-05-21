@@ -56,60 +56,21 @@ capture API.
 
 Choose by job:
 
-| Job | Start with | Why |
-| --- | ---------- | --- |
-| Ship a Rust crate with Lean source | `lean-toolchain` in `build.rs`, then `lean-rs` or `lean-rs-worker` at runtime | Builds the Lean shared library during Cargo builds and hides Lake output paths. |
-| Call a Lean export from Rust in the same process | `lean-rs` | Opens a built capability and dispatches typed `@[export]` functions. |
-| Use imports, elaboration, kernel checks, declaration queries, or `MetaM` | `lean-rs-host` | Provides the theorem-prover session API for trusted in-process work. |
-| Run production worker-style tools | `lean-rs-worker` | Adds process isolation, live rows, diagnostics, timeouts, memory cycling, and local pooling. |
-| Bind raw Lean C symbols | `lean-rs-sys` | Advanced escape hatch for raw `unsafe` FFI work. |
+| Job | Start with |
+| --- | ---------- |
+| Ship a Rust crate with Lean source | `lean-toolchain` (build-time) plus `lean-rs` or `lean-rs-worker` (runtime) |
+| Call a Lean `@[export]` from Rust in the same process | `lean-rs` |
+| Use imports, elaboration, kernel checks, declaration queries, or `MetaM` | `lean-rs-host` |
+| Run production worker-style tools (process isolation, live rows, timeouts, cycling) | `lean-rs-worker` |
+| Bind raw Lean C symbols directly (advanced, `unsafe`) | `lean-rs-sys` |
 
-| Crate            | Role |
-| ---------------- | ---- |
-| `lean-rs-sys`    | Internal raw-FFI substrate. Depend on `lean-rs` instead unless you specifically need raw `unsafe` access. Opaque public types, refcount mirrors, `REQUIRED_SYMBOLS` allowlist, header digest. |
-| `lean-toolchain` | Toolchain discovery, fingerprint, fixture digest, link diagnostics, `build.rs` helpers. |
-| `lean-rs`        | Safe FFI primitive: runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. Use this to call Lean from Rust. |
-| `lean-rs-host`   | Theorem-prover-host stack on top of `lean-rs`: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. Use this for sessions, kernel checks, or `MetaM`. |
-| `lean-rs-worker` | Process-boundary supervisor around `lean-rs-host`: child lifecycle, request timeouts, memory cycling, typed commands, row streaming, local pool. Use this for production tools needing process isolation. |
-
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. `lean-rs-worker`
-wraps the host stack in a child-process boundary. Raw `lean_*` symbols enter the workspace
-only through `lean-rs-sys`; the safe layers never re-export them.
-
-The detailed composition rule:
-
-- `lean-rs` for custom same-process ABI calls, module loading, and callbacks.
-- `lean-rs-host` for trusted in-process theorem-prover work: imports, elaboration, kernel
-  checks, declaration queries, progress, cancellation, pooling.
-- `lean-rs-worker` for production tools needing process isolation, streaming rows, request
-  timeouts, or memory cycling.
-
-Lower layers are escape hatches, not steps every downstream caller should hand-compose. See
-[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the host-stack
-classification table.
-
-## Ship a crate with Lean code
-
-For a crate that owns Lean source and should build on another developer's
-machine, use the build-time recipe:
-
-- `build.rs` calls `lean_toolchain::CargoLeanCapability`;
-- Rust opens the built dylib with `lean_rs::LeanCapability`, or starts it
-  behind `lean-rs-worker`;
-- worker applications ship a tiny app-owned worker-child binary that calls
-  `lean_rs_worker::run_worker_child_stdio`.
-
-See [`docs/recipes/ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.md)
-and the checked-in template at
-[`templates/shipped-lean-crate/`](templates/shipped-lean-crate/).
-
-Run the template:
-
-```sh
-cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
-cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shipped-lean-crate-worker
-cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
-```
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`;
+`lean-rs-worker` wraps the host stack in a child-process boundary. Raw `lean_*`
+symbols enter the workspace only through `lean-rs-sys`; the safe layers never
+re-export them. Lower layers are escape hatches, not steps every downstream
+caller should hand-compose. See
+[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for
+the host-stack classification table.
 
 ## Call a Lean export from Rust
 

@@ -1,9 +1,7 @@
 # Production-Scale Worker Release Contract
 
-Prompts 77-86 move `lean-rs-worker` from one supervised child to a local
-worker-pool foundation for mathlib-scale worker-class workloads. This document
-states the release claim and the boundaries that must stay true after
-hardening.
+The release claim for `lean-rs-worker` as a local worker-pool foundation for
+mathlib-scale worker-class workloads, and the boundaries that must stay true.
 
 ## Release Claim
 
@@ -46,11 +44,11 @@ Worker throughput is handled through worker IPC, raw-JSON typed decoding,
 bounded row delivery, and measured batching/data-plane decisions. It is not
 handled through cross-process callback handles.
 
-The current release keeps per-row worker frames and the raw-JSON typed decode
-path because the measured broader worker workloads did not justify public row
-batch sinks, binary row APIs, MessagePack, CBOR, Postcard, or a public protocol
-frame surface. `LeanWorkerDataRow` remains the schema-less escape hatch.
-`LeanWorkerStreamingCommand` remains the normal downstream streaming surface.
+The worker keeps per-row frames and the raw-JSON typed decode path. The
+measured broader worker workloads did not justify public row batch sinks,
+binary row APIs, MessagePack, CBOR, Postcard, or a public protocol frame
+surface. `LeanWorkerDataRow` is the schema-less escape hatch;
+`LeanWorkerStreamingCommand` is the normal downstream streaming surface.
 
 ## Callback Payload Decision
 
@@ -58,12 +56,11 @@ L1 callbacks are same-process interop mechanisms in `lean-rs`. They are useful
 for trusted extensions that intentionally run in the same process as Lean. They
 are not the scale path for worker-class tools.
 
-Supported callback payloads for this release remain the sealed payloads already
-implemented: `LeanProgressTick` and `LeanStringEvent`. Byte callbacks are
-deferred until a concrete same-process binary callback caller appears. Object
-callbacks remain rejected for this release unless a future prompt proves a
-sound scoped API. Neither byte nor object callbacks are needed for worker row
-ergonomics.
+Supported callback payloads are the sealed payloads already implemented:
+`LeanProgressTick` and `LeanStringEvent`. Byte callbacks are not exposed
+until a concrete same-process binary callback caller appears. Object
+callbacks are not exposed until a soundness proof produces a scoped API.
+Neither byte nor object callbacks are needed for worker row ergonomics.
 
 ## Evidence
 
@@ -86,9 +83,8 @@ The scale claim is backed by named workloads, not by intent:
   `features`, `index`, and `probe` command shapes without importing downstream
   schemas.
 
-Numbers remain machine-local and live in the prompt ledger and capture output.
-Docs should name the workload, command, platform, row counts, throughput, RSS
-status, and caveats whenever they make a performance claim.
+Numbers are machine-local. Any performance claim must name the workload,
+command, platform, row counts, throughput, RSS status, and caveats.
 
 ## Non-Goals
 
@@ -96,6 +92,6 @@ Remote workers are future work. The local pool should avoid public APIs that
 would make a remote backend impossible, but this release supports only local
 child processes.
 
-This release does not implement `lean-dup`, define downstream row schemas,
-publish a release tag, add worker pools across machines, or add new callback
-payload types.
+`lean-rs-worker` does not implement `lean-dup`, define downstream row
+schemas, add worker pools across machines, or expose new callback payload
+types.

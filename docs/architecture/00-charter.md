@@ -59,26 +59,19 @@ The L1/L2 crate split gives each layer its own semver and refactor surface: `lea
 internal modules can reshape without affecting `lean-rs-host` callers, and vice versa, as long
 as both crate roots stay stable.
 
-See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s per-decision rationale,
-[`03-host-stack.md`](03-host-stack.md) for `lean-rs-host`'s curated surface, and
-[`14-interop-release-contract.md`](14-interop-release-contract.md) for the final reusable
-interop release contract. See [`16-production-boundary.md`](16-production-boundary.md) for the
-worker-process boundary around `lean-rs-host` and
-[`17-worker-session-adapter.md`](17-worker-session-adapter.md) for the narrow
-host-session subset available across that boundary. See
-[`18-worker-data-streaming.md`](18-worker-data-streaming.md) for arbitrary
-downstream row streams over the worker process boundary,
-[`22-worker-row-batching.md`](22-worker-row-batching.md) for the measured
-decision not to add row-batch frames yet, and
-[`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) for the
-measured decision to keep the current row format until an end-to-end worker
-workload justifies a replacement, and
-[`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) for the
-Lean-side worker envelope helpers capability authors use without importing host
-policy, [`20-worker-pool.md`](20-worker-pool.md) for the local worker-pool
-boundary, and
-[`28-production-scale-release.md`](28-production-scale-release.md) for the
-final production-scale worker contract.
+Topic deep-dives:
+
+- [`05-raw-sys-design.md`](05-raw-sys-design.md) — `lean-rs-sys` per-decision rationale.
+- [`03-host-stack.md`](03-host-stack.md) — `lean-rs-host` curated surface.
+- [`14-interop-release-contract.md`](14-interop-release-contract.md) — reusable interop release contract.
+- [`16-production-boundary.md`](16-production-boundary.md),
+  [`17-worker-session-adapter.md`](17-worker-session-adapter.md) — worker-process boundary and the host-session subset crossing it.
+- [`18-worker-data-streaming.md`](18-worker-data-streaming.md) — downstream row streams over the worker boundary.
+- [`20-worker-pool.md`](20-worker-pool.md) — local worker-pool boundary.
+- [`22-worker-row-batching.md`](22-worker-row-batching.md),
+  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) — row batching and data-plane format decisions.
+- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) — Lean-side worker envelope helpers.
+- [`28-production-scale-release.md`](28-production-scale-release.md) — production-scale worker contract.
 
 ## Hidden knowledge
 

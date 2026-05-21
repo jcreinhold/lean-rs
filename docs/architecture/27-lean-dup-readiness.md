@@ -1,10 +1,10 @@
 # Lean-Dup Readiness Proof
 
-Prompt 86 proves that the generic worker foundation can replace the
-subprocess-worker shape used by a `lean-dup`-class tool. The proof is not a
-`lean-dup` implementation and not a migration guide. It is a boundary check:
-the `lean-rs-worker` pool can host the operational responsibilities, while
-downstream crates keep their schemas and semantic policy.
+A boundary check showing that the generic worker foundation can replace the
+subprocess-worker shape used by a `lean-dup`-class tool. The
+`lean-rs-worker` pool hosts the operational responsibilities; downstream
+crates keep their schemas and semantic policy. This is not a `lean-dup`
+implementation and not a migration guide.
 
 ## What The Proof Covers
 

@@ -98,7 +98,8 @@ A session-wide cancellation wrapper was rejected because cancellation is an
 operation-level decision. A token may apply to one user request, not to the
 session's whole imported environment.
 
-Pre-emptive cancellation was rejected because the host cannot safely unwind or
-interrupt arbitrary Lean runtime work. Prompt 33 records the same boundary for
-panic containment: when the host cannot prove Lean state and refcounts remain
-valid, the recovery boundary is a worker process.
+Pre-emptive cancellation was rejected because the host cannot safely unwind
+or interrupt arbitrary Lean runtime work. Panic containment imposes the same
+boundary: when the host cannot prove Lean state and refcounts remain valid,
+the recovery boundary is a worker process. See
+[`06-panic-containment.md`](06-panic-containment.md).
