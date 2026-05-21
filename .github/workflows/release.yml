@@ -73,10 +73,15 @@ jobs:
         with:
           key: release-verify-${{ matrix.lean_version }}-${{ matrix.os }}
 
-      - name: Install cargo-nextest + cargo-public-api + actionlint
+      - name: Install cargo-nextest + cargo-public-api
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-public-api,actionlint
+          tool: cargo-nextest,cargo-public-api
+
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install elan + Lean ${{ matrix.lean_version }}
         run: |
