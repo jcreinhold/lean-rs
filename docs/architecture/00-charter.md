@@ -68,7 +68,12 @@ worker-process boundary around `lean-rs-host` and
 [`17-worker-session-adapter.md`](17-worker-session-adapter.md) for the narrow
 host-session subset available across that boundary. See
 [`18-worker-data-streaming.md`](18-worker-data-streaming.md) for arbitrary
-downstream row streams over the worker process boundary.
+downstream row streams over the worker process boundary,
+[`22-worker-row-batching.md`](22-worker-row-batching.md) for the measured
+decision not to add row-batch frames yet, and
+[`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) for the
+measured decision to keep the current row format until an end-to-end worker
+workload justifies a replacement.
 
 ## Hidden knowledge
 

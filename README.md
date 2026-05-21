@@ -276,6 +276,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`20-worker-pool.md`](docs/architecture/20-worker-pool.md)—the local worker pool and session-lease boundary.
 - [`21-import-set-planning.md`](docs/architecture/21-import-set-planning.md)—Lake module discovery and worker session batch planning.
 - [`22-worker-row-batching.md`](docs/architecture/22-worker-row-batching.md)—the measured decision not to add row-batch frames or a public batch sink yet.
+- [`23-worker-data-plane-format.md`](docs/architecture/23-worker-data-plane-format.md)—the measured decision to keep the current worker row format until an end-to-end workload justifies a replacement.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

@@ -22,7 +22,10 @@ and the `String`/`Vec<String>` round-trip decoders. `session` covers
 validated raw-JSON rows, typed command decode, row throughput, and allocation
 pressure. It also contains `worker::row_payload::protocol_batching`, the
 prompt-81 guard that compares simulated per-row raw JSON frames with batched
-raw JSON frames before any batch protocol is added. `worker_capability` covers
+raw JSON frames before any batch protocol is added, and
+`worker::row_payload::data_plane`, the prompt-82 guard comparing JSON,
+raw JSON, simulated binary envelopes, MessagePack, and CBOR before any worker
+format is changed. `worker_capability` covers
 the downstream-shaped worker fixture:
 cold startup, first import, import-once streaming, cancellation latency,
 fatal-exit recovery, worker cycling, row throughput, and memory growth.
@@ -54,6 +57,11 @@ a microbenchmark alone. Prompt 81 measured `protocol_batching` and the broader
 `typed_many_512` worker stream; batching did not improve the real worker path,
 so row delivery remains per-row for this release. See
 [`docs/architecture/22-worker-row-batching.md`](architecture/22-worker-row-batching.md).
+Do not replace the worker data-plane format from a microbenchmark alone either.
+Prompt 82 measured small-row and large-row format candidates and kept the
+current raw-JSON typed decode path until an end-to-end worker workload proves a
+protocol replacement. See
+[`docs/architecture/23-worker-data-plane-format.md`](architecture/23-worker-data-plane-format.md).
 
 Capability-layer changes should also run the downstream-shaped scenario bench:
 
@@ -65,6 +73,7 @@ Record parent/child RSS alongside throughput with:
 
 ```sh
 cargo run --release -p lean-rs-worker --example worker_capability_probe
+cargo run --release -p lean-rs-worker --example row_perf_probe
 ```
 
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:

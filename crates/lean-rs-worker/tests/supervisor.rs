@@ -136,11 +136,11 @@ fn max_import_policy_restarts_before_next_import() {
 
 #[test]
 fn idle_restart_policy_restarts_before_next_request() {
-    let idle_limit = Duration::from_millis(1);
+    let idle_limit = Duration::from_millis(100);
     let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().idle_restart_after(idle_limit));
     let mut worker = LeanWorker::spawn(&config).expect("worker starts");
     worker.health().expect("first request succeeds");
-    thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(150));
     worker.health().expect("second request succeeds after idle restart");
     let stats = worker.stats();
     assert_eq!(stats.restarts, 1);
