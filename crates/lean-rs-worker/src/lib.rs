@@ -9,12 +9,17 @@
 
 mod capability;
 mod child;
+mod planning;
 mod pool;
 mod protocol;
 mod session;
 mod supervisor;
 
 pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
+pub use planning::{
+    LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
+    LeanWorkerModuleWork, LeanWorkerPlanMetadataExpectation, LeanWorkerPlannedBatch,
+};
 pub use pool::{
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
     LeanWorkerSessionLease,

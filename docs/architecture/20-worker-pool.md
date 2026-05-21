@@ -155,6 +155,8 @@ RSS, inspect child pids, or decide which child to cycle.
 ## Next Prompts
 
 Prompt 80 adds import-set planning so callers can produce stable work batches
-that make pool reuse effective. Prompts 81-87 then harden batching, data-plane
-choices, Lean-side streaming helpers, mathlib-scale fixtures, observability,
-downstream readiness, and the final scale contract.
+that make pool reuse effective; see
+[`21-import-set-planning.md`](21-import-set-planning.md). Prompts 81-87 then
+harden batching, data-plane choices, Lean-side streaming helpers,
+mathlib-scale fixtures, observability, downstream readiness, and the final
+scale contract.

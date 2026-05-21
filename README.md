@@ -274,6 +274,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`18-worker-data-streaming.md`](docs/architecture/18-worker-data-streaming.md)—arbitrary downstream JSON rows over the worker boundary.
 - [`19-worker-capability-layer.md`](docs/architecture/19-worker-capability-layer.md)—the generic worker capability layer above raw row transport.
 - [`20-worker-pool.md`](docs/architecture/20-worker-pool.md)—the local worker pool and session-lease boundary.
+- [`21-import-set-planning.md`](docs/architecture/21-import-set-planning.md)—Lake module discovery and worker session batch planning.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

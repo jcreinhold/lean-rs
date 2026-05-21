@@ -38,6 +38,14 @@ pids, worker ids, pipes, protocol frames, or which warm worker was selected. A
 `LeanWorkerSessionKey` is only a worker reuse key; downstream tools still own
 row schemas, cache validity, ranking, reporting, and source provenance.
 
+`LeanWorkerImportPlanner` groups Lake modules into stable pool-execution
+batches. It consumes `lean-toolchain` module discovery, checks that the
+capability target exists, and produces `LeanWorkerPlannedBatch` values keyed by
+the same session material as `LeanWorkerPool`: project root, package, target,
+source root, imports, metadata expectation, toolchain fingerprint, and restart
+policy class. Planned batches contain no worker ids or scheduling decisions.
+They help callers reuse imports; they are not downstream cache entries.
+
 Startup timeout and request timeout are separate. Startup timeout covers the
 child handshake. Request timeout covers one request after its frame is written,
 including live rows, diagnostics, progress, and terminal response. If the

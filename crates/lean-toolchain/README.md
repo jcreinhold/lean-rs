@@ -9,6 +9,12 @@ reusable build-script helpers downstream embedders can call from their own `buil
 Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS` from `lean-rs-sys` so
 the allowlist lives in one place.
 
+It also owns Lake module discovery for higher layers. `discover_lake_modules`
+resolves a Lake root, discovers `lean_lib` source roots, validates module names,
+enumerates Lean source files deterministically, and returns source-set
+fingerprints. This discovery layer does not know worker pools or downstream
+cache policy; `lean-rs-worker` uses it to build import/session batches.
+
 Most application code never depends on this crate directly—it shows up transitively through
 `lean-rs`. Pull it in if your own `build.rs` needs Lean discovery, fingerprint, or link
 diagnostics without depending on `lean-rs-sys` itself.

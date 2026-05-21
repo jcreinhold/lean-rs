@@ -25,7 +25,7 @@ use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStat
 /// or a caller-selected policy class. It deliberately does not expose every
 /// restart-policy knob as key material; prompt 79 owns memory-aware scheduling
 /// and richer policy admission.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
 pub enum LeanWorkerRestartPolicyClass {
     Default,

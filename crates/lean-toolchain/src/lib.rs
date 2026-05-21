@@ -25,6 +25,7 @@ mod build_helpers;
 mod diagnostics;
 mod discover;
 mod fingerprint;
+mod modules;
 
 pub use build_helpers::{
     build_lake_target, build_lake_target_quiet, emit_lean_link_directives, emit_lean_link_directives_checked,
@@ -33,6 +34,10 @@ pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};
 pub use lean_rs_sys::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
+pub use modules::{
+    LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
+    LeanModuleSetFingerprint, discover_lake_modules, lake_target_declared,
+};
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

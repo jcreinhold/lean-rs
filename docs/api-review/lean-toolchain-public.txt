@@ -24,6 +24,35 @@ impl core::marker::Unpin for lean_toolchain::DiscoverySource
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverySource
+#[non_exhaustive] pub enum lean_toolchain::LeanModuleDiscoveryDiagnostic
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::module: alloc::string::String
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::reason: alloc::string::String
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::message: &'static str
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::path: std::path::PathBuf
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::Io::source: std::io::error::Error
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::MissingLakeRoot
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::MissingLakeRoot::requested_root: std::path::PathBuf
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::MissingModuleRoot
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::MissingModuleRoot::module_root: alloc::string::String
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::MissingModuleRoot::project_root: std::path::PathBuf
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::UnsupportedToolchain
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::UnsupportedToolchain::active: alloc::string::String
+pub lean_toolchain::LeanModuleDiscoveryDiagnostic::UnsupportedToolchain::supported_window: alloc::string::String
+impl core::error::Error for lean_toolchain::LeanModuleDiscoveryDiagnostic
+pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for lean_toolchain::LeanModuleDiscoveryDiagnostic
+pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::LeanModuleDiscoveryDiagnostic
+pub fn lean_toolchain::LeanModuleDiscoveryDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl core::marker::Send for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl core::marker::Sync for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl core::marker::Unpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl !core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
+impl !core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
 #[non_exhaustive] pub enum lean_toolchain::LinkDiagnostics
 pub lean_toolchain::LinkDiagnostics::AllowlistFailure
 pub lean_toolchain::LinkDiagnostics::AllowlistFailure::name: &'static str
@@ -90,6 +119,89 @@ impl core::marker::Unpin for lean_toolchain::DiscoverOptions
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverOptions
+pub struct lean_toolchain::LeanLakeProjectModules
+pub lean_toolchain::LeanLakeProjectModules::fingerprint: lean_toolchain::LeanModuleSetFingerprint
+pub lean_toolchain::LeanLakeProjectModules::lakefile: std::path::PathBuf
+pub lean_toolchain::LeanLakeProjectModules::module_roots: alloc::vec::Vec<alloc::string::String>
+pub lean_toolchain::LeanLakeProjectModules::modules: alloc::vec::Vec<lean_toolchain::LeanModuleDescriptor>
+pub lean_toolchain::LeanLakeProjectModules::project_root: std::path::PathBuf
+pub lean_toolchain::LeanLakeProjectModules::requested_root: std::path::PathBuf
+pub lean_toolchain::LeanLakeProjectModules::selected_roots: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for lean_toolchain::LeanLakeProjectModules
+pub fn lean_toolchain::LeanLakeProjectModules::clone(&self) -> lean_toolchain::LeanLakeProjectModules
+impl core::cmp::Eq for lean_toolchain::LeanLakeProjectModules
+impl core::cmp::PartialEq for lean_toolchain::LeanLakeProjectModules
+pub fn lean_toolchain::LeanLakeProjectModules::eq(&self, other: &lean_toolchain::LeanLakeProjectModules) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLakeProjectModules
+pub fn lean_toolchain::LeanLakeProjectModules::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLakeProjectModules
+impl core::marker::Freeze for lean_toolchain::LeanLakeProjectModules
+impl core::marker::Send for lean_toolchain::LeanLakeProjectModules
+impl core::marker::Sync for lean_toolchain::LeanLakeProjectModules
+impl core::marker::Unpin for lean_toolchain::LeanLakeProjectModules
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLakeProjectModules
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLakeProjectModules
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLakeProjectModules
+pub struct lean_toolchain::LeanModuleDescriptor
+pub lean_toolchain::LeanModuleDescriptor::module: alloc::string::String
+pub lean_toolchain::LeanModuleDescriptor::path: std::path::PathBuf
+pub lean_toolchain::LeanModuleDescriptor::source_root: alloc::string::String
+impl core::clone::Clone for lean_toolchain::LeanModuleDescriptor
+pub fn lean_toolchain::LeanModuleDescriptor::clone(&self) -> lean_toolchain::LeanModuleDescriptor
+impl core::cmp::Eq for lean_toolchain::LeanModuleDescriptor
+impl core::cmp::PartialEq for lean_toolchain::LeanModuleDescriptor
+pub fn lean_toolchain::LeanModuleDescriptor::eq(&self, other: &lean_toolchain::LeanModuleDescriptor) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanModuleDescriptor
+pub fn lean_toolchain::LeanModuleDescriptor::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanModuleDescriptor
+impl core::marker::Freeze for lean_toolchain::LeanModuleDescriptor
+impl core::marker::Send for lean_toolchain::LeanModuleDescriptor
+impl core::marker::Sync for lean_toolchain::LeanModuleDescriptor
+impl core::marker::Unpin for lean_toolchain::LeanModuleDescriptor
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDescriptor
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDescriptor
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDescriptor
+pub struct lean_toolchain::LeanModuleDiscoveryOptions
+impl lean_toolchain::LeanModuleDiscoveryOptions
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::new(requested_root: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::selected_roots(self, roots: impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::toolchain(self, toolchain: lean_toolchain::ToolchainFingerprint) -> Self
+impl core::clone::Clone for lean_toolchain::LeanModuleDiscoveryOptions
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::clone(&self) -> lean_toolchain::LeanModuleDiscoveryOptions
+impl core::cmp::Eq for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::cmp::PartialEq for lean_toolchain::LeanModuleDiscoveryOptions
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::eq(&self, other: &lean_toolchain::LeanModuleDiscoveryOptions) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanModuleDiscoveryOptions
+pub fn lean_toolchain::LeanModuleDiscoveryOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::marker::Freeze for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::marker::Send for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::marker::Sync for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::marker::Unpin for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDiscoveryOptions
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDiscoveryOptions
+pub struct lean_toolchain::LeanModuleSetFingerprint
+pub lean_toolchain::LeanModuleSetFingerprint::lakefile_sha256: alloc::string::String
+pub lean_toolchain::LeanModuleSetFingerprint::manifest_sha256: core::option::Option<alloc::string::String>
+pub lean_toolchain::LeanModuleSetFingerprint::source_count: u64
+pub lean_toolchain::LeanModuleSetFingerprint::source_max_mtime_ns: u128
+pub lean_toolchain::LeanModuleSetFingerprint::toolchain: lean_toolchain::ToolchainFingerprint
+impl core::clone::Clone for lean_toolchain::LeanModuleSetFingerprint
+pub fn lean_toolchain::LeanModuleSetFingerprint::clone(&self) -> lean_toolchain::LeanModuleSetFingerprint
+impl core::cmp::Eq for lean_toolchain::LeanModuleSetFingerprint
+impl core::cmp::PartialEq for lean_toolchain::LeanModuleSetFingerprint
+pub fn lean_toolchain::LeanModuleSetFingerprint::eq(&self, other: &lean_toolchain::LeanModuleSetFingerprint) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanModuleSetFingerprint
+pub fn lean_toolchain::LeanModuleSetFingerprint::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanModuleSetFingerprint
+impl core::marker::Freeze for lean_toolchain::LeanModuleSetFingerprint
+impl core::marker::Send for lean_toolchain::LeanModuleSetFingerprint
+impl core::marker::Sync for lean_toolchain::LeanModuleSetFingerprint
+impl core::marker::Unpin for lean_toolchain::LeanModuleSetFingerprint
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleSetFingerprint
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleSetFingerprint
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleSetFingerprint
 pub struct lean_toolchain::ToolchainFingerprint
 pub lean_toolchain::ToolchainFingerprint::fixture_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::header_sha256: &'static str
@@ -142,7 +254,9 @@ pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
 pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::build_lake_target(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::build_lake_target_quiet(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::discover_lake_modules(options: lean_toolchain::LeanModuleDiscoveryOptions) -> core::result::Result<lean_toolchain::LeanLakeProjectModules, lean_toolchain::LeanModuleDiscoveryDiagnostic>
 pub fn lean_toolchain::discover_toolchain(opts: &lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()
 pub fn lean_toolchain::emit_lean_link_directives_checked() -> core::result::Result<(), lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::lake_target_declared(project_root: &std::path::Path, target_name: &str) -> core::result::Result<bool, lean_toolchain::LeanModuleDiscoveryDiagnostic>
 pub fn lean_toolchain::required_symbols() -> &'static [&'static str]
