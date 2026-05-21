@@ -11,6 +11,8 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-21
+
 ### Shipping Lean code
 
 - Added the canonical build-time shipping path for downstream crates with
@@ -262,5 +264,6 @@ Known gaps:
 - See `docs/lean-rs-host-capability-contract.md` for the full 13+3 shim contract and the
   `LeanDiagnosticCode` taxonomy that surfaces capability-loading failures.
 
+[0.1.2]: https://github.com/jcreinhold/lean-rs/releases/tag/v0.1.2
 [0.1.1]: https://github.com/jcreinhold/lean-rs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jcreinhold/lean-rs/releases/tag/v0.1.0

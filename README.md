@@ -78,7 +78,7 @@ The minimum same-process setup is five pieces: a `Cargo.toml`, a `build.rs`, a L
 `lakefile.lean`, a Lean module, and a Rust `main.rs`. The example calls a user-authored
 `@[export]` Lean function from Rust without depending on `lean-rs-host`.
 
-All five crates are published on crates.io at the same workspace version (currently 0.1.1).
+All five crates are published on crates.io at the same workspace version (currently 0.1.2).
 The `Cargo.toml` snippets in this repo use `"0.1"` so they pick up the latest 0.1.x.
 
 **`Cargo.toml`**: `lean-rs` for the API; `lean-toolchain` is a build-dep that emits link

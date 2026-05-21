@@ -86,8 +86,8 @@ upstream version.
 Only after the merge commit is on `main`:
 
 ```sh
-git tag -s v0.1.1 -m "lean-rs v0.1.1"
-git push origin v0.1.1
+git tag -s v0.1.2 -m "lean-rs v0.1.2"
+git push origin v0.1.2
 ```
 
 `-s` for a signed tag (recommended) or `-a` for unsigned annotated. The tag fires the
