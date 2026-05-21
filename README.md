@@ -267,6 +267,7 @@ Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by to
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md): host progress-sink contract.
 - [`14-interop-release-contract.md`](docs/architecture/14-interop-release-contract.md): interop release contract.
 - [`15-callback-payloads.md`](docs/architecture/15-callback-payloads.md): sealed callback payload family.
+- [`29-loader-and-artifact-boundary.md`](docs/architecture/29-loader-and-artifact-boundary.md): shipped-capability manifest, bundle loader, preflight, docs.rs/package, and worker bootstrap boundary.
 
 **Host stack (`lean-rs-host`)**
 - [`03-host-stack.md`](docs/architecture/03-host-stack.md): curated host surface and semver boundary.

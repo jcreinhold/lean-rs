@@ -34,9 +34,12 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo nextest run --workspace --profile ci
 cargo test --doc --workspace
+cargo test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 python3 scripts/check_package_docsrs.py
+cargo package --workspace --no-verify
+actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
 ```
 
 Stop on any failure. `cargo test` (single-process) is not the gate—see

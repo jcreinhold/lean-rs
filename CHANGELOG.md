@@ -29,6 +29,18 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 - Included `lean-rs-worker` benchmark sources in the crate package so declared bench targets
   do not produce packaging warnings.
 
+### Loader and deployment hardening
+
+- Added the manifest-backed `LeanCapability` bundle-loader path, loader preflight diagnostics,
+  cross-platform loader regressions, and worker bootstrap checks as the patch-release contract
+  for shipped Lean capabilities.
+- Made the intended hierarchy explicit in docs and examples:
+  `CargoLeanCapability` manifest → `LeanCapability` bundle loader → optional
+  `LeanWorkerCapabilityBuilder` / `LeanWorkerPool`. Lower-level `LeanLibrary` calls, raw link
+  helpers, and low-level worker APIs remain advanced escape hatches.
+- Added CI/release gates for packaged-tarball docs.rs simulation, loader regressions,
+  workflow validation, package creation, and public-API baseline drift.
+
 ## [0.1.1] — 2026-05-20
 
 Hardening release for the Lean/Rust interop stack and the first publish of

@@ -82,10 +82,10 @@ jobs:
         with:
           key: lean-${{ matrix.lean_version }}-${{ matrix.os }}
 
-      - name: Install cargo-nextest
+      - name: Install cargo-nextest + cargo-public-api + actionlint
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
+          tool: cargo-nextest,cargo-public-api,actionlint
 
       - name: Install elan + Lean ${{ matrix.lean_version }}
         run: |
@@ -131,6 +131,10 @@ jobs:
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: actionlint workflows
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
+
       # Two Linux-specific overrides for the panic-handling tests in
       # `error::tests` and `runtime::*::tests`:
       #
@@ -171,3 +175,28 @@ jobs:
 
       - name: Package tarball docs.rs simulation
         run: python3 scripts/check_package_docsrs.py
+
+      - name: Install Rust nightly (for cargo-public-api)
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Public-API diff vs committed baselines
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        run: |
+          set -euo pipefail
+          fail=0
+          for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
+            baseline="docs/api-review/${crate}-public.txt"
+            if [ ! -f "$baseline" ]; then
+              echo "::error::Missing baseline: $baseline"
+              fail=1
+              continue
+            fi
+            actual=$(mktemp)
+            cargo public-api --simplified -p "$crate" > "$actual"
+            if ! diff -u "$baseline" "$actual"; then
+              echo "::error::Public-API drift for $crate. Regenerate $baseline in the same commit that changes public API."
+              fail=1
+            fi
+          done
+          exit "$fail"

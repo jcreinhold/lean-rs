@@ -198,5 +198,7 @@ pipes or dynamic-loader variables.
 
 This is not a narrow fix for one Linux or docs.rs failure. The failures point
 at a common design problem: volatile loader, package, and bootstrap decisions
-were visible in too many places. The next hardening prompts move those
-decisions behind the crates that can own and test them.
+were visible in too many places. The hardening arc moves those decisions behind
+the crates that can own and test them, then makes the package simulation,
+loader regressions, worker bootstrap checks, and public-API baselines release
+gates.

@@ -73,10 +73,10 @@ jobs:
         with:
           key: release-verify-${{ matrix.lean_version }}-${{ matrix.os }}
 
-      - name: Install cargo-nextest + cargo-public-api
+      - name: Install cargo-nextest + cargo-public-api + actionlint
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-public-api
+          tool: cargo-nextest,cargo-public-api,actionlint
 
       - name: Install elan + Lean ${{ matrix.lean_version }}
         run: |
@@ -119,6 +119,10 @@ jobs:
 
       - name: cargo clippy --all-targets -- -D warnings
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: actionlint workflows
+        if: matrix.os == 'ubuntu-latest'
+        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
 
       # See `ci.yml` for the rationale on `RUST_BACKTRACE=0` and
       # `LD_PRELOAD=libgcc_s.so.1` here.
