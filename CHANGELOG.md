@@ -23,7 +23,9 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
   `DOCS_RS=1`, instead of probing for a Lean installation that docs.rs does not provide.
 - Added explicit docs.rs metadata for each public crate so docs.rs builds only the default
   Linux target instead of relying on service defaults.
-- Added a `DOCS_RS=1` workspace documentation gate to CI and the release workflow.
+- Added a `DOCS_RS=1` workspace documentation gate to CI and the release workflow, plus a
+  packaged-tarball docs.rs simulation that hides Lean/elan/lake from `PATH` before building
+  docs from normalized crate contents.
 - Included `lean-rs-worker` benchmark sources in the crate package so declared bench targets
   do not produce packaging warnings.
 

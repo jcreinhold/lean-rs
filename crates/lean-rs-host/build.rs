@@ -22,8 +22,13 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=LEAN_SYSROOT");
     println!("cargo:rerun-if-env-changed=PATH");
+
+    if env::var_os("DOCS_RS").is_some() {
+        return;
+    }
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if !matches!(target_os.as_str(), "macos" | "linux") {

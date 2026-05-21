@@ -165,3 +165,6 @@ jobs:
           DOCS_RS: '1'
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --workspace
+
+      - name: Package tarball docs.rs simulation
+        run: python3 scripts/check_package_docsrs.py

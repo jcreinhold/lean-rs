@@ -46,6 +46,7 @@ harness = false
 name = "session"
 
 [package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
 targets = []
 
 [lints]

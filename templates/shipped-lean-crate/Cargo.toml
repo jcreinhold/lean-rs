@@ -2,6 +2,9 @@
 name = "shipped-lean-crate"
 version = "0.1.0"
 edition = "2024"
+description = "Template showing how to ship Lean source in a Rust crate with lean-rs."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jcreinhold/lean-rs"
 publish = false
 default-run = "shipped-lean-crate"
 

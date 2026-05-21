@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR unset"));
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let docs_rs = env::var_os("DOCS_RS").is_some();
     let (digest, inputs) = find_fixture_dir(&manifest_dir).map_or_else(
         || {
             println!(
@@ -45,6 +46,13 @@ fn main() {
             ("0".repeat(64), Vec::new())
         },
         |fixture_dir| {
+            if docs_rs {
+                println!(
+                    "cargo:warning=lean-toolchain: DOCS_RS=1; skipping workspace fixture digest and Lean runtime probes"
+                );
+                return ("0".repeat(64), Vec::new());
+            }
+
             let dylib_ext = match target_os.as_str() {
                 "macos" => "dylib",
                 "linux" => "so",
@@ -121,6 +129,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LEAN_SYSROOT");
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     // Bake an rpath into this crate's test binaries so they can load
     // `libleanshared.{dylib,so}` at run-time. `lean-toolchain` itself
@@ -130,7 +139,8 @@ fn main() {
     // time. `cargo:rustc-link-arg` directives do not propagate from
     // `lean-rs-sys` to dependents, so each crate that produces an
     // executable that loads Lean emits the rpath itself.
-    if matches!(target_os.as_str(), "macos" | "linux")
+    if !docs_rs
+        && matches!(target_os.as_str(), "macos" | "linux")
         && let Some(prefix) = discover_prefix()
     {
         let lib_lean = prefix.join("lib").join("lean");

@@ -25,6 +25,9 @@ CargoLeanCapability artifact description
   shared-library target, resolves Lake's dylib naming, emits Cargo rerun and
   link directives, and records enough artifact metadata for runtime code to
   reopen the same capability without rediscovering Lake output conventions.
+  Release gates also simulate docs.rs from normalized crate tarballs with
+  Lean, Lake, and Elan hidden from `PATH`, so package drift fails before
+  crates.io receives immutable uploads.
 - `lean-rs` owns runtime loader lifetime and symbol visibility. It opens the
   capability and any dependent Lean dylibs in the required order, keeps those
   handles alive for the full capability lifetime, preflights the manifest and
