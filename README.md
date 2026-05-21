@@ -95,7 +95,10 @@ cargo run -p lean-rs-worker --example mathlib_scale_probe
 
 Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a real mathlib module list
 as the planning workload shape. The fixture still emits generic test rows; it
-does not claim `lean-dup` or mathlib indexing semantics.
+does not claim `lean-dup` or mathlib indexing semantics. The probe also prints
+pool snapshot fields and a slow-sink workload with bounded backpressure
+counters, parent RSS, child RSS, delivered rows, payload bytes, and terminal
+row counts.
 
 For the source-of-truth worker capability recipe, run:
 
@@ -296,6 +299,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`23-worker-data-plane-format.md`](docs/architecture/23-worker-data-plane-format.md)—the measured decision to keep the current worker row format until an end-to-end workload justifies a replacement.
 - [`24-lean-side-worker-streaming.md`](docs/architecture/24-lean-side-worker-streaming.md)—generic Lean-side worker envelope helpers for capability authors.
 - [`25-mathlib-scale-worker-fixture.md`](docs/architecture/25-mathlib-scale-worker-fixture.md)—the planner, pool, typed-command scale fixture and mathlib-module-list probe.
+- [`26-worker-pool-observability.md`](docs/architecture/26-worker-pool-observability.md)—pool snapshots and bounded row-delivery backpressure.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

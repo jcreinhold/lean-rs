@@ -156,6 +156,14 @@ def workerDataStreamRowThenPanic (_requestJson : String) (handle trampoline : US
   else
     pure status
 
+@[export lean_rs_interop_consumer_worker_data_stream_many_then_panic]
+def workerDataStreamManyThenPanic (_requestJson : String) (handle trampoline : USize) : IO UInt8 := do
+  let status ← Stream.emitAll handle trampoline (manyWorkerDataRows 128)
+  if status == 0 then
+    panic! "lean-rs worker stream panic after many rows"
+  else
+    pure status
+
 @[export lean_rs_interop_consumer_worker_metadata]
 def workerMetadata (_requestJson : String) : IO String :=
   pure "{\"commands\":[{\"name\":\"version\",\"version\":\"fixture-1\"},{\"name\":\"scan\",\"version\":\"fixture-2\"}],\"capabilities\":[{\"name\":\"rows.json\",\"version\":\"fixture-1\"},{\"name\":\"diagnostics\",\"version\":\"fixture-1\"}],\"lean_version\":\"fixture-lean-4\",\"extra\":{\"fixture\":true}}"

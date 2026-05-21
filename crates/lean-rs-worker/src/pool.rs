@@ -243,8 +243,13 @@ impl Default for LeanWorkerPoolConfig {
 pub struct LeanWorkerPoolSnapshot {
     pub max_workers: usize,
     pub workers: usize,
+    pub active_workers: usize,
+    pub warm_leases: usize,
+    pub queue_depth: usize,
     pub total_child_rss_kib: Option<u64>,
     pub rss_samples_unavailable: u64,
+    pub requests: u64,
+    pub imports: u64,
     pub worker_restarts: u64,
     pub max_request_restarts: u64,
     pub max_import_restarts: u64,
@@ -256,6 +261,14 @@ pub struct LeanWorkerPoolSnapshot {
     pub queue_timeouts: u64,
     pub memory_budget_rejections: u64,
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    pub stream_requests: u64,
+    pub stream_successes: u64,
+    pub stream_failures: u64,
+    pub data_rows_delivered: u64,
+    pub data_row_payload_bytes: u64,
+    pub stream_elapsed: Duration,
+    pub backpressure_waits: u64,
+    pub backpressure_failures: u64,
 }
 
 /// Local pool for worker-backed capability sessions.
@@ -302,6 +315,7 @@ impl LeanWorkerPool {
             let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
                 message: "worker pool entry disappeared during lease acquisition".to_owned(),
             })?;
+            entry.active_leases = entry.active_leases.saturating_add(1);
             return Ok(LeanWorkerSessionLease {
                 entry,
                 config: self.config.clone(),
@@ -328,11 +342,13 @@ impl LeanWorkerPool {
             last_activity: Instant::now(),
             last_restart_reason: None,
             policy_restarts: 0,
+            active_leases: 0,
         });
         let entry = self.entries.last_mut().ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool failed to retain newly opened entry".to_owned(),
         })?;
         let _ = entry.sample_rss();
+        entry.active_leases = entry.active_leases.saturating_add(1);
         Ok(LeanWorkerSessionLease {
             entry,
             config: self.config.clone(),
@@ -345,57 +361,115 @@ impl LeanWorkerPool {
     /// Return a public snapshot of pool state.
     #[must_use]
     pub fn snapshot(&self) -> LeanWorkerPoolSnapshot {
-        LeanWorkerPoolSnapshot {
-            max_workers: self.config.max_workers,
-            workers: self.entries.len(),
-            total_child_rss_kib: self.total_known_child_rss_kib(),
-            rss_samples_unavailable: self.entries.iter().map(|entry| entry.rss_samples_unavailable).sum(),
-            worker_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().restarts)
-                .sum(),
-            max_request_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().max_request_restarts)
-                .sum(),
-            max_import_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().max_import_restarts)
-                .sum(),
-            rss_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().rss_restarts)
-                .sum(),
-            idle_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().idle_restarts)
-                .sum(),
-            cancelled_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().cancelled_restarts)
-                .sum(),
-            timeout_restarts: self
-                .entries
-                .iter()
-                .map(|entry| entry.capability.worker().stats().timeout_restarts)
-                .sum(),
-            policy_restarts: self.entries.iter().map(|entry| entry.policy_restarts).sum(),
-            queue_timeouts: self.queue_timeouts,
-            memory_budget_rejections: self.memory_budget_rejections,
-            last_restart_reason: self
-                .entries
-                .iter()
-                .rev()
-                .find_map(|entry| entry.last_restart_reason.clone()),
-        }
+        snapshot_from_entries(
+            &self.config,
+            &self.entries,
+            self.queue_timeouts,
+            self.memory_budget_rejections,
+        )
     }
 
+    fn snapshot_from_lease_config(config: &LeanWorkerPoolConfig, entry: &PoolEntry) -> LeanWorkerPoolSnapshot {
+        snapshot_from_entries(config, std::slice::from_ref(entry), 0, 0)
+    }
+}
+
+fn snapshot_from_entries(
+    config: &LeanWorkerPoolConfig,
+    entries: &[PoolEntry],
+    queue_timeouts: u64,
+    memory_budget_rejections: u64,
+) -> LeanWorkerPoolSnapshot {
+    LeanWorkerPoolSnapshot {
+        max_workers: config.max_workers,
+        workers: entries.len(),
+        active_workers: entries.iter().filter(|entry| entry.active_leases > 0).count(),
+        warm_leases: entries.iter().filter(|entry| entry.active_leases == 0).count(),
+        queue_depth: 0,
+        total_child_rss_kib: total_known_child_rss_kib(entries),
+        rss_samples_unavailable: entries.iter().map(|entry| entry.rss_samples_unavailable).sum(),
+        requests: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().requests)
+            .sum(),
+        imports: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().imports)
+            .sum(),
+        worker_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().restarts)
+            .sum(),
+        max_request_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().max_request_restarts)
+            .sum(),
+        max_import_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().max_import_restarts)
+            .sum(),
+        rss_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().rss_restarts)
+            .sum(),
+        idle_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().idle_restarts)
+            .sum(),
+        cancelled_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().cancelled_restarts)
+            .sum(),
+        timeout_restarts: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().timeout_restarts)
+            .sum(),
+        policy_restarts: entries.iter().map(|entry| entry.policy_restarts).sum(),
+        queue_timeouts,
+        memory_budget_rejections,
+        last_restart_reason: entries.iter().rev().find_map(|entry| entry.last_restart_reason.clone()),
+        stream_requests: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().stream_requests)
+            .sum(),
+        stream_successes: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().stream_successes)
+            .sum(),
+        stream_failures: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().stream_failures)
+            .sum(),
+        data_rows_delivered: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().data_rows_delivered)
+            .sum(),
+        data_row_payload_bytes: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().data_row_payload_bytes)
+            .sum(),
+        stream_elapsed: entries.iter().fold(Duration::ZERO, |acc, entry| {
+            acc.saturating_add(entry.capability.worker().stats().stream_elapsed)
+        }),
+        backpressure_waits: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().backpressure_waits)
+            .sum(),
+        backpressure_failures: entries
+            .iter()
+            .map(|entry| entry.capability.worker().stats().backpressure_failures)
+            .sum(),
+    }
+}
+
+fn total_known_child_rss_kib(entries: &[PoolEntry]) -> Option<u64> {
+    entries
+        .iter()
+        .map(|entry| entry.last_rss_kib)
+        .try_fold(0_u64, |acc, value| value.map(|rss| acc.saturating_add(rss)))
+}
+
+impl LeanWorkerPool {
     fn ensure_entry_running(&mut self, index: usize) -> Result<(), LeanWorkerError> {
         let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool entry disappeared during liveness check".to_owned(),
@@ -451,13 +525,6 @@ impl LeanWorkerPool {
         PoolRssTotal { total_kib, unavailable }
     }
 
-    fn total_known_child_rss_kib(&self) -> Option<u64> {
-        self.entries
-            .iter()
-            .map(|entry| entry.last_rss_kib)
-            .try_fold(0_u64, |acc, value| value.map(|rss| acc.saturating_add(rss)))
-    }
-
     fn pool_full_error<T>(&mut self) -> Result<T, LeanWorkerError> {
         if self.config.queue_wait_timeout.is_zero() {
             return Err(LeanWorkerError::WorkerPoolExhausted {
@@ -493,6 +560,7 @@ struct PoolEntry {
     last_activity: Instant,
     last_restart_reason: Option<LeanWorkerRestartReason>,
     policy_restarts: u64,
+    active_leases: u64,
 }
 
 impl PoolEntry {
@@ -584,6 +652,17 @@ impl LeanWorkerSessionLease<'_> {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.valid
+    }
+
+    /// Return an operational snapshot for the worker entry behind this lease.
+    ///
+    /// This is the sampling hook to use while a lease is checked out. It keeps
+    /// child identity, pipe state, and protocol details hidden; the snapshot
+    /// only reports the same aggregate counters as `LeanWorkerPool::snapshot`
+    /// for the leased entry.
+    #[must_use]
+    pub fn snapshot(&self) -> LeanWorkerPoolSnapshot {
+        LeanWorkerPool::snapshot_from_lease_config(&self.config, self.entry)
     }
 
     /// Explicitly cycle the leased worker and invalidate this lease.
@@ -734,6 +813,12 @@ impl LeanWorkerSessionLease<'_> {
     fn invalidate(&mut self, reason: impl Into<String>) {
         self.valid = false;
         self.invalidation_reason = Some(reason.into());
+    }
+}
+
+impl Drop for LeanWorkerSessionLease<'_> {
+    fn drop(&mut self) {
+        self.entry.active_leases = self.entry.active_leases.saturating_sub(1);
     }
 }
 

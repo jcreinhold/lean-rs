@@ -195,6 +195,7 @@ fn child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker() {
         .run_json_command(&json_command(), &request("pool-after-fatal"), None, None)
         .expect("typed command succeeds after replacement");
     assert!(response.accepted);
+    drop(replacement);
     assert_eq!(
         pool.snapshot().last_restart_reason,
         None,
@@ -351,19 +352,26 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
         assert!(response.accepted);
     }
 
-    match pool.acquire_lease(distinct_valid_builder()) {
+    let admission = match pool.acquire_lease(distinct_valid_builder()) {
         Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded { current_kib, limit_kib }) => {
             assert_eq!(limit_kib, 1);
             assert!(current_kib >= limit_kib);
-            assert_eq!(pool.snapshot().memory_budget_rejections, 1);
+            "budget-exceeded"
         }
-        Ok(_lease) => {
-            assert!(
-                pool.snapshot().rss_samples_unavailable > 0,
-                "budget admission should only proceed when RSS samples are unavailable",
-            );
+        Ok(lease) => {
+            drop(lease);
+            "rss-unavailable-admitted"
         }
         Err(other) => panic!("expected memory budget error or RSS-unavailable admission, got {other:?}"),
+    };
+    let snapshot = pool.snapshot();
+    if admission == "budget-exceeded" {
+        assert_eq!(snapshot.memory_budget_rejections, 1);
+    } else {
+        assert!(
+            snapshot.rss_samples_unavailable > 0,
+            "budget admission should only proceed when RSS samples are unavailable",
+        );
     }
 }
 
@@ -398,7 +406,7 @@ fn per_worker_rss_policy_invalidates_old_lease_before_work() {
         match lease.run_json_command(&json_command(), &request("pool-memory-cycle"), None, None) {
             Err(LeanWorkerError::LeaseInvalidated { reason }) => {
                 assert!(reason.contains("memory policy"), "unexpected reason: {reason}");
-                let snapshot = pool.snapshot();
+                let snapshot = lease.snapshot();
                 assert_eq!(snapshot.policy_restarts, 1);
                 assert!(matches!(
                     snapshot.last_restart_reason,
@@ -408,7 +416,7 @@ fn per_worker_rss_policy_invalidates_old_lease_before_work() {
             Ok(response) => {
                 assert!(response.accepted);
                 assert!(
-                    pool.snapshot().rss_samples_unavailable > 0,
+                    lease.snapshot().rss_samples_unavailable > 0,
                     "low RSS ceiling may only proceed when RSS samples are unavailable",
                 );
             }
@@ -463,9 +471,10 @@ fn rss_snapshot_records_available_samples_on_supported_platforms() {
         assert!(response.accepted);
     }
 
-    let _lease = pool
+    let lease = pool
         .acquire_lease(distinct_valid_builder())
         .expect("second lease admission samples existing worker RSS");
+    drop(lease);
     let snapshot = pool.snapshot();
     if snapshot.total_child_rss_kib.is_some() {
         assert_eq!(snapshot.rss_samples_unavailable, 0);

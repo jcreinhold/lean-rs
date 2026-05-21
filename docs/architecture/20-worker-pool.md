@@ -56,6 +56,23 @@ recorded as unavailable; the pool does not claim a budget decision from missing
 RSS data. Memory-driven cycles are reported as policy restarts and invalidate
 stale leases before downstream command execution.
 
+Prompt 85 adds pool-level observability and bounded row-delivery backpressure
+to that same boundary:
+
+- `LeanWorkerPoolSnapshot` summarizes worker counts, warm leases, queue depth,
+  restart reasons, child RSS samples, stream request outcomes, delivered row
+  counts, payload bytes, stream elapsed time, and backpressure counters;
+- `LeanWorkerSessionLease::snapshot` samples the leased worker without
+  exposing child identity;
+- row delivery uses a bounded internal event buffer, so a slow sink blocks the
+  request path instead of growing memory without bound;
+- rows are never dropped for committed streams, and delivered rows remain
+  tentative until terminal success.
+
+Snapshots are operational summaries, not protocol traces. They do not expose
+worker ids, child pids, pipe handles, protocol frames, or which warm worker was
+selected.
+
 ## Designs Considered
 
 **Single worker only.** Rejected as the scale foundation. It preserves a clean
@@ -156,7 +173,8 @@ RSS, inspect child pids, or decide which child to cycle.
 
 Prompt 80 adds import-set planning so callers can produce stable work batches
 that make pool reuse effective; see
-[`21-import-set-planning.md`](21-import-set-planning.md). Prompts 81-87 then
+[`21-import-set-planning.md`](21-import-set-planning.md). Prompts 81-85 then
 harden batching, data-plane choices, Lean-side streaming helpers,
-mathlib-scale fixtures, observability, downstream readiness, and the final
-scale contract.
+mathlib-scale fixtures, and pool observability. The observability record is
+[`26-worker-pool-observability.md`](26-worker-pool-observability.md). Prompts
+86-87 cover downstream readiness and the final scale contract.

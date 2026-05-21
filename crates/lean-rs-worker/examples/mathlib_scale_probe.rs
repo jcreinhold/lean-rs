@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use lean_rs_worker::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError,
@@ -67,10 +67,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cancellation = run_cancelled_workload(&worker_binary, &workload)?;
     let fatal = run_fatal_workload(&worker_binary, &workload)?;
     let cycle = run_cycle_workload(&worker_binary, &workload)?;
+    let slow = run_slow_sink_workload(&worker_binary, &workload)?;
 
     println!(
-        "summary single_rows={} pool_rows={} cancellation={} fatal_exit={} post_cycle_rows={}",
-        single.rows, pooled.rows, cancellation, fatal, cycle.rows
+        "summary single_rows={} pool_rows={} cancellation={} fatal_exit={} post_cycle_rows={} slow_sink_rows={}",
+        single.rows, pooled.rows, cancellation, fatal, cycle.rows, slow.rows
     );
     println!(
         "parent_rss_end_kib={}",
@@ -227,16 +228,27 @@ fn run_index_workload(
     let elapsed = started.elapsed();
     let snapshot = pool.snapshot();
     println!(
-        "{label} elapsed_ms={:.3} rows={} rows_per_second={:.1} diagnostics={} progress={} workers={} child_rss_kib={} restarts={} policy_restarts={} timeout_restarts={} cancelled_restarts={} last_reason={:?}",
+        "{label} elapsed_ms={:.3} rows={} rows_per_second={:.1} diagnostics={} progress={} workers={} active_workers={} warm_leases={} queue_depth={} child_rss_kib={} stream_requests={} stream_successes={} stream_failures={} data_rows_delivered={} data_row_payload_bytes={} stream_elapsed_ms={:.3} backpressure_waits={} backpressure_failures={} restarts={} policy_restarts={} timeout_restarts={} cancelled_restarts={} last_reason={:?}",
         elapsed.as_secs_f64() * 1000.0,
         rows,
         rows as f64 / elapsed.as_secs_f64().max(0.001),
         diagnostics,
         progress,
         snapshot.workers,
+        snapshot.active_workers,
+        snapshot.warm_leases,
+        snapshot.queue_depth,
         snapshot
             .total_child_rss_kib
             .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot.stream_requests,
+        snapshot.stream_successes,
+        snapshot.stream_failures,
+        snapshot.data_rows_delivered,
+        snapshot.data_row_payload_bytes,
+        snapshot.stream_elapsed.as_secs_f64() * 1000.0,
+        snapshot.backpressure_waits,
+        snapshot.backpressure_failures,
         snapshot.worker_restarts,
         snapshot.policy_restarts,
         snapshot.timeout_restarts,
@@ -305,6 +317,46 @@ fn run_cycle_workload(worker_binary: &Path, workload: &Workload) -> Result<Workl
     lease.cycle()?;
     drop(lease);
     run_index_workload("post_cycle", 1, worker_binary, workload)
+}
+
+fn run_slow_sink_workload(
+    worker_binary: &Path,
+    workload: &Workload,
+) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
+    let parent_rss_before = current_process_rss_kib();
+    let started = Instant::now();
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).max_total_child_rss_kib(u64::MAX));
+    let sink = SlowManyRows::new(Duration::from_millis(2));
+    let command = LeanWorkerStreamingCommand::<serde_json::Value, ManyRow, serde_json::Value>::new(
+        "lean_rs_interop_consumer_worker_data_stream_many",
+    );
+    let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
+    let summary = lease.run_streaming_command(&command, &json!({"rows": 512}), &sink, None, None, None)?;
+    drop(lease);
+    let elapsed = started.elapsed();
+    let snapshot = pool.snapshot();
+    let parent_rss_after = current_process_rss_kib();
+    println!(
+        "slow_sink elapsed_ms={:.3} rows={} summary_rows={} parent_rss_before_kib={} parent_rss_after_kib={} child_rss_kib={} stream_requests={} stream_successes={} stream_failures={} data_rows_delivered={} data_row_payload_bytes={} backpressure_waits={} backpressure_failures={}",
+        elapsed.as_secs_f64() * 1000.0,
+        sink.count(),
+        summary.total_rows,
+        parent_rss_before.map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        parent_rss_after.map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot
+            .total_child_rss_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot.stream_requests,
+        snapshot.stream_successes,
+        snapshot.stream_failures,
+        snapshot.data_rows_delivered,
+        snapshot.data_row_payload_bytes,
+        snapshot.backpressure_waits,
+        snapshot.backpressure_failures,
+    );
+    Ok(WorkloadResult {
+        rows: summary.total_rows,
+    })
 }
 
 fn first_builder(
@@ -391,6 +443,11 @@ struct ScaleSummary {
     modules: u64,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct ManyRow {
+    i: u64,
+}
+
 #[derive(Default)]
 struct CountingRows {
     metrics: Mutex<SinkMetrics>,
@@ -415,6 +472,36 @@ impl LeanWorkerTypedDataSink<ScaleRow> for CountingRows {
         metrics.checksum = metrics
             .checksum
             .saturating_add(row.payload.checksum())
+            .saturating_add(row.sequence);
+    }
+}
+
+struct SlowManyRows {
+    delay: Duration,
+    metrics: Mutex<SinkMetrics>,
+}
+
+impl SlowManyRows {
+    fn new(delay: Duration) -> Self {
+        Self {
+            delay,
+            metrics: Mutex::new(SinkMetrics::default()),
+        }
+    }
+
+    fn count(&self) -> u64 {
+        self.metrics.lock().expect("metrics lock is not poisoned").count
+    }
+}
+
+impl LeanWorkerTypedDataSink<ManyRow> for SlowManyRows {
+    fn report(&self, row: LeanWorkerTypedDataRow<ManyRow>) {
+        std::thread::sleep(self.delay);
+        let mut metrics = self.metrics.lock().expect("metrics lock is not poisoned");
+        metrics.count = metrics.count.saturating_add(1);
+        metrics.checksum = metrics
+            .checksum
+            .saturating_add(row.payload.i)
             .saturating_add(row.sequence);
     }
 }

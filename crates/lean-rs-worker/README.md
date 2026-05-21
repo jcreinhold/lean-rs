@@ -37,6 +37,13 @@ rather than presented as false memory claims. The pool does not expose child
 pids, worker ids, pipes, protocol frames, or which warm worker was selected. A
 `LeanWorkerSessionKey` is only a worker reuse key; downstream tools still own
 row schemas, cache validity, ranking, reporting, and source provenance.
+`LeanWorkerPoolSnapshot` summarizes operational state without exposing child
+identity: queue depth, active workers, warm leases, restart reasons, best-effort
+child RSS, stream counters, delivered row counts, payload bytes, elapsed stream
+time, and backpressure counters. `LeanWorkerSessionLease::snapshot` provides
+the same summary shape for an active lease. Row delivery uses bounded internal
+buffering; slow sinks block the request path instead of growing memory without
+bound, and rows are never dropped for committed streams.
 
 `LeanWorkerImportPlanner` groups Lake modules into stable pool-execution
 batches. It consumes `lean-toolchain` module discovery, checks that the
@@ -171,7 +178,9 @@ with mixed declaration-like, feature-like, and probe-like rows, diagnostics,
 progress, terminal metadata, cancellation, fatal-exit recovery, and worker
 cycling. Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a discovered
 mathlib module list as the workload shape. The fixture rows remain generic test
-data, not downstream schemas.
+data, not downstream schemas. It also prints pool snapshots and a slow-sink
+workload so large-run operators can see row throughput, backpressure waits,
+parent RSS, child RSS, and terminal row counts.
 
 The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).

@@ -18,6 +18,7 @@ use crate::session::{
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const WORKER_EVENT_BUFFER_CAPACITY: usize = 64;
 
 /// Default deadline for one worker request after startup.
 pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -217,6 +218,22 @@ pub struct LeanWorkerStats {
     pub last_rss_kib: Option<u64>,
     /// Most recent restart reason, if any.
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    /// Streaming requests that entered a worker child.
+    pub stream_requests: u64,
+    /// Streaming requests that reached terminal success.
+    pub stream_successes: u64,
+    /// Streaming requests that failed after entering the child.
+    pub stream_failures: u64,
+    /// Data rows delivered to parent-side sinks.
+    pub data_rows_delivered: u64,
+    /// Raw row payload bytes delivered to parent-side sinks.
+    pub data_row_payload_bytes: u64,
+    /// Total elapsed time spent in streaming requests.
+    pub stream_elapsed: Duration,
+    /// Times the bounded worker-event reader had to wait for the parent to drain events.
+    pub backpressure_waits: u64,
+    /// Streaming requests that failed after bounded-buffer backpressure was observed.
+    pub backpressure_failures: u64,
 }
 
 impl LeanWorkerStats {
@@ -1216,6 +1233,7 @@ impl LeanWorker {
             progress: progress.is_some(),
         })?;
         self.record_request(false);
+        self.stats.stream_requests = self.stats.stream_requests.saturating_add(1);
         match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
             Response::StreamComplete { summary } => Ok(summary.into()),
             Response::StreamExportFailed { status_byte } => {
@@ -1469,13 +1487,18 @@ impl LeanWorker {
         let started = Instant::now();
         let timeout = self.config.request_timeout;
         let deadline = started.checked_add(timeout);
+        let streaming = data.is_some();
+        let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
         let _reader = thread::spawn(move || read_request_messages(stdout, sender));
 
         loop {
             let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
                 Some(remaining) if remaining.is_zero() => {
+                    if streaming {
+                        self.record_stream_failure(started, request_backpressure_waits);
+                    }
                     self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
                         operation,
                         duration: timeout,
@@ -1488,6 +1511,9 @@ impl LeanWorker {
                 Some(remaining) => match receiver.recv_timeout(remaining) {
                     Ok(event) => event,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
                         self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
                             operation,
                             duration: timeout,
@@ -1512,16 +1538,30 @@ impl LeanWorker {
                     }
                 },
             };
+            request_backpressure_waits = request_backpressure_waits.saturating_add(event.backpressure_waits());
+            self.stats.backpressure_waits = self.stats.backpressure_waits.saturating_add(event.backpressure_waits());
 
             let message = match event {
-                RequestReaderEvent::Message(message) => message,
-                RequestReaderEvent::Terminal(message, stdout) => {
+                RequestReaderEvent::Message { message, .. } => message,
+                RequestReaderEvent::Terminal { message, stdout, .. } => {
                     self.stdout = Some(stdout);
                     match message {
                         Message::Response(Response::Error { code, message }) => {
+                            if streaming {
+                                self.record_stream_failure(started, request_backpressure_waits);
+                            }
                             return Err(LeanWorkerError::Worker { code, message });
                         }
-                        Message::Response(response) => return Ok(response),
+                        Message::Response(response) => {
+                            if streaming {
+                                if matches!(response, Response::StreamComplete { .. }) {
+                                    self.record_stream_success(started);
+                                } else {
+                                    self.record_stream_failure(started, request_backpressure_waits);
+                                }
+                            }
+                            return Ok(response);
+                        }
                         other @ (Message::Handshake { .. }
                         | Message::Request(_)
                         | Message::Diagnostic(_)
@@ -1534,7 +1574,10 @@ impl LeanWorker {
                         }
                     }
                 }
-                RequestReaderEvent::ReadError { message, eof } => {
+                RequestReaderEvent::ReadError { message, eof, .. } => {
+                    if streaming {
+                        self.record_stream_failure(started, request_backpressure_waits);
+                    }
                     return if eof {
                         Err(self.record_exit_error())
                     } else {
@@ -1545,21 +1588,47 @@ impl LeanWorker {
 
             match message {
                 Message::ProgressTick(tick) => {
-                    report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))?;
+                    if let Err(err) =
+                        report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))
+                    {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
+                        return Err(err);
+                    }
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
                         self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
                         return Err(LeanWorkerError::Cancelled { operation });
                     }
                 }
                 Message::DataRow(row) => {
-                    report_parent_data_row(data, row)?;
+                    let payload_bytes = row.payload.get().len() as u64;
+                    if let Err(err) = report_parent_data_row(data, row) {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
+                        return Err(err);
+                    }
+                    self.stats.data_rows_delivered = self.stats.data_rows_delivered.saturating_add(1);
+                    self.stats.data_row_payload_bytes = self.stats.data_row_payload_bytes.saturating_add(payload_bytes);
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
                         self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
                         return Err(LeanWorkerError::Cancelled { operation });
                     }
                 }
                 Message::Diagnostic(diagnostic) => {
-                    report_parent_diagnostic(diagnostics, diagnostic.into())?;
+                    if let Err(err) = report_parent_diagnostic(diagnostics, diagnostic.into()) {
+                        if streaming {
+                            self.record_stream_failure(started, request_backpressure_waits);
+                        }
+                        return Err(err);
+                    }
                 }
                 Message::Response(response) => return Err(unexpected_response(operation, &response)),
                 other @ (Message::Handshake { .. } | Message::Request(_) | Message::FatalExit(_)) => {
@@ -1576,6 +1645,19 @@ impl LeanWorker {
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(exit) if exit.success => Err(LeanWorkerError::ChildExited { exit }),
             LeanWorkerStatus::Exited(exit) => Err(LeanWorkerError::ChildPanicOrAbort { exit }),
+        }
+    }
+
+    fn record_stream_success(&mut self, started: Instant) {
+        self.stats.stream_successes = self.stats.stream_successes.saturating_add(1);
+        self.stats.stream_elapsed = self.stats.stream_elapsed.saturating_add(started.elapsed());
+    }
+
+    fn record_stream_failure(&mut self, started: Instant, backpressure_waits: u64) {
+        self.stats.stream_failures = self.stats.stream_failures.saturating_add(1);
+        self.stats.stream_elapsed = self.stats.stream_elapsed.saturating_add(started.elapsed());
+        if backpressure_waits > 0 {
+            self.stats.backpressure_failures = self.stats.backpressure_failures.saturating_add(1);
         }
     }
 
@@ -1658,35 +1740,96 @@ impl LeanWorker {
 }
 
 enum RequestReaderEvent {
-    Message(Message),
-    Terminal(Message, BufReader<ChildStdout>),
-    ReadError { message: String, eof: bool },
+    Message {
+        message: Message,
+        backpressure_waits: u64,
+    },
+    Terminal {
+        message: Message,
+        stdout: BufReader<ChildStdout>,
+        backpressure_waits: u64,
+    },
+    ReadError {
+        message: String,
+        eof: bool,
+        backpressure_waits: u64,
+    },
+}
+
+impl RequestReaderEvent {
+    fn backpressure_waits(&self) -> u64 {
+        match self {
+            Self::Message { backpressure_waits, .. }
+            | Self::Terminal { backpressure_waits, .. }
+            | Self::ReadError { backpressure_waits, .. } => *backpressure_waits,
+        }
+    }
+
+    fn add_backpressure_wait(&mut self) {
+        match self {
+            Self::Message { backpressure_waits, .. }
+            | Self::Terminal { backpressure_waits, .. }
+            | Self::ReadError { backpressure_waits, .. } => {
+                *backpressure_waits = backpressure_waits.saturating_add(1);
+            }
+        }
+    }
 }
 
 #[allow(
     clippy::needless_pass_by_value,
     reason = "the request reader thread must own the sender"
 )]
-fn read_request_messages(mut stdout: BufReader<ChildStdout>, sender: mpsc::Sender<RequestReaderEvent>) {
+fn read_request_messages(mut stdout: BufReader<ChildStdout>, sender: mpsc::SyncSender<RequestReaderEvent>) {
     loop {
         match read_frame(&mut stdout) {
             Ok(frame) if matches!(frame.message, Message::Response(_)) => {
-                drop(sender.send(RequestReaderEvent::Terminal(frame.message, stdout)));
+                let _ = send_reader_event(
+                    &sender,
+                    RequestReaderEvent::Terminal {
+                        message: frame.message,
+                        stdout,
+                        backpressure_waits: 0,
+                    },
+                );
                 return;
             }
             Ok(frame) => {
-                if sender.send(RequestReaderEvent::Message(frame.message)).is_err() {
+                if send_reader_event(
+                    &sender,
+                    RequestReaderEvent::Message {
+                        message: frame.message,
+                        backpressure_waits: 0,
+                    },
+                )
+                .is_err()
+                {
                     return;
                 }
             }
             Err(err) => {
-                drop(sender.send(RequestReaderEvent::ReadError {
-                    message: err.to_string(),
-                    eof: err.is_eof(),
-                }));
+                let _ = send_reader_event(
+                    &sender,
+                    RequestReaderEvent::ReadError {
+                        message: err.to_string(),
+                        eof: err.is_eof(),
+                        backpressure_waits: 0,
+                    },
+                );
                 return;
             }
         }
+    }
+}
+
+fn send_reader_event(sender: &mpsc::SyncSender<RequestReaderEvent>, event: RequestReaderEvent) -> Result<(), ()> {
+    match sender.try_send(event) {
+        Ok(()) => Ok(()),
+        Err(mpsc::TrySendError::Full(mut event)) => {
+            event.add_backpressure_wait();
+            sender.send(event).map_err(|_| ())
+        }
+        Err(mpsc::TrySendError::Disconnected(_event)) => Err(()),
     }
 }
 

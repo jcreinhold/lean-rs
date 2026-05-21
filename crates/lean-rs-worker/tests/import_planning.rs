@@ -208,6 +208,7 @@ fn planned_batches_execute_through_pool_with_one_import_group() {
         assert!(response.accepted);
     }
     let planned = planned_start.elapsed();
+    drop(lease);
 
     println!(
         "import_planner_fixture modules={modules} batches={} naive_ms={} planned_ms={} planned_workers={}",

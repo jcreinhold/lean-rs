@@ -761,19 +761,32 @@ impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerPoolConfig
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerPoolConfig
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerPoolConfig
 pub struct lean_rs_worker::LeanWorkerPoolSnapshot
+pub lean_rs_worker::LeanWorkerPoolSnapshot::active_workers: usize
+pub lean_rs_worker::LeanWorkerPoolSnapshot::backpressure_failures: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::backpressure_waits: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::cancelled_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::data_row_payload_bytes: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::data_rows_delivered: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::idle_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::imports: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::last_restart_reason: core::option::Option<lean_rs_worker::LeanWorkerRestartReason>
 pub lean_rs_worker::LeanWorkerPoolSnapshot::max_import_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::max_request_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::max_workers: usize
 pub lean_rs_worker::LeanWorkerPoolSnapshot::memory_budget_rejections: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::policy_restarts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::queue_depth: usize
 pub lean_rs_worker::LeanWorkerPoolSnapshot::queue_timeouts: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::requests: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::rss_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::rss_samples_unavailable: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::stream_elapsed: core::time::Duration
+pub lean_rs_worker::LeanWorkerPoolSnapshot::stream_failures: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::stream_requests: u64
+pub lean_rs_worker::LeanWorkerPoolSnapshot::stream_successes: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::timeout_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::total_child_rss_kib: core::option::Option<u64>
+pub lean_rs_worker::LeanWorkerPoolSnapshot::warm_leases: usize
 pub lean_rs_worker::LeanWorkerPoolSnapshot::worker_restarts: u64
 pub lean_rs_worker::LeanWorkerPoolSnapshot::workers: usize
 impl core::clone::Clone for lean_rs_worker::LeanWorkerPoolSnapshot
@@ -927,6 +940,9 @@ pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::run_streaming_command<Req, Ro
 pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::runtime_metadata(&self) -> lean_rs_worker::LeanWorkerRuntimeMetadata
 pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::session_key(&self) -> &lean_rs_worker::LeanWorkerSessionKey
 pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::set_request_timeout(&mut self, timeout: core::time::Duration) -> core::result::Result<(), lean_rs_worker::LeanWorkerError>
+pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::snapshot(&self) -> lean_rs_worker::LeanWorkerPoolSnapshot
+impl core::ops::drop::Drop for lean_rs_worker::LeanWorkerSessionLease<'_>
+pub fn lean_rs_worker::LeanWorkerSessionLease<'_>::drop(&mut self)
 impl<'pool> core::fmt::Debug for lean_rs_worker::LeanWorkerSessionLease<'pool>
 pub fn lean_rs_worker::LeanWorkerSessionLease<'pool>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'pool> core::marker::Freeze for lean_rs_worker::LeanWorkerSessionLease<'pool>
@@ -937,7 +953,11 @@ impl<'pool> core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerSessionLease
 impl<'pool> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerSessionLease<'pool>
 impl<'pool> !core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerSessionLease<'pool>
 pub struct lean_rs_worker::LeanWorkerStats
+pub lean_rs_worker::LeanWorkerStats::backpressure_failures: u64
+pub lean_rs_worker::LeanWorkerStats::backpressure_waits: u64
 pub lean_rs_worker::LeanWorkerStats::cancelled_restarts: u64
+pub lean_rs_worker::LeanWorkerStats::data_row_payload_bytes: u64
+pub lean_rs_worker::LeanWorkerStats::data_rows_delivered: u64
 pub lean_rs_worker::LeanWorkerStats::exits: u64
 pub lean_rs_worker::LeanWorkerStats::explicit_cycles: u64
 pub lean_rs_worker::LeanWorkerStats::idle_restarts: u64
@@ -950,6 +970,10 @@ pub lean_rs_worker::LeanWorkerStats::requests: u64
 pub lean_rs_worker::LeanWorkerStats::restarts: u64
 pub lean_rs_worker::LeanWorkerStats::rss_restarts: u64
 pub lean_rs_worker::LeanWorkerStats::rss_samples_unavailable: u64
+pub lean_rs_worker::LeanWorkerStats::stream_elapsed: core::time::Duration
+pub lean_rs_worker::LeanWorkerStats::stream_failures: u64
+pub lean_rs_worker::LeanWorkerStats::stream_requests: u64
+pub lean_rs_worker::LeanWorkerStats::stream_successes: u64
 pub lean_rs_worker::LeanWorkerStats::timeout_restarts: u64
 impl core::clone::Clone for lean_rs_worker::LeanWorkerStats
 pub fn lean_rs_worker::LeanWorkerStats::clone(&self) -> lean_rs_worker::LeanWorkerStats

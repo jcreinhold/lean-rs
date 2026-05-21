@@ -358,6 +358,7 @@ fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly(
     }
     assert_eq!(panic_rows.rows().len(), 1);
     assert!(!panic_lease.is_valid());
+    drop(panic_lease);
 
     let snapshot = panic_pool.snapshot();
     assert!(

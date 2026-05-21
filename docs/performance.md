@@ -104,6 +104,23 @@ mathlib-scale behavior for the parts actually measured: planning, pool leases,
 session reuse, row throughput, cancellation, fatal-exit recovery, worker
 cycling, and RSS sampling availability.
 
+Prompt 85 adds pool snapshots and bounded row-delivery backpressure to the
+same probe. The `single_worker`, `pool_max_2`, and `post_cycle` lines print
+active workers, warm leases, queue depth, stream request outcomes, delivered
+rows, payload bytes, stream elapsed time, and backpressure counters. The
+`slow_sink` line runs a deliberately slow row sink and records parent RSS
+before/after, child RSS, delivered row count, payload bytes, and
+backpressure waits/failures:
+
+```sh
+cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo run -p lean-rs-worker --example mathlib_scale_probe
+```
+
+Rows are not dropped under backpressure. A delivered row is still tentative
+until terminal success. Use the snapshot counters as operating evidence and
+terminal summaries as committed row counts.
+
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
 
 ```text
