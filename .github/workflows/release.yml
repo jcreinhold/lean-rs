@@ -219,8 +219,14 @@ jobs:
           done
           exit "$fail"
 
-      - name: Workspace publish dry-run
-        run: cargo publish --workspace --dry-run
+      # `cargo publish --workspace --dry-run` verifies downstream crates against
+      # the crates.io index before this workflow has published the new internal
+      # dependency versions. That rejects valid staged releases such as
+      # lean-rs-sys 0.1.1 -> lean-toolchain 0.1.1 -> lean-rs 0.1.1. The live
+      # publish steps below do the real verification in dependency order after
+      # each upstream crate has reached the index.
+      - name: Package workspace tarballs
+        run: cargo package --workspace --no-verify
 
       - name: Publish lean-rs-sys
         if: inputs.dry_run != true

@@ -2,7 +2,7 @@
 
 The `lean-rs` workspace publishes via [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 Pushing a `v<semver>` git tag fires the workflow, which runs the pre-flight gate set, the
-public-API diff, the workspace publish dry-run, the five-crate live publish in dependency
+public-API diff, workspace package creation, the five-crate live publish in dependency
 order, and opens a GitHub Release whose body is the matching `## [<version>]` section of
 [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -65,9 +65,16 @@ regular CI run on the PR is the final correctness gate.
 
 Before tagging, manually trigger the release workflow with `dry_run: true` from the Actions UI
 (Actions → Release → "Run workflow" → check **dry_run**). Runs every gate including
-`cargo publish --workspace --dry-run` and the public-API diff but skips the live publish and
-the GitHub Release. Useful when CHANGELOG section extraction or the public-API diff needs a
-sanity check that doesn't show up in the regular CI run.
+workspace package creation and the public-API diff but skips the live publish and the GitHub
+Release. Useful when CHANGELOG section extraction or the public-API diff needs a sanity check
+that doesn't show up in the regular CI run.
+
+The workflow intentionally does **not** run `cargo publish --workspace --dry-run` before the
+live publish. Cargo verifies each downstream package against the crates.io index, so a new
+interdependent workspace version fails dry-run until the upstream crates have actually been
+published and indexed. The live workflow publishes in dependency order and sleeps between
+crates so each later `cargo publish` performs the real verification against the just-published
+upstream version.
 
 ## Step 5—Cut the tag
 
@@ -93,7 +100,7 @@ The workflow:
 2. Asserts the tag matches the workspace version.
 3. Runs `fmt`, `clippy`, `nextest`, doctests, `doc` build.
 4. Runs the public-API diff against the committed baselines.
-5. Runs `cargo publish --workspace --dry-run`.
+5. Runs `cargo package --workspace --no-verify` to create the package tarballs.
 6. Publishes the five crates in order with 90s sleeps between steps.
 7. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
 8. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease automatically.
