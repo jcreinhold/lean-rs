@@ -131,6 +131,9 @@ jobs:
       - name: cargo test --doc
         run: cargo test --doc --workspace
 
+      - name: loader regression suite
+        run: cargo test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
+
       - name: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: '-D warnings'

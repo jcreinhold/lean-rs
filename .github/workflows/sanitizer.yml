@@ -51,6 +51,9 @@ jobs:
           (cd fixtures/lean && lake build)
           (cd fixtures/interop-shims && lake build)
 
+      - name: Loader regression suite
+        run: cargo +nightly test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
+
       - name: ASan Rust and Lean object stress
         working-directory: crates/lean-rs
         env:

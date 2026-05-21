@@ -174,6 +174,23 @@ Use the highest-level surface that matches the job:
 - Use `LeanLibrary::open`, `LeanLibrary::open_globally`, raw link directives,
   and low-level worker APIs only for advanced interop, diagnostics, and tests.
 
+## Regression Gates
+
+`crates/lean-rs-worker/tests/loader_regressions.rs` protects the public
+packaged-app path. It builds the shipped-crate template, then runs the
+same-process binary and worker example with `LD_LIBRARY_PATH`, `LD_PRELOAD`,
+`DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES`
+removed. The test proves the canonical path relies on build artifacts, rpath,
+and the bundle loader rather than a developer shell's loader environment. The
+same file also checks the template package list and proves a public
+`LeanCapability` bundle keeps a transitive Lean dependency alive after the
+opener helper returns.
+
+The worker regression keeps `PATH` because the current worker session startup
+still invokes Lean tooling to initialize imports. Prompt 94 owns the next
+bootstrap hardening step; this regression is scoped to loader environment
+leakage and app-owned worker child discovery.
+
 This is not a narrow fix for one Linux or docs.rs failure. The failures point
 at a common design problem: volatile loader, package, and bootstrap decisions
 were visible in too many places. The next hardening prompts move those

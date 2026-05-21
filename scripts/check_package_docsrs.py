@@ -124,6 +124,7 @@ def package_contents(version: str) -> None:
             "examples/worker_capability_runner.rs",
             "src/bin/lean-rs-worker-child.rs",
             "src/capability.rs",
+            "tests/loader_regressions.rs",
             "tests/typed_command.rs",
         ],
     }
