@@ -76,6 +76,33 @@ Normal users should not repair shipped apps by setting `LD_LIBRARY_PATH` or
 `DYLD_*`. A missing search path in the canonical flow is a packaging or
 artifact-manifest problem, not a caller-managed loader-flag problem.
 
+## Worker bootstrap checks
+
+Packaged worker applications can check deployment state before running a real
+command:
+
+```rust
+let report = builder.check();
+if let Some(check) = report.first_error() {
+    eprintln!("{}: {}", check.code(), check.repair_hint());
+}
+```
+
+`LeanWorkerCapabilityBuilder::check()` validates the app-owned worker child,
+manifest-backed capability artifact, protocol handshake, import session, and
+optional metadata expectation. It returns `LeanWorkerBootstrapReport`, not raw
+child pids, pipe handles, protocol frames, loader flags, or `std::process`
+configuration.
+
+| Worker bootstrap code | `as_str()` | Meaning | Common fix |
+| --- | --- | --- | --- |
+| `WorkerChildUnresolved` | `lean_rs.worker.bootstrap.child_unresolved` | The configured child locator did not resolve to a file. | Ship an app-owned worker child binary beside the application or set the documented worker-child override. |
+| `WorkerChildNotExecutable` | `lean_rs.worker.bootstrap.child_not_executable` | The child path is missing or is not executable on this platform. | Build the worker child binary and package it with executable permissions. |
+| `CapabilityPreflight { code: ... }` | `lean_rs.loader.*` | Manifest-backed loader preflight failed. | Follow the loader-code repair hint: rebuild through `CargoLeanCapability`, package missing artifacts, or use a compatible Lean toolchain. |
+| `WorkerHandshakeFailed` | `lean_rs.worker.bootstrap.handshake_failed` | The child started but did not speak the worker protocol. | Ensure the binary calls `lean_rs_worker::run_worker_child_stdio()` and matches the parent crate version. |
+| `CapabilityMetadataMismatch` | `lean_rs.worker.bootstrap.metadata_mismatch` | The capability metadata export did not match the caller's expectation. | Select or rebuild the intended capability package. |
+| `WorkerStartupFailed` | `lean_rs.worker.bootstrap.startup_failed` | Startup failed outside a more specific bootstrap class. | Run the bootstrap check in the deployment environment and inspect the bounded message. |
+
 `Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not
 mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
 boundary.

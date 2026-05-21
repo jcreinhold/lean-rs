@@ -15,7 +15,10 @@ mod protocol;
 mod session;
 mod supervisor;
 
-pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild};
+pub use capability::{
+    LeanWorkerBootstrapCheck, LeanWorkerBootstrapDiagnosticCode, LeanWorkerBootstrapReport,
+    LeanWorkerBootstrapSeverity, LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild,
+};
 pub use planning::{
     LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
     LeanWorkerModuleWork, LeanWorkerPlanMetadataExpectation, LeanWorkerPlannedBatch,

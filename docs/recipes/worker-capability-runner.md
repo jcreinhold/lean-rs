@@ -45,6 +45,12 @@ the Lake project, package, target, and imports because those identify the
 capability. The caller does not construct `.lake/build/lib` paths, wire stdio
 pipes, decode private frames, or repeat startup ordering.
 
+Packaged applications should use the manifest-backed form shown in
+[`ship-crate-with-lean.md`](ship-crate-with-lean.md). The same builder exposes
+`check()` for startup probes and doctor commands; it validates the app-owned
+worker child, capability manifest/artifacts, worker handshake, import session,
+and optional metadata expectation before real work starts.
+
 The row command uses the typed facade:
 
 ```rust

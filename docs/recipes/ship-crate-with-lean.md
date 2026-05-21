@@ -121,24 +121,31 @@ fn main() -> std::process::ExitCode {
 Then point the worker builder at that binary:
 
 ```rust,ignore
-let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
-    .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
-    .manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")
-    .package("my_app")
-    .module("MyCapability");
-let mut capability =
+let spec = lean_rs::LeanBuiltCapability::manifest_path(
+    env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
+)
+.manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST");
+
+let builder =
     lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
         .worker_child(
             lean_rs_worker::LeanWorkerChild::sibling("my_app_lean_worker")
                 .env_override("MY_APP_LEAN_WORKER"),
-        )
-        .open()?;
+        );
+
+let report = builder.check();
+if let Some(first) = report.first_error() {
+    return Err(format!("worker bootstrap check failed: {}", first.message()).into());
+}
+
+let mut capability = builder.open()?;
 ```
 
-The builder uses the built dylib path, infers the Lake root from the standard
-`.lake/build/lib` layout, starts the worker child, opens the import session,
-and leaves typed commands, rows, diagnostics, timeout, and cycling behind the
-worker API.
+The builder consumes the same manifest-backed descriptor as `LeanCapability`.
+It checks the worker child, capability artifact, protocol handshake, import
+session, and optional metadata expectation without exposing child pids, pipes,
+protocol frames, or loader environment variables. Typed commands, rows,
+diagnostics, timeout, and cycling remain behind the worker API.
 
 ## Publishing Checklist
 

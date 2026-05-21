@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use lean_rs::LeanBuiltCapability;
+use lean_rs::{LeanBuiltCapability, LeanCapabilityPreflight, LeanLoaderDiagnosticCode};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
@@ -44,6 +45,7 @@ pub struct LeanWorkerCapabilityBuilder {
     lib_name: String,
     imports: Vec<String>,
     built_dylib_path: Option<PathBuf>,
+    built_capability: Option<LeanBuiltCapability>,
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
@@ -70,6 +72,7 @@ impl LeanWorkerCapabilityBuilder {
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
             built_dylib_path: None,
+            built_capability: None,
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
@@ -80,35 +83,32 @@ impl LeanWorkerCapabilityBuilder {
 
     /// Create a builder from a build-script produced capability.
     ///
-    /// The dylib path comes from `spec`; the Lake project root is inferred
-    /// from the standard `.lake/build/lib/<dylib>` layout so the worker child
-    /// can still initialize Lean's import search path.
+    /// Manifest-backed descriptors are the canonical packaged-app path. The
+    /// builder reads package, module, and primary dylib facts from the
+    /// manifest, then infers the Lake project root from the standard
+    /// `.lake/build/lib/<dylib>` layout so the worker child can initialize
+    /// Lean's import search path. Direct dylib descriptors remain supported as
+    /// a compatibility path when callers also provide package and module names.
     ///
     /// # Errors
     ///
-    /// Returns `LeanWorkerError` if the built dylib path cannot be resolved,
-    /// the descriptor is missing package/module names, or the dylib is not
-    /// under a standard Lake build directory.
+    /// Returns `LeanWorkerError` if manifest data cannot be parsed, the
+    /// fallback dylib path cannot be resolved, the compatibility descriptor is
+    /// missing package/module names, or the dylib is not under a standard Lake
+    /// build directory.
     pub fn from_built_capability(
         spec: &LeanBuiltCapability,
         imports: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self, LeanWorkerError> {
-        let dylib_path = spec.dylib_path().map_err(|err| LeanWorkerError::Setup {
-            message: err.to_string(),
-        })?;
-        let project_root = infer_lake_project_root_from_dylib(&dylib_path)?;
-        let package = spec.package_name().ok_or_else(|| LeanWorkerError::Setup {
-            message: "LeanBuiltCapability is missing the Lake package name; call `.package(...)`".to_owned(),
-        })?;
-        let module = spec.module_name().ok_or_else(|| LeanWorkerError::Setup {
-            message: "LeanBuiltCapability is missing the root Lean module name; call `.module(...)`".to_owned(),
-        })?;
+        let artifact = WorkerCapabilityArtifact::from_built_capability(spec)?;
+        let project_root = infer_lake_project_root_from_dylib(&artifact.dylib_path)?;
         Ok(Self {
             project_root,
-            package: package.to_owned(),
-            lib_name: module.to_owned(),
+            package: artifact.package,
+            lib_name: artifact.module,
             imports: imports.into_iter().map(Into::into).collect(),
-            built_dylib_path: Some(dylib_path),
+            built_dylib_path: Some(artifact.dylib_path),
+            built_capability: Some(spec.clone()),
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
@@ -227,6 +227,60 @@ impl LeanWorkerCapabilityBuilder {
             .unwrap_or(crate::supervisor::LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT)
     }
 
+    /// Check deployment facts before running a real worker command.
+    ///
+    /// The report validates the worker child locator, manifest-backed
+    /// capability artifact when present, worker protocol handshake, session
+    /// opening, and optional metadata expectation. It keeps child paths,
+    /// protocol frames, and loader environment details below the worker
+    /// boundary.
+    #[must_use]
+    pub fn check(&self) -> LeanWorkerBootstrapReport {
+        let mut checks = self.bootstrap_static_checks();
+        if checks.iter().any(LeanWorkerBootstrapCheck::is_error) {
+            return LeanWorkerBootstrapReport::new(checks);
+        }
+
+        match self.clone().open_unchecked() {
+            Ok(capability) => {
+                drop(capability.terminate());
+            }
+            Err(err) => checks.push(check_from_open_error(&err)),
+        }
+        LeanWorkerBootstrapReport::new(checks)
+    }
+
+    fn bootstrap_static_checks(&self) -> Vec<LeanWorkerBootstrapCheck> {
+        let mut checks = Vec::new();
+        match self
+            .worker_child
+            .as_ref()
+            .map_or_else(resolve_default_worker_executable, LeanWorkerChild::resolve)
+        {
+            Ok(path) => {
+                if let Err(err) = validate_worker_child_path(&path) {
+                    checks.push(check_from_open_error(&err));
+                }
+            }
+            Err(err) => checks.push(check_from_open_error(&err)),
+        }
+
+        if let Some(spec) = &self.built_capability
+            && spec.resolved_manifest_path().is_ok()
+        {
+            let report = LeanCapabilityPreflight::new(spec.clone()).check();
+            for check in report.errors() {
+                checks.push(LeanWorkerBootstrapCheck::error(
+                    LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight { code: check.code() },
+                    check.subject().to_owned(),
+                    check.message().to_owned(),
+                    check.repair_hint().to_owned(),
+                ));
+            }
+        }
+        checks
+    }
+
     /// Build the Lake target, start the worker, open the session, and return a ready capability.
     ///
     /// # Errors
@@ -235,6 +289,21 @@ impl LeanWorkerCapabilityBuilder {
     /// child cannot be resolved or spawned, the worker fails startup/health,
     /// the session cannot open, or metadata validation fails.
     pub fn open(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
+        let report = self.bootstrap_static_report();
+        if let Some(check) = report.first_error() {
+            return Err(LeanWorkerError::Bootstrap {
+                code: check.code(),
+                message: check.message().to_owned(),
+            });
+        }
+        self.open_unchecked()
+    }
+
+    fn bootstrap_static_report(&self) -> LeanWorkerBootstrapReport {
+        LeanWorkerBootstrapReport::new(self.bootstrap_static_checks())
+    }
+
+    fn open_unchecked(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
         let dylib_path = match self.built_dylib_path {
             Some(path) => path,
             None => lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
@@ -243,6 +312,7 @@ impl LeanWorkerCapabilityBuilder {
         let worker_executable = self
             .worker_child
             .map_or_else(resolve_default_worker_executable, |child| child.resolve())?;
+        validate_worker_child_path(&worker_executable)?;
 
         let mut config = LeanWorkerConfig::new(worker_executable);
         if let Some(timeout) = self.startup_timeout {
@@ -291,6 +361,155 @@ impl LeanWorkerCapabilityBuilder {
             dylib_path,
             validated_metadata,
         })
+    }
+}
+
+/// Stable worker bootstrap diagnostic codes.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum LeanWorkerBootstrapDiagnosticCode {
+    /// The worker child locator did not resolve to a file.
+    WorkerChildUnresolved,
+    /// The worker child exists but is not executable.
+    WorkerChildNotExecutable,
+    /// Manifest-backed capability preflight reported a loader/artifact issue.
+    CapabilityPreflight { code: LeanLoaderDiagnosticCode },
+    /// The worker child did not complete the protocol handshake.
+    WorkerHandshakeFailed,
+    /// Capability metadata did not match the caller's expectation.
+    CapabilityMetadataMismatch,
+    /// Worker bootstrap failed for a reason outside the named deployment checks.
+    WorkerStartupFailed,
+}
+
+impl LeanWorkerBootstrapDiagnosticCode {
+    /// Stable string identifier suitable for logs and support reports.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkerChildUnresolved => "lean_rs.worker.bootstrap.child_unresolved",
+            Self::WorkerChildNotExecutable => "lean_rs.worker.bootstrap.child_not_executable",
+            Self::CapabilityPreflight { code } => code.as_str(),
+            Self::WorkerHandshakeFailed => "lean_rs.worker.bootstrap.handshake_failed",
+            Self::CapabilityMetadataMismatch => "lean_rs.worker.bootstrap.metadata_mismatch",
+            Self::WorkerStartupFailed => "lean_rs.worker.bootstrap.startup_failed",
+        }
+    }
+}
+
+impl std::fmt::Display for LeanWorkerBootstrapDiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Severity of one worker bootstrap finding.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum LeanWorkerBootstrapSeverity {
+    /// Informational finding that does not block startup.
+    Info,
+    /// Suspicious state that may still start.
+    Warning,
+    /// The worker should not start real commands until this is fixed.
+    Error,
+}
+
+/// One bounded worker bootstrap finding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerBootstrapCheck {
+    code: LeanWorkerBootstrapDiagnosticCode,
+    severity: LeanWorkerBootstrapSeverity,
+    subject: String,
+    message: String,
+    repair_hint: String,
+}
+
+impl LeanWorkerBootstrapCheck {
+    fn error(
+        code: LeanWorkerBootstrapDiagnosticCode,
+        subject: impl Into<String>,
+        message: impl Into<String>,
+        repair_hint: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            severity: LeanWorkerBootstrapSeverity::Error,
+            subject: bound_bootstrap_text(subject.into()),
+            message: bound_bootstrap_text(message.into()),
+            repair_hint: bound_bootstrap_text(repair_hint.into()),
+        }
+    }
+
+    /// Stable diagnostic code.
+    #[must_use]
+    pub fn code(&self) -> LeanWorkerBootstrapDiagnosticCode {
+        self.code
+    }
+
+    /// Whether this finding blocks worker startup.
+    #[must_use]
+    pub fn severity(&self) -> LeanWorkerBootstrapSeverity {
+        self.severity
+    }
+
+    /// Child binary, artifact, export, or protocol step this finding concerns.
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// Bounded explanation of the finding.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Bounded repair hint for packaged applications.
+    #[must_use]
+    pub fn repair_hint(&self) -> &str {
+        &self.repair_hint
+    }
+
+    fn is_error(&self) -> bool {
+        self.severity == LeanWorkerBootstrapSeverity::Error
+    }
+}
+
+/// Structured result of worker bootstrap checks for one capability builder.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerBootstrapReport {
+    checks: Vec<LeanWorkerBootstrapCheck>,
+}
+
+impl LeanWorkerBootstrapReport {
+    fn new(checks: Vec<LeanWorkerBootstrapCheck>) -> Self {
+        Self { checks }
+    }
+
+    /// All bootstrap findings.
+    #[must_use]
+    pub fn checks(&self) -> &[LeanWorkerBootstrapCheck] {
+        &self.checks
+    }
+
+    /// Blocking bootstrap findings.
+    pub fn errors(&self) -> impl Iterator<Item = &LeanWorkerBootstrapCheck> {
+        self.checks
+            .iter()
+            .filter(|check| check.severity == LeanWorkerBootstrapSeverity::Error)
+    }
+
+    /// Whether the worker bootstrap checks found no blocking findings.
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        self.first_error().is_none()
+    }
+
+    /// First blocking finding, if any.
+    #[must_use]
+    pub fn first_error(&self) -> Option<&LeanWorkerBootstrapCheck> {
+        self.errors().next()
     }
 }
 
@@ -381,6 +600,83 @@ struct CapabilityMetadataCheck {
     expected: Option<LeanWorkerCapabilityMetadata>,
 }
 
+#[derive(Debug)]
+struct WorkerCapabilityArtifact {
+    dylib_path: PathBuf,
+    package: String,
+    module: String,
+}
+
+impl WorkerCapabilityArtifact {
+    fn from_built_capability(spec: &LeanBuiltCapability) -> Result<Self, LeanWorkerError> {
+        if let Ok(manifest_path) = spec.resolved_manifest_path() {
+            return Self::from_manifest(&manifest_path);
+        }
+
+        let dylib_path = spec.dylib_path().map_err(|err| LeanWorkerError::Setup {
+            message: err.to_string(),
+        })?;
+        let package = spec.package_name().ok_or_else(|| LeanWorkerError::Setup {
+            message: "LeanBuiltCapability is missing the Lake package name; call `.package(...)`".to_owned(),
+        })?;
+        let module = spec.module_name().ok_or_else(|| LeanWorkerError::Setup {
+            message: "LeanBuiltCapability is missing the root Lean module name; call `.module(...)`".to_owned(),
+        })?;
+        Ok(Self {
+            dylib_path,
+            package: package.to_owned(),
+            module: module.to_owned(),
+        })
+    }
+
+    fn from_manifest(manifest_path: &Path) -> Result<Self, LeanWorkerError> {
+        let bytes = std::fs::read(manifest_path).map_err(|err| LeanWorkerError::Bootstrap {
+            code: LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight {
+                code: LeanLoaderDiagnosticCode::MissingManifest,
+            },
+            message: format!(
+                "could not read Lean capability manifest '{}': {err}",
+                manifest_path.display()
+            ),
+        })?;
+        let manifest: WorkerCapabilityManifest =
+            serde_json::from_slice(&bytes).map_err(|err| LeanWorkerError::Bootstrap {
+                code: LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight {
+                    code: LeanLoaderDiagnosticCode::MalformedManifest,
+                },
+                message: format!(
+                    "Lean capability manifest '{}' is malformed: {err}",
+                    manifest_path.display()
+                ),
+            })?;
+        if manifest.schema_version != u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION) {
+            return Err(LeanWorkerError::Bootstrap {
+                code: LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight {
+                    code: LeanLoaderDiagnosticCode::UnsupportedManifestSchema,
+                },
+                message: format!(
+                    "unsupported Lean capability manifest schema {}; supported schema is {}",
+                    manifest.schema_version,
+                    lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION
+                ),
+            });
+        }
+        Ok(Self {
+            dylib_path: manifest.primary_dylib,
+            package: manifest.package,
+            module: manifest.module,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct WorkerCapabilityManifest {
+    schema_version: u64,
+    primary_dylib: PathBuf,
+    package: String,
+    module: String,
+}
+
 /// Locator for an app-owned worker child executable.
 ///
 /// Dependency binaries are not automatically installed with downstream
@@ -466,6 +762,133 @@ impl Default for LeanWorkerChild {
 
 fn resolve_default_worker_executable() -> Result<PathBuf, LeanWorkerError> {
     LeanWorkerChild::default().resolve()
+}
+
+fn validate_worker_child_path(path: &Path) -> Result<(), LeanWorkerError> {
+    if !path.is_file() {
+        return Err(LeanWorkerError::WorkerChildNotExecutable {
+            path: path.to_path_buf(),
+            reason: "path does not point to a file".to_owned(),
+        });
+    }
+    if !is_executable_file(path) {
+        return Err(LeanWorkerError::WorkerChildNotExecutable {
+            path: path.to_path_buf(),
+            reason: "file is not executable by this user".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(_path: &Path) -> bool {
+    true
+}
+
+fn check_from_open_error(err: &LeanWorkerError) -> LeanWorkerBootstrapCheck {
+    match err {
+        LeanWorkerError::WorkerChildUnresolved { tried } => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::WorkerChildUnresolved,
+            "worker child",
+            format!("could not resolve worker child; tried {}", format_paths(tried)),
+            "ship an app-owned worker child binary beside the app or configure LeanWorkerChild::env_override",
+        ),
+        LeanWorkerError::WorkerChildNotExecutable { path, reason } => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::WorkerChildNotExecutable,
+            path.display().to_string(),
+            reason.clone(),
+            "ship an app-owned worker child binary and ensure it is executable",
+        ),
+        LeanWorkerError::Bootstrap { code, message } => LeanWorkerBootstrapCheck::error(
+            *code,
+            code.as_str(),
+            message.clone(),
+            "fix the reported bootstrap input",
+        ),
+        LeanWorkerError::Handshake { message } => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed,
+            "worker handshake",
+            message.clone(),
+            "ensure the worker child calls lean_rs_worker::run_worker_child_stdio and matches this crate version",
+        ),
+        LeanWorkerError::Timeout {
+            operation: "startup", ..
+        } => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed,
+            "worker handshake",
+            err.to_string(),
+            "check that the worker child starts promptly and writes the lean-rs-worker handshake",
+        ),
+        LeanWorkerError::CapabilityMetadataMismatch { export, .. } => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch,
+            export.clone(),
+            "capability metadata did not match the requested expectation",
+            "rebuild or select a capability whose metadata matches the caller expectation",
+        ),
+        other @ (LeanWorkerError::Spawn { .. }
+        | LeanWorkerError::CapabilityBuild { .. }
+        | LeanWorkerError::Setup { .. }
+        | LeanWorkerError::Protocol { .. }
+        | LeanWorkerError::Worker { .. }
+        | LeanWorkerError::ChildExited { .. }
+        | LeanWorkerError::ChildPanicOrAbort { .. }
+        | LeanWorkerError::Timeout { .. }
+        | LeanWorkerError::Cancelled { .. }
+        | LeanWorkerError::ProgressPanic { .. }
+        | LeanWorkerError::DataSinkPanic { .. }
+        | LeanWorkerError::DiagnosticSinkPanic { .. }
+        | LeanWorkerError::StreamExportFailed { .. }
+        | LeanWorkerError::StreamCallbackFailed { .. }
+        | LeanWorkerError::StreamRowMalformed { .. }
+        | LeanWorkerError::CapabilityMetadataMalformed { .. }
+        | LeanWorkerError::CapabilityDoctorMalformed { .. }
+        | LeanWorkerError::TypedCommandRequestEncode { .. }
+        | LeanWorkerError::TypedCommandResponseDecode { .. }
+        | LeanWorkerError::TypedCommandRowDecode { .. }
+        | LeanWorkerError::TypedCommandSummaryDecode { .. }
+        | LeanWorkerError::LeaseInvalidated { .. }
+        | LeanWorkerError::WorkerPoolExhausted { .. }
+        | LeanWorkerError::WorkerPoolMemoryBudgetExceeded { .. }
+        | LeanWorkerError::WorkerPoolQueueTimeout { .. }
+        | LeanWorkerError::UnsupportedRequest { .. }
+        | LeanWorkerError::Wait { .. }) => LeanWorkerBootstrapCheck::error(
+            LeanWorkerBootstrapDiagnosticCode::WorkerStartupFailed,
+            "worker bootstrap",
+            other.to_string(),
+            "run the bootstrap check in a deployment environment and rebuild the worker child or capability artifact",
+        ),
+    }
+}
+
+fn format_paths(paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        return "<none>".to_owned();
+    }
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn bound_bootstrap_text(mut text: String) -> String {
+    const LIMIT: usize = 1_024;
+    if text.len() <= LIMIT {
+        return text;
+    }
+    while !text.is_char_boundary(LIMIT) {
+        text.pop();
+    }
+    text.truncate(LIMIT);
+    text.push_str("...");
+    text
 }
 
 fn candidate_sibling_worker_paths(executable_name: &str) -> Vec<PathBuf> {

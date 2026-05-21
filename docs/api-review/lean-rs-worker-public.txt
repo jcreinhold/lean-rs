@@ -1,4 +1,56 @@
 pub mod lean_rs_worker
+#[non_exhaustive] pub enum lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight::code: lean_rs::module::preflight::LeanLoaderDiagnosticCode
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::WorkerChildNotExecutable
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::WorkerChildUnresolved
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed
+pub lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::WorkerStartupFailed
+impl lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub const fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::as_str(self) -> &'static str
+impl core::clone::Clone for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::clone(&self) -> lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::eq(&self, other: &lean_rs_worker::LeanWorkerBootstrapDiagnosticCode) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapDiagnosticCode::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::Send for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::Sync for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+#[non_exhaustive] pub enum lean_rs_worker::LeanWorkerBootstrapSeverity
+pub lean_rs_worker::LeanWorkerBootstrapSeverity::Error
+pub lean_rs_worker::LeanWorkerBootstrapSeverity::Info
+pub lean_rs_worker::LeanWorkerBootstrapSeverity::Warning
+impl core::clone::Clone for lean_rs_worker::LeanWorkerBootstrapSeverity
+pub fn lean_rs_worker::LeanWorkerBootstrapSeverity::clone(&self) -> lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerBootstrapSeverity
+pub fn lean_rs_worker::LeanWorkerBootstrapSeverity::eq(&self, other: &lean_rs_worker::LeanWorkerBootstrapSeverity) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerBootstrapSeverity
+pub fn lean_rs_worker::LeanWorkerBootstrapSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_rs_worker::LeanWorkerBootstrapSeverity
+pub fn lean_rs_worker::LeanWorkerBootstrapSeverity::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::Send for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::Sync for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerBootstrapSeverity
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerBootstrapSeverity
 #[non_exhaustive] pub enum lean_rs_worker::LeanWorkerDoctorSeverity
 pub lean_rs_worker::LeanWorkerDoctorSeverity::Error
 pub lean_rs_worker::LeanWorkerDoctorSeverity::Pass
@@ -20,6 +72,9 @@ impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerDoctorSeverity
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerDoctorSeverity
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerDoctorSeverity
 pub enum lean_rs_worker::LeanWorkerError
+pub lean_rs_worker::LeanWorkerError::Bootstrap
+pub lean_rs_worker::LeanWorkerError::Bootstrap::code: lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub lean_rs_worker::LeanWorkerError::Bootstrap::message: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::Cancelled
 pub lean_rs_worker::LeanWorkerError::Cancelled::operation: &'static str
 pub lean_rs_worker::LeanWorkerError::CapabilityBuild
@@ -84,6 +139,9 @@ pub lean_rs_worker::LeanWorkerError::Wait::source: std::io::error::Error
 pub lean_rs_worker::LeanWorkerError::Worker
 pub lean_rs_worker::LeanWorkerError::Worker::code: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::Worker::message: alloc::string::String
+pub lean_rs_worker::LeanWorkerError::WorkerChildNotExecutable
+pub lean_rs_worker::LeanWorkerError::WorkerChildNotExecutable::path: std::path::PathBuf
+pub lean_rs_worker::LeanWorkerError::WorkerChildNotExecutable::reason: alloc::string::String
 pub lean_rs_worker::LeanWorkerError::WorkerChildUnresolved
 pub lean_rs_worker::LeanWorkerError::WorkerChildUnresolved::tried: alloc::vec::Vec<std::path::PathBuf>
 pub lean_rs_worker::LeanWorkerError::WorkerPoolExhausted
@@ -269,6 +327,49 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerBatchFingerprint
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerBatchFingerprint
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerBatchFingerprint
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerBatchFingerprint
+pub struct lean_rs_worker::LeanWorkerBootstrapCheck
+impl lean_rs_worker::LeanWorkerBootstrapCheck
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::code(&self) -> lean_rs_worker::LeanWorkerBootstrapDiagnosticCode
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::message(&self) -> &str
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::repair_hint(&self) -> &str
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::severity(&self) -> lean_rs_worker::LeanWorkerBootstrapSeverity
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::subject(&self) -> &str
+impl core::clone::Clone for lean_rs_worker::LeanWorkerBootstrapCheck
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::clone(&self) -> lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerBootstrapCheck
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::eq(&self, other: &lean_rs_worker::LeanWorkerBootstrapCheck) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerBootstrapCheck
+pub fn lean_rs_worker::LeanWorkerBootstrapCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::marker::Send for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::marker::Sync for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerBootstrapCheck
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerBootstrapCheck
+pub struct lean_rs_worker::LeanWorkerBootstrapReport
+impl lean_rs_worker::LeanWorkerBootstrapReport
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::checks(&self) -> &[lean_rs_worker::LeanWorkerBootstrapCheck]
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::errors(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_rs_worker::LeanWorkerBootstrapCheck>
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::first_error(&self) -> core::option::Option<&lean_rs_worker::LeanWorkerBootstrapCheck>
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::is_ok(&self) -> bool
+impl core::clone::Clone for lean_rs_worker::LeanWorkerBootstrapReport
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::clone(&self) -> lean_rs_worker::LeanWorkerBootstrapReport
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerBootstrapReport
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::eq(&self, other: &lean_rs_worker::LeanWorkerBootstrapReport) -> bool
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerBootstrapReport
+pub fn lean_rs_worker::LeanWorkerBootstrapReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::marker::Send for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::marker::Sync for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerBootstrapReport
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerBootstrapReport
 pub struct lean_rs_worker::LeanWorkerCancellationToken
 impl lean_rs_worker::LeanWorkerCancellationToken
 pub fn lean_rs_worker::LeanWorkerCancellationToken::cancel(&self)
@@ -308,6 +409,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCapab
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCapability
 pub struct lean_rs_worker::LeanWorkerCapabilityBuilder
 impl lean_rs_worker::LeanWorkerCapabilityBuilder
+pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::check(&self) -> lean_rs_worker::LeanWorkerBootstrapReport
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::expect_metadata(self, export: impl core::convert::Into<alloc::string::String>, request: serde_json::value::Value, expected: lean_rs_worker::LeanWorkerCapabilityMetadata) -> Self
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(spec: &lean_rs::module::capability::LeanBuiltCapability, imports: impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> core::result::Result<Self, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self

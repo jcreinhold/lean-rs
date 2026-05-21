@@ -7,6 +7,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::capability::LeanWorkerBootstrapDiagnosticCode;
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::LeanWorkerDataSinkTarget;
 use crate::session::{
@@ -312,6 +313,13 @@ pub enum LeanWorkerError {
         /// Candidate paths checked by the default resolver.
         tried: Vec<PathBuf>,
     },
+    /// The resolved worker child is missing or is not executable.
+    WorkerChildNotExecutable { path: PathBuf, reason: String },
+    /// Worker bootstrap preflight failed before a real command ran.
+    Bootstrap {
+        code: LeanWorkerBootstrapDiagnosticCode,
+        message: String,
+    },
     /// The capability Lake target could not be built.
     CapabilityBuild {
         /// Typed Lake/toolchain diagnostic from `lean-toolchain`.
@@ -402,6 +410,12 @@ impl fmt::Display for LeanWorkerError {
                     "could not resolve lean-rs-worker-child; set LEAN_RS_WORKER_CHILD or place it beside the current executable (tried: {tried})"
                 )
             }
+            Self::WorkerChildNotExecutable { path, reason } => {
+                write!(f, "worker child '{}' is not executable: {reason}", path.display())
+            }
+            Self::Bootstrap { code, message } => {
+                write!(f, "worker bootstrap check {code} failed: {message}")
+            }
             Self::CapabilityBuild { diagnostic } => {
                 write!(f, "worker capability Lake target build failed: {diagnostic}")
             }
@@ -491,7 +505,7 @@ impl std::error::Error for LeanWorkerError {
         match self {
             Self::Spawn { source, .. } | Self::Wait { source } => Some(source),
             Self::CapabilityBuild { diagnostic } => Some(diagnostic),
-            Self::WorkerChildUnresolved { .. } => None,
+            Self::WorkerChildUnresolved { .. } | Self::WorkerChildNotExecutable { .. } | Self::Bootstrap { .. } => None,
             Self::Setup { .. }
             | Self::Handshake { .. }
             | Self::Protocol { .. }

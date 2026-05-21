@@ -110,6 +110,25 @@ fn stripped_loader_env_shipped_crate_worker_example_uses_app_owned_child() {
 }
 
 #[test]
+fn shipped_crate_worker_example_honors_explicit_child_env_override() {
+    build_template();
+
+    let output = clean_loader_env_command(template_target_debug().join("examples").join(exe_name("worker")))
+        .env(
+            "SHIPPED_LEAN_CRATE_WORKER",
+            template_target_debug().join(exe_name("shipped-lean-crate-worker")),
+        )
+        .output()
+        .expect("env-override shipped-lean-crate worker example starts");
+    let stdout = assert_success(output, "env-override shipped-lean-crate worker example");
+
+    assert!(
+        stdout.contains("worker capability opened"),
+        "worker template should honor SHIPPED_LEAN_CRATE_WORKER override, stdout={stdout:?}",
+    );
+}
+
+#[test]
 fn shipped_crate_template_package_contains_lean_sources_and_worker_child() {
     let output = Command::new(cargo())
         .args(["package", "--manifest-path"])

@@ -1,10 +1,13 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
 
 use lean_rs::LeanBuiltCapability;
 use lean_rs_worker::{
-    LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerError, LeanWorkerRestartPolicy,
+    LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
+    LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerError, LeanWorkerRestartPolicy,
 };
 use serde_json::json;
 
@@ -23,6 +26,58 @@ fn workspace_root() -> PathBuf {
 
 fn interop_root() -> PathBuf {
     workspace_root().join("fixtures").join("interop-shims")
+}
+
+fn shipped_template_root() -> PathBuf {
+    workspace_root().join("templates").join("shipped-lean-crate")
+}
+
+fn shipped_template_manifest() -> PathBuf {
+    shipped_template_root().join("Cargo.toml")
+}
+
+fn build_shipped_template() {
+    let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
+        .args(["build", "--manifest-path"])
+        .arg(shipped_template_manifest())
+        .args(["--bins", "--examples"])
+        .output()
+        .expect("template cargo build starts");
+    assert!(
+        output.status.success(),
+        "template build failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+fn shipped_manifest_path() -> PathBuf {
+    build_shipped_template();
+    let build_dir = shipped_template_root().join("target").join("debug").join("build");
+    let mut candidates = std::fs::read_dir(&build_dir)
+        .expect("template build directory exists")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("out").join("ShipLeanDemo.lean-rs-capability.json"))
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.pop().expect("template build emitted a capability manifest")
+}
+
+fn env_exe_name(name: &str) -> String {
+    let mut name = name.to_owned();
+    if !std::env::consts::EXE_SUFFIX.is_empty() {
+        name.push_str(std::env::consts::EXE_SUFFIX);
+    }
+    name
+}
+
+fn shipped_worker_binary() -> PathBuf {
+    build_shipped_template();
+    shipped_template_root()
+        .join("target")
+        .join("debug")
+        .join(env_exe_name("shipped-lean-crate-worker"))
 }
 
 fn builder() -> LeanWorkerCapabilityBuilder {
@@ -151,17 +206,146 @@ fn missing_lake_target_is_a_build_error() {
 }
 
 #[test]
-fn missing_worker_child_is_a_spawn_error() {
+fn missing_worker_child_is_a_bootstrap_error() {
     let missing = workspace_root().join("target").join("definitely-not-a-worker-child");
     let err = builder()
-        .worker_executable(missing.clone())
+        .worker_executable(missing)
         .open()
-        .expect_err("missing worker child should fail at spawn");
+        .expect_err("missing worker child should fail before spawn");
 
     match err {
-        LeanWorkerError::Spawn { executable, .. } => assert_eq!(executable, missing),
-        other => panic!("expected spawn error, got {other:?}"),
+        LeanWorkerError::Bootstrap { code, message } => {
+            assert_eq!(code, LeanWorkerBootstrapDiagnosticCode::WorkerChildNotExecutable);
+            assert!(message.contains("path does not point to a file"));
+        }
+        other => panic!("expected bootstrap child error, got {other:?}"),
     }
+}
+
+#[test]
+fn bootstrap_report_distinguishes_missing_child_without_spawning() {
+    let report = builder()
+        .worker_executable(workspace_root().join("target").join("missing-bootstrap-child"))
+        .check();
+    let first = report.first_error().expect("missing child is reported");
+    assert_eq!(
+        first.code(),
+        LeanWorkerBootstrapDiagnosticCode::WorkerChildNotExecutable
+    );
+    assert!(first.message().contains("path does not point to a file"));
+}
+
+#[test]
+fn manifest_backed_builder_uses_manifest_capability_identity() {
+    let spec = LeanBuiltCapability::manifest_path(shipped_manifest_path());
+    let report = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["ShipLeanDemo"])
+        .expect("manifest-backed descriptor creates worker builder")
+        .worker_child(LeanWorkerChild::path(shipped_worker_binary()))
+        .check();
+
+    assert!(
+        report.is_ok(),
+        "manifest-backed shipped worker bootstrap should pass: {report:?}",
+    );
+}
+
+#[test]
+fn missing_manifest_is_typed_at_manifest_backed_builder_boundary() {
+    let missing = std::env::temp_dir()
+        .join(format!("lean-rs-worker-missing-manifest-{}", std::process::id()))
+        .join("missing.json");
+    let err = LeanWorkerCapabilityBuilder::from_built_capability(
+        &LeanBuiltCapability::manifest_path(missing),
+        ["ShipLeanDemo"],
+    )
+    .expect_err("missing manifest should be typed");
+
+    match err {
+        LeanWorkerError::Bootstrap { code, message } => {
+            assert_eq!(code.as_str(), "lean_rs.loader.missing_manifest");
+            assert!(message.contains("could not read Lean capability manifest"));
+        }
+        other => panic!("expected missing-manifest bootstrap error, got {other:?}"),
+    }
+}
+
+#[test]
+fn stale_fingerprint_is_reported_by_bootstrap_preflight() {
+    let manifest = shipped_manifest_path();
+    let dir = std::env::temp_dir().join(format!("lean-rs-worker-stale-fingerprint-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let stale = dir.join("ShipLeanDemo.lean-rs-capability.json");
+    let mut contents: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest).expect("read template manifest"))
+            .expect("template manifest is JSON");
+    contents
+        .get_mut("toolchain_fingerprint")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("manifest has fingerprint object")
+        .insert(
+            "header_sha256".to_owned(),
+            serde_json::Value::String("0000000000000000000000000000000000000000000000000000000000000000".to_owned()),
+        );
+    std::fs::write(
+        &stale,
+        serde_json::to_vec_pretty(&contents).expect("encode stale manifest"),
+    )
+    .expect("write stale manifest");
+
+    let spec = LeanBuiltCapability::manifest_path(stale);
+    let report = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["ShipLeanDemo"])
+        .expect("manifest still contains capability identity")
+        .worker_child(LeanWorkerChild::path(shipped_worker_binary()))
+        .check();
+
+    let first = report.first_error().expect("stale fingerprint should be reported");
+    assert_eq!(
+        first.code().as_str(),
+        "lean_rs.loader.unsupported_toolchain_fingerprint"
+    );
+}
+
+#[test]
+fn metadata_mismatch_is_reported_by_bootstrap_check() {
+    let wrong_metadata = LeanWorkerCapabilityMetadata {
+        commands: vec![LeanWorkerCommandMetadata {
+            name: "wrong".to_owned(),
+            version: "0".to_owned(),
+        }],
+        capabilities: vec![LeanWorkerCapabilityFact {
+            name: "wrong-capability".to_owned(),
+            version: "0".to_owned(),
+        }],
+        lean_version: None,
+        extra: None,
+    };
+    let report = builder()
+        .expect_metadata(
+            "lean_rs_interop_consumer_worker_metadata",
+            json!({"caller": "builder-metadata-check"}),
+            wrong_metadata,
+        )
+        .check();
+
+    let first = report.first_error().expect("metadata mismatch is reported");
+    assert_eq!(
+        first.code(),
+        LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch
+    );
+}
+
+#[test]
+fn handshake_failure_is_a_bootstrap_diagnostic() {
+    let shell = PathBuf::from("/bin/sh");
+    if !shell.is_file() {
+        return;
+    }
+    let report = builder()
+        .worker_child(LeanWorkerChild::path(shell))
+        .startup_timeout(Duration::from_millis(50))
+        .check();
+    let first = report.first_error().expect("non-worker child fails bootstrap");
+    assert_eq!(first.code(), LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed);
 }
 
 #[test]

@@ -170,7 +170,8 @@ Use the highest-level surface that matches the job:
 - Use `LeanCapability` to call a built capability in process.
 - Use `LeanWorkerCapabilityBuilder` or `LeanWorkerPool` when the application
   needs process isolation, request timeouts, live rows, memory cycling, or
-  crash containment.
+  crash containment. Their normal packaged-app input is the same
+  manifest-backed capability descriptor that `LeanCapability` consumes.
 - Use `LeanLibrary::open`, `LeanLibrary::open_globally`, raw link directives,
   and low-level worker APIs only for advanced interop, diagnostics, and tests.
 
@@ -186,10 +187,14 @@ same file also checks the template package list and proves a public
 `LeanCapability` bundle keeps a transitive Lean dependency alive after the
 opener helper returns.
 
-The worker regression keeps `PATH` because the current worker session startup
-still invokes Lean tooling to initialize imports. Prompt 94 owns the next
-bootstrap hardening step; this regression is scoped to loader environment
-leakage and app-owned worker child discovery.
+Worker bootstrap is checked through
+`LeanWorkerCapabilityBuilder::check()`. The report validates app-owned child
+resolution, executable status, manifest-backed capability preflight, protocol
+handshake, import session startup, and optional metadata expectations before a
+real command runs. The worker regression still keeps `PATH` because current
+host-session import startup uses Lean tooling; the bootstrap check now reports
+that deployment boundary explicitly instead of asking callers to manage child
+pipes or dynamic-loader variables.
 
 This is not a narrow fix for one Linux or docs.rs failure. The failures point
 at a common design problem: volatile loader, package, and bootstrap decisions

@@ -27,8 +27,8 @@ for testing `lean-rs-worker` itself.
 
 For a shipped application, build the Lean capability in `build.rs` with
 `lean_toolchain::CargoLeanCapability`, embed the resulting path with
-`lean_rs::LeanBuiltCapability::path(env!(...))`, and ship an app-owned worker
-child binary:
+`lean_rs::LeanBuiltCapability::manifest_path(env!(...))`, and ship an
+app-owned worker child binary:
 
 ```rust,ignore
 fn main() -> std::process::ExitCode {
@@ -38,6 +38,10 @@ fn main() -> std::process::ExitCode {
 
 Point the builder at that binary with
 `LeanWorkerChild::sibling("my_app_lean_worker").env_override("MY_APP_LEAN_WORKER")`.
+Run `LeanWorkerCapabilityBuilder::check()` in installers, startup probes, or
+doctor commands to validate the child binary, manifest-backed capability,
+protocol handshake, import session, and optional metadata expectation before
+real work starts.
 This is the production packaging path because Cargo does not install dependency binaries as
 part of your application. See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
@@ -48,7 +52,7 @@ part of your application. See
 | ------- | --- |
 | Child process lifecycle, pipes, frame decoding, fatal-exit classification, cleanup | `LeanWorker`, `LeanWorkerConfig`, `LeanWorkerError`, `LeanWorkerExit`, `LeanWorkerStats` |
 | Restart and memory-cycling policy: explicit cycling, request-count threshold, import-like threshold, idle interval, RSS ceiling | `LeanWorkerRestartPolicy`, `LeanWorkerRestartReason` |
-| Capability startup: Lake build, child resolution, health-check, import session, optional metadata validation | `LeanWorkerCapabilityBuilder` |
+| Capability startup: Lake build or manifest-backed artifact use, child resolution, bootstrap check, health-check, import session, optional metadata validation | `LeanWorkerCapabilityBuilder`, `LeanWorkerBootstrapReport` |
 | Packaged worker child resolution | `LeanWorkerChild`, `run_worker_child_stdio` |
 | Typed downstream commands and row streams | `LeanWorkerJsonCommand<Req, Resp>`, `LeanWorkerStreamingCommand<Req, Row, Summary>`, `LeanWorkerTypedDataSink`, `LeanWorkerDiagnosticSink` |
 | Narrow host-session adapter (elaboration, kernel-check status, declaration-kind/name bulk queries) | `LeanWorker::open_session` |
