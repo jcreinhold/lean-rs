@@ -13,7 +13,7 @@ include = [
   "benches/**/*.rs",
   "build.rs",
   "examples/**/*.rs",
-  "shims/**/*.c",
+  "shims/**/c/**/*.c",
   "shims/**/*.lean",
   "shims/**/lake-manifest.json",
   "shims/**/lakefile.lean",
