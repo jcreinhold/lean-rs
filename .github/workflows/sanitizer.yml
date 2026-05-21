@@ -19,7 +19,7 @@ env:
 
 jobs:
   asan:
-    name: Linux ASan
+    name: Linux ASan (Rust-only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,83 +54,17 @@ jobs:
       - name: Loader regression suite
         run: cargo +nightly test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
 
-      - name: ASan Rust and Lean object stress
-        working-directory: crates/lean-rs
+      - name: ASan Rust-only helper tests
         env:
           RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
           RUSTDOCFLAGS: '-Z sanitizer=address'
-          LEAN_RS_REFCOUNT_STRESS_ITERS: '20000'
         run: |
-          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-            clone_drop_cycle_preserves_exclusive_after_release -- --test-threads=1
-          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-            many_independent_objs_drop_in_arbitrary_order -- --test-threads=1
-          cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-            catch_callback_panic_loop_remains_independent -- --test-threads=1
+          cargo +nightly test -p lean-toolchain --target x86_64-unknown-linux-gnu \
+            -- --test-threads=1
 
-      - name: ASan panic-containment fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
+      - name: In-process Lean ASan compatibility note
         run: |
-          cargo +nightly test -p lean-rs-host --target x86_64-unknown-linux-gnu \
-            --test panic_containment -- --test-threads=1
-
-      - name: ASan callback trampoline fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
-            --test callback_trampoline -- --test-threads=1
-
-      - name: ASan callback registry fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
-            --test callback_registry -- --test-threads=1
-
-      - name: ASan string callback ABI fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs --target x86_64-unknown-linux-gnu \
-            --test string_callback_abi -- --test-threads=1
-
-      - name: ASan host progress fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs-host --target x86_64-unknown-linux-gnu \
-            --test progress -- --test-threads=1
-
-      - name: ASan worker crash-containment fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
-            --test supervisor child_crash_is_typed_and_parent_survives -- --test-threads=1
-
-      - name: ASan worker pool fatal-exit recovery fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
-            --test pool child_fatal_exit_invalidates_lease_and_next_acquire_replaces_worker -- --test-threads=1
-
-      - name: ASan worker streaming fatal-exit fixture
-        env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
-        run: |
-          cargo +nightly test -p lean-rs-worker --target x86_64-unknown-linux-gnu \
-            --test streaming_runner child_fatal_exit_is_reported_to_parent -- --test-threads=1
+          echo "::notice::In-process Lean runtime tests are not ASan-instrumented in CI. Lean's shared runtime is uninstrumented and currently crashes Linux ASan before producing actionable Rust diagnostics. Loader regressions, normal workspace tests, worker containment tests, and release/manual ABI fuzzing remain the gates for those paths."
 
   fuzz:
     name: ABI fuzz smoke

@@ -327,31 +327,20 @@ opt-out with reviewer sign-off per [`docs/architecture/01-safety-model.md`](../a
 
 ```sh
 rustup toolchain install nightly --component rust-src
-cd crates/lean-rs
 RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
 RUSTDOCFLAGS="-Z sanitizer=address" \
-LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
-cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-  clone_drop_cycle_preserves_exclusive_after_release -- --test-threads=1
-RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
-RUSTDOCFLAGS="-Z sanitizer=address" \
-LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
-cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-  many_independent_objs_drop_in_arbitrary_order -- --test-threads=1
-RUSTFLAGS="-Z sanitizer=address -Cdebug-assertions=on" \
-RUSTDOCFLAGS="-Z sanitizer=address" \
-LEAN_RS_REFCOUNT_STRESS_ITERS=20000 \
-cargo +nightly test --target x86_64-unknown-linux-gnu --lib \
-  catch_callback_panic_loop_remains_independent -- --test-threads=1
+cargo +nightly test -p lean-toolchain --target x86_64-unknown-linux-gnu \
+  -- --test-threads=1
 ```
 
-`-Z sanitizer=address` instruments every allocation; LeakSanitizer ships with ASan on Linux, so
-the same run catches refcount use-after-free and leak regressions. ASan coverage is focused on
-ownership, callback-panic, and process-containment contracts. Loader-negative-path regressions
-run outside ASan because they intentionally exercise platform dynamic-loader failure behavior
-with uninstrumented Lean shared libraries. `LEAN_RS_REFCOUNT_STRESS_ITERS` overrides
-per-test iteration count for `Obj` and callback panic stress tests. `--test-threads=1`
-preserves the per-thread Lean runtime invariant.
+`-Z sanitizer=address` instruments pure-Rust helper code. CI intentionally does not run
+in-process Lean runtime tests under Linux ASan: Lean's shared runtime is not ASan-instrumented
+and currently crashes the sanitizer before it can produce actionable Rust diagnostics. The
+in-process Lean paths are instead covered by normal workspace tests, loader regressions,
+worker crash-containment tests, and the release/manual ABI fuzz target. Loader-negative-path
+regressions also run outside ASan because they intentionally exercise platform dynamic-loader
+failure behavior with uninstrumented Lean shared libraries. `--test-threads=1` preserves
+the per-thread Lean runtime invariant for the helper checks that do touch runtime discovery.
 
 ### Local—fuzz target (Linux or macOS, nightly)
 
@@ -372,12 +361,10 @@ any panic, exception kind, or sanitizer-detected fault is a finding.
 
 ### CI
 
-A dedicated workflow at `.github/workflows/sanitizer.yml` runs the focused Linux ASan commands
-above on `ubuntu-latest` nightly, runs the panic-containment fixture and callback trampoline,
-registry, string-callback, host-progress, worker-crash, worker-pool, and worker-streaming
-fixtures under ASan, and runs loader regressions outside ASan. The ASan job runs on every push
-to `main`, every pull request, a weekly cron, and manual dispatch. The ABI fuzz smoke is
-manual-only in the sanitizer workflow and is a release gate in `.github/workflows/release.yml`;
+A dedicated workflow at `.github/workflows/sanitizer.yml` runs the Rust-only Linux ASan command
+above on `ubuntu-latest` nightly and runs loader regressions outside ASan. The ASan job runs on
+every push to `main`, every pull request, a weekly cron, and manual dispatch. The ABI fuzz smoke
+is manual-only in the sanitizer workflow and is a release gate in `.github/workflows/release.yml`;
 it is not part of routine push/PR CI. The stable workspace matrix at `.github/workflows/ci.yml`
 is unchanged.
 
