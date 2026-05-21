@@ -19,18 +19,25 @@ does not reconstruct Lean semantic facts.
 - Rust stable (MSRV 1.91).
 - macOS or Linux. Windows is not supported.
 
-## Run an example
+## Start Here
 
-Build the in-tree fixture once. If you skip this step, the example panics at
-`LeanRuntime::init` with a fixture-missing diagnostic.
+If you want to ship a Rust crate that owns Lean source, start with the checked template:
+
+```sh
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
+cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shipped-lean-crate-worker
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
+```
+
+That path builds the Lean shared library in `build.rs`, opens it from Rust, and starts the same
+capability behind an app-owned worker child. The full recipe is
+[`docs/recipes/ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.md).
+
+The in-tree host tour is a workspace orientation example, not the canonical shipped-crate
+layout. Build the fixture once, then run the tour:
 
 ```sh
 cd fixtures/lean && lake build && cd -
-```
-
-Then run the tour:
-
-```sh
 cargo run -p lean-rs-host --example tour
 ```
 
@@ -39,7 +46,7 @@ open an import session, elaborate, kernel-check, run a bulk query, and call `Met
 
 Browse the eight examples and walkthroughs at
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the
-fastest path from "ran the tour" to "wrote my own consumer."
+host-stack tour path for sessions, kernel checks, and `MetaM`.
 
 If something goes wrong, re-run with `RUST_LOG=lean_rs=debug` for structured spans. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for the code catalogue and the in-process
@@ -47,9 +54,15 @@ capture API.
 
 ## The five published crates
 
-Most consumers start with `lean-rs-host`. Reach down to `lean-rs` only for custom
-same-process ABI work; reach up to `lean-rs-worker` only when you need process isolation,
-request timeouts, or memory cycling.
+Choose by job:
+
+| Job | Start with | Why |
+| --- | ---------- | --- |
+| Ship a Rust crate with Lean source | `lean-toolchain` in `build.rs`, then `lean-rs` or `lean-rs-worker` at runtime | Builds the Lean shared library during Cargo builds and hides Lake output paths. |
+| Call a Lean export from Rust in the same process | `lean-rs` | Opens a built capability and dispatches typed `@[export]` functions. |
+| Use imports, elaboration, kernel checks, declaration queries, or `MetaM` | `lean-rs-host` | Provides the theorem-prover session API for trusted in-process work. |
+| Run production worker-style tools | `lean-rs-worker` | Adds process isolation, live rows, diagnostics, timeouts, memory cycling, and local pooling. |
+| Bind raw Lean C symbols | `lean-rs-sys` | Advanced escape hatch for raw `unsafe` FFI work. |
 
 | Crate            | Role |
 | ---------------- | ---- |
@@ -90,7 +103,15 @@ See [`docs/recipes/ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.m
 and the checked-in template at
 [`templates/shipped-lean-crate/`](templates/shipped-lean-crate/).
 
-## Build your own low-level consumer
+Run the template:
+
+```sh
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
+cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shipped-lean-crate-worker
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
+```
+
+## Call a Lean export from Rust
 
 The minimum same-process setup is five pieces: a `Cargo.toml`, a `build.rs`, a Lake
 `lakefile.lean`, a Lean module, and a Rust `main.rs`. The example calls a user-authored
@@ -192,8 +213,10 @@ builds its own shim packages; your Lake package only declares your capability li
 
 | Command | What it shows |
 | ------- | ------------- |
+| `cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml` | Canonical shipped-crate template: build-time Lean capability plus same-process Rust call. |
+| `cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker` | Canonical shipped worker template: app-owned worker child plus built Lean capability. |
 | `cargo run -p lean-rs --example interop_callback` | Same-process Lean-to-Rust callback through `LeanCallbackHandle` without `lean-rs-host`. Recipe: [`downstream-interop.md`](docs/recipes/downstream-interop.md). |
-| `cargo run -p lean-rs --example string_streaming` | Same-process Lean-to-Rust string callbacks (`LeanCallbackHandle<LeanStringEvent>`). Recipe: [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md). |
+| `cargo run -p lean-rs --example string_streaming` | Advanced same-process Lean-to-Rust string callbacks (`LeanCallbackHandle<LeanStringEvent>`). Recipe: [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md). |
 | `cargo run -p lean-rs-worker --example worker_capability_runner` | Normal worker-capability path: builder, typed commands, live rows, diagnostics, timeouts, terminal completion, cycling. Recipe: [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md). |
 | `cargo run -p lean-rs-worker --example worker_streaming` | Process-isolated typed streaming command with parent-side watchdog and worker cycling. Recipe: [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md). |
 | `cargo run -p lean-rs-worker --example worker_pool` | Local multi-worker fanout via `LeanWorkerPool` and `LeanWorkerSessionLease`. |
@@ -210,8 +233,9 @@ contents.
 
 | Recipe | When to use |
 | ------ | ----------- |
+| [`ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.md) | Canonical shipped crate: build-time Lean capability, runtime open helper, and app-owned worker child packaging. |
 | [`downstream-interop.md`](docs/recipes/downstream-interop.md) | Rust-to-Lean exports plus same-process Lean-to-Rust callbacks without `lean-rs-host`. Advanced same-process path. |
-| [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md) | Same-process Lean-to-Rust string callbacks without `lean-rs-host`. |
+| [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md) | Advanced same-process Lean-to-Rust string callbacks without `lean-rs-host`. |
 | [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md) | Normal worker path: builder, typed commands, live rows, diagnostics, timeouts, cycling. |
 | [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md) | Lower-level worker recipe: process isolation, memory cycling, row streaming. |
 

@@ -7,30 +7,43 @@ mangling.
 
 ## Build Script Contract
 
-Use the checked link helper when a downstream `build.rs` wants typed errors:
+Use `CargoLeanCapability` for downstream crates that ship Lean source:
 
 ```rust
-use std::path::Path;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::emit_lean_link_directives_checked()?;
-    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
-    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+        .package("my_app")
+        .module("MyCapability")
+        .build()?;
     Ok(())
 }
 ```
 
-`emit_lean_link_directives_checked` emits the Lean link-search, link-lib, rpath,
-and rerun directives. If discovery fails, it returns `LinkDiagnostics` instead
-of degrading the failure to a Cargo warning. `emit_lean_link_directives` remains
-for callers that prefer the earlier warning-on-failure behavior.
+The helper emits the Lean link-search, link-lib, runtime rpath, Cargo rerun
+directives, and a deterministic compile-time environment variable:
+
+```text
+cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB=<built dylib path>
+```
+
+It runs `lake build MyCapability:shared`, resolves Lake's supported dylib
+naming conventions, and returns `BuiltLeanCapability` for build scripts that
+want to inspect the result.
+
+Lower-level helpers remain available for custom build flows:
+
+- `emit_lean_link_directives_checked` emits only Lean link directives and
+  returns typed `LinkDiagnostics` on discovery failure.
+- `emit_lean_link_directives` preserves the warning-on-failure behavior.
+- `build_lake_target` builds one Lake shared-library target and emits Cargo
+  rerun directives.
+- `build_lake_target_quiet` uses the same cache and path resolver without
+  emitting Cargo directives; `lean-rs-host` uses it when it materializes
+  bundled shims at runtime.
 
 `build_lake_target` emits `cargo:rerun-if-changed` lines for the Lake files and
 Lean source files it scans. It captures Lake stdout and stderr, so stdout stays
 limited to Cargo directives and caller-chosen `cargo:` lines.
-`build_lake_target_quiet` uses the same cache and path resolver without emitting
-Cargo directives; `lean-rs-host` uses it when it materializes bundled shims at
-runtime.
 
 `discover_lake_modules` is the runtime discovery companion for higher-level
 planners. It resolves the Lake root, discovers `lean_lib` module roots,
@@ -95,7 +108,9 @@ cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example interop_callback
 ```
 
-The full consumer recipe is
+The canonical shipped-crate recipe is
+[`docs/recipes/ship-crate-with-lean.md`](../recipes/ship-crate-with-lean.md).
+The advanced same-process callback recipe is
 [`docs/recipes/downstream-interop.md`](../recipes/downstream-interop.md).
 
 ## Scope

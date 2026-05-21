@@ -9,7 +9,7 @@ Use this crate when a downstream tool needs process isolation, live rows, diagno
 terminal summaries, request timeouts, or memory cycling. Use `lean-rs-host` directly for
 trusted in-process work that does not need those guarantees.
 
-## Quick start
+## Quick start in this repo
 
 ```sh
 cargo run -p lean-rs-worker --example worker_capability_runner
@@ -19,6 +19,11 @@ The runner is the normal downstream shape: `LeanWorkerCapabilityBuilder` manages
 typed commands carry requests and rows, diagnostics arrive on a separate sink, and explicit
 cycling resets process-global memory. The full recipe is
 [`docs/recipes/worker-capability-runner.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/worker-capability-runner.md).
+
+This in-tree example uses the workspace worker child. It is useful for learning the API and
+for testing `lean-rs-worker` itself.
+
+## Ship your own worker app
 
 For a shipped application, build the Lean capability in `build.rs` with
 `lean_toolchain::CargoLeanCapability`, embed the resulting path with
@@ -33,7 +38,8 @@ fn main() -> std::process::ExitCode {
 
 Point the builder at that binary with
 `LeanWorkerChild::sibling("my_app_lean_worker").env_override("MY_APP_LEAN_WORKER")`.
-See
+This is the production packaging path because Cargo does not install dependency binaries as
+part of your application. See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
 
 ## What the crate owns
@@ -118,6 +124,7 @@ first: `cargo build -p lean-rs-worker --bin lean-rs-worker-child`.
 ## Recipes and contracts
 
 - [`docs/recipes/worker-capability-runner.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/worker-capability-runner.md): normal downstream path.
+- [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md): canonical packaged app path with `build.rs`, runtime open helper, and app-owned worker child.
 - [`docs/recipes/worker-process-boundary.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/worker-process-boundary.md): lower-level process-boundary recipe.
 - [`docs/architecture/28-production-scale-release.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/28-production-scale-release.md): local scale contract and non-goals.
 

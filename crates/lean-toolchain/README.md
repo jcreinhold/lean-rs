@@ -15,9 +15,13 @@ enumerates Lean source files deterministically, and returns source-set
 fingerprints. This discovery layer does not know worker pools or downstream
 cache policy; `lean-rs-worker` uses it to build import/session batches.
 
-Most application code never depends on this crate directly—it shows up transitively through
-`lean-rs`. Pull it in if your own `build.rs` needs Lean discovery, fingerprint, or link
-diagnostics without depending on `lean-rs-sys` itself.
+Runtime application code usually does not depend on this crate directly: it shows up
+transitively through `lean-rs`. Downstream crates that ship Lean source commonly depend on it
+from `build.rs`, where `CargoLeanCapability` builds the Lake shared library and emits the
+compile-time path that runtime code opens through `lean-rs` or `lean-rs-worker`.
+Same-process apps pair that path with `LeanCapability`; worker apps pair it with
+`LeanWorkerChild` and an app-owned worker-child binary. See
+[`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
 
 ## Quick start in a downstream `build.rs`
 
@@ -27,12 +31,12 @@ lean-toolchain = "0.1"
 ```
 
 ```rust,ignore
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
         .package("my_app")
         .module("MyCapability")
         .build()?;
-    Ok::<(), Box<dyn std::error::Error>>(())
+    Ok(())
 }
 ```
 

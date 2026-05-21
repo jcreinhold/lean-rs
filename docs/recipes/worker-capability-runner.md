@@ -14,6 +14,11 @@ It uses the generic fixture under
 are shaped like a downstream tool, but the row schemas are deliberately small
 fixture schemas.
 
+If you are packaging your own application, start with
+[`ship-crate-with-lean.md`](ship-crate-with-lean.md). That recipe shows the
+`build.rs` helper, runtime capability open, and app-owned worker child binary.
+This page explains the worker capability behavior using the in-tree fixture.
+
 ## What The Example Shows
 
 The example opens a worker-backed capability with

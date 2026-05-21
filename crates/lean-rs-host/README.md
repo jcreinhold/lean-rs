@@ -59,12 +59,16 @@ lean-rs-host = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**: same as the `lean-rs` same-process setup; the checked helper reports Lean
-toolchain failures as typed diagnostics:
+**`build.rs`**: build your capability with the same shipped-crate helper used by
+`lean-rs` applications. `lean-rs-host` builds its bundled host shims on demand, but your
+consumer capability still needs a Lake shared-library target:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::emit_lean_link_directives_checked()?;
+    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+        .package("my_app")
+        .module("MyCapability")
+        .build()?;
     Ok(())
 }
 ```
@@ -128,12 +132,12 @@ fn main() -> LeanResult<()> {
 Build and run:
 
 ```sh
-(cd lean && lake build)
 cargo run
 ```
 
-Lake produces your `libmy__app_MyCapability.{dylib,so}`. `load_capabilities` also builds and
-opens the crate-bundled `LeanRsInterop` and `LeanRsHostShims` dylibs, sharing one Lean
+`CargoLeanCapability` runs `lake build MyCapability:shared`, emits Cargo rerun and link
+directives, and exposes the built dylib path at compile time. `load_capabilities` also builds
+and opens the crate-bundled `LeanRsInterop` and `LeanRsHostShims` dylibs, sharing one Lean
 runtime; per-module `initialize_*` functions are idempotent.
 
 ## Capability contract

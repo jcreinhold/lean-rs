@@ -3,6 +3,35 @@
 Use this recipe when a Rust crate owns Lean source code and should build on
 another developer's machine with ordinary Cargo commands.
 
+## Run The Template
+
+From the repository root:
+
+```sh
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
+cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shipped-lean-crate-worker
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
+```
+
+The first command builds the Lean shared library in `build.rs` and calls a Lean
+export in process. The second builds the app-owned worker child binary. The
+third starts that worker child and opens the same capability behind
+`lean-rs-worker`.
+
+The template uses path dependencies because it lives inside this repository.
+Published crates use normal version dependencies:
+
+```toml
+[dependencies]
+lean-rs = "0.1"
+lean-rs-worker = "0.1" # only for worker apps
+
+[build-dependencies]
+lean-toolchain = "0.1"
+```
+
+## File Layout
+
 The canonical shape is build-time first:
 
 1. `build.rs` builds the Lake shared-library target.
@@ -62,7 +91,8 @@ let capability = lean_rs::LeanCapability::from_build_env(
 )?;
 
 let module = capability.module()?;
-let answer = module.exported::<(), u64>("my_app_answer")?.call()?;
+let add = module.exported::<(u64, u64), u64>("my_app_add")?;
+let answer = add.call(40, 2)?;
 ```
 
 `LeanCapability` is a convenience layer over `LeanLibrary`: it resolves the
@@ -88,12 +118,13 @@ let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABI
     .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
     .package("my_app")
     .module("MyCapability");
-let mut capability = lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
-.worker_child(
-    lean_rs_worker::LeanWorkerChild::sibling("my_app_lean_worker")
-        .env_override("MY_APP_LEAN_WORKER"),
-)
-.open()?;
+let mut capability =
+    lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
+        .worker_child(
+            lean_rs_worker::LeanWorkerChild::sibling("my_app_lean_worker")
+                .env_override("MY_APP_LEAN_WORKER"),
+        )
+        .open()?;
 ```
 
 The builder uses the built dylib path, infers the Lake root from the standard
@@ -119,6 +150,21 @@ include = [
 
 Do not include `.lake/`; each downstream build should materialize Lake outputs
 for its local platform and Lean toolchain.
+
+## Gotchas
+
+- Use `env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")`, not a runtime
+  environment lookup, when the path is emitted by your own `build.rs`.
+- Include Lean sources, `lakefile.lean`, `lean-toolchain`, and
+  `lake-manifest.json` in the published crate.
+- Exclude `.lake/`; it is platform- and toolchain-specific build output.
+- Worker applications should ship an app-owned worker child binary that calls
+  `lean_rs_worker::run_worker_child_stdio`.
+- Do not rely on dependency binaries for the worker child; normal Cargo
+  packaging does not install them as part of your application.
+- Avoid nullary unboxed scalar exports in examples and app APIs. Give exported
+  functions at least one argument, as in `my_app_add`, so Lake emits a function
+  symbol rather than a persistent global.
 
 The checked-in template under `templates/shipped-lean-crate/` shows the full
 layout.

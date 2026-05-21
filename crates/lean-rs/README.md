@@ -12,6 +12,16 @@ theorem-prover host shims. If you want sessions, `MetaM`, and kernel-checked evi
 
 ## Quick start
 
+Inside the workspace, run the canonical shipped-crate template first:
+
+```sh
+cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
+```
+
+That template is the shortest executable path for a crate that owns Lean source. It uses
+`lean-toolchain` in `build.rs` and `LeanCapability` at runtime so application code does not
+hand-write Lake output paths or dylib env-var plumbing.
+
 The minimum consumer is five pieces: a Lean module declaring an `@[export]`, a `lakefile.lean`
 that builds it into a shared library, a Rust `build.rs` that emits the link and rpath
 directives, a `Cargo.toml`, and a Rust caller. All five together fit on one screen.
@@ -101,8 +111,11 @@ directly only for lower-level custom interop.
 
 See the complete shipping recipe at
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
+Worker applications use the same built capability path with
+`lean-rs-worker` and point `LeanWorkerChild` at an app-owned worker-child binary; the recipe
+shows that packaging path as well.
 
-For a complete low-level example that also lets Lean call a Rust callback, run
+For a complete advanced same-process example that also lets Lean call a Rust callback, run
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
 For a trusted same-process string callback example, run
