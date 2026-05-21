@@ -20,7 +20,10 @@ and the `String`/`Vec<String>` round-trip decoders. `session` covers
 
 `row_payload` covers the worker row transport hot path: JSON tree rows versus
 validated raw-JSON rows, typed command decode, row throughput, and allocation
-pressure. `worker_capability` covers the downstream-shaped worker fixture:
+pressure. It also contains `worker::row_payload::protocol_batching`, the
+prompt-81 guard that compares simulated per-row raw JSON frames with batched
+raw JSON frames before any batch protocol is added. `worker_capability` covers
+the downstream-shaped worker fixture:
 cold startup, first import, import-once streaming, cancellation latency,
 fatal-exit recovery, worker cycling, row throughput, and memory growth.
 
@@ -45,6 +48,12 @@ cargo bench -p lean-rs-worker --bench row_payload -- --save-baseline before
 # ... make row transport changes ...
 cargo bench -p lean-rs-worker --bench row_payload -- --baseline before
 ```
+
+Do not add public worker batch sinks or private row-batch protocol frames from
+a microbenchmark alone. Prompt 81 measured `protocol_batching` and the broader
+`typed_many_512` worker stream; batching did not improve the real worker path,
+so row delivery remains per-row for this release. See
+[`docs/architecture/22-worker-row-batching.md`](architecture/22-worker-row-batching.md).
 
 Capability-layer changes should also run the downstream-shaped scenario bench:
 

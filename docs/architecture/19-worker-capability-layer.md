@@ -171,6 +171,12 @@ downstream row types. The public `LeanWorkerDataRow { payload:
 serde_json::Value }` surface remains for schema-less tooling, but it is no
 longer on the typed command hot path.
 
+Prompt 81 measured private row batching and rejected it for this release. The
+microbenchmark and the broader 512-row worker stream did not justify adding
+`DataRowBatch` frames or a public batch sink. Row delivery therefore remains
+live and per-row until a workload proves that batching improves the full
+worker path, not just a synthetic frame loop.
+
 As of the downstream-shaped fixture work, `lean-rs-worker` has an operational
 proof that combines the verified pieces above without adding downstream
 business methods. The fixture exports command-like names `version`, `doctor`,

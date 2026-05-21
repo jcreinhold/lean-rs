@@ -92,6 +92,11 @@ struct BytesFrame {
     payload: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RawFrameBatch {
+    rows: Vec<RawFrame>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct LargeRow {
     i: u64,
@@ -203,6 +208,59 @@ fn owned_bytes_roundtrip(rows: &[String]) -> u64 {
     checksum
 }
 
+fn raw_value_per_row_protocol_roundtrip(rows: &[String]) -> u64 {
+    let mut checksum = 0_u64;
+    for (sequence, row) in rows.iter().enumerate() {
+        let envelope: RawEnvelope = serde_json::from_str(row).expect("raw envelope parses");
+        let frame = RawFrame {
+            stream: envelope.stream,
+            sequence: u64::try_from(sequence).expect("sequence fits"),
+            payload: envelope.payload,
+        };
+        let bytes = serde_json::to_vec(&frame).expect("raw frame serializes");
+        let decoded: RawFrame = serde_json::from_slice(&bytes).expect("raw frame decodes");
+        let payload: LargeRow = serde_json::from_str(decoded.payload.get()).expect("payload decodes");
+        checksum = checksum.saturating_add(payload.i);
+        checksum = checksum.saturating_add(u64::try_from(payload.blob.len()).expect("blob length fits"));
+    }
+    checksum
+}
+
+fn raw_value_batched_protocol_roundtrip(rows: &[String], batch_size: usize) -> u64 {
+    let mut checksum = 0_u64;
+    let mut batch = Vec::with_capacity(batch_size);
+    for (sequence, row) in rows.iter().enumerate() {
+        let envelope: RawEnvelope = serde_json::from_str(row).expect("raw envelope parses");
+        batch.push(RawFrame {
+            stream: envelope.stream,
+            sequence: u64::try_from(sequence).expect("sequence fits"),
+            payload: envelope.payload,
+        });
+        if batch.len() == batch_size {
+            checksum = checksum.saturating_add(raw_value_batch_roundtrip(&mut batch));
+        }
+    }
+    if !batch.is_empty() {
+        checksum = checksum.saturating_add(raw_value_batch_roundtrip(&mut batch));
+    }
+    checksum
+}
+
+fn raw_value_batch_roundtrip(batch: &mut Vec<RawFrame>) -> u64 {
+    let frame = RawFrameBatch {
+        rows: std::mem::take(batch),
+    };
+    let bytes = serde_json::to_vec(&frame).expect("raw batch serializes");
+    let decoded: RawFrameBatch = serde_json::from_slice(&bytes).expect("raw batch decodes");
+    let mut checksum = 0_u64;
+    for row in decoded.rows {
+        let payload: LargeRow = serde_json::from_str(row.payload.get()).expect("payload decodes");
+        checksum = checksum.saturating_add(payload.i);
+        checksum = checksum.saturating_add(u64::try_from(payload.blob.len()).expect("blob length fits"));
+    }
+    checksum
+}
+
 fn bench_representation(c: &mut Criterion) {
     let rows = large_rows(ROWS);
     let mut group = c.benchmark_group("worker::row_payload::representation");
@@ -220,6 +278,24 @@ fn bench_representation(c: &mut Criterion) {
     });
     group.bench_with_input(BenchmarkId::new("owned_bytes_json_frame", ROWS), &rows, |b, rows| {
         b.iter(|| black_box(owned_bytes_roundtrip(black_box(rows))));
+    });
+    group.finish();
+}
+
+fn bench_protocol_batching(c: &mut Criterion) {
+    let rows = large_rows(ROWS);
+    let mut group = c.benchmark_group("worker::row_payload::protocol_batching");
+    group.throughput(Throughput::Elements(u64::try_from(ROWS).expect("row count fits")));
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(2));
+    group.bench_with_input(BenchmarkId::new("per_row_raw_value", ROWS), &rows, |b, rows| {
+        b.iter(|| black_box(raw_value_per_row_protocol_roundtrip(black_box(rows))));
+    });
+    group.bench_with_input(BenchmarkId::new("batch_16_raw_value", ROWS), &rows, |b, rows| {
+        b.iter(|| black_box(raw_value_batched_protocol_roundtrip(black_box(rows), 16)));
+    });
+    group.bench_with_input(BenchmarkId::new("batch_64_raw_value", ROWS), &rows, |b, rows| {
+        b.iter(|| black_box(raw_value_batched_protocol_roundtrip(black_box(rows), 64)));
     });
     group.finish();
 }
@@ -273,6 +349,7 @@ fn bench_worker_stream(c: &mut Criterion) {
 
 fn criterion_benchmarks(c: &mut Criterion) {
     bench_representation(c);
+    bench_protocol_batching(c);
     bench_worker_stream(c);
 }
 
