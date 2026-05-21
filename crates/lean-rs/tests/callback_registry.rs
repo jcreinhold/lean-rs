@@ -77,7 +77,11 @@ fn consumer_library() -> LeanLibrary<'static> {
         "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
         interop_path.display(),
     );
-    let interop = LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly");
+    // Keep the RTLD_GLOBAL handle alive; Linux can otherwise unload the shim
+    // before the consumer initializer resolves its imported symbols.
+    let interop = Box::leak(Box::new(
+        LeanLibrary::open_globally(runtime, &interop_path).expect("interop dylib opens cleanly"),
+    ));
     let _interop_module = interop
         .initialize_module("lean_rs_interop_shims", "LeanRsInterop")
         .expect("interop root module initializes");
