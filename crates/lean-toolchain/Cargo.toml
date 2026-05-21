@@ -29,3 +29,6 @@ workspace = true
 
 [lib]
 doctest = false
+
+[package.metadata.docs.rs]
+targets = []

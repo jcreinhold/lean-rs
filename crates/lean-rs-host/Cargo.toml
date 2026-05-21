@@ -45,6 +45,9 @@ trybuild = "1"
 harness = false
 name = "session"
 
+[package.metadata.docs.rs]
+targets = []
+
 [lints]
 workspace = true
 

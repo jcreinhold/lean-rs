@@ -63,6 +63,9 @@ tracing-subscriber = { workspace = true }
 # module; it is not re-exported at the crate root.
 fuzzing = []
 
+[package.metadata.docs.rs]
+targets = []
+
 [dev-dependencies]
 # Heap profiler for `examples/alloc_probe.rs`. Installs `dhat::Alloc` as the
 # *Rust* global allocator; Lean's internal mimalloc (statically linked into

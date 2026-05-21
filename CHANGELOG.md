@@ -21,6 +21,8 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 
 - Fixed docs.rs builds by making `lean-rs-sys` emit documentation-only toolchain metadata when
   `DOCS_RS=1`, instead of probing for a Lean installation that docs.rs does not provide.
+- Added explicit docs.rs metadata for each public crate so docs.rs builds only the default
+  Linux target instead of relying on service defaults.
 - Added a `DOCS_RS=1` workspace documentation gate to CI and the release workflow.
 
 ## [0.1.1] — 2026-05-20
