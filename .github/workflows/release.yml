@@ -79,6 +79,7 @@ jobs:
           tool: cargo-nextest,cargo-public-api
 
       - name: Install actionlint
+        if: matrix.os == 'ubuntu-latest'
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
