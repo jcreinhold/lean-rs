@@ -100,6 +100,20 @@ pool snapshot fields and a slow-sink workload with bounded backpressure
 counters, parent RSS, child RSS, delivered rows, payload bytes, and terminal
 row counts.
 
+For the `lean-dup`-class readiness proof, run:
+
+```sh
+cargo run -p lean-rs-worker --example lean_dup_readiness
+```
+
+It runs generic `version`, `doctor`, `extract`, `features`, `index`, and
+`probe` command shapes through the import planner, local worker pool, session
+lease, and typed command facade. The example records diagnostics, progress,
+terminal summaries, timeout/cancellation/fatal-exit recovery, memory cycling,
+backpressure, pool stats, RSS samples when available, and an optional
+read-only comparison command. It does not define `lean-dup` row schemas or
+cache policy.
+
 For the source-of-truth worker capability recipe, run:
 
 ```sh
@@ -300,6 +314,7 @@ Architecture and policy docs live under [`docs/architecture/`](docs/architecture
 - [`24-lean-side-worker-streaming.md`](docs/architecture/24-lean-side-worker-streaming.md)—generic Lean-side worker envelope helpers for capability authors.
 - [`25-mathlib-scale-worker-fixture.md`](docs/architecture/25-mathlib-scale-worker-fixture.md)—the planner, pool, typed-command scale fixture and mathlib-module-list probe.
 - [`26-worker-pool-observability.md`](docs/architecture/26-worker-pool-observability.md)—pool snapshots and bounded row-delivery backpressure.
+- [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md)—readiness proof for replacing a subprocess-worker shape without importing downstream schemas.
 - [`downstream-interop.md`](docs/recipes/downstream-interop.md)—the advanced L1 recipe for Rust-to-Lean exported calls and same-process Lean-to-Rust callbacks without `lean-rs-host`.
 - [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md)—the advanced L1 recipe for same-process Lean-to-Rust string callbacks.
 - [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md)—the worker recipe for process isolation, memory cycling, and downstream row streaming.

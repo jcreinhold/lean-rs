@@ -177,4 +177,5 @@ that make pool reuse effective; see
 harden batching, data-plane choices, Lean-side streaming helpers,
 mathlib-scale fixtures, and pool observability. The observability record is
 [`26-worker-pool-observability.md`](26-worker-pool-observability.md). Prompts
-86-87 cover downstream readiness and the final scale contract.
+86-87 cover downstream readiness and the final scale contract. The readiness
+proof is [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md).

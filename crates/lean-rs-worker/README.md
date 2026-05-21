@@ -182,6 +182,21 @@ data, not downstream schemas. It also prints pool snapshots and a slow-sink
 workload so large-run operators can see row throughput, backpressure waits,
 parent RSS, child RSS, and terminal row counts.
 
+Run the `lean-dup`-class readiness proof:
+
+```sh
+cargo run -p lean-rs-worker --example lean_dup_readiness
+```
+
+That example runs generic `version`, `doctor`, `extract`, `features`,
+`index`, and `probe` command shapes through the planner, local pool, session
+lease, and typed command facade. It records rows, diagnostics, progress,
+terminal summaries, request timeout, cancellation, fatal-exit recovery,
+explicit cycling, backpressure counters, pool stats, RSS samples when
+available, and an optional read-only subprocess comparison command. It is not a
+`lean-dup` adapter: downstream crates still own schemas, semantic algorithms,
+cache validity, ranking, reporting, source provenance, and CLI policy.
+
 The recipe is
 [`docs/recipes/worker-capability-runner.md`](../../docs/recipes/worker-capability-runner.md).
 The lower-level process-boundary recipe is

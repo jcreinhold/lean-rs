@@ -121,6 +121,20 @@ Rows are not dropped under backpressure. A delivered row is still tentative
 until terminal success. Use the snapshot counters as operating evidence and
 terminal summaries as committed row counts.
 
+Prompt 86 adds a `lean-dup`-class readiness proof:
+
+```sh
+cargo run -p lean-rs-worker --example lean_dup_readiness
+```
+
+The example uses the planner, pool, session lease, and typed command facade for
+generic `version`, `doctor`, `extract`, `features`, `index`, and `probe`
+command shapes. It records row throughput, diagnostics, progress, terminal
+summaries, timeout/cancellation/fatal-exit recovery, explicit cycling,
+backpressure, pool stats, parent/child RSS when available, and optional
+subprocess comparison status. Treat its rows as generic fixture data, not
+downstream schemas.
+
 Prompt 47 release-hardening capture on macOS / Lean 4.29.1:
 
 ```text
