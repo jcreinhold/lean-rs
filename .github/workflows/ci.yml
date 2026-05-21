@@ -159,3 +159,9 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --workspace
+
+      - name: docs.rs compatibility doc build
+        env:
+          DOCS_RS: '1'
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --workspace

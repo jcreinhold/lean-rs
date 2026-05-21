@@ -17,6 +17,12 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
   `lean_toolchain::CargoLeanCapability`, `lean_rs::LeanCapability`,
   `lean_rs_worker::LeanWorkerChild`, and the `ship-crate-with-lean` recipe/template.
 
+### Documentation builds
+
+- Fixed docs.rs builds by making `lean-rs-sys` emit documentation-only toolchain metadata when
+  `DOCS_RS=1`, instead of probing for a Lean installation that docs.rs does not provide.
+- Added a `DOCS_RS=1` workspace documentation gate to CI and the release workflow.
+
 ## [0.1.1] — 2026-05-20
 
 Hardening release for the Lean/Rust interop stack and the first publish of

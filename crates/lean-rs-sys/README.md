@@ -38,7 +38,7 @@ row to `SUPPORTED_TOOLCHAINS`, add a CI matrix entry, run the local sweep
 
 ## Build environment
 
-`build.rs` discovers Lean via `lean --print-prefix` (or `LEAN_PREFIX` when set), emits the
+`build.rs` discovers Lean via `lean --print-prefix` (or `LEAN_SYSROOT` when set), emits the
 appropriate `cargo:rustc-link-*` directives, and exposes `LEAN_VERSION`, `LEAN_HEADER_PATH`,
 and `LEAN_HEADER_DIGEST` as build-time environment variables consumed by `consts.rs`. The
 default features (`dynamic`, `mimalloc`) link against `libleanshared`; the `static` feature is
@@ -46,6 +46,10 @@ available but requires extending the link set beyond what `lean.h` alone demands
 `metadata-only` feature is for crates such as `lean-toolchain` that need the supported-window
 metadata from build scripts without linking the build-script binary to `libleanshared`. See
 `build.rs` for details.
+
+When `DOCS_RS=1`, the build script emits documentation-only metadata for the latest supported
+Lean window entry and deliberately skips Lean discovery and link directives. docs.rs does not
+install Lean, so published API docs must not require a local toolchain.
 
 ## License
 

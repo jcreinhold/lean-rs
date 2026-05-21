@@ -35,6 +35,7 @@ cargo clippy --all-targets -- -D warnings
 cargo nextest run --workspace --profile ci
 cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
 Stop on any failure. `cargo test` (single-process) is not the gate—see
@@ -99,11 +100,12 @@ The workflow:
 1. Installs elan + Lean (head of the supported window).
 2. Asserts the tag matches the workspace version.
 3. Runs `fmt`, `clippy`, `nextest`, doctests, `doc` build.
-4. Runs the public-API diff against the committed baselines.
-5. Runs `cargo package --workspace --no-verify` to create the package tarballs.
-6. Publishes the five crates in order with 90s sleeps between steps.
-7. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
-8. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease automatically.
+4. Runs the docs.rs-compatible doc build with `DOCS_RS=1`.
+5. Runs the public-API diff against the committed baselines.
+6. Runs `cargo package --workspace --no-verify` to create the package tarballs.
+7. Publishes the five crates in order with 90s sleeps between steps.
+8. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
+9. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease automatically.
 
 **If the workflow fails after one crate has published**, crates.io versions are immutable—do
 not retry with the same version. Bump the failed crate's patch version, repeat steps 1–3, and

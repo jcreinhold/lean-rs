@@ -41,6 +41,11 @@ fn main() {
         );
     }
 
+    if env::var_os("DOCS_RS").is_some() {
+        emit_docs_rs_metadata();
+        return;
+    }
+
     let prefix = discover_lean_prefix();
     println!(
         "cargo:warning=lean-rs-sys: using Lean toolchain prefix {}",
@@ -79,6 +84,30 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-changed={}", header_path.display());
+    println!("cargo:rerun-if-changed=src/supported.rs");
+    println!("cargo:rerun-if-changed=build.rs");
+}
+
+/// docs.rs does not install Lean. Rustdoc still needs the compile-time
+/// constants from `src/consts.rs`, but it must not link or probe the local
+/// Lean runtime while rendering API docs.
+fn emit_docs_rs_metadata() {
+    let entry = SUPPORTED_TOOLCHAINS
+        .last()
+        .unwrap_or_else(|| panic!("lean-rs-sys: SUPPORTED_TOOLCHAINS is empty"));
+    let resolved_version = entry
+        .versions
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("lean-rs-sys: latest supported toolchain entry has no versions"));
+
+    println!("cargo:warning=lean-rs-sys: DOCS_RS=1; emitting documentation metadata without probing Lean");
+    println!("cargo:rustc-env=LEAN_VERSION={resolved_version}");
+    println!("cargo:rustc-env=LEAN_RESOLVED_VERSION={resolved_version}");
+    println!("cargo:rustc-env=LEAN_HEADER_PATH=<docs.rs synthetic lean.h>");
+    println!("cargo:rustc-env=LEAN_HEADER_DIGEST={}", entry.header_digest);
+    println!("cargo:rustc-cfg=lean_v_{}", cfg_token(resolved_version));
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-changed=src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
