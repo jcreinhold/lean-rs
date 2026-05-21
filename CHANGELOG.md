@@ -24,6 +24,8 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 - Added explicit docs.rs metadata for each public crate so docs.rs builds only the default
   Linux target instead of relying on service defaults.
 - Added a `DOCS_RS=1` workspace documentation gate to CI and the release workflow.
+- Included `lean-rs-worker` benchmark sources in the crate package so declared bench targets
+  do not produce packaging warnings.
 
 ## [0.1.1] — 2026-05-20
 
