@@ -12,7 +12,7 @@ theorem-prover host shims. If you want sessions, `MetaM`, and kernel-checked evi
 
 ## Quick start
 
-The minimum L1 consumer is five files: a Lean module declaring an `@[export]`, a `lakefile.lean`
+The minimum consumer is five pieces: a Lean module declaring an `@[export]`, a `lakefile.lean`
 that builds it into a shared library, a Rust `build.rs` that emits the link and rpath
 directives, a `Cargo.toml`, and a Rust caller. All five together fit on one screen.
 
@@ -31,22 +31,22 @@ lean-rs = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—one helper covers link-search, link-lib, and the runtime rpath into the Lean
-toolchain's `lib/lean` directory; the other builds the Lake shared-library target and records
-the dylib path for `main.rs`:
+**`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build,
+Cargo rerun triggers, and the compile-time dylib path:
 
 ```rust
-use std::path::Path;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::emit_lean_link_directives_checked()?;
-    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
-    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+        .package("my_app")
+        .module("MyCapability")
+        .build()?;
     Ok(())
 }
 ```
 
-**`lean/lakefile.lean`**—a minimal Lake package emitting one shared library:
+**`lean/lakefile.lean`**: a minimal Lake package emitting one shared library. Lake uses
+guillemets (`« »`) as its idiomatic quoting for package and library names; plain ASCII
+names also work.
 
 ```lean
 import Lake
@@ -66,15 +66,21 @@ lean_lib «MyCapability» where
 def add (a b : UInt64) : UInt64 := a + b
 ```
 
-**`src/main.rs`**—open the dylib, dispatch typed:
+**`src/main.rs`**—open the build-script capability, dispatch typed:
 
 ```rust
-use lean_rs::{LeanLibrary, LeanResult, LeanRuntime};
+use lean_rs::{LeanBuiltCapability, LeanCapability, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
-    let library = LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
-    let module = library.initialize_module("my_app", "MyCapability")?;
+    let capability = LeanCapability::from_build_env(
+        runtime,
+        LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
+            .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
+            .package("my_app")
+            .module("MyCapability"),
+    )?;
+    let module = capability.module()?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
     println!("{}", add.call(40, 2)?);  // 42
@@ -88,11 +94,15 @@ Build and run:
 cargo run
 ```
 
-`build_lake_target` hides Lake's shared-library facet, cache, and filename convention.
-`initialize_module(package, lib_name)` still takes unmangled names; the loader resolves the
-mangled initializer symbol internally.
+`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache,
+filename convention, and dylib-path env-var plumbing. `LeanCapability` keeps the built path
+and initializer names together at runtime. Use `build_lake_target` and `LeanLibrary`
+directly only for lower-level custom interop.
 
-For a complete low-level L1 example that also lets Lean call a Rust callback, run
+See the complete shipping recipe at
+[`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
+
+For a complete low-level example that also lets Lean call a Rust callback, run
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
 For a trusted same-process string callback example, run
@@ -109,7 +119,7 @@ producing wrong decodes at runtime.
 ## See also
 
 - Workspace overview, architecture docs, and the worked examples that exercise this surface end to end: [`lean-rs` repository](https://github.com/jcreinhold/lean-rs).
-- L2 host stack (sessions, kernel check, `MetaM`): [`lean-rs-host`](https://docs.rs/lean-rs-host).
+- Host stack (sessions, kernel check, `MetaM`): [`lean-rs-host`](https://docs.rs/lean-rs-host).
 - Build-script helper: [`lean-toolchain`](https://docs.rs/lean-toolchain).
 - Raw FFI escape hatch (advanced): [`lean-rs-sys`](https://docs.rs/lean-rs-sys).
 - Diagnostics and tracing: [`docs/diagnostics.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/diagnostics.md).

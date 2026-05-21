@@ -122,7 +122,9 @@ pub use crate::error::{
     LeanResult,
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
-pub use crate::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary, LeanModule};
+pub use crate::module::{
+    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanExported, LeanIo, LeanLibrary, LeanModule,
+};
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};
 

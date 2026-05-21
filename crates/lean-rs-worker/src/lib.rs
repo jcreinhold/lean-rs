@@ -15,7 +15,7 @@ mod protocol;
 mod session;
 mod supervisor;
 
-pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
+pub use capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild};
 pub use planning::{
     LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
     LeanWorkerModuleWork, LeanWorkerPlanMetadataExpectation, LeanWorkerPlannedBatch,
@@ -41,12 +41,24 @@ pub use supervisor::{
 
 /// Run the worker child process on stdin/stdout.
 ///
-/// This entry point exists for the `lean-rs-worker-child` binary. It is not
-/// the public worker API; the supervisor (`LeanWorker`) is the consumer
-/// surface over this child runner.
+/// Production applications can expose a tiny app-owned child binary:
+///
+/// ```ignore
+/// fn main() -> std::process::ExitCode {
+///     lean_rs_worker::run_worker_child_stdio()
+/// }
+/// ```
+///
+/// Parent processes should still use [`LeanWorker`],
+/// [`LeanWorkerCapabilityBuilder`], or [`LeanWorkerPool`]. This function is
+/// only the child-side binary entry point.
+pub fn run_worker_child_stdio() -> std::process::ExitCode {
+    child::run_stdio()
+}
+
 #[doc(hidden)]
 pub fn __run_child_stdio() -> std::process::ExitCode {
-    child::run_stdio()
+    run_worker_child_stdio()
 }
 
 #[doc(hidden)]

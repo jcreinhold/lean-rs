@@ -11,18 +11,18 @@ in [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is
 
 ## [Unreleased]
 
-### `lean-rs-worker`
+### Shipping Lean code
 
-- Added the production-scale worker contract docs for the local
-  `LeanWorkerPool` foundation: planner -> pool -> session lease -> typed
-  command -> live rows -> terminal summary -> pool stats. The contract records
-  remote workers, byte callbacks, object callbacks, and downstream schemas as
-  non-goals for the current scale release.
+- Added the canonical build-time shipping path for downstream crates with
+  `lean_toolchain::CargoLeanCapability`, `lean_rs::LeanCapability`,
+  `lean_rs_worker::LeanWorkerChild`, and the `ship-crate-with-lean` recipe/template.
 
 ## [0.1.1] — 2026-05-20
 
-Hardening release for the reusable Lean/Rust interop stack. This release keeps the same Lean
-toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
+Hardening release for the Lean/Rust interop stack and the first publish of
+**`lean-rs-worker`**, the worker-process boundary around `lean-rs-host`. After this release
+crates.io has all five workspace crates at 0.1.1. The Lean toolchain window stays at
+**4.26.0 through 4.29.1**.
 
 ### `lean-rs-sys` 0.1.1
 
@@ -83,6 +83,10 @@ toolchain window as 0.1.0: **4.26.0 through 4.29.1**.
   commands.
 - Added worker examples and recipes for process-boundary use, memory cycling, arbitrary
   downstream-owned rows, capability startup, typed commands, timeouts, and performance probes.
+- Added the production-scale worker contract docs for the local `LeanWorkerPool` foundation:
+  planner → pool → session lease → typed command → live rows → terminal summary → pool
+  stats. The contract records remote workers, byte callbacks, object callbacks, and
+  downstream schemas as non-goals for the current scale release.
 
 ## [0.1.0] — 2026-05-18
 

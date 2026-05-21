@@ -309,6 +309,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCapabili
 pub struct lean_rs_worker::LeanWorkerCapabilityBuilder
 impl lean_rs_worker::LeanWorkerCapabilityBuilder
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::expect_metadata(self, export: impl core::convert::Into<alloc::string::String>, request: serde_json::value::Value, expected: lean_rs_worker::LeanWorkerCapabilityMetadata) -> Self
+pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(spec: &lean_rs::module::capability::LeanBuiltCapability, imports: impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> core::result::Result<Self, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::new(project_root: impl core::convert::Into<std::path::PathBuf>, package: impl core::convert::Into<alloc::string::String>, lib_name: impl core::convert::Into<alloc::string::String>, imports: impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::open(self) -> core::result::Result<lean_rs_worker::LeanWorkerCapability, lean_rs_worker::LeanWorkerError>
@@ -317,6 +318,7 @@ pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::restart_policy(self, policy:
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::session_key(&self) -> lean_rs_worker::LeanWorkerSessionKey
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::startup_timeout(self, timeout: core::time::Duration) -> Self
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::validate_metadata(self, export: impl core::convert::Into<alloc::string::String>, request: serde_json::value::Value) -> Self
+pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::worker_child(self, child: lean_rs_worker::LeanWorkerChild) -> Self
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::worker_executable(self, path: impl core::convert::Into<std::path::PathBuf>) -> Self
 impl core::clone::Clone for lean_rs_worker::LeanWorkerCapabilityBuilder
 pub fn lean_rs_worker::LeanWorkerCapabilityBuilder::clone(&self) -> lean_rs_worker::LeanWorkerCapabilityBuilder
@@ -367,6 +369,28 @@ impl core::marker::Unpin for lean_rs_worker::LeanWorkerCapabilityMetadata
 impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerCapabilityMetadata
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerCapabilityMetadata
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerCapabilityMetadata
+pub struct lean_rs_worker::LeanWorkerChild
+impl lean_rs_worker::LeanWorkerChild
+pub fn lean_rs_worker::LeanWorkerChild::env_override(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs_worker::LeanWorkerChild::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_rs_worker::LeanWorkerChild::sibling(executable_name: impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for lean_rs_worker::LeanWorkerChild
+pub fn lean_rs_worker::LeanWorkerChild::clone(&self) -> lean_rs_worker::LeanWorkerChild
+impl core::cmp::Eq for lean_rs_worker::LeanWorkerChild
+impl core::cmp::PartialEq for lean_rs_worker::LeanWorkerChild
+pub fn lean_rs_worker::LeanWorkerChild::eq(&self, other: &lean_rs_worker::LeanWorkerChild) -> bool
+impl core::default::Default for lean_rs_worker::LeanWorkerChild
+pub fn lean_rs_worker::LeanWorkerChild::default() -> Self
+impl core::fmt::Debug for lean_rs_worker::LeanWorkerChild
+pub fn lean_rs_worker::LeanWorkerChild::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker::LeanWorkerChild
+impl core::marker::Freeze for lean_rs_worker::LeanWorkerChild
+impl core::marker::Send for lean_rs_worker::LeanWorkerChild
+impl core::marker::Sync for lean_rs_worker::LeanWorkerChild
+impl core::marker::Unpin for lean_rs_worker::LeanWorkerChild
+impl core::marker::UnsafeUnpin for lean_rs_worker::LeanWorkerChild
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker::LeanWorkerChild
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker::LeanWorkerChild
 pub struct lean_rs_worker::LeanWorkerCommandMetadata
 pub lean_rs_worker::LeanWorkerCommandMetadata::name: alloc::string::String
 pub lean_rs_worker::LeanWorkerCommandMetadata::version: alloc::string::String
@@ -1079,3 +1103,4 @@ pub trait lean_rs_worker::LeanWorkerProgressSink: core::marker::Send + core::mar
 pub fn lean_rs_worker::LeanWorkerProgressSink::report(&self, event: lean_rs_worker::LeanWorkerProgressEvent)
 pub trait lean_rs_worker::LeanWorkerTypedDataSink<Row>: core::marker::Send + core::marker::Sync
 pub fn lean_rs_worker::LeanWorkerTypedDataSink::report(&self, row: lean_rs_worker::LeanWorkerTypedDataRow<Row>)
+pub fn lean_rs_worker::run_worker_child_stdio() -> std::process::ExitCode

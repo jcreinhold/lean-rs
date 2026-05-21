@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use lean_rs::LeanBuiltCapability;
 use serde_json::Value;
 
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
@@ -42,7 +43,8 @@ pub struct LeanWorkerCapabilityBuilder {
     package: String,
     lib_name: String,
     imports: Vec<String>,
-    worker_executable: Option<PathBuf>,
+    built_dylib_path: Option<PathBuf>,
+    worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
@@ -67,12 +69,52 @@ impl LeanWorkerCapabilityBuilder {
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
-            worker_executable: None,
+            built_dylib_path: None,
+            worker_child: None,
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
             metadata_check: None,
         }
+    }
+
+    /// Create a builder from a build-script produced capability.
+    ///
+    /// The dylib path comes from `spec`; the Lake project root is inferred
+    /// from the standard `.lake/build/lib/<dylib>` layout so the worker child
+    /// can still initialize Lean's import search path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the built dylib path cannot be resolved,
+    /// the descriptor is missing package/module names, or the dylib is not
+    /// under a standard Lake build directory.
+    pub fn from_built_capability(
+        spec: &LeanBuiltCapability,
+        imports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, LeanWorkerError> {
+        let dylib_path = spec.dylib_path().map_err(|err| LeanWorkerError::Setup {
+            message: err.to_string(),
+        })?;
+        let project_root = infer_lake_project_root_from_dylib(&dylib_path)?;
+        let package = spec.package_name().ok_or_else(|| LeanWorkerError::Setup {
+            message: "LeanBuiltCapability is missing the Lake package name; call `.package(...)`".to_owned(),
+        })?;
+        let module = spec.module_name().ok_or_else(|| LeanWorkerError::Setup {
+            message: "LeanBuiltCapability is missing the root Lean module name; call `.module(...)`".to_owned(),
+        })?;
+        Ok(Self {
+            project_root,
+            package: package.to_owned(),
+            lib_name: module.to_owned(),
+            imports: imports.into_iter().map(Into::into).collect(),
+            built_dylib_path: Some(dylib_path),
+            worker_child: None,
+            startup_timeout: None,
+            request_timeout: None,
+            restart_policy: None,
+            metadata_check: None,
+        })
     }
 
     /// Use an explicit `lean-rs-worker-child` executable.
@@ -81,7 +123,14 @@ impl LeanWorkerCapabilityBuilder {
     /// is not discoverable beside the current executable.
     #[must_use]
     pub fn worker_executable(mut self, path: impl Into<PathBuf>) -> Self {
-        self.worker_executable = Some(path.into());
+        self.worker_child = Some(LeanWorkerChild::path(path));
+        self
+    }
+
+    /// Resolve the worker executable with a packaged worker-child locator.
+    #[must_use]
+    pub fn worker_child(mut self, child: LeanWorkerChild) -> Self {
+        self.worker_child = Some(child);
         self
     }
 
@@ -186,11 +235,14 @@ impl LeanWorkerCapabilityBuilder {
     /// child cannot be resolved or spawned, the worker fails startup/health,
     /// the session cannot open, or metadata validation fails.
     pub fn open(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
-        let dylib_path = lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
-            .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?;
+        let dylib_path = match self.built_dylib_path {
+            Some(path) => path,
+            None => lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
+                .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?,
+        };
         let worker_executable = self
-            .worker_executable
-            .map_or_else(resolve_default_worker_executable, Ok)?;
+            .worker_child
+            .map_or_else(resolve_default_worker_executable, |child| child.resolve())?;
 
         let mut config = LeanWorkerConfig::new(worker_executable);
         if let Some(timeout) = self.startup_timeout {
@@ -329,36 +381,133 @@ struct CapabilityMetadataCheck {
     expected: Option<LeanWorkerCapabilityMetadata>,
 }
 
-fn resolve_default_worker_executable() -> Result<PathBuf, LeanWorkerError> {
-    if let Some(value) = env::var_os(WORKER_CHILD_ENV) {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Ok(path);
+/// Locator for an app-owned worker child executable.
+///
+/// Dependency binaries are not automatically installed with downstream
+/// applications. Production apps should ship a tiny binary that calls
+/// [`crate::run_worker_child_stdio`] and point the capability builder at it
+/// through this locator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerChild {
+    executable_name: Option<String>,
+    explicit_path: Option<PathBuf>,
+    env_var: Option<String>,
+}
+
+impl LeanWorkerChild {
+    /// Locate a worker child beside the current executable, or beside the
+    /// Cargo profile directory during tests and `cargo run`.
+    #[must_use]
+    pub fn sibling(executable_name: impl Into<String>) -> Self {
+        Self {
+            executable_name: Some(with_exe_suffix(executable_name.into())),
+            explicit_path: None,
+            env_var: None,
         }
-        return Err(LeanWorkerError::WorkerChildUnresolved { tried: vec![path] });
     }
 
-    let executable_name = format!("lean-rs-worker-child{}", env::consts::EXE_SUFFIX);
+    /// Use an explicit worker child path.
+    #[must_use]
+    pub fn path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            executable_name: None,
+            explicit_path: Some(path.into()),
+            env_var: None,
+        }
+    }
+
+    /// Add an environment-variable override for launchers and tests.
+    #[must_use]
+    pub fn env_override(mut self, env_var: impl Into<String>) -> Self {
+        self.env_var = Some(env_var.into());
+        self
+    }
+
+    fn resolve(&self) -> Result<PathBuf, LeanWorkerError> {
+        let mut tried = Vec::new();
+        if let Some(env_var) = &self.env_var
+            && let Some(value) = env::var_os(env_var)
+        {
+            let path = PathBuf::from(value);
+            if path.is_file() {
+                return Ok(path);
+            }
+            tried.push(path);
+            return Err(LeanWorkerError::WorkerChildUnresolved { tried });
+        }
+        if let Some(path) = &self.explicit_path {
+            return Ok(path.clone());
+        }
+
+        let executable_name = self
+            .executable_name
+            .clone()
+            .unwrap_or_else(|| with_exe_suffix("lean-rs-worker-child".to_owned()));
+        tried.extend(candidate_sibling_worker_paths(&executable_name));
+        if executable_name == with_exe_suffix("lean-rs-worker-child".to_owned())
+            && let Some(path) = try_build_workspace_worker_child(&executable_name, &mut tried)
+        {
+            return Ok(path);
+        }
+        for path in dedup_paths(&tried) {
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+        Err(LeanWorkerError::WorkerChildUnresolved { tried })
+    }
+}
+
+impl Default for LeanWorkerChild {
+    fn default() -> Self {
+        Self::sibling("lean-rs-worker-child").env_override(WORKER_CHILD_ENV)
+    }
+}
+
+fn resolve_default_worker_executable() -> Result<PathBuf, LeanWorkerError> {
+    LeanWorkerChild::default().resolve()
+}
+
+fn candidate_sibling_worker_paths(executable_name: &str) -> Vec<PathBuf> {
     let mut tried = Vec::new();
     if let Ok(current_exe) = env::current_exe() {
         if let Some(dir) = current_exe.parent() {
-            tried.push(dir.join(&executable_name));
+            tried.push(dir.join(executable_name));
         }
         if let Some(profile_dir) = current_exe.parent().and_then(Path::parent) {
-            tried.push(profile_dir.join(&executable_name));
+            tried.push(profile_dir.join(executable_name));
         }
     }
+    tried
+}
 
-    if let Some(path) = try_build_workspace_worker_child(&executable_name, &mut tried) {
-        return Ok(path);
+fn with_exe_suffix(mut executable_name: String) -> String {
+    if !env::consts::EXE_SUFFIX.is_empty() && !executable_name.ends_with(env::consts::EXE_SUFFIX) {
+        executable_name.push_str(env::consts::EXE_SUFFIX);
     }
+    executable_name
+}
 
-    for path in dedup_paths(&tried) {
-        if path.is_file() {
-            return Ok(path);
+fn infer_lake_project_root_from_dylib(dylib_path: &Path) -> Result<PathBuf, LeanWorkerError> {
+    let lib_dir = dylib_path.parent();
+    let build_dir = lib_dir.and_then(Path::parent);
+    let lake_dir = build_dir.and_then(Path::parent);
+    let project_root = lake_dir.and_then(Path::parent);
+    match (lib_dir, build_dir, lake_dir, project_root) {
+        (Some(lib), Some(build), Some(lake), Some(root))
+            if lib.file_name().is_some_and(|name| name == "lib")
+                && build.file_name().is_some_and(|name| name == "build")
+                && lake.file_name().is_some_and(|name| name == ".lake") =>
+        {
+            Ok(root.to_path_buf())
         }
+        _ => Err(LeanWorkerError::Setup {
+            message: format!(
+                "built capability dylib '{}' is not under a standard .lake/build/lib directory",
+                dylib_path.display()
+            ),
+        }),
     }
-    Err(LeanWorkerError::WorkerChildUnresolved { tried })
 }
 
 fn try_build_workspace_worker_child(executable_name: &str, tried: &mut Vec<PathBuf>) -> Option<PathBuf> {

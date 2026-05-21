@@ -28,7 +28,8 @@ mod fingerprint;
 mod modules;
 
 pub use build_helpers::{
-    build_lake_target, build_lake_target_quiet, emit_lean_link_directives, emit_lean_link_directives_checked,
+    BuiltLeanCapability, CargoLeanCapability, build_lake_target, build_lake_target_quiet, capability_env_var,
+    emit_lean_link_directives, emit_lean_link_directives_checked,
 };
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};

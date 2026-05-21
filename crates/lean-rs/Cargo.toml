@@ -31,6 +31,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+lean-toolchain = { workspace = true }
 lean-rs-sys = { workspace = true }
 libloading = "0.8"
 # Symbol-table walk in `module::library` distinguishes Lean nullary-constant
@@ -68,7 +69,6 @@ fuzzing = []
 # `libleanrt.a`) is a separate allocator and unaffected. Dev-only — never
 # pulled into the published library build.
 dhat = "0.3"
-lean-toolchain = { workspace = true }
 # Criterion drives the steady-state hot-path and session-path baselines
 # under `benches/`. Cold paths (runtime init, library open, module init)
 # are once-per-process and live in `examples/cold_probe.rs` instead —

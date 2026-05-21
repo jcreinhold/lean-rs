@@ -549,6 +549,48 @@ impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
 pub mod lean_rs::module
+pub struct lean_rs::module::LeanBuiltCapability
+impl lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
+pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
+pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
+pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+impl core::clone::Clone for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
+impl core::cmp::Eq for lean_rs::LeanBuiltCapability
+impl core::cmp::PartialEq for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::eq(&self, other: &lean_rs::LeanBuiltCapability) -> bool
+impl core::convert::From<&lean_toolchain::build_helpers::BuiltLeanCapability> for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::from(value: &lean_toolchain::build_helpers::BuiltLeanCapability) -> Self
+impl core::fmt::Debug for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanBuiltCapability
+impl core::marker::Freeze for lean_rs::LeanBuiltCapability
+impl core::marker::Send for lean_rs::LeanBuiltCapability
+impl core::marker::Sync for lean_rs::LeanBuiltCapability
+impl core::marker::Unpin for lean_rs::LeanBuiltCapability
+impl core::marker::UnsafeUnpin for lean_rs::LeanBuiltCapability
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanBuiltCapability
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanBuiltCapability
+pub struct lean_rs::module::LeanCapability<'lean>
+impl<'lean> lean_rs::LeanCapability<'lean>
+pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
+pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
+pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
+impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanCapability<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanCapability<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanCapability<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapability<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapability<'lean>
 pub struct lean_rs::module::LeanExported<'lean, 'lib, Args, R>
 impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11, a12: A12) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
@@ -997,6 +1039,33 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
+pub struct lean_rs::LeanBuiltCapability
+impl lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
+pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
+pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
+pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+impl core::clone::Clone for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
+impl core::cmp::Eq for lean_rs::LeanBuiltCapability
+impl core::cmp::PartialEq for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::eq(&self, other: &lean_rs::LeanBuiltCapability) -> bool
+impl core::convert::From<&lean_toolchain::build_helpers::BuiltLeanCapability> for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::from(value: &lean_toolchain::build_helpers::BuiltLeanCapability) -> Self
+impl core::fmt::Debug for lean_rs::LeanBuiltCapability
+pub fn lean_rs::LeanBuiltCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanBuiltCapability
+impl core::marker::Freeze for lean_rs::LeanBuiltCapability
+impl core::marker::Send for lean_rs::LeanBuiltCapability
+impl core::marker::Sync for lean_rs::LeanBuiltCapability
+impl core::marker::Unpin for lean_rs::LeanBuiltCapability
+impl core::marker::UnsafeUnpin for lean_rs::LeanBuiltCapability
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanBuiltCapability
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanBuiltCapability
 pub struct lean_rs::LeanCallbackHandle<P: lean_rs::callback::LeanCallbackPayload>
 impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>
 pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
@@ -1034,6 +1103,21 @@ impl core::marker::Unpin for lean_rs::error::LeanCancelled
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanCancelled
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanCancelled
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
+pub struct lean_rs::LeanCapability<'lean>
+impl<'lean> lean_rs::LeanCapability<'lean>
+pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
+pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
+pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
+pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
+impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
+impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
+impl<'lean> !core::marker::Sync for lean_rs::LeanCapability<'lean>
+impl<'lean> core::marker::Unpin for lean_rs::LeanCapability<'lean>
+impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanCapability<'lean>
+impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapability<'lean>
+impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapability<'lean>
 pub struct lean_rs::LeanDeclaration<'lean>
 impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self

@@ -7,14 +7,30 @@ Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability.
 bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` /
 `PooledSession` reuse helper.
 
-Built on top of [`lean-rs`](https://docs.rs/lean-rs), the L1 typed-FFI primitive. The opaque
+Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed-FFI primitive. The opaque
 semantic handles `LeanName`, `LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`;
 this crate consumes them through `use lean_rs::{...}`. If you only need to call typed
-`@[export]` Lean functions from Rust, depend on `lean-rs` directly—it is the typed-FFI
+`@[export]` Lean functions from Rust, depend on `lean-rs` directly: it is the typed-FFI
 minimum and has no Lean-side shim contract.
 
+**You write zero shim exports yourself.** `lean-rs-host` bundles its host and generic
+interop shim packages and builds them on demand. Your `lakefile.lean` declares only your
+own capability library; you do not `require lean_rs_host_shims`, write
+`lean_rs_host_*` exports, or import the shim package from Lean.
+
+The three central types nest:
+
+```text
+LeanHost            opened once per Lean runtime
+  └─ LeanCapabilities   loaded once per (consumer dylib + shim dylib) pair
+       └─ LeanSession   one per call, returned from caps.session(...)
+```
+
+Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into
+the same capability, and open a fresh `LeanSession` for each unit of work.
+
 Supports the same Lean toolchain window as
-[`lean-rs-sys`](https://docs.rs/lean-rs-sys)—currently **Lean 4.26.0 through 4.29.1**; see
+[`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.26.0 through 4.29.1**; see
 [`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md).
 The capability loader transparently handles the Lake naming-convention change between Lean
 4.26 and 4.27 (dylib filename and module-initializer symbol shape), so consumer
@@ -22,9 +38,9 @@ The capability loader transparently handles the Lake naming-convention change be
 
 ## Quick start
 
-The L2 setup adds a `lean-rs-host` dependency to `Cargo.toml`. The crate ships the matching
-host and generic interop shim sources and builds them on demand, so your `lakefile.lean`
-declares only your own capability library. Everything else mirrors the L1 setup in
+Add a `lean-rs-host` dependency to `Cargo.toml`. The crate ships the matching host and
+generic interop shim sources and builds them on demand, so your `lakefile.lean` declares
+only your own capability library. Everything else mirrors the same-process setup in
 [`lean-rs`'s README](https://docs.rs/lean-rs).
 
 **`Cargo.toml`**:
@@ -43,7 +59,7 @@ lean-rs-host = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—unchanged from the L1 setup; the checked helper reports Lean
+**`build.rs`**: same as the `lean-rs` same-process setup; the checked helper reports Lean
 toolchain failures as typed diagnostics:
 
 ```rust
@@ -53,8 +69,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**`lean/lakefile.lean`**—declares your capability target. Do not add a
+**`lean/lakefile.lean`**: declares your capability target. Do not add a
 `lean_rs_host_shims` require; `lean-rs-host` loads its bundled shims separately.
+Lake uses guillemets (`« »`) as its idiomatic quoting for package and library names;
+plain ASCII names also work.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check
 calls can receive a borrowed `LeanProgressSink` for live in-thread progress
@@ -71,8 +89,7 @@ lean_lib «MyCapability» where
   defaultFacets := #[LeanLib.sharedFacet]
 ```
 
-**`lean/MyCapability.lean`**—one Rust-callable export (the host stack also exposes the
-shim contract's `@[export]` symbols, but you don't need to write any of those yourself):
+**`lean/MyCapability.lean`**: one Rust-callable export.
 
 ```lean
 @[export my_app_square]
@@ -121,11 +138,9 @@ runtime; per-module `initialize_*` functions are idempotent.
 
 ## Capability contract
 
-The full per-symbol contract—each Lean signature, the Rust call site it maps to, and the
-typed `LeanSession::*` method on top—lives at
+The full per-symbol contract (each Lean signature, the Rust call site it maps to, and the
+typed `LeanSession::*` method on top) lives at
 [`docs/lean-rs-host-capability-contract.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/lean-rs-host-capability-contract.md).
-Your `lean_lib` does **not** need to `import LeanRsHostShims`; the Rust side builds and
-loads the bundled shim dylibs and then dispatches through their fixed symbols.
 
 ## Caveats
 

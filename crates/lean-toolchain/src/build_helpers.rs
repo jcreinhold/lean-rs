@@ -6,15 +6,14 @@
 //! embedders** whose own `build.rs` would otherwise duplicate the link-policy
 //! probe, the directive set, and the runtime rpath logic.
 //!
-//! Usage in a downstream `build.rs` for a pure Rust-to-Lean export consumer:
+//! Usage in a downstream `build.rs` for a shipped Rust-to-Lean capability:
 //!
 //! ```ignore
-//! use std::path::Path;
-//!
 //! fn main() {
-//!     lean_toolchain::emit_lean_link_directives_checked()?;
-//!     let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
-//!     println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+//!     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+//!         .package("my_app")
+//!         .module("MyCapability")
+//!         .build()?;
 //!     Ok::<(), Box<dyn std::error::Error>>(())
 //! }
 //! ```
@@ -148,6 +147,187 @@ pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathB
 pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
     let mut runner = RealLakeRunner;
     build_lake_target_with_runner(project_root, target_name, &mut runner, CargoMetadata::Suppress)
+}
+
+/// Build-script helper for shipping a Rust crate with bundled Lean code.
+///
+/// This is the canonical downstream `build.rs` entry point. It composes
+/// [`emit_lean_link_directives_checked`], [`build_lake_target`], and the
+/// `cargo:rustc-env=...` directive that carries the built capability path
+/// into Rust code at compile time.
+///
+/// ```ignore
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+///         .package("my_app")
+///         .module("MyCapability")
+///         .build()?;
+///     Ok(())
+/// }
+/// ```
+#[derive(Clone, Debug)]
+pub struct CargoLeanCapability {
+    project_root: PathBuf,
+    target_name: String,
+    package: Option<String>,
+    module: Option<String>,
+    env_var: Option<String>,
+}
+
+impl CargoLeanCapability {
+    /// Create a build helper for a Lake project and `lean_lib` target.
+    #[must_use]
+    pub fn new(project_root: impl Into<PathBuf>, target_name: impl Into<String>) -> Self {
+        Self {
+            project_root: project_root.into(),
+            target_name: target_name.into(),
+            package: None,
+            module: None,
+            env_var: None,
+        }
+    }
+
+    /// Set the Lake package name used by the module initializer.
+    ///
+    /// If omitted, the helper infers the package from `lake-manifest.json` or
+    /// `lakefile.lean`, matching [`build_lake_target`].
+    #[must_use]
+    pub fn package(mut self, package: impl Into<String>) -> Self {
+        self.package = Some(package.into());
+        self
+    }
+
+    /// Set the root Lean module name initialized by Rust.
+    ///
+    /// Defaults to the Lake target name.
+    #[must_use]
+    pub fn module(mut self, module: impl Into<String>) -> Self {
+        self.module = Some(module.into());
+        self
+    }
+
+    /// Override the generated Cargo environment variable name.
+    ///
+    /// The default is `LEAN_RS_CAPABILITY_<TARGET>_DYLIB`, with the target
+    /// converted to screaming snake case.
+    #[must_use]
+    pub fn env_var(mut self, env_var: impl Into<String>) -> Self {
+        self.env_var = Some(env_var.into());
+        self
+    }
+
+    /// Emit link directives, build the Lake shared library, and emit the
+    /// `cargo:rustc-env` directive for the built dylib.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LinkDiagnostics`] if Lean cannot be discovered, Lake cannot
+    /// build the target, or the target output cannot be resolved.
+    pub fn build(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        emit_lean_link_directives_checked()?;
+        let dylib_path = build_lake_target(&self.project_root, &self.target_name)?;
+        self.finish(dylib_path, CargoMetadata::Emit)
+    }
+
+    /// Same as [`Self::build`] without printing Cargo directives.
+    ///
+    /// This exists for tests and internal callers. Downstream `build.rs`
+    /// scripts should use [`Self::build`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LinkDiagnostics`] if Lake cannot build the target or the
+    /// target output cannot be resolved.
+    pub fn build_quiet(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let dylib_path = build_lake_target_quiet(&self.project_root, &self.target_name)?;
+        self.finish(dylib_path, CargoMetadata::Suppress)
+    }
+
+    fn finish(
+        self,
+        dylib_path: PathBuf,
+        cargo_metadata: CargoMetadata,
+    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let project_root =
+            fs::canonicalize(&self.project_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+                project_root: self.project_root.clone(),
+                target_name: self.target_name.clone(),
+                reason: format!(
+                    "could not canonicalize project root {} ({err})",
+                    self.project_root.display()
+                ),
+            })?;
+        let package = match self.package {
+            Some(package) => package,
+            None => infer_package_name(&project_root, &self.target_name)?,
+        };
+        let module = self.module.unwrap_or_else(|| self.target_name.clone());
+        let env_var = self.env_var.unwrap_or_else(|| capability_env_var(&self.target_name));
+        cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
+        Ok(BuiltLeanCapability {
+            dylib_path,
+            env_var,
+            package,
+            module,
+            target_name: self.target_name,
+            project_root,
+        })
+    }
+}
+
+/// Metadata produced by [`CargoLeanCapability`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuiltLeanCapability {
+    dylib_path: PathBuf,
+    env_var: String,
+    package: String,
+    module: String,
+    target_name: String,
+    project_root: PathBuf,
+}
+
+impl BuiltLeanCapability {
+    /// Built shared-library path.
+    #[must_use]
+    pub fn dylib_path(&self) -> &Path {
+        &self.dylib_path
+    }
+
+    /// Cargo environment variable that stores the built dylib path.
+    #[must_use]
+    pub fn env_var(&self) -> &str {
+        &self.env_var
+    }
+
+    /// Lake package name.
+    #[must_use]
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+
+    /// Root Lean module initialized by Rust.
+    #[must_use]
+    pub fn module(&self) -> &str {
+        &self.module
+    }
+
+    /// Lake target name.
+    #[must_use]
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    /// Canonical Lake project root.
+    #[must_use]
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+}
+
+/// Default Cargo environment variable for a Lean capability target.
+#[must_use]
+pub fn capability_env_var(target_name: &str) -> String {
+    format!("LEAN_RS_CAPABILITY_{}_DYLIB", screaming_snake(target_name))
 }
 
 fn emit_for(info: &ToolchainInfo) {
@@ -404,6 +584,21 @@ fn package_name_from_lakefile(
     })
 }
 
+fn infer_package_name(project_root: &Path, target_name: &str) -> Result<String, LinkDiagnostics> {
+    let manifest_path = project_root.join("lake-manifest.json");
+    match fs::read(&manifest_path) {
+        Ok(manifest_bytes) => package_name_from_manifest(project_root, target_name, &manifest_path, &manifest_bytes),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            package_name_from_lakefile(project_root, target_name, &project_root.join("lakefile.lean"))
+        }
+        Err(err) => Err(LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("could not read {} ({err})", manifest_path.display()),
+        }),
+    }
+}
+
 fn normalize_lake_identifier(raw: &str) -> String {
     raw.trim()
         .trim_matches('«')
@@ -522,6 +717,32 @@ fn sanitize_target_name(target_name: &str) -> String {
         .collect()
 }
 
+fn screaming_snake(input: &str) -> String {
+    let mut out = String::new();
+    let mut prev_was_sep = true;
+    let mut prev_was_lower_or_digit = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if ch.is_ascii_uppercase() && prev_was_lower_or_digit && !prev_was_sep {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_uppercase());
+            prev_was_sep = false;
+            prev_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        } else {
+            if !prev_was_sep {
+                out.push('_');
+            }
+            prev_was_sep = true;
+            prev_was_lower_or_digit = false;
+        }
+    }
+    while out.ends_with('_') {
+        out.pop();
+    }
+    if out.is_empty() { "CAPABILITY".to_owned() } else { out }
+}
+
 fn cache_key(target_name: &str, package_name: &str, manifest_digest: &str, source_set: &SourceSet) -> String {
     format!(
         "target={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\n",
@@ -573,7 +794,10 @@ fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
-    use super::{CargoMetadata, LakeRun, LakeRunner, build_lake_target_with_runner, command_detail};
+    use super::{
+        CargoLeanCapability, CargoMetadata, LakeRun, LakeRunner, build_lake_target_with_runner, capability_env_var,
+        command_detail,
+    };
     use crate::LinkDiagnostics;
     use std::cell::Cell;
     use std::fs;
@@ -793,5 +1017,38 @@ mod tests {
         let detail = command_detail(&vec![b'x'; 4096], b"");
         assert!(detail.len() <= 1027);
         assert!(detail.ends_with("..."));
+    }
+
+    #[test]
+    fn capability_env_var_is_deterministic() {
+        assert_eq!(
+            capability_env_var("MyCapability"),
+            "LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"
+        );
+        assert_eq!(
+            capability_env_var("lean-dup_index"),
+            "LEAN_RS_CAPABILITY_LEAN_DUP_INDEX_DYLIB"
+        );
+    }
+
+    #[test]
+    fn cargo_capability_build_quiet_returns_metadata() {
+        let root = make_project("cargo-capability", "MyCapability");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let dylib = build_lake_target_with_runner(&root, "MyCapability", &mut runner, CargoMetadata::Suppress)
+            .expect("build target");
+        let built = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .env_var("MY_CAPABILITY_DYLIB")
+            .build_quiet()
+            .expect("cargo helper build");
+
+        assert_eq!(built.dylib_path(), dylib.as_path());
+        assert_eq!(built.env_var(), "MY_CAPABILITY_DYLIB");
+        assert_eq!(built.package(), "my_pkg");
+        assert_eq!(built.module(), "MyCapability");
+        assert_eq!(built.target_name(), "MyCapability");
+        assert!(built.project_root().is_absolute());
     }
 }

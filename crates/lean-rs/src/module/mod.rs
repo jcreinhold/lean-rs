@@ -26,11 +26,13 @@
 //! boundary as [`LeanExported`] and [`LeanIo`]; see `exported` for
 //! the call shape.
 
+pub(crate) mod capability;
 pub(crate) mod exported;
 pub(crate) mod initializer;
 pub(crate) mod library;
 pub(crate) mod loaded;
 
+pub use capability::{LeanBuiltCapability, LeanCapability};
 pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;

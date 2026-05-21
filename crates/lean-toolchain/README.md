@@ -27,21 +27,28 @@ lean-toolchain = "0.1"
 ```
 
 ```rust,ignore
-use std::path::Path;
-
 fn main() {
-    lean_toolchain::emit_lean_link_directives_checked()?;
-    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
-    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+        .package("my_app")
+        .module("MyCapability")
+        .build()?;
     Ok::<(), Box<dyn std::error::Error>>(())
 }
 ```
 
-`build_lake_target` also covers Lake targets that depend on the generic
+`CargoLeanCapability` emits Lean link directives, Cargo rerun triggers, runs
+`lake build <target>:shared`, resolves the built dylib path, and emits a
+deterministic `LEAN_RS_CAPABILITY_<TARGET>_DYLIB` compile-time environment
+variable. `build_lake_target` remains available as the lower-level escape
+hatch and also covers Lake targets that depend on the generic
 `lean-rs-interop-shims` package. It reports cache hits and misses on stderr,
 emits only `cargo:` directives on stdout, and returns typed `LinkDiagnostics`
 for missing `lake`, target lookup failures, Lake build failures, and unresolved
 outputs.
+
+See
+[`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md)
+for the canonical shipped-crate layout.
 
 See the [workspace README](https://github.com/jcreinhold/lean-rs) for the five-crate
 architecture overview and [`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)

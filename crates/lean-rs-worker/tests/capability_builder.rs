@@ -2,8 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use lean_rs::LeanBuiltCapability;
 use lean_rs_worker::{
-    LeanWorkerCapabilityBuilder, LeanWorkerCommandMetadata, LeanWorkerError, LeanWorkerRestartPolicy,
+    LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerError, LeanWorkerRestartPolicy,
 };
 use serde_json::json;
 
@@ -32,6 +33,54 @@ fn builder() -> LeanWorkerCapabilityBuilder {
         ["LeanRsInteropConsumer.Callback"],
     )
     .worker_executable(worker_binary())
+}
+
+#[test]
+fn built_capability_builder_infers_lake_root_from_dylib_path() {
+    let dylib = interop_root()
+        .join(".lake")
+        .join("build")
+        .join("lib")
+        .join(if cfg!(target_os = "macos") {
+            "liblean__rs__interop__consumer_LeanRsInteropConsumer.dylib"
+        } else {
+            "liblean__rs__interop__consumer_LeanRsInteropConsumer.so"
+        });
+    let spec = LeanBuiltCapability::path(&dylib)
+        .package("lean_rs_interop_consumer")
+        .module("LeanRsInteropConsumer");
+
+    let builder = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["LeanRsInteropConsumer.Callback"])
+        .expect("standard Lake dylib path is accepted")
+        .worker_executable(worker_binary());
+
+    assert_eq!(
+        builder.session_key(),
+        LeanWorkerCapabilityBuilder::new(
+            interop_root(),
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            ["LeanRsInteropConsumer.Callback"],
+        )
+        .worker_executable(worker_binary())
+        .session_key(),
+    );
+}
+
+#[test]
+fn app_owned_worker_child_locator_accepts_explicit_binary() {
+    let child = LeanWorkerChild::path(worker_binary());
+    let mut capability = LeanWorkerCapabilityBuilder::new(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["LeanRsInteropConsumer.Callback"],
+    )
+    .worker_child(child)
+    .open()
+    .expect("explicit app-owned worker child opens");
+
+    capability.open_session(None, None).expect("session opens");
 }
 
 #[test]

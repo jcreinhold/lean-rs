@@ -100,6 +100,48 @@ impl core::marker::Unpin for lean_toolchain::LinkDiagnostics
 impl core::marker::UnsafeUnpin for lean_toolchain::LinkDiagnostics
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LinkDiagnostics
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LinkDiagnostics
+pub struct lean_toolchain::BuiltLeanCapability
+impl lean_toolchain::BuiltLeanCapability
+pub fn lean_toolchain::BuiltLeanCapability::dylib_path(&self) -> &std::path::Path
+pub fn lean_toolchain::BuiltLeanCapability::env_var(&self) -> &str
+pub fn lean_toolchain::BuiltLeanCapability::module(&self) -> &str
+pub fn lean_toolchain::BuiltLeanCapability::package(&self) -> &str
+pub fn lean_toolchain::BuiltLeanCapability::project_root(&self) -> &std::path::Path
+pub fn lean_toolchain::BuiltLeanCapability::target_name(&self) -> &str
+impl core::clone::Clone for lean_toolchain::BuiltLeanCapability
+pub fn lean_toolchain::BuiltLeanCapability::clone(&self) -> lean_toolchain::BuiltLeanCapability
+impl core::cmp::Eq for lean_toolchain::BuiltLeanCapability
+impl core::cmp::PartialEq for lean_toolchain::BuiltLeanCapability
+pub fn lean_toolchain::BuiltLeanCapability::eq(&self, other: &lean_toolchain::BuiltLeanCapability) -> bool
+impl core::fmt::Debug for lean_toolchain::BuiltLeanCapability
+pub fn lean_toolchain::BuiltLeanCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::BuiltLeanCapability
+impl core::marker::Freeze for lean_toolchain::BuiltLeanCapability
+impl core::marker::Send for lean_toolchain::BuiltLeanCapability
+impl core::marker::Sync for lean_toolchain::BuiltLeanCapability
+impl core::marker::Unpin for lean_toolchain::BuiltLeanCapability
+impl core::marker::UnsafeUnpin for lean_toolchain::BuiltLeanCapability
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::BuiltLeanCapability
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::BuiltLeanCapability
+pub struct lean_toolchain::CargoLeanCapability
+impl lean_toolchain::CargoLeanCapability
+pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::CargoLeanCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::CargoLeanCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::CargoLeanCapability::new(project_root: impl core::convert::Into<std::path::PathBuf>, target_name: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::CargoLeanCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for lean_toolchain::CargoLeanCapability
+pub fn lean_toolchain::CargoLeanCapability::clone(&self) -> lean_toolchain::CargoLeanCapability
+impl core::fmt::Debug for lean_toolchain::CargoLeanCapability
+pub fn lean_toolchain::CargoLeanCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::CargoLeanCapability
+impl core::marker::Send for lean_toolchain::CargoLeanCapability
+impl core::marker::Sync for lean_toolchain::CargoLeanCapability
+impl core::marker::Unpin for lean_toolchain::CargoLeanCapability
+impl core::marker::UnsafeUnpin for lean_toolchain::CargoLeanCapability
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::CargoLeanCapability
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::CargoLeanCapability
 pub struct lean_toolchain::DiscoverOptions
 pub lean_toolchain::DiscoverOptions::allow_elan: bool
 pub lean_toolchain::DiscoverOptions::allow_lake_env: bool
@@ -254,6 +296,7 @@ pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
 pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::build_lake_target(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::build_lake_target_quiet(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::capability_env_var(target_name: &str) -> alloc::string::String
 pub fn lean_toolchain::discover_lake_modules(options: lean_toolchain::LeanModuleDiscoveryOptions) -> core::result::Result<lean_toolchain::LeanLakeProjectModules, lean_toolchain::LeanModuleDiscoveryDiagnostic>
 pub fn lean_toolchain::discover_toolchain(opts: &lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()

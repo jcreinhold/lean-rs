@@ -21,31 +21,49 @@ does not reconstruct Lean semantic facts.
 
 ## Run an example
 
+Build the in-tree fixture once. If you skip this step, the example panics at
+`LeanRuntime::init` with a fixture-missing diagnostic.
+
 ```sh
-(cd fixtures/lean && lake build)
+cd fixtures/lean && lake build && cd -
+```
+
+Then run the tour:
+
+```sh
 cargo run -p lean-rs-host --example tour
 ```
 
 `tour` composes the full host-stack flow in one process: open the runtime, load capabilities,
-open an import session, elaborate, kernel-check, run a bulk query, and call `Meta.whnf`. See
-[`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md) for the
-per-example walkthrough.
+open an import session, elaborate, kernel-check, run a bulk query, and call `Meta.whnf`.
+
+Browse the eight examples and walkthroughs at
+[`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the
+fastest path from "ran the tour" to "wrote my own consumer."
+
+If something goes wrong, re-run with `RUST_LOG=lean_rs=debug` for structured spans. See
+[`docs/diagnostics.md`](docs/diagnostics.md) for the code catalogue and the in-process
+capture API.
 
 ## The five published crates
 
+Most consumers start with `lean-rs-host`. Reach down to `lean-rs` only for custom
+same-process ABI work; reach up to `lean-rs-worker` only when you need process isolation,
+request timeouts, or memory cycling.
+
 | Crate            | Role |
 | ---------------- | ---- |
-| `lean-rs-sys`    | Raw Lean 4 C ABI. Opaque public types, refcount mirrors, `REQUIRED_SYMBOLS` allowlist, header digest. Opt-in unsafe raw FFI. |
+| `lean-rs-sys`    | Internal raw-FFI substrate. Depend on `lean-rs` instead unless you specifically need raw `unsafe` access. Opaque public types, refcount mirrors, `REQUIRED_SYMBOLS` allowlist, header digest. |
 | `lean-toolchain` | Toolchain discovery, fingerprint, fixture digest, link diagnostics, `build.rs` helpers. |
-| `lean-rs`        | **L1.** Safe FFI primitive: runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. |
-| `lean-rs-host`   | **L2.** Theorem-prover-host stack on top of `lean-rs`: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. |
-| `lean-rs-worker` | Process-boundary supervisor around `lean-rs-host`: child lifecycle, request timeouts, memory cycling, typed commands, row streaming, local pool. |
+| `lean-rs`        | Safe FFI primitive: runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. Use this to call Lean from Rust. |
+| `lean-rs-host`   | Theorem-prover-host stack on top of `lean-rs`: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. Use this for sessions, kernel checks, or `MetaM`. |
+| `lean-rs-worker` | Process-boundary supervisor around `lean-rs-host`: child lifecycle, request timeouts, memory cycling, typed commands, row streaming, local pool. Use this for production tools needing process isolation. |
 
 Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. `lean-rs-worker`
 wraps the host stack in a child-process boundary. Raw `lean_*` symbols enter the workspace
 only through `lean-rs-sys`; the safe layers never re-export them.
 
-Compose at the highest layer that fits the workload:
+The detailed composition rule:
 
 - `lean-rs` for custom same-process ABI calls, module loading, and callbacks.
 - `lean-rs-host` for trusted in-process theorem-prover work: imports, elaboration, kernel
@@ -54,13 +72,32 @@ Compose at the highest layer that fits the workload:
   timeouts, or memory cycling.
 
 Lower layers are escape hatches, not steps every downstream caller should hand-compose. See
-[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the L2
+[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the host-stack
 classification table.
 
-## Build your own consumer
+## Ship a crate with Lean code
 
-The minimum L1 setup is five files. The example calls a user-authored `@[export]` Lean
-function from Rust without depending on `lean-rs-host`.
+For a crate that owns Lean source and should build on another developer's
+machine, use the build-time recipe:
+
+- `build.rs` calls `lean_toolchain::CargoLeanCapability`;
+- Rust opens the built dylib with `lean_rs::LeanCapability`, or starts it
+  behind `lean-rs-worker`;
+- worker applications ship a tiny app-owned worker-child binary that calls
+  `lean_rs_worker::run_worker_child_stdio`.
+
+See [`docs/recipes/ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.md)
+and the checked-in template at
+[`templates/shipped-lean-crate/`](templates/shipped-lean-crate/).
+
+## Build your own low-level consumer
+
+The minimum same-process setup is five pieces: a `Cargo.toml`, a `build.rs`, a Lake
+`lakefile.lean`, a Lean module, and a Rust `main.rs`. The example calls a user-authored
+`@[export]` Lean function from Rust without depending on `lean-rs-host`.
+
+All five crates are published on crates.io at the same workspace version (currently 0.1.1).
+The `Cargo.toml` snippets in this repo use `"0.1"` so they pick up the latest 0.1.x.
 
 **`Cargo.toml`**: `lean-rs` for the API; `lean-toolchain` is a build-dep that emits link
 directives and the runtime rpath:
@@ -78,22 +115,22 @@ lean-rs = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**: one helper covers link-search, link-lib, and the runtime rpath into the
-Lean toolchain's `lib/lean` directory; the other builds the Lake shared-library target and
-records the dylib path for `main.rs`:
+**`build.rs`**: the high-level helper covers link-search, link-lib, the runtime rpath,
+Lake build, Cargo rerun directives, and the compile-time dylib path:
 
 ```rust
-use std::path::Path;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::emit_lean_link_directives_checked()?;
-    let dylib = lean_toolchain::build_lake_target(Path::new("lean"), "MyCapability")?;
-    println!("cargo:rustc-env=MY_CAPABILITY_DYLIB={}", dylib.display());
+    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+        .package("my_app")
+        .module("MyCapability")
+        .build()?;
     Ok(())
 }
 ```
 
-**`lean/lakefile.lean`**: minimal Lake package emitting a shared library:
+**`lean/lakefile.lean`**: minimal Lake package emitting a shared library. Lake uses
+guillemets (`« »`) as its idiomatic quoting for package and library names; plain ASCII names
+also work.
 
 ```lean
 import Lake
@@ -113,15 +150,21 @@ lean_lib «MyCapability» where
 def add (a b : UInt64) : UInt64 := a + b
 ```
 
-**`src/main.rs`**: open the dylib, dispatch typed:
+**`src/main.rs`**: open the build-script capability, dispatch typed:
 
 ```rust
-use lean_rs::{LeanLibrary, LeanResult, LeanRuntime};
+use lean_rs::{LeanBuiltCapability, LeanCapability, LeanResult, LeanRuntime};
 
 fn main() -> LeanResult<()> {
     let runtime = LeanRuntime::init()?;
-    let library = LeanLibrary::open(runtime, env!("MY_CAPABILITY_DYLIB"))?;
-    let module = library.initialize_module("my_app", "MyCapability")?;
+    let capability = LeanCapability::from_build_env(
+        runtime,
+        LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
+            .env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB")
+            .package("my_app")
+            .module("MyCapability"),
+    )?;
+    let module = capability.module()?;
 
     let add = module.exported::<(u64, u64), u64>("my_app_add")?;
     println!("{}", add.call(40, 2)?);  // 42
@@ -135,10 +178,13 @@ Build and run:
 cargo run
 ```
 
-`build_lake_target` hides Lake's shared-library facet, cache, and filename convention.
-`initialize_module(package, lib_name)` takes the unmangled Lake names.
+`CargoLeanCapability` hides Lean link directives, Lake's shared-library facet,
+Cargo rerun triggers, cache, filename convention, and dylib-path env-var
+plumbing. `LeanCapability` keeps the build-time path and initializer names
+together at runtime. Use `build_lake_target` and `LeanLibrary` directly only
+for lower-level custom interop.
 
-For the L2 path (sessions, kernel checking, `MetaM`), add `lean-rs-host = "0.1"` and follow
+For sessions, kernel checking, and `MetaM`, add `lean-rs-host = "0.1"` and follow
 [`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). The host crate ships and
 builds its own shim packages; your Lake package only declares your capability library.
 
@@ -160,10 +206,25 @@ The Lean side of a worker capability can use `LeanRsInterop.Worker.Stream` helpe
 Downstream packages still own request parsing, row schemas, semantic commands, and chunk
 contents.
 
+## Recipes
+
+| Recipe | When to use |
+| ------ | ----------- |
+| [`downstream-interop.md`](docs/recipes/downstream-interop.md) | Rust-to-Lean exports plus same-process Lean-to-Rust callbacks without `lean-rs-host`. Advanced same-process path. |
+| [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md) | Same-process Lean-to-Rust string callbacks without `lean-rs-host`. |
+| [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md) | Normal worker path: builder, typed commands, live rows, diagnostics, timeouts, cycling. |
+| [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md) | Lower-level worker recipe: process isolation, memory cycling, row streaming. |
+
 ## Going deeper
 
-Architecture, safety, and policy docs live under [`docs/`](docs/). The list below groups
-them by topic; numbering reflects the historical order, not the reading order.
+> **Start here.** If you read only two architecture docs, read
+> [`00-charter.md`](docs/architecture/00-charter.md) (design boundary, hidden knowledge,
+> rejected alternatives) and
+> [`01-safety-model.md`](docs/architecture/01-safety-model.md) (unsafe boundary, refcount
+> ownership, concurrency stance). The rest are reference for specific topics. The numbers
+> reflect the order docs were written, not the order they should be read.
+
+Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by topic:
 
 **Foundations**
 - [`00-charter.md`](docs/architecture/00-charter.md): design boundary, hidden knowledge, rejected alternatives.
@@ -171,20 +232,20 @@ them by topic; numbering reflects the historical order, not the reading order.
 - [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md): toolchain window, crate semver, supported platforms.
 - [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md): per-decision rationale behind `lean-rs-sys`.
 
-**L1 surface (`lean-rs`)**
+**Same-process FFI (`lean-rs`)**
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md): `!Send + !Sync` contract.
 - [`06-panic-containment.md`](docs/architecture/06-panic-containment.md): panic containment via process boundary.
 - [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md): cancellation token contract.
 - [`08-reusable-interop.md`](docs/architecture/08-reusable-interop.md): reusable Lean/Rust interop boundary.
 - [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md): callback ABI proof.
-- [`10-callback-registry.md`](docs/architecture/10-callback-registry.md): L1 RAII callback registry rules.
+- [`10-callback-registry.md`](docs/architecture/10-callback-registry.md): RAII callback registry rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md): reusable Lean-side interop shims.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md): build-script helper path and cache.
 - [`13-structured-progress.md`](docs/architecture/13-structured-progress.md): host progress-sink contract.
 - [`14-interop-release-contract.md`](docs/architecture/14-interop-release-contract.md): interop release contract.
 - [`15-callback-payloads.md`](docs/architecture/15-callback-payloads.md): sealed callback payload family.
 
-**L2 host stack (`lean-rs-host`)**
+**Host stack (`lean-rs-host`)**
 - [`03-host-stack.md`](docs/architecture/03-host-stack.md): curated host surface and semver boundary.
 
 **Worker (`lean-rs-worker`)**
@@ -201,12 +262,6 @@ them by topic; numbering reflects the historical order, not the reading order.
 - [`26-worker-pool-observability.md`](docs/architecture/26-worker-pool-observability.md): pool snapshots and backpressure.
 - [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md): readiness proof for subprocess-worker shape.
 - [`28-production-scale-release.md`](docs/architecture/28-production-scale-release.md): local pool scale contract and non-goals.
-
-**Recipes**
-- [`downstream-interop.md`](docs/recipes/downstream-interop.md): Rust-to-Lean exports + same-process callbacks without `lean-rs-host`.
-- [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md): same-process Lean-to-Rust string callbacks.
-- [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md): process isolation, memory cycling, row streaming.
-- [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md): worker builder, typed commands, live rows, timeouts, cycling.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/);
 later changes diff against those baselines.

@@ -20,6 +20,22 @@ typed commands carry requests and rows, diagnostics arrive on a separate sink, a
 cycling resets process-global memory. The full recipe is
 [`docs/recipes/worker-capability-runner.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/worker-capability-runner.md).
 
+For a shipped application, build the Lean capability in `build.rs` with
+`lean_toolchain::CargoLeanCapability`, embed the resulting path with
+`lean_rs::LeanBuiltCapability::path(env!(...))`, and ship an app-owned worker
+child binary:
+
+```rust,ignore
+fn main() -> std::process::ExitCode {
+    lean_rs_worker::run_worker_child_stdio()
+}
+```
+
+Point the builder at that binary with
+`LeanWorkerChild::sibling("my_app_lean_worker").env_override("MY_APP_LEAN_WORKER")`.
+See
+[`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
+
 ## What the crate owns
 
 | Concern | API |
@@ -27,6 +43,7 @@ cycling resets process-global memory. The full recipe is
 | Child process lifecycle, pipes, frame decoding, fatal-exit classification, cleanup | `LeanWorker`, `LeanWorkerConfig`, `LeanWorkerError`, `LeanWorkerExit`, `LeanWorkerStats` |
 | Restart and memory-cycling policy: explicit cycling, request-count threshold, import-like threshold, idle interval, RSS ceiling | `LeanWorkerRestartPolicy`, `LeanWorkerRestartReason` |
 | Capability startup: Lake build, child resolution, health-check, import session, optional metadata validation | `LeanWorkerCapabilityBuilder` |
+| Packaged worker child resolution | `LeanWorkerChild`, `run_worker_child_stdio` |
 | Typed downstream commands and row streams | `LeanWorkerJsonCommand<Req, Resp>`, `LeanWorkerStreamingCommand<Req, Row, Summary>`, `LeanWorkerTypedDataSink`, `LeanWorkerDiagnosticSink` |
 | Narrow host-session adapter (elaboration, kernel-check status, declaration-kind/name bulk queries) | `LeanWorker::open_session` |
 | Local multi-worker fanout, warm reuse, fixed admission, RSS-aware policy, lease invalidation | `LeanWorkerPool`, `LeanWorkerSessionLease`, `LeanWorkerSessionKey`, `LeanWorkerPoolSnapshot` |
