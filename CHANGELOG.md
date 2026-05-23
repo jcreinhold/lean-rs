@@ -9,6 +9,36 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-05-23
+
+### `lean-rs-host` 0.1.4
+
+#### Header-aware info-tree projection
+
+- Added `LeanSession::process_module_with_info_tree` and the optional shim `lean_rs_host_process_module_with_info_tree`.
+  The new entry point parses a file's header with `Lean.Parser.parseHeader` first, then resumes `IO.processCommands`
+  from the parser state — so positions in the returned `ProcessedFile` land in the original file's line/column system
+  with no Rust-side offset arithmetic. The previous `process_with_info_tree` shim is still the right call for body-only
+  snippets and stays untouched.
+- Returns a new outcome enum `ProcessModuleOutcome` with four arms — `Ok { file, imports }`,
+  `MissingImports { file, imports, missing }`, `HeaderParseFailed { diagnostics }`, and `Unsupported`. Missing imports
+  is a soft failure: the body still elaborates against whatever the env carries, and the partial projection is returned
+  for downstream consumers to use.
+- Capability contract: mandatory count unchanged (28); optional count 6 → 7. Capability dylibs built against the 0.1.3
+  shim set continue to load — the new symbol degrades to `ProcessModuleOutcome::Unsupported`.
+
+### `lean-rs` 0.1.4
+
+#### Runtime initialization
+
+- `LeanRuntime::init` now calls `lean_io_mark_end_initialization()` after the core-runtime + built-in bootstrap. Without
+  this call, Lean's `IO.initializing` flag stayed `true` for the process lifetime and any Lean API gated on it
+  (most notably `Lean.mkEmptyEnvironment`, transitively used by `Lean.Parser.parseHeader`) threw
+  `"environment objects cannot be created during initialization"`. The omission was documented as already-fixed in
+  `crates/lean-rs/examples/cold_probe.rs:62` but was missing from the runtime init body. No public API change; downstream
+  module initializers loaded via `LeanLibrary::initialize_module` continue to run normally because Lake-emitted
+  initializers do not check the flag.
+
 ## [0.1.3] — 2026-05-23
 
 Adds string projections for opaque `LeanName` and `LeanExpr` handles and a new info-tree projection over processed Lean
