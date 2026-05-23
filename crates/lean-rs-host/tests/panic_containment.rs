@@ -53,11 +53,6 @@ fn lean_internal_panic_terminates_child_process() {
         .arg("--nocapture")
         .env(CHILD_ENV, "1")
         .env("LEAN_ABORT_ON_PANIC", "1")
-        // Lean 4.30's panic-time backtrace handler calls back into the
-        // Lean runtime for name demangling (lean4 PR #12539); that
-        // callback hangs on Linux child panics. `LEAN_BACKTRACE_RAW=1`
-        // bypasses the demangler so the abort path completes promptly.
-        .env("LEAN_BACKTRACE_RAW", "1")
         .env("RUST_BACKTRACE", "0")
         .output()
         .expect("child test process starts");
