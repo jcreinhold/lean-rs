@@ -3,7 +3,7 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves the
-//! twenty-six mandatory session symbols plus the four optional
+//! twenty-seven mandatory session symbols plus the four optional
 //! meta-service symbols), starts a session over an import list, and
 //! exercises the typed query methods.
 
@@ -18,7 +18,7 @@ use crate::host::meta::{
 };
 use crate::{
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
-    LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
+    LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
 use lean_rs::LeanRuntime;
 use lean_rs::error::{HostStage, LeanError};
@@ -237,6 +237,112 @@ fn session_list_declarations_includes_prelude_and_fixture() {
     assert!(
         !names.is_empty(),
         "imported environment must contain at least one declaration"
+    );
+}
+
+#[test]
+fn session_name_to_string_renders_prelude_name() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+
+    let names = session.list_declarations(None).expect("list declarations");
+    let mut found_nat = false;
+    let mut found_fixture = false;
+    for name in &names {
+        let rendered = session.name_to_string(name, None).expect("render name");
+        if rendered == "Nat" {
+            found_nat = true;
+        }
+        if rendered == "LeanRsFixture.Handles.nameAnonymous" {
+            found_fixture = true;
+        }
+        if found_nat && found_fixture {
+            break;
+        }
+    }
+    assert!(found_nat, "prelude `Nat` must round-trip through name_to_string");
+    assert!(
+        found_fixture,
+        "fixture `LeanRsFixture.Handles.nameAnonymous` must round-trip through name_to_string"
+    );
+}
+
+#[test]
+fn session_name_to_string_renders_names_with_numeric_components() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+
+    // Generated names (compiler-introduced numeric components) are
+    // suppressed by the default filter; flip the flag on so the listing
+    // contains them.
+    let filter = LeanDeclarationFilter {
+        include_generated: true,
+        ..LeanDeclarationFilter::default()
+    };
+    let names = session
+        .list_declarations_filtered(&filter, None, None)
+        .expect("list with generated names");
+    let mut saw_numeric_component = false;
+    for name in &names {
+        let rendered = session.name_to_string(name, None).expect("render name");
+        assert!(!rendered.is_empty(), "every rendered name must be non-empty");
+        if rendered.split('.').any(|part| part.chars().all(|c| c.is_ascii_digit())) {
+            saw_numeric_component = true;
+        }
+    }
+    assert!(
+        saw_numeric_component,
+        "enabling include_generated must surface at least one numeric-component name"
+    );
+}
+
+#[test]
+fn session_name_to_string_bulk_renders_listed_declarations() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+
+    let mut names = session.list_declarations(None).expect("list declarations");
+    let take = names.len().min(1000);
+    assert!(take >= 100, "fixture + prelude must yield at least 100 names");
+    names.truncate(take);
+
+    let rendered = session.name_to_string_bulk(&names, None, None).expect("bulk render");
+    assert_eq!(rendered.len(), take, "bulk render must preserve length");
+    assert!(rendered.iter().all(|s| !s.is_empty()), "no rendered name may be empty");
+    assert!(
+        rendered.iter().all(|s| s != "missing"),
+        "bulk render is a pure projection — `missing` is not a valid output"
+    );
+}
+
+#[test]
+fn session_list_declarations_strings_matches_filtered_count() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_handles(&caps);
+
+    let filter = LeanDeclarationFilter::default();
+    let names = session
+        .list_declarations_filtered(&filter, None, None)
+        .expect("list filtered");
+    let rendered = session
+        .list_declarations_strings(&filter, None, None)
+        .expect("list strings");
+    assert_eq!(
+        rendered.len(),
+        names.len(),
+        "list_declarations_strings must agree on length with list_declarations_filtered"
     );
 }
 

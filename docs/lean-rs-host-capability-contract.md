@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 26 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
+The 27 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
@@ -33,7 +33,7 @@ missing optional meta-service symbol stores `None` in `SessionSymbols`;
 `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that service at dispatch
 time.
 
-## Mandatory contract (26 symbols)
+## Mandatory contract (27 symbols)
 
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
 `KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
@@ -46,13 +46,14 @@ the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 `0`/`1` values so it uses the same object-slot structure ABI as the rest of the
 host-defined records; Rust callers see ordinary `bool` fields.
 
-### Environment and declaration queries (13)
+### Environment and declaration queries (14)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
 | `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation, None)` |
 | `lean_rs_host_session_import_progress` | `(searchPaths : Array String) (importNames : Array String) (handle trampoline : USize) : IO (Except UInt8 Environment)` | `LeanCapabilities::session(imports, cancellation, Some(progress))` |
 | `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
+| `lean_rs_host_name_to_string` | `(n : Name) : String` | `name_to_string(name, cancellation)` (and `name_to_string_bulk` / `list_declarations_strings`) |
 | `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
 | `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation, None)` |
 | `lean_rs_host_env_query_declarations_bulk_progress` | `(env : Environment) (names : Array Name) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Declaration)))` | `query_declarations_bulk(names, None, Some(progress))` |
@@ -101,7 +102,7 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can initialize the module and interpret symbol names consistently.
-- Same 26 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
+- Same 27 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
 - The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this

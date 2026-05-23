@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-six **mandatory** `@[export]` symbols and may export four
+//! exports twenty-seven **mandatory** `@[export]` symbols and may export four
 //! **optional** meta-service symbols (matched at `LeanCapabilities::load_capabilities` time):
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
@@ -19,6 +19,7 @@
 //! | `lean_rs_host_session_import`                  | yes        | `String -> Array String -> IO Environment`                                                                    |
 //! | `lean_rs_host_session_import_progress`         | yes        | `Array String -> Array String -> USize -> USize -> IO (Except UInt8 Environment)`                             |
 //! | `lean_rs_host_name_from_string`                | yes        | `String -> Name`                                                                                              |
+//! | `lean_rs_host_name_to_string`                  | yes        | `Name -> String`                                                                                              |
 //! | `lean_rs_host_env_query_declaration`           | yes        | `Environment -> Name -> IO (Option Declaration)`                                                              |
 //! | `lean_rs_host_env_query_declarations_bulk`     | yes        | `Environment -> Array Name -> IO (Array (Option Declaration))`                                                |
 //! | `lean_rs_host_env_query_declarations_bulk_progress` | yes   | `Environment -> Array Name -> USize -> USize -> IO (Except UInt8 (Array (Option Declaration)))`               |
@@ -303,6 +304,7 @@ pub(crate) struct SessionSymbols {
     pub(crate) session_import: *mut c_void,
     pub(crate) session_import_progress: *mut c_void,
     pub(crate) name_from_string: *mut c_void,
+    pub(crate) name_to_string: *mut c_void,
     pub(crate) env_query_declaration: *mut c_void,
     pub(crate) env_query_declarations_bulk: *mut c_void,
     pub(crate) env_query_declarations_bulk_progress: *mut c_void,
@@ -333,7 +335,7 @@ pub(crate) struct SessionSymbols {
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The twenty-six
+    /// Resolve session function symbols from `library`. The twenty-seven
     /// baseline symbols are mandatory; the four meta-service symbols
     /// are optional.
     ///
@@ -351,6 +353,7 @@ impl SessionSymbols {
             session_import: library.resolve_function_symbol("lean_rs_host_session_import")?,
             session_import_progress: library.resolve_function_symbol("lean_rs_host_session_import_progress")?,
             name_from_string: library.resolve_function_symbol("lean_rs_host_name_from_string")?,
+            name_to_string: library.resolve_function_symbol("lean_rs_host_name_to_string")?,
             env_query_declaration: library.resolve_function_symbol("lean_rs_host_env_query_declaration")?,
             env_query_declarations_bulk: library.resolve_function_symbol("lean_rs_host_env_query_declarations_bulk")?,
             env_query_declarations_bulk_progress: library
@@ -1122,6 +1125,107 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         }
     }
 
+    /// Render an opaque [`LeanName`] handle as its dotted-string form,
+    /// routed through the capability's `Name.toString` shim.
+    ///
+    /// This is the supported way to turn a `LeanName` (e.g. an element
+    /// of [`Self::list_declarations_filtered`]'s result) into Rust text.
+    /// The output is diagnostic — not a semantic key — and equality on
+    /// the underlying `Lean.Name` still lives in Lean.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch.
+    pub fn name_to_string(
+        &mut self,
+        name: &LeanName<'lean>,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<String> {
+        let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.name_to_string").entered();
+        check_cancellation(cancellation)?;
+        let address = self.capabilities.symbols().name_to_string;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `Name -> String` (pure, not IO).
+        let render: LeanExported<'lean, '_, (LeanName<'lean>,), String> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = render.call(name.clone());
+        self.record_call(0, t.elapsed());
+        result
+    }
+
+    /// Render `names` as dotted-string forms, preserving input order.
+    ///
+    /// Implemented as a per-item loop over [`Self::name_to_string`] in
+    /// v1: cancellation is checked between items, progress is reported
+    /// after each. The Lean shim is pure and short, so the per-item FFI
+    /// overhead is acceptable; a bulk shim is a future optimisation if
+    /// profiling shows it matters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] between items if the
+    /// token is tripped during the walk.
+    pub fn name_to_string_bulk(
+        &mut self,
+        names: &[LeanName<'lean>],
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<Vec<String>> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.name_to_string_bulk",
+            batch_size = names.len(),
+        )
+        .entered();
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        check_cancellation(cancellation)?;
+        let started = Instant::now();
+        let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
+        let mut out = Vec::with_capacity(names.len());
+        for (idx, name) in names.iter().enumerate() {
+            check_cancellation(cancellation)?;
+            out.push(self.name_to_string(name, cancellation)?);
+            report_progress(
+                progress,
+                "name_to_string_bulk",
+                u64::try_from(idx.saturating_add(1)).unwrap_or(u64::MAX),
+                total,
+                started,
+            )?;
+        }
+        Ok(out)
+    }
+
+    /// Enumerate the imported environment's declaration names and render
+    /// each as a dotted string. Convenience over
+    /// [`Self::list_declarations_filtered`] + [`Self::name_to_string_bulk`]
+    /// for the common case where the consumer only needs strings.
+    ///
+    /// Two FFI hops (list + per-name render) and one heap allocation
+    /// per name. For batches under a few thousand this is fine; for
+    /// six-figure walks consider the lower-level pair so the listing
+    /// pass and the rendering pass can be cancelled or chunked
+    /// independently.
+    ///
+    /// # Errors
+    ///
+    /// Forwards errors from [`Self::list_declarations_filtered`] and
+    /// [`Self::name_to_string_bulk`].
+    pub fn list_declarations_strings(
+        &mut self,
+        filter: &LeanDeclarationFilter,
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<Vec<String>> {
+        let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.list_declarations_strings").entered();
+        let names = self.list_declarations_filtered(filter, cancellation, None)?;
+        self.name_to_string_bulk(&names, cancellation, progress)
+    }
+
     /// Parse and elaborate a single Lean term against the imported
     /// environment, optionally against an expected type.
     ///
@@ -1677,7 +1781,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// typed argument tuple and a typed result decoder.
     ///
     /// This is the transport-neutral escape hatch for capability dylibs
-    /// that export Lean functions beyond the twenty-six session-fixed
+    /// that export Lean functions beyond the twenty-seven session-fixed
     /// symbols. The conversion bounds — [`LeanArgs`] on the argument
     /// tuple and [`DecodeCallResult`] on the result — are the same
     /// bounds [`lean_rs::module::LeanModule::exported`] uses, so an

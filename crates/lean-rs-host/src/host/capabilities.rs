@@ -15,7 +15,7 @@
 //!   reusable callback helpers imported by the host progress shims.
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
 //!   built from the `lean-rs-host` crate's bundled shim sources. It contains
-//!   the 26 mandatory + 4 optional `lean_rs_host_*` `@[export]` symbols that
+//!   the 27 mandatory + 4 optional `lean_rs_host_*` `@[export]` symbols that
 //!   every typed `LeanSession` method dispatches through. Lake does *not*
 //!   transitively bundle the shim's `@[export]` symbols into the user's dylib
 //!   (verified at carve-out time, 2026-05-18 — `LeanLib.sharedFacet` is a
@@ -63,7 +63,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// generated `LeanRsInterop.*` initializer references resolve.
     #[allow(dead_code, reason = "Drop releases the dylib; field is structurally required")]
     interop_library: LeanLibrary<'lean>,
-    /// Shim dylib carrying the 26+4 `lean_rs_host_*` `@[export]`
+    /// Shim dylib carrying the 27+4 `lean_rs_host_*` `@[export]`
     /// symbols. RAII anchor only — the addresses inside `symbols`
     /// outlive any direct read of this field.
     #[allow(dead_code, reason = "Drop releases the dylib; field is structurally required")]
@@ -131,7 +131,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         // ad-hoc user exports still resolve from this library.
         let _user_module = user_library.initialize_module(package, lib_name)?;
 
-        // The 26 mandatory + 4 optional `lean_rs_host_*` symbols live
+        // The 27 mandatory + 4 optional `lean_rs_host_*` symbols live
         // in the shim dylib; resolve them there.
         // `LeanSession::call_capability` (separately) routes ad-hoc
         // user-authored `@[export]` symbols through `user_library`.
@@ -186,7 +186,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// resolve ad-hoc function symbols on the user's dylib without
     /// holding a separate library borrow. Ad-hoc calls always go to
     /// the user's dylib, not the shim dylib: the shim dylib hosts a
-    /// fixed contract (the 26+4 `lean_rs_host_*` symbols pre-resolved
+    /// fixed contract (the 27+4 `lean_rs_host_*` symbols pre-resolved
     /// in `symbols`); arbitrary user `@[export]` symbols live in the
     /// user's dylib.
     pub(crate) fn library(&self) -> &LeanLibrary<'lean> {

@@ -11,6 +11,13 @@
 //! Display text obtained from a Lean export is diagnostic, not a
 //! semantic key; use a Lean-authored equality export when semantics
 //! matter (see the module docs on [`crate::handle`]).
+//!
+//! To render a handle as a Rust [`String`], call
+//! `LeanSession::name_to_string` (or `name_to_string_bulk` for a slice).
+//! There is intentionally no `Display`, `Eq`, or `From<String>` impl on
+//! the handle itself: forcing callers through an explicit method keeps
+//! the FFI cost and the "diagnostic only" semantics visible at the call
+//! site.
 
 use core::fmt;
 

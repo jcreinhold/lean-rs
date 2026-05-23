@@ -73,6 +73,13 @@ def sessionImportProgress (searchPaths : Array String) (importNames : Array Stri
 def nameFromString (s : String) : Name :=
   s.toName
 
+/-- Render a `Lean.Name` as its dotted-string form. Pure (no IO).
+    The result is diagnostic text — not a semantic key. Use Lean-side
+    equality (or hashing) when you need to compare names. -/
+@[export lean_rs_host_name_to_string]
+def nameToString (n : Name) : String :=
+  n.toString
+
 /-- Look up `name` in `env` and return its declaration, if present and
     convertible. Constants that don't round-trip to `Declaration`
     (constructors, recursors, inductive types, the `Quot` builtin) yield
