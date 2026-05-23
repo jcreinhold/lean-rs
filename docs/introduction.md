@@ -5,8 +5,8 @@ checking, proof objects, universes, `MetaM`, dependent-type meaning. `lean-rs` o
 initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics, batching, and
 packaging. Rust does not reconstruct Lean semantic facts.
 
-This site collects the architecture charter, design notes, recipes, safety audits, and operational runbooks that ship
-in the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs). The
+This site collects the architecture charter, design notes, recipes, safety audits, and operational runbooks that ship in
+the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs). The
 [repository README](https://github.com/jcreinhold/lean-rs#readme) is the entry point for new users — it walks through
 the crate layout, the minimal same-process example, and the worked examples. Read it first if you have not used
 `lean-rs` before.

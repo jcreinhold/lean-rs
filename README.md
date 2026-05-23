@@ -197,8 +197,8 @@ semantic commands, and chunk contents.
 > stance). The rest are reference for specific topics. The numbers reflect the order docs were written, not the order
 > they should be read.
 
-Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by topic. The same content, with search and
-a curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
+Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by topic. The same content, with search and a
+curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 
 **Foundations**
 - [`00-charter.md`](docs/architecture/00-charter.md): design boundary, hidden knowledge, rejected alternatives.
