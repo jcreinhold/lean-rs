@@ -13,6 +13,10 @@
 //!   per step, exercising the heartbeat-exhaustion classification path.
 //! - [`is_def_eq`] — runs `Meta.isDefEq` on two supplied expressions
 //!   under a request-supplied transparency setting.
+//! - [`pp_expr`] — runs `Lean.PrettyPrinter.ppExpr` on a supplied `Expr`
+//!   and returns the rendered string. Slow relative to the raw
+//!   [`crate::LeanSession::expr_to_string_raw`] projection but produces
+//!   the form a Lean user reads.
 //!
 //! Rust cannot assemble arbitrary `MetaM` programs: the only services
 //! that exist are the ones with a `LeanMetaService` constructor in this
@@ -52,4 +56,4 @@ mod service;
 
 pub use self::options::{LeanMetaOptions, LeanMetaTransparency};
 pub use self::response::{LeanMetaResponse, MetaCallStatus};
-pub use self::service::{LeanMetaService, heartbeat_burn, infer_type, is_def_eq, whnf};
+pub use self::service::{LeanMetaService, heartbeat_burn, infer_type, is_def_eq, pp_expr, whnf};

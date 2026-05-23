@@ -13,6 +13,18 @@
 //! Display text obtained from a Lean export is diagnostic, not a
 //! semantic key; use a Lean-authored equality export when semantics
 //! matter (see the module docs on [`crate::handle`]).
+//!
+//! Two render paths cover the cost/quality tradeoff and the host stack
+//! exposes both deliberately. `LeanSession::expr_to_string_raw` walks
+//! `Expr.toString` directly — cheap, deterministic, ugly — and is the
+//! right choice for indexing, logging, and search keys. The optional
+//! `lean_rs_host::meta::pp_expr` service runs
+//! `Lean.PrettyPrinter.ppExpr` under the standard heartbeat budget; it
+//! is the form a Lean user reads, but pays for elaboration context and
+//! can time out. There is intentionally no `Display`, `Eq`, or
+//! `FromStr` impl on the handle itself: forcing callers through an
+//! explicit method keeps the FFI cost and the "diagnostic only"
+//! semantics visible at the call site.
 
 use core::fmt;
 

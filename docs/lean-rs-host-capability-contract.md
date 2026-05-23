@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 27 mandatory + 4 optional `@[export] lean_rs_host_*` symbols
+The 28 mandatory + 5 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
@@ -33,7 +33,7 @@ missing optional meta-service symbol stores `None` in `SessionSymbols`;
 `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that service at dispatch
 time.
 
-## Mandatory contract (27 symbols)
+## Mandatory contract (28 symbols)
 
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
 `KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
@@ -46,7 +46,7 @@ the `TryFromLean` / `IntoLean` impls crossing the ABI live in
 `0`/`1` values so it uses the same object-slot structure ABI as the rest of the
 host-defined records; Rust callers see ordinary `bool` fields.
 
-### Environment and declaration queries (14)
+### Environment and declaration queries (15)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -70,6 +70,7 @@ host-defined records; Rust callers see ordinary `bool` fields.
 | `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` |
 | `lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` | `declaration_name_bulk(names, cancellation, None)` |
 | `lean_rs_host_env_declaration_name_bulk_progress` | `(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_name_bulk(names, None, Some(progress))` |
+| `lean_rs_host_env_expr_to_string_raw` | `(e : Expr) : String` | `expr_to_string_raw(expr, cancellation)` |
 
 ### Elaboration, kernel check, evidence (5)
 
@@ -83,7 +84,7 @@ host-defined records; Rust callers see ordinary `bool` fields.
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (4 symbols—bounded `MetaM`)
+## Optional contract (5 symbols—bounded `MetaM`)
 
 If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for
 that slot; `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for any
@@ -95,6 +96,7 @@ service mapped to the missing address.
 | `lean_rs_host_meta_whnf` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options, cancellation)` |
 | `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
 | `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
+| `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
 
 ## Forking the shim package
 
@@ -102,8 +104,8 @@ The shim package is small (~557 LOC across three files). A fork that customises 
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can initialize the module and interpret symbol names consistently.
-- Same 27 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
-- The 4 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
+- Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
+- The 5 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this
 is why the shim package isn't framed as "compatibility shims" but as the **implementation** of

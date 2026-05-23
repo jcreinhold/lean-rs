@@ -124,3 +124,23 @@ pub fn heartbeat_burn<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lea
 pub fn is_def_eq<'lean>() -> LeanMetaService<(LeanExpr<'lean>, LeanExpr<'lean>, LeanMetaTransparency), bool> {
     LeanMetaService::new("lean_rs_host_meta_is_def_eq", REQUIRED_IMPORTS)
 }
+
+/// Register the `Lean.PrettyPrinter.ppExpr` service.
+///
+/// Returns the pretty-printed string form of the supplied expression —
+/// the form a Lean user reads. `MetaM`-bounded, so a deeply nested
+/// term under a tight heartbeat budget surfaces as
+/// [`super::LeanMetaResponse::TimeoutOrHeartbeat`]. For a cheap,
+/// deterministic, ugly alternative that pays no `MetaM` cost, use
+/// [`crate::LeanSession::expr_to_string_raw`].
+///
+/// Optional symbol: capability dylibs that predate this shim still
+/// load, and [`crate::LeanSession::run_meta`] returns
+/// [`super::LeanMetaResponse::Unsupported`] for the call. Callers that
+/// want graceful degradation should fall through to
+/// [`crate::LeanSession::expr_to_string_raw`] on the `Unsupported`
+/// branch.
+#[must_use]
+pub fn pp_expr<'lean>() -> LeanMetaService<LeanExpr<'lean>, String> {
+    LeanMetaService::new("lean_rs_host_meta_pp_expr", REQUIRED_IMPORTS)
+}

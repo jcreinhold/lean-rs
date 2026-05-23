@@ -80,6 +80,16 @@ def nameFromString (s : String) : Name :=
 def nameToString (n : Name) : String :=
   n.toString
 
+/-- Render an `Expr` via `Expr.toString`. Pure (no `MetaM`, no `IO`).
+    Cheap, deterministic, ugly: walks the syntax tree directly without
+    consulting an elaboration context. Useful for indexing, logging, and
+    diagnostic dumps. For the form a Lean user reads — notation,
+    binders, pretty whitespace — route through the optional
+    `lean_rs_host_meta_pp_expr` service instead. -/
+@[export lean_rs_host_env_expr_to_string_raw]
+def exprToStringRaw (e : Expr) : String :=
+  toString e
+
 /-- Look up `name` in `env` and return its declaration, if present and
     convertible. Constants that don't round-trip to `Declaration`
     (constructors, recursors, inductive types, the `Quot` builtin) yield

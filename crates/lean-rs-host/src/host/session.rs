@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-seven **mandatory** `@[export]` symbols and may export four
+//! exports twenty-eight **mandatory** `@[export]` symbols and may export five
 //! **optional** meta-service symbols (matched at `LeanCapabilities::load_capabilities` time):
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
@@ -36,6 +36,7 @@
 //! | `lean_rs_host_env_declaration_name`            | yes        | `Environment -> Name -> IO String`                                                                            |
 //! | `lean_rs_host_env_declaration_name_bulk`       | yes        | `Environment -> Array String -> IO (Array String)`                                                            |
 //! | `lean_rs_host_env_declaration_name_bulk_progress` | yes    | `Environment -> Array String -> USize -> USize -> IO (Except UInt8 (Array String))`                           |
+//! | `lean_rs_host_env_expr_to_string_raw`          | yes        | `Expr -> String`                                                                                              |
 //! | `lean_rs_host_elaborate`                       | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)` |
 //! | `lean_rs_host_elaborate_bulk`                  | yes        | `Environment -> Array String -> String -> String -> UInt64 -> USize -> IO (Array (Except ElabFailure Expr))`  |
 //! | `lean_rs_host_elaborate_bulk_progress`         | yes        | `Environment -> Array String -> String -> String -> UInt64 -> USize -> USize -> USize -> IO (Except UInt8 (Array (Except ElabFailure Expr)))` |
@@ -47,6 +48,7 @@
 //! | `lean_rs_host_meta_whnf`                       | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //! | `lean_rs_host_meta_heartbeat_burn`             | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //! | `lean_rs_host_meta_is_def_eq`                  | optional   | `Environment -> (Expr × Expr × UInt8) -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Bool)`                  |
+//! | `lean_rs_host_meta_pp_expr`                    | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse String)`                                 |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`lean_rs::HostStage::Link`] — failures bind to the capability's load,
@@ -321,6 +323,7 @@ pub(crate) struct SessionSymbols {
     pub(crate) env_declaration_name: *mut c_void,
     pub(crate) env_declaration_name_bulk: *mut c_void,
     pub(crate) env_declaration_name_bulk_progress: *mut c_void,
+    pub(crate) env_expr_to_string_raw: *mut c_void,
     pub(crate) elaborate: *mut c_void,
     pub(crate) elaborate_bulk: *mut c_void,
     pub(crate) elaborate_bulk_progress: *mut c_void,
@@ -332,11 +335,12 @@ pub(crate) struct SessionSymbols {
     pub(crate) meta_whnf: Option<*mut c_void>,
     pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
     pub(crate) meta_is_def_eq: Option<*mut c_void>,
+    pub(crate) meta_pp_expr: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The twenty-seven
-    /// baseline symbols are mandatory; the four meta-service symbols
+    /// Resolve session function symbols from `library`. The twenty-eight
+    /// baseline symbols are mandatory; the five meta-service symbols
     /// are optional.
     ///
     /// # Errors
@@ -377,6 +381,7 @@ impl SessionSymbols {
             env_declaration_name_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_name_bulk")?,
             env_declaration_name_bulk_progress: library
                 .resolve_function_symbol("lean_rs_host_env_declaration_name_bulk_progress")?,
+            env_expr_to_string_raw: library.resolve_function_symbol("lean_rs_host_env_expr_to_string_raw")?,
             elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
             elaborate_bulk: library.resolve_function_symbol("lean_rs_host_elaborate_bulk")?,
             elaborate_bulk_progress: library.resolve_function_symbol("lean_rs_host_elaborate_bulk_progress")?,
@@ -388,6 +393,7 @@ impl SessionSymbols {
             meta_whnf: library.resolve_optional_function_symbol("lean_rs_host_meta_whnf"),
             meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
             meta_is_def_eq: library.resolve_optional_function_symbol("lean_rs_host_meta_is_def_eq"),
+            meta_pp_expr: library.resolve_optional_function_symbol("lean_rs_host_meta_pp_expr"),
         })
     }
 
@@ -400,6 +406,7 @@ impl SessionSymbols {
             "lean_rs_host_meta_whnf" => self.meta_whnf,
             "lean_rs_host_meta_heartbeat_burn" => self.meta_heartbeat_burn,
             "lean_rs_host_meta_is_def_eq" => self.meta_is_def_eq,
+            "lean_rs_host_meta_pp_expr" => self.meta_pp_expr,
             _ => None,
         }
     }
@@ -1226,6 +1233,40 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         self.name_to_string_bulk(&names, cancellation, progress)
     }
 
+    /// Render `expr` via `Expr.toString` — the cheap, deterministic
+    /// projection.
+    ///
+    /// Walks the syntax tree directly: no `MetaM`, no notation lookup,
+    /// no binder pretty-printing. The result is a legible-but-ugly
+    /// dump suitable for indexing, logging, and search keys. For the
+    /// form a Lean user reads, use the optional
+    /// [`crate::host::meta::pp_expr`] service through
+    /// [`Self::run_meta`] instead — it pays for elaboration context to
+    /// get notation and unfolding right but can time out under a tight
+    /// heartbeat budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch.
+    pub fn expr_to_string_raw(
+        &mut self,
+        expr: &LeanExpr<'lean>,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<String> {
+        let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.expr_to_string_raw").entered();
+        check_cancellation(cancellation)?;
+        let address = self.capabilities.symbols().env_expr_to_string_raw;
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `Expr -> String` (pure, not IO).
+        let render: LeanExported<'lean, '_, (LeanExpr<'lean>,), String> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = render.call(expr.clone());
+        self.record_call(0, t.elapsed());
+        result
+    }
+
     /// Parse and elaborate a single Lean term against the imported
     /// environment, optionally against an expected type.
     ///
@@ -1781,7 +1822,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// typed argument tuple and a typed result decoder.
     ///
     /// This is the transport-neutral escape hatch for capability dylibs
-    /// that export Lean functions beyond the twenty-seven session-fixed
+    /// that export Lean functions beyond the twenty-eight session-fixed
     /// symbols. The conversion bounds — [`LeanArgs`] on the argument
     /// tuple and [`DecodeCallResult`] on the result — are the same
     /// bounds [`lean_rs::module::LeanModule::exported`] uses, so an

@@ -1,7 +1,7 @@
 import Lake
 open System Lake DSL
 
-/-! Bundled Lake package shipping the 27 mandatory + 4 optional
+/-! Bundled Lake package shipping the 28 mandatory + 5 optional
     `lean_rs_host_*` `@[export]` Lean shims that the `lean-rs-host` Rust
     crate loads at runtime.
 

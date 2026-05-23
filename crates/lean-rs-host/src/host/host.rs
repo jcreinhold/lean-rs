@@ -66,7 +66,7 @@ impl<'lean> LeanHost<'lean> {
     /// Returns [`lean_rs::LeanError::Host`] with stage
     /// [`lean_rs::HostStage::Load`] if the dylib does not exist or fails
     /// to open, [`lean_rs::HostStage::Link`] if the initializer symbol or
-    /// any of the twenty-seven mandatory session symbols is missing. The
+    /// any of the twenty-eight mandatory session symbols is missing. The
     /// four optional `MetaM` symbols (`infer_type`, `whnf`,
     /// `heartbeat_burn`, `is_def_eq`) are looked up lazily and their
     /// absence does not fail loading; `run_meta` reports `Unsupported`

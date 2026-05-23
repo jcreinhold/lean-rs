@@ -54,7 +54,7 @@ reentrancy, and Rust panic containment are Rust-side registry contracts; see
 
 ## Relationship To Host Shims
 
-`lean-rs-host-shims` still owns the 27 + 4 `lean_rs_host_*` theorem-prover
+`lean-rs-host-shims` still owns the 28 + 5 `lean_rs_host_*` theorem-prover
 policy symbols. Host-specific environment queries, elaboration, kernel
 checking, and `MetaM` services stay out of `LeanRsInterop`.
 

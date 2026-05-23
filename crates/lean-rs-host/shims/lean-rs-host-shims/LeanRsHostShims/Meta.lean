@@ -149,4 +149,19 @@ def metaHeartbeatBurn (env : Environment) (_expr : Expr)
     : IO (MetaResponse Expr) :=
   runMetaBounded env heartbeats diagBytes transparency burnLoop
 
+/-- Service: pretty-print an `Expr` via `Lean.PrettyPrinter.ppExpr` and
+    return its rendered string form. Slow relative to
+    `lean_rs_host_env_expr_to_string_raw` — `ppExpr` consults the
+    environment for notation, unfolding hints, and binder choices —
+    but produces the form a Lean user reads. Heartbeat-bounded like
+    every other meta service, so a deeply nested term under a tiny
+    budget surfaces as `MetaResponse.timeoutOrHeartbeat`. -/
+@[export lean_rs_host_meta_pp_expr]
+def metaPpExpr (env : Environment) (expr : Expr)
+    (heartbeats : UInt64) (diagBytes : USize) (transparency : UInt8)
+    : IO (MetaResponse String) :=
+  runMetaBounded env heartbeats diagBytes transparency do
+    let fmt ← Lean.PrettyPrinter.ppExpr expr
+    return fmt.pretty
+
 end LeanRsFixture.Meta

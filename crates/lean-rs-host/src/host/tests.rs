@@ -3,7 +3,7 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves the
-//! twenty-seven mandatory session symbols plus the four optional
+//! twenty-eight mandatory session symbols plus the five optional
 //! meta-service symbols), starts a session over an import list, and
 //! exercises the typed query methods.
 
@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::host::meta::{
     LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
-    infer_type, is_def_eq, whnf,
+    infer_type, is_def_eq, pp_expr, whnf,
 };
 use crate::{
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
@@ -367,6 +367,26 @@ fn elaborate_success_returns_expr() {
     let expr = outcome.expect("elaboration succeeds for a well-typed Nat term");
     // Returned LeanExpr is opaque; success path is asserted by Ok.
     drop(expr);
+}
+
+#[test]
+fn session_expr_to_string_raw_renders_elaborated_expr() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let expr = session
+        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let rendered = session.expr_to_string_raw(&expr, None).expect("raw render");
+    assert!(!rendered.is_empty(), "raw projection must be non-empty");
+    assert!(
+        rendered.contains("Nat.succ"),
+        "raw projection of `Nat.succ 0` must mention `Nat.succ`, got {rendered:?}",
+    );
 }
 
 #[test]
@@ -745,7 +765,7 @@ fn session_reuse_amortises_import() {
 //
 // Each test imports `LeanRsHostShims.Meta` (which also pulls in
 // `LeanRsHostShims.Elaboration` via the dependency edge). The fixture
-// dylib exports the four optional meta-service symbols, so the
+// dylib exports the five optional meta-service symbols, so the
 // `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
 // dispatches through cached addresses.
 
@@ -775,12 +795,13 @@ fn assert_is_def_eq_response(response: &LeanMetaResponse<bool>, expected: bool) 
 }
 
 #[test]
-fn meta_registry_exposes_four_pinned_services() {
+fn meta_registry_exposes_five_pinned_services() {
     let services = [
         infer_type().name(),
         whnf().name(),
         heartbeat_burn().name(),
         is_def_eq().name(),
+        pp_expr().name(),
     ];
     assert_eq!(
         services,
@@ -789,6 +810,7 @@ fn meta_registry_exposes_four_pinned_services() {
             "lean_rs_host_meta_whnf",
             "lean_rs_host_meta_heartbeat_burn",
             "lean_rs_host_meta_is_def_eq",
+            "lean_rs_host_meta_pp_expr",
         ],
     );
     assert_eq!(
@@ -902,6 +924,68 @@ fn meta_heartbeat_burn_yields_timeout_status() {
             panic!("expected TimeoutOrHeartbeat variant");
         }
     }
+}
+
+#[test]
+fn meta_pp_expr_renders_elaborated_expr() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let expr = session
+        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let outcome = session
+        .run_meta(&pp_expr(), expr, &LeanMetaOptions::new(), None)
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::Ok,
+        "pp_expr on a well-typed Expr must succeed, got {outcome:?}",
+    );
+    match outcome {
+        LeanMetaResponse::Ok(rendered) => {
+            assert!(!rendered.is_empty(), "pretty-printed form must be non-empty");
+            assert!(
+                rendered.contains("Nat.succ"),
+                "pretty-printed `Nat.succ 0` must mention `Nat.succ`, got {rendered:?}",
+            );
+        }
+        LeanMetaResponse::Failed(_) | LeanMetaResponse::TimeoutOrHeartbeat(_) | LeanMetaResponse::Unsupported(_) => {
+            panic!("expected Ok variant");
+        }
+    }
+}
+
+#[test]
+fn meta_pp_expr_honours_heartbeat_budget() {
+    // pp_expr runs `Lean.PrettyPrinter.ppExpr` inside MetaM, which
+    // consults `checkMaxHeartbeats` on every reduction step. With
+    // `heartbeat_limit(1)` the first internal check trips and the
+    // outcome must classify as `TimeoutOrHeartbeat` — never `Ok`,
+    // never a panic.
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_meta(&caps);
+
+    let expr = session
+        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception")
+        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let opts = LeanMetaOptions::new().heartbeat_limit(1);
+    let outcome = session
+        .run_meta(&pp_expr(), expr, &opts, None)
+        .expect("host stack reports no exception");
+    assert_eq!(
+        outcome.status(),
+        MetaCallStatus::TimeoutOrHeartbeat,
+        "heartbeat budget = 1 must surface as TimeoutOrHeartbeat, got {outcome:?}",
+    );
 }
 
 #[test]

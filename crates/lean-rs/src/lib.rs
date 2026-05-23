@@ -8,7 +8,7 @@
 //! `LeanCapabilities`, `LeanSession`, plus the evidence and meta
 //! surfaces) lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
-//! 27+4 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
+//! 28+5 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
 //! interop shims used by L1 callbacks; it has no theorem-prover host shim
 //! contract.
 //!
