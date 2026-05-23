@@ -102,8 +102,10 @@ jobs:
 
       - name: Run ABI fuzz smoke
         working-directory: crates/lean-rs/fuzz
-        # See release.yml for the rationale behind `-detect_leaks=0`:
-        # LSan flags Lean's intentional runtime non-cleanup as leaks,
-        # which is orthogonal to the ABI-decode coverage this gate is
-        # for.
-        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120 -detect_leaks=0
+        # See release.yml for the rationale behind disabling LSan via
+        # `ASAN_OPTIONS=detect_leaks=0`: LSan flags Lean's intentional
+        # runtime non-cleanup as leaks at process exit, which is
+        # orthogonal to the ABI-decode coverage this gate is for.
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120
