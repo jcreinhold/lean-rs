@@ -99,7 +99,7 @@ private def severityOfMessage : MessageSeverity → Severity
     one diagnostic if any are present so callers always see *some*
     failure context; subsequent diagnostics stop being collected once
     the cumulative body bytes meet the limit. -/
-private def serializeMessages
+def serializeMessages
     (msgs : MessageLog) (byteLimit : USize) (fallbackLabel : String)
     : BaseIO (Array Diagnostic × Truncation) := do
   let mut out : Array Diagnostic := #[]

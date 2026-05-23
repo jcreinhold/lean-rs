@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 28 mandatory + 5 optional `@[export] lean_rs_host_*` symbols
+The 28 mandatory + 6 optional `@[export] lean_rs_host_*` symbols
 [`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
 resolves at runtime. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
@@ -84,11 +84,13 @@ host-defined records; Rust callers see ordinary `bool` fields.
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (5 symbols—bounded `MetaM`)
+## Optional contract (6 symbols)
 
 If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for
-that slot; `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for any
-service mapped to the missing address.
+that slot; the dispatching call site degrades gracefully — `LeanSession::run_meta`
+synthesises `LeanMetaResponse::Unsupported` for the meta services, and
+`LeanSession::process_with_info_tree` returns `ProcessFileOutcome::Unsupported` for the
+info-tree projection.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -97,15 +99,16 @@ service mapped to the missing address.
 | `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
 | `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
 | `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
+| `lean_rs_host_process_with_info_tree` | `(env) (src : String) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ProcessedFile` | `process_with_info_tree(source, options, cancellation)` |
 
 ## Forking the shim package
 
-The shim package is small (~557 LOC across three files). A fork that customises behaviour
+The shim package is small (~700 LOC across four files). A fork that customises behaviour
 (e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can initialize the module and interpret symbol names consistently.
 - Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
-- The 5 optional meta-service symbols are truly optional; omitting any collapses the corresponding `run_meta` service to `Unsupported`.
+- The 6 optional symbols are truly optional; omitting any collapses the corresponding session method to its `Unsupported` arm (`run_meta` for the five meta services, `process_with_info_tree` for the info-tree projection).
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this
 is why the shim package isn't framed as "compatibility shims" but as the **implementation** of

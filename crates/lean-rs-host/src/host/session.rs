@@ -11,8 +11,9 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-eight **mandatory** `@[export]` symbols and may export five
-//! **optional** meta-service symbols (matched at `LeanCapabilities::load_capabilities` time):
+//! exports twenty-eight **mandatory** `@[export]` symbols and may export six
+//! **optional** symbols (matched at `LeanCapabilities::load_capabilities` time) —
+//! five bounded `MetaM` services plus an info-tree projection:
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
 //! | ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -49,13 +50,16 @@
 //! | `lean_rs_host_meta_heartbeat_burn`             | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Expr)`                                   |
 //! | `lean_rs_host_meta_is_def_eq`                  | optional   | `Environment -> (Expr × Expr × UInt8) -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Bool)`                  |
 //! | `lean_rs_host_meta_pp_expr`                    | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse String)`                                 |
+//! | `lean_rs_host_process_with_info_tree`          | optional   | `Environment -> String -> String -> String -> UInt64 -> USize -> IO ProcessedFile`                            |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`lean_rs::HostStage::Link`] — failures bind to the capability's load,
-//! not to the first query. Missing **optional** meta-service symbols
-//! degrade gracefully: [`LeanSession::run_meta`] returns
+//! not to the first query. Missing **optional** symbols degrade
+//! gracefully: [`LeanSession::run_meta`] returns
 //! [`crate::host::meta::LeanMetaResponse::Unsupported`] against a service whose
-//! address did not resolve, the rest of the capability stays usable.
+//! address did not resolve, [`LeanSession::process_with_info_tree`]
+//! returns [`crate::host::process::ProcessFileOutcome::Unsupported`],
+//! and the rest of the capability stays usable.
 //! The evidence-side pair (`check_evidence`, `evidence_summary`) is
 //! mandatory because any capability that produces a `LeanEvidence`
 //! handle via `kernel_check` must also be able to re-validate and
@@ -134,6 +138,7 @@ use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
+use crate::host::process::{ProcessFileOutcome, ProcessedFile};
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
 use lean_rs::Obj;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
@@ -336,12 +341,14 @@ pub(crate) struct SessionSymbols {
     pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
     pub(crate) meta_is_def_eq: Option<*mut c_void>,
     pub(crate) meta_pp_expr: Option<*mut c_void>,
+    pub(crate) process_with_info_tree: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
     /// Resolve session function symbols from `library`. The twenty-eight
-    /// baseline symbols are mandatory; the five meta-service symbols
-    /// are optional.
+    /// baseline symbols are mandatory; the six optional symbols (five
+    /// bounded `MetaM` services and the info-tree projection) degrade
+    /// to per-call `Unsupported` returns if missing.
     ///
     /// # Errors
     ///
@@ -394,6 +401,7 @@ impl SessionSymbols {
             meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
             meta_is_def_eq: library.resolve_optional_function_symbol("lean_rs_host_meta_is_def_eq"),
             meta_pp_expr: library.resolve_optional_function_symbol("lean_rs_host_meta_pp_expr"),
+            process_with_info_tree: library.resolve_optional_function_symbol("lean_rs_host_process_with_info_tree"),
         })
     }
 
@@ -1265,6 +1273,75 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let result = render.call(expr.clone());
         self.record_call(0, t.elapsed());
         result
+    }
+
+    /// Parse, elaborate, and project a Lean source string into its
+    /// `Elab.InfoTree`.
+    ///
+    /// Drives Lean's `IO.processCommands` pipeline with info collection
+    /// enabled, walks every captured info tree, and projects each
+    /// `TermInfo` / `TacticInfo` / `CommandInfo` / identifier reference
+    /// into a [`ProcessedFile`] value. The projection is the FFI
+    /// boundary — raw `InfoTree` does not cross, because it carries
+    /// metavariable contexts that cannot be revived outside the
+    /// session that produced them.
+    ///
+    /// Goal text in `TacticInfoNode::goals_before` /
+    /// `TacticInfoNode::goals_after` is pre-rendered through Lean's
+    /// `Meta.ppGoal` inside the elaboration context; the cumulative
+    /// goal-byte sum is bounded by [`LeanElabOptions::diagnostic_byte_limit`].
+    ///
+    /// The shim is optional. When the loaded capability dylib does not
+    /// export `lean_rs_host_process_with_info_tree`, the method returns
+    /// [`ProcessFileOutcome::Unsupported`] without an FFI call —
+    /// matching the meta-service degradation pattern. There is no
+    /// separate timeout arm because `IO.processCommands` catches
+    /// per-command exceptions and attaches them to the message log;
+    /// inspect [`ProcessedFile::diagnostics`] to detect heartbeat
+    /// exhaustion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch. Returns
+    /// [`lean_rs::LeanError::LeanException`] if the Lean-side shim
+    /// raises through `IO`. Returns [`lean_rs::LeanError::Host`] with
+    /// stage [`HostStage::Conversion`] if the Lean return value does
+    /// not decode into [`ProcessedFile`].
+    pub fn process_with_info_tree(
+        &mut self,
+        source: &str,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<ProcessFileOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.process_with_info_tree",
+            source_len = source.len(),
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(address) = self.capabilities.symbols().process_with_info_tree else {
+            return Ok(ProcessFileOutcome::Unsupported);
+        };
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, String, String, String, UInt64, USize) ->
+        // IO ProcessedFile`.
+        let call: LeanExported<'lean, '_, (Obj<'lean>, &str, &str, &str, u64, usize), LeanIo<ProcessedFile>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            source,
+            options.namespace_context_str(),
+            options.file_label_str(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        self.record_call(0, t.elapsed());
+        Ok(ProcessFileOutcome::Processed(result?))
     }
 
     /// Parse and elaborate a single Lean term against the imported

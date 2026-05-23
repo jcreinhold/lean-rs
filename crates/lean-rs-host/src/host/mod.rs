@@ -47,6 +47,7 @@ pub mod elaboration;
 pub mod evidence;
 pub mod meta;
 pub mod pool;
+pub mod process;
 
 pub(crate) mod lake;
 

@@ -14,7 +14,7 @@ import LeanRsFixture.SourceRanges
     workspace-internal test fixtures (containers, effects, scalars, …)
     that the in-tree integration and codegen tests drive.
 
-    The 26 mandatory + 4 optional `@[export] lean_rs_host_*` shims travel
+    The 28 mandatory + 6 optional `@[export] lean_rs_host_*` shims travel
     with the `lean-rs-host` crate. The host stack builds and loads those
     bundled shims directly, then adds their `.olean` directory to the search
     path when a session imports `LeanRsHostShims.*`.

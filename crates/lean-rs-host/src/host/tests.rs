@@ -3,8 +3,8 @@
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
 //! loads the `LeanRsFixture` capability dylib (which pre-resolves the
-//! twenty-eight mandatory session symbols plus the five optional
-//! meta-service symbols), starts a session over an import list, and
+//! twenty-eight mandatory session symbols plus the six optional
+//! symbols — five `MetaM` services and the info-tree projection), starts a session over an import list, and
 //! exercises the typed query methods.
 
 #![allow(clippy::expect_used, clippy::panic)]
@@ -765,7 +765,7 @@ fn session_reuse_amortises_import() {
 //
 // Each test imports `LeanRsHostShims.Meta` (which also pulls in
 // `LeanRsHostShims.Elaboration` via the dependency edge). The fixture
-// dylib exports the five optional meta-service symbols, so the
+// dylib exports all six optional symbols, so the
 // `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
 // dispatches through cached addresses.
 
@@ -1145,5 +1145,126 @@ fn meta_missing_optional_symbol_returns_unsupported() {
         outcome.status(),
         MetaCallStatus::Unsupported,
         "missing optional meta symbol must return Unsupported, got {outcome:?}",
+    );
+}
+
+// -- process_with_info_tree (optional info-tree projection) -------------
+//
+// `lean_rs_host_process_with_info_tree` is bundled in the shim dylib, so
+// `SessionSymbols::resolve` finds it and dispatch returns `Processed`.
+// The unsupported branch is asserted indirectly by the meta-Unsupported
+// tests above — the same lookup pattern (`Option<*mut c_void>` from
+// `resolve_optional_function_symbol`) covers both. A bespoke
+// "synthesise None to confirm Unsupported" test would require a
+// reflection-style hook into `SessionSymbols`; not load-bearing for v1.
+
+#[test]
+fn session_process_with_info_tree_projects_small_file() {
+    use crate::host::process::ProcessFileOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "def x := 1\ntheorem t : x = 1 := rfl\n#check x";
+    let outcome = session
+        .process_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessFileOutcome::Processed(processed) = outcome else {
+        panic!("expected Processed, got {outcome:?}");
+    };
+    assert!(
+        processed.commands.len() >= 3,
+        "three top-level commands expected, got {}",
+        processed.commands.len()
+    );
+    let t_node = processed.commands.iter().find(|c| c.decl_name.as_deref() == Some("t"));
+    assert!(
+        t_node.is_some(),
+        "the `theorem t` command must surface declName=`t`, got commands {:?}",
+        processed.commands
+    );
+    assert!(
+        processed.names.iter().any(|n| n.name.ends_with('x')),
+        "name references must include a use site for `x`, got {:?}",
+        processed.names
+    );
+    assert!(
+        processed
+            .terms
+            .iter()
+            .any(|t| t.expr_str.contains('x') || t.type_str.contains('x')),
+        "at least one term node must mention `x`, got {:?}",
+        processed.terms
+    );
+}
+
+#[test]
+fn session_process_with_info_tree_position_helpers() {
+    use crate::host::process::ProcessFileOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Tactic-mode body so the elaborator records a TacticInfo node for
+    // `rfl`. Without `by`, `rfl` is a term and there is no TacticInfo.
+    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n";
+    let outcome = session
+        .process_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessFileOutcome::Processed(processed) = outcome else {
+        panic!("expected Processed, got {outcome:?}");
+    };
+    // `rfl` sits at line 2 around column 24 (after "by "). The
+    // innermost tactic node covering that column should be the `rfl`
+    // tactic itself.
+    let tac = processed.tactic_at(2, 24).unwrap_or_else(|| {
+        panic!(
+            "tactic_at(2, 24) must find the `rfl` tactic, got tactics {:?}",
+            processed.tactics
+        )
+    });
+    assert!(
+        !tac.goals_before.is_empty(),
+        "tactic node must record goals_before, got {tac:?}",
+    );
+    // Names of `x` should include the def site and the reference in `t`.
+    let xs = processed.references_of("x");
+    assert!(!xs.is_empty(), "references_of(\"x\") must find ≥1 entry, got {xs:?}");
+    // term_at within `x = 1` body should find a term.
+    let term = processed.term_at(2, 13);
+    assert!(
+        term.is_some(),
+        "term_at(2, 13) inside the theorem body must find a term, got terms {:?}",
+        processed.terms
+    );
+}
+
+#[test]
+fn session_process_with_info_tree_records_diagnostics_for_failure() {
+    use crate::host::process::ProcessFileOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Type-mismatched body — elaborator emits an error diagnostic but
+    // the projection still returns Processed (diagnostics carry the
+    // failure context; no separate timeout/failed wire arm).
+    let src = "theorem bad : True := 0\n";
+    let outcome = session
+        .process_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessFileOutcome::Processed(processed) = outcome else {
+        panic!("expected Processed, got {outcome:?}");
+    };
+    let diags = processed.diagnostics.diagnostics();
+    assert!(
+        diags.iter().any(|d| d.severity() == LeanSeverity::Error),
+        "type-mismatched body must record at least one error diagnostic, got {diags:?}",
     );
 }

@@ -15,7 +15,7 @@
 //!   reusable callback helpers imported by the host progress shims.
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
 //!   built from the `lean-rs-host` crate's bundled shim sources. It contains
-//!   the 28 mandatory + 5 optional `lean_rs_host_*` `@[export]` symbols that
+//!   the 28 mandatory + 6 optional `lean_rs_host_*` `@[export]` symbols that
 //!   every typed `LeanSession` method dispatches through. Lake does *not*
 //!   transitively bundle the shim's `@[export]` symbols into the user's dylib
 //!   (verified at carve-out time, 2026-05-18 — `LeanLib.sharedFacet` is a
@@ -63,7 +63,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// generated `LeanRsInterop.*` initializer references resolve.
     #[allow(dead_code, reason = "Drop releases the dylib; field is structurally required")]
     interop_library: LeanLibrary<'lean>,
-    /// Shim dylib carrying the 28+5 `lean_rs_host_*` `@[export]`
+    /// Shim dylib carrying the 28+6 `lean_rs_host_*` `@[export]`
     /// symbols. RAII anchor only — the addresses inside `symbols`
     /// outlive any direct read of this field.
     #[allow(dead_code, reason = "Drop releases the dylib; field is structurally required")]
@@ -85,10 +85,11 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// through Lean's `_G_initialized` short-circuit), opens and
     /// initializes the generic interop and host shim dylibs built from the
     /// crate-owned shim sources, and resolves the
-    /// session-dispatch symbol addresses from the **shim** dylib: 26
-    /// mandatory baseline symbols (load failure on miss) and 4
-    /// optional meta-service symbols (missing entries stored as
-    /// `None`). Both [`lean_rs::module::LeanModule`] handles are
+    /// session-dispatch symbol addresses from the **shim** dylib: 28
+    /// mandatory baseline symbols (load failure on miss) and 6
+    /// optional symbols — five bounded `MetaM` services plus the
+    /// info-tree projection (missing entries stored as `None`). Both
+    /// [`lean_rs::module::LeanModule`] handles are
     /// dropped at the end of this call — the cached symbol addresses
     /// outlive any single module borrow.
     ///
@@ -98,7 +99,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// [`lean_rs::HostStage::Load`] /
     /// [`lean_rs::LeanDiagnosticCode::ModuleInit`] if the bundled shim dylibs
     /// cannot be built or located. Returns [`lean_rs::HostStage::Link`] if the
-    /// initializer or any of the 26 **mandatory** symbols is missing from the
+    /// initializer or any of the 28 **mandatory** symbols is missing from the
     /// shim dylib. Missing optional meta-service symbols never fail capability
     /// load.
     pub(crate) fn new(
@@ -131,7 +132,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         // ad-hoc user exports still resolve from this library.
         let _user_module = user_library.initialize_module(package, lib_name)?;
 
-        // The 28 mandatory + 5 optional `lean_rs_host_*` symbols live
+        // The 28 mandatory + 6 optional `lean_rs_host_*` symbols live
         // in the shim dylib; resolve them there.
         // `LeanSession::call_capability` (separately) routes ad-hoc
         // user-authored `@[export]` symbols through `user_library`.
@@ -186,7 +187,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// resolve ad-hoc function symbols on the user's dylib without
     /// holding a separate library borrow. Ad-hoc calls always go to
     /// the user's dylib, not the shim dylib: the shim dylib hosts a
-    /// fixed contract (the 28+5 `lean_rs_host_*` symbols pre-resolved
+    /// fixed contract (the 28+6 `lean_rs_host_*` symbols pre-resolved
     /// in `symbols`); arbitrary user `@[export]` symbols live in the
     /// user's dylib.
     pub(crate) fn library(&self) -> &LeanLibrary<'lean> {

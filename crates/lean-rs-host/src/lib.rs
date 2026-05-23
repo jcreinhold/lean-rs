@@ -11,7 +11,7 @@
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 28 mandatory + 5 optional `lean_rs_host_*`
+//! - The capability contract: 28 mandatory + 6 optional `lean_rs_host_*`
 //!   `@[export]` Lean shims bundled with this crate and loaded alongside the
 //!   consumer capability dylib.
 //!

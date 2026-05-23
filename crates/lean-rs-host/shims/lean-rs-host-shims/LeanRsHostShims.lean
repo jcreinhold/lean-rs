@@ -1,10 +1,11 @@
 import LeanRsHostShims.Environment
 import LeanRsHostShims.Elaboration
 import LeanRsHostShims.Meta
+import LeanRsHostShims.InfoTree
 import LeanRsHostShims.Interop
 
 /-! Roll-up module for the `LeanRsHostShims` Lake library. Importing this
-    module pulls in all 28 mandatory + 5 optional `@[export]
+    module pulls in all 28 mandatory + 6 optional `@[export]
     lean_rs_host_*` shims that the `lean-rs-host` Rust crate's
     `LeanCapabilities::load_capabilities` resolves, plus the test-only
     interop callback spike export. External consumers of `lean-rs-host`
