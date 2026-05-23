@@ -8,8 +8,8 @@ creation, the five-crate live publish in dependency order, and opens a GitHub Re
 This document is the **human checklist** for the steps before the tag push. The steps after the tag push are owned by
 the workflow.
 
-**Supported Lean window for v0.1.x:** 4.26.0 through 4.29.1. Adding the next release follows the
-[bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
+**Supported Lean window for v0.1.x:** 4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candidate. Adding the next
+release follows the [bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
 `crates/lean-rs-sys/src/supported.rs` before any release.
 
 **Crate publish order is load-bearing:** `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host` →

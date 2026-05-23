@@ -127,10 +127,15 @@ fn pick_resolved_version<'a>(entry: &'a SupportedToolchain, discovered: &'a str)
     entry.versions.first().copied().unwrap_or("unknown")
 }
 
-/// Convert a version string like `"4.29.1"` to the `cfg` token `4_29_1` so
-/// downstream code can write `#[cfg(lean_v_4_29_1)]`.
+/// Convert a version string to a valid `cfg` token. Examples: `"4.29.1"` →
+/// `"4_29_1"` (downstream uses `#[cfg(lean_v_4_29_1)]`); `"4.30.0-rc2"` →
+/// `"4_30_0_rc2"`. Any byte outside `[A-Za-z0-9_]` collapses to `_` so
+/// release-candidate suffixes do not produce invalid `--cfg` arguments.
 fn cfg_token(version: &str) -> String {
-    version.replace('.', "_")
+    version
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
 }
 
 /// Render the supported window as a multi-line bulleted summary, suitable

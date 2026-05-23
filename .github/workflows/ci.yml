@@ -68,8 +68,8 @@ jobs:
         #
         # See `docs/bump-toolchain.md`.
         os: [ubuntu-latest]
-        lean_version: ['4.29.1']
-        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.full_matrix) && '[{"os":"ubuntu-latest","lean_version":"4.26.0"},{"os":"ubuntu-latest","lean_version":"4.27.0"},{"os":"ubuntu-latest","lean_version":"4.28.0"},{"os":"ubuntu-latest","lean_version":"4.28.1"},{"os":"ubuntu-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.26.0"},{"os":"macos-latest","lean_version":"4.27.0"},{"os":"macos-latest","lean_version":"4.28.0"},{"os":"macos-latest","lean_version":"4.28.1"},{"os":"macos-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.29.1"}]' || '[]') }}
+        lean_version: ['4.30.0-rc2']
+        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.full_matrix) && '[{"os":"ubuntu-latest","lean_version":"4.26.0"},{"os":"ubuntu-latest","lean_version":"4.27.0"},{"os":"ubuntu-latest","lean_version":"4.28.0"},{"os":"ubuntu-latest","lean_version":"4.28.1"},{"os":"ubuntu-latest","lean_version":"4.29.0"},{"os":"ubuntu-latest","lean_version":"4.29.1"},{"os":"macos-latest","lean_version":"4.26.0"},{"os":"macos-latest","lean_version":"4.27.0"},{"os":"macos-latest","lean_version":"4.28.0"},{"os":"macos-latest","lean_version":"4.28.1"},{"os":"macos-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.29.1"},{"os":"macos-latest","lean_version":"4.30.0-rc2"}]' || '[]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -88,7 +88,7 @@ jobs:
           tool: cargo-nextest,cargo-public-api
 
       - name: Install actionlint
-        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.30.0-rc2'
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
@@ -138,7 +138,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: actionlint workflows
-        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.30.0-rc2'
         run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
 
       # Two Linux-specific overrides for the panic-handling tests in
@@ -183,11 +183,11 @@ jobs:
         run: python3 scripts/check_package_docsrs.py
 
       - name: Install Rust nightly (for cargo-public-api)
-        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.30.0-rc2'
         run: rustup toolchain install nightly --profile minimal
 
       - name: Public-API diff vs committed baselines
-        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.29.1'
+        if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.30.0-rc2'
         run: |
           set -euo pipefail
           fail=0

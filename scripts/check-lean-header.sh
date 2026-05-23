@@ -13,8 +13,8 @@
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <existing-version> <candidate-version>" >&2
-    exit 2
+	echo "usage: $0 <existing-version> <candidate-version>" >&2
+	exit 2
 fi
 
 EXISTING=$1
@@ -23,5 +23,5 @@ TOOLCHAIN_ROOT="${ELAN_HOME:-$HOME/.elan}/toolchains"
 EXTRACT='/^typedef struct lean_object \{|^} lean_(ctor|array|sarray|string|closure|ref|thunk|task|promise|external)_object/{p=1} p{print} /^} lean_external_object/{p=0}'
 
 diff \
-    <(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$EXISTING/include/lean/lean.h") \
-    <(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/include/lean/lean.h")
+	<(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$EXISTING/include/lean/lean.h") \
+	<(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/include/lean/lean.h")

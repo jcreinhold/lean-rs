@@ -5,11 +5,11 @@ description = "Worker-process boundary for lean-rs host workloads."
 documentation = "https://docs.rs/lean-rs-worker"
 edition.workspace = true
 include = [
-  "benches/**/*.rs",
   "Cargo.toml",
   "LICENSE-APACHE",
   "LICENSE-MIT",
   "README.md",
+  "benches/**/*.rs",
   "build.rs",
   "examples/**/*.rs",
   "src/**/*.rs",

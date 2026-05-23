@@ -79,6 +79,11 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc",
         missing_symbols: &[],
     },
+    SupportedToolchain {
+        versions: &["4.30.0-rc2"],
+        header_digest: "790b121ce52942086a360a91f6db5f0f738043bc87b669daffa3fb8bc01e6dd3",
+        missing_symbols: &[],
+    },
 ];
 
 /// Return the [`SupportedToolchain`] entry that includes `version`, if any.

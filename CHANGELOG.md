@@ -9,6 +9,68 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-05-23
+
+Adds string projections for opaque `LeanName` and `LeanExpr` handles and a new info-tree projection over processed Lean
+sources. Concentrated in `lean-rs-host`; the other four crates have only the toolchain-window extension. The supported
+Lean window now covers **4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candidate**.
+
+### `lean-rs-host` 0.1.3
+
+#### `LeanName` rendering
+
+- Added `LeanSession::name_to_string`, `name_to_string_bulk`, and `list_declarations_strings` for projecting opaque
+  `LeanName` handles into Rust `String`s. Backed by the new mandatory shim `lean_rs_host_name_to_string`. The handle
+  stays opaque — no `Display`, `Eq`, or `From<String>` — so the FFI cost is visible at the call site and the
+  diagnostic-only semantics are not papered over.
+
+#### `LeanExpr` rendering
+
+- Added two complementary projections so callers pick the cost tier without a flag.
+  - `LeanSession::expr_to_string_raw` walks `Expr.toString` through the new mandatory shim
+    `lean_rs_host_env_expr_to_string_raw`. No `MetaM`, no notation, ugly but deterministic — suitable for indexing,
+    logging, and search keys.
+  - `LeanSession::pp_expr` runs `Lean.PrettyPrinter.ppExpr` as a new optional meta service, heartbeat-bounded by
+    `LeanMetaOptions`. Capability dylibs that predate the service still load; `run_meta` returns `Unsupported` so
+    callers can fall back to the raw path.
+
+#### Info-tree projection
+
+- Added `LeanSession::process_with_info_tree`. The session projects a Lean source into a `ProcessedFile`: command, term,
+  and tactic nodes plus name references, each carrying source ranges and diagnostics. The method returns
+  `ProcessFileOutcome::Processed` or `ProcessFileOutcome::Unsupported`, so capability dylibs without the new optional
+  shim `lean_rs_host_process_with_info_tree` still load.
+
+#### Capability contract
+
+- Mandatory shim count: 26 → 28. Optional shim count: 3 → 6. Capability dylibs built against the 0.1.2 shim set **must
+  be rebuilt** before they will pass 0.1.3 capability preflight — the two new mandatory entries
+  (`lean_rs_host_name_to_string`, `lean_rs_host_env_expr_to_string_raw`) have no fallback path. The new optional entries
+  degrade cleanly: missing `pp_expr` and `process_with_info_tree` surface as `Unsupported` rather than load failure.
+
+### Lean toolchain window
+
+- Added 4.30.0-rc2 to `SUPPORTED_TOOLCHAINS` (header digest
+  `790b121ce52942086a360a91f6db5f0f738043bc87b669daffa3fb8bc01e6dd3`). Layout-probe + symbol-probe gates both clean
+  against 4.29.1. RCs are now in scope as supported rows; promotion to the stable row happens when upstream tags
+  `4.30.0`.
+- Fixed `lean-rs-sys`'s build script: the `lean_v_X_Y_Z` cfg-token converter now sanitizes any non-identifier character
+  (hyphens in `-rcN` suffixes specifically), preventing `invalid --cfg argument` build failures on RC toolchains.
+
+### CI
+
+- Bumped the CI / sanitizer / release head pin from 4.29.1 to 4.30.0-rc2 and extended the workflow-dispatch full matrix
+  to cover every entry in the table.
+- Narrowed the sanitizer job to Linux ASan Rust-only; the previous matrix is documented in
+  [`docs/safety/unsafe-inventory.md`](docs/safety/unsafe-inventory.md).
+- Gated the fuzz workflow inside the release pipeline so tag pushes run it without making it a default-branch gate.
+
+### Internal
+
+- Repointed `scripts/test-all-toolchains.sh` to the bundled shim packages under `crates/lean-rs/shims/` and
+  `crates/lean-rs-host/shims/` (was top-level `lake/`), added the `templates/shipped-lean-crate/lean/` pin, and brought
+  the script up to shellcheck/shfmt clean (real bug fix on a `[ ... =~ ... ]` test).
+
 ## [0.1.2] — 2026-05-21
 
 ### Shipping Lean code

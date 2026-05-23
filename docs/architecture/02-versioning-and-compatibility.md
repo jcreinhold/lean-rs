@@ -6,9 +6,9 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 ## Supported Lean toolchain window
 
-`lean-rs` supports a **contiguous window of Lean 4 stable releases**, enumerated in the
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table is the single source of truth; this
-document mirrors it for narrative context. As of 2026-05-18:
+`lean-rs` supports a **contiguous window of Lean 4 stable releases plus the current upstream release candidate**,
+enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table is the single
+source of truth; this document mirrors it for narrative context. As of 2026-05-23:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 |
 | --- | --- |
@@ -18,6 +18,7 @@ document mirrors it for narrative context. As of 2026-05-18:
 | 4.28.1 | `648ecfb615ef0222cd63b5f1bbbc379a06749bc0f5f4c2eb16ffca26fd18fe81` |
 | 4.29.0 | `671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c` |
 | 4.29.1 | `2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc` |
+| 4.30.0-rc2 | `790b121ce52942086a360a91f6db5f0f738043bc87b669daffa3fb8bc01e6dd3` |
 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
@@ -25,7 +26,8 @@ is the [bump procedure](../bump-toolchain.md).
 **Lower bound: 4.26.0.** A 2026-05-18 multi-toolchain sweep
 ([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1. The six
 releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases ≤ 4.25.x SIGSEGV inside
-`lean_dec_ref_cold` from L2 host-stack tests (`lean-rs-host` session/meta).
+`lean_dec_ref_cold` from L2 host-stack tests (`lean-rs-host` session/meta). The 4.30.0-rc2 row was added on 2026-05-23
+after the standard layout-probe + symbol-probe gate; it is promoted to a stable row when upstream tags `4.30.0`.
 
 **Policy.**
 

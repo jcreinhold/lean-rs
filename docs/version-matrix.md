@@ -9,7 +9,8 @@ if they happen to compile.
 
 ## Lean toolchain window
 
-Supported window: Lean 4.26.0–4.29.1 (six releases). Authoritative list, including `lean.h` SHA-256 digests, lives in
+Supported window: Lean 4.26.0–4.29.1 plus the 4.30.0-rc2 release candidate (seven entries). Authoritative list,
+including `lean.h` SHA-256 digests, lives in
 [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs). Releases that ship a byte-identical
 `lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is
 platform-independent; digests are identical across the two target triples.
@@ -51,7 +52,6 @@ Explicitly unsupported (do not file as bugs without a compatibility-decision pro
 - Windows (any toolchain). Adding requires a CI cell and a compatibility-decision proposal against
   [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md).
 - BSDs, embedded targets, WASM.
-- Release-candidate Lean tags (e.g. `4.30.0-rc2`). Promoted when they ship stable.
 
 ## See also
 

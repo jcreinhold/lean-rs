@@ -13,8 +13,8 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 <candidate-version>" >&2
-    exit 2
+	echo "usage: $0 <candidate-version>" >&2
+	exit 2
 fi
 
 CANDIDATE=$1
@@ -23,9 +23,12 @@ TOOLCHAIN_ROOT="${ELAN_HOME:-$HOME/.elan}/toolchains"
 LIB_DIR="$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/lib/lean"
 
 case "$(uname -s)" in
-    Darwin) LIB="$LIB_DIR/libleanshared.dylib" ;;
-    Linux)  LIB="$LIB_DIR/libleanshared.so" ;;
-    *)      echo "unsupported OS: $(uname -s)" >&2; exit 2 ;;
+Darwin) LIB="$LIB_DIR/libleanshared.dylib" ;;
+Linux) LIB="$LIB_DIR/libleanshared.so" ;;
+*)
+	echo "unsupported OS: $(uname -s)" >&2
+	exit 2
+	;;
 esac
 
 REQUIRED=$(mktemp)
@@ -33,10 +36,10 @@ PRESENT=$(mktemp)
 trap 'rm -f "$REQUIRED" "$PRESENT"' EXIT
 
 awk '/^pub const REQUIRED_SYMBOLS/,/^];/' \
-    "$REPO_ROOT/crates/lean-rs-sys/src/lib.rs" \
-    | grep -oE '"lean_[a-z0-9_]+"' | tr -d '"' | sort -u > "$REQUIRED"
+	"$REPO_ROOT/crates/lean-rs-sys/src/lib.rs" |
+	grep -oE '"lean_[a-z0-9_]+"' | tr -d '"' | sort -u >"$REQUIRED"
 
-nm -gU "$LIB" | awk '{print $NF}' | sed 's/^_//' | grep -E '^lean_' \
-    | sort -u > "$PRESENT"
+nm -gU "$LIB" | awk '{print $NF}' | sed 's/^_//' | grep -E '^lean_' |
+	sort -u >"$PRESENT"
 
 comm -23 "$REQUIRED" "$PRESENT"

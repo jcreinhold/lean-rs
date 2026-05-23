@@ -13,8 +13,8 @@ include = [
   "benches/**/*.rs",
   "build.rs",
   "examples/**/*.rs",
-  "shims/**/c/**/*.c",
   "shims/**/*.lean",
+  "shims/**/c/**/*.c",
   "shims/**/lake-manifest.json",
   "shims/**/lakefile.lean",
   "shims/**/lean-toolchain",
@@ -31,8 +31,8 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-lean-toolchain = { workspace = true }
 lean-rs-sys = { workspace = true }
+lean-toolchain = { workspace = true }
 libloading = "0.8"
 # Symbol-table walk in `module::library` distinguishes Lean nullary-constant
 # globals (compiled by Lake as persistent `lean_object*` data-section

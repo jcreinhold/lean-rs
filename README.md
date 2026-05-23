@@ -13,7 +13,7 @@ packaging. Rust does not reconstruct Lean semantic facts.
 ## Prerequisites
 
 - [`elan`](https://github.com/leanprover/elan) and a Lean 4 toolchain in the [supported window](docs/version-matrix.md)
-  (currently 4.26.0–4.29.1). `elan` ships `lean` and `lake` together.
+  (currently 4.26.0–4.29.1 plus the 4.30.0-rc2 release candidate). `elan` ships `lean` and `lake` together.
 - Rust stable (MSRV 1.91).
 - macOS or Linux. Windows is not supported.
 
