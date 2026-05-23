@@ -149,25 +149,39 @@ static INIT: OnceLock<Result<(), LeanError>> = OnceLock::new();
 fn do_initialize_once() -> Result<(), LeanError> {
     let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
         let workers = read_num_threads_env();
-        // SAFETY: All three calls are valid to invoke once per process
+        // SAFETY: All four calls are valid to invoke once per process
         // before any other Lean code runs; `OnceLock::get_or_init`
         // enforces the "once" half of the contract. The order
-        // (`runtime_module` before the full `initialize`; task manager
-        // last) follows the documented Lean embedding sequence captured
-        // in `crates/lean-rs-sys/src/init.rs`. None of the calls take
-        // inputs from Rust state (the `workers` count is a plain `u32`
-        // read from the environment above), so there is no aliasing or
-        // lifetime hazard. The task manager is required for any code
-        // path that spawns Lean tasks — including
-        // `Lean.Elab.Frontend.process` (driven by `kernel_check`),
-        // which would otherwise abort with a
+        // (`runtime_module` before the full `initialize`; mark-end of
+        // bootstrap initialization next; task manager last) follows
+        // the documented Lean embedding sequence captured in
+        // `crates/lean-rs-sys/src/init.rs`. None of the calls take
+        // inputs from Rust state (the `workers` count is a plain
+        // `u32` read from the environment above), so there is no
+        // aliasing or lifetime hazard.
+        //
+        // `lean_io_mark_end_initialization()` flips Lean's
+        // `IO.initializing` flag to `false`. Several Lean APIs gate on
+        // this flag — most notably `Lean.mkEmptyEnvironment` (called
+        // transitively by `Lean.Parser.parseHeader`), which throws
+        // `IO.userError "environment objects cannot be created during
+        // initialization"` otherwise. Omitting this call leaves the
+        // runtime stuck in pre-init mode forever; downstream module
+        // initializers loaded via `LeanLibrary::initialize_module`
+        // still run normally because Lake-emitted initializers do not
+        // check the flag.
+        //
+        // The task manager is required for any code path that spawns
+        // Lean tasks — including `Lean.Elab.Frontend.process` (driven
+        // by `kernel_check`), which would otherwise abort with a
         // "g_task_manager" assertion on the first
-        // `Language.Lean.processCommands` call. Lean tears the manager
-        // down at process exit; we hold no Drop handle here because
-        // the runtime itself is intentionally process-lifetime.
+        // `Language.Lean.processCommands` call. Lean tears the
+        // manager down at process exit; we hold no Drop handle here
+        // because the runtime itself is intentionally process-lifetime.
         unsafe {
             lean_rs_sys::init::lean_initialize_runtime_module();
             lean_rs_sys::init::lean_initialize();
+            lean_rs_sys::io::lean_io_mark_end_initialization();
             match workers {
                 Some(n) => lean_rs_sys::init::lean_init_task_manager_using(n),
                 None => lean_rs_sys::init::lean_init_task_manager(),
