@@ -16,13 +16,13 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use lean_rs::{LeanResult, LeanRuntime};
+use lean_rs::{LeanError, LeanRuntime};
 use lean_rs_host::host::process::ProcessFileOutcome;
 use lean_rs_host::{LeanElabOptions, LeanHost};
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(err) => {
             eprintln!("[{}] {err}", err.code());
             ExitCode::FAILURE
@@ -30,7 +30,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> LeanResult<()> {
+fn run() -> Result<ExitCode, LeanError> {
     let runtime = LeanRuntime::init()?;
     let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
@@ -54,15 +54,15 @@ fn run() -> LeanResult<()> {
                 processed.diagnostics.diagnostics().len(),
                 processed.diagnostics.truncated(),
             );
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
         ProcessFileOutcome::Unsupported => {
             eprintln!("capability dylib does not export `lean_rs_host_process_with_info_tree`");
-            std::process::exit(2);
+            Ok(ExitCode::from(2))
         }
         other => {
             eprintln!("unexpected non-exhaustive outcome: {other:?}");
-            std::process::exit(3);
+            Ok(ExitCode::from(3))
         }
     }
 }

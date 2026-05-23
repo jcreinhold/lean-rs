@@ -296,6 +296,7 @@ impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::Lea
 pub fn lean_rs_host::host::meta::heartbeat_burn<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::host::meta::infer_type<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanMetaService<(lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::meta::LeanMetaTransparency), bool>
+pub fn lean_rs_host::host::meta::pp_expr<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, alloc::string::String>
 pub fn lean_rs_host::host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub mod lean_rs_host::host::pool
 pub struct lean_rs_host::host::pool::PoolStats
@@ -359,6 +360,138 @@ impl<'lean> core::marker::Unpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
+pub mod lean_rs_host::host::process
+#[non_exhaustive] pub enum lean_rs_host::host::process::ProcessFileOutcome
+pub lean_rs_host::host::process::ProcessFileOutcome::Processed(lean_rs_host::host::process::ProcessedFile)
+pub lean_rs_host::host::process::ProcessFileOutcome::Unsupported
+impl core::fmt::Debug for lean_rs_host::host::process::ProcessFileOutcome
+pub fn lean_rs_host::host::process::ProcessFileOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::host::process::ProcessFileOutcome
+impl core::marker::Send for lean_rs_host::host::process::ProcessFileOutcome
+impl core::marker::Sync for lean_rs_host::host::process::ProcessFileOutcome
+impl core::marker::Unpin for lean_rs_host::host::process::ProcessFileOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProcessFileOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
+pub struct lean_rs_host::host::process::CommandInfoNode
+pub lean_rs_host::host::process::CommandInfoNode::decl_name: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::process::CommandInfoNode::end_column: u32
+pub lean_rs_host::host::process::CommandInfoNode::end_line: u32
+pub lean_rs_host::host::process::CommandInfoNode::start_column: u32
+pub lean_rs_host::host::process::CommandInfoNode::start_line: u32
+impl core::clone::Clone for lean_rs_host::host::process::CommandInfoNode
+pub fn lean_rs_host::host::process::CommandInfoNode::clone(&self) -> lean_rs_host::host::process::CommandInfoNode
+impl core::cmp::Eq for lean_rs_host::host::process::CommandInfoNode
+impl core::cmp::PartialEq for lean_rs_host::host::process::CommandInfoNode
+pub fn lean_rs_host::host::process::CommandInfoNode::eq(&self, other: &lean_rs_host::host::process::CommandInfoNode) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::CommandInfoNode
+pub fn lean_rs_host::host::process::CommandInfoNode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::CommandInfoNode
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::CommandInfoNode
+pub fn lean_rs_host::host::process::CommandInfoNode::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::CommandInfoNode
+impl core::marker::Send for lean_rs_host::host::process::CommandInfoNode
+impl core::marker::Sync for lean_rs_host::host::process::CommandInfoNode
+impl core::marker::Unpin for lean_rs_host::host::process::CommandInfoNode
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::CommandInfoNode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::CommandInfoNode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::CommandInfoNode
+pub struct lean_rs_host::host::process::NameRefNode
+pub lean_rs_host::host::process::NameRefNode::end_column: u32
+pub lean_rs_host::host::process::NameRefNode::end_line: u32
+pub lean_rs_host::host::process::NameRefNode::is_binder: bool
+pub lean_rs_host::host::process::NameRefNode::name: alloc::string::String
+pub lean_rs_host::host::process::NameRefNode::start_column: u32
+pub lean_rs_host::host::process::NameRefNode::start_line: u32
+impl core::clone::Clone for lean_rs_host::host::process::NameRefNode
+pub fn lean_rs_host::host::process::NameRefNode::clone(&self) -> lean_rs_host::host::process::NameRefNode
+impl core::cmp::Eq for lean_rs_host::host::process::NameRefNode
+impl core::cmp::PartialEq for lean_rs_host::host::process::NameRefNode
+pub fn lean_rs_host::host::process::NameRefNode::eq(&self, other: &lean_rs_host::host::process::NameRefNode) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::NameRefNode
+pub fn lean_rs_host::host::process::NameRefNode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::NameRefNode
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::NameRefNode
+pub fn lean_rs_host::host::process::NameRefNode::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::NameRefNode
+impl core::marker::Send for lean_rs_host::host::process::NameRefNode
+impl core::marker::Sync for lean_rs_host::host::process::NameRefNode
+impl core::marker::Unpin for lean_rs_host::host::process::NameRefNode
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::NameRefNode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::NameRefNode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::NameRefNode
+pub struct lean_rs_host::host::process::ProcessedFile
+pub lean_rs_host::host::process::ProcessedFile::commands: alloc::vec::Vec<lean_rs_host::host::process::CommandInfoNode>
+pub lean_rs_host::host::process::ProcessedFile::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::process::ProcessedFile::names: alloc::vec::Vec<lean_rs_host::host::process::NameRefNode>
+pub lean_rs_host::host::process::ProcessedFile::tactics: alloc::vec::Vec<lean_rs_host::host::process::TacticInfoNode>
+pub lean_rs_host::host::process::ProcessedFile::terms: alloc::vec::Vec<lean_rs_host::host::process::TermInfoNode>
+impl lean_rs_host::host::process::ProcessedFile
+pub fn lean_rs_host::host::process::ProcessedFile::references_of<'a>(&'a self, name: &str) -> alloc::vec::Vec<&'a lean_rs_host::host::process::NameRefNode>
+pub fn lean_rs_host::host::process::ProcessedFile::tactic_at(&self, line: u32, column: u32) -> core::option::Option<&lean_rs_host::host::process::TacticInfoNode>
+pub fn lean_rs_host::host::process::ProcessedFile::term_at(&self, line: u32, column: u32) -> core::option::Option<&lean_rs_host::host::process::TermInfoNode>
+impl core::clone::Clone for lean_rs_host::host::process::ProcessedFile
+pub fn lean_rs_host::host::process::ProcessedFile::clone(&self) -> lean_rs_host::host::process::ProcessedFile
+impl core::fmt::Debug for lean_rs_host::host::process::ProcessedFile
+pub fn lean_rs_host::host::process::ProcessedFile::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ProcessedFile
+pub fn lean_rs_host::host::process::ProcessedFile::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ProcessedFile
+impl core::marker::Send for lean_rs_host::host::process::ProcessedFile
+impl core::marker::Sync for lean_rs_host::host::process::ProcessedFile
+impl core::marker::Unpin for lean_rs_host::host::process::ProcessedFile
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProcessedFile
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProcessedFile
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProcessedFile
+pub struct lean_rs_host::host::process::TacticInfoNode
+pub lean_rs_host::host::process::TacticInfoNode::end_column: u32
+pub lean_rs_host::host::process::TacticInfoNode::end_line: u32
+pub lean_rs_host::host::process::TacticInfoNode::goals_after: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::TacticInfoNode::goals_before: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::TacticInfoNode::start_column: u32
+pub lean_rs_host::host::process::TacticInfoNode::start_line: u32
+impl core::clone::Clone for lean_rs_host::host::process::TacticInfoNode
+pub fn lean_rs_host::host::process::TacticInfoNode::clone(&self) -> lean_rs_host::host::process::TacticInfoNode
+impl core::cmp::Eq for lean_rs_host::host::process::TacticInfoNode
+impl core::cmp::PartialEq for lean_rs_host::host::process::TacticInfoNode
+pub fn lean_rs_host::host::process::TacticInfoNode::eq(&self, other: &lean_rs_host::host::process::TacticInfoNode) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::TacticInfoNode
+pub fn lean_rs_host::host::process::TacticInfoNode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::TacticInfoNode
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::TacticInfoNode
+pub fn lean_rs_host::host::process::TacticInfoNode::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::TacticInfoNode
+impl core::marker::Send for lean_rs_host::host::process::TacticInfoNode
+impl core::marker::Sync for lean_rs_host::host::process::TacticInfoNode
+impl core::marker::Unpin for lean_rs_host::host::process::TacticInfoNode
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::TacticInfoNode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::TacticInfoNode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::TacticInfoNode
+pub struct lean_rs_host::host::process::TermInfoNode
+pub lean_rs_host::host::process::TermInfoNode::end_column: u32
+pub lean_rs_host::host::process::TermInfoNode::end_line: u32
+pub lean_rs_host::host::process::TermInfoNode::expected_type_str: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::process::TermInfoNode::expr_str: alloc::string::String
+pub lean_rs_host::host::process::TermInfoNode::start_column: u32
+pub lean_rs_host::host::process::TermInfoNode::start_line: u32
+pub lean_rs_host::host::process::TermInfoNode::type_str: alloc::string::String
+impl core::clone::Clone for lean_rs_host::host::process::TermInfoNode
+pub fn lean_rs_host::host::process::TermInfoNode::clone(&self) -> lean_rs_host::host::process::TermInfoNode
+impl core::cmp::Eq for lean_rs_host::host::process::TermInfoNode
+impl core::cmp::PartialEq for lean_rs_host::host::process::TermInfoNode
+pub fn lean_rs_host::host::process::TermInfoNode::eq(&self, other: &lean_rs_host::host::process::TermInfoNode) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::TermInfoNode
+pub fn lean_rs_host::host::process::TermInfoNode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::TermInfoNode
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::TermInfoNode
+pub fn lean_rs_host::host::process::TermInfoNode::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::TermInfoNode
+impl core::marker::Send for lean_rs_host::host::process::TermInfoNode
+impl core::marker::Sync for lean_rs_host::host::process::TermInfoNode
+impl core::marker::Unpin for lean_rs_host::host::process::TermInfoNode
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::TermInfoNode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::TermInfoNode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::TermInfoNode
 pub struct lean_rs_host::host::LeanCancellationToken
 impl lean_rs_host::LeanCancellationToken
 pub fn lean_rs_host::LeanCancellationToken::cancel(&self)
@@ -465,9 +598,14 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, expr: &lean_rs::handle::expr::LeanExpr<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, name: &lean_rs::handle::name::LeanName<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, names: &[lean_rs::handle::name::LeanName<'lean>], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessFileOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
@@ -697,6 +835,7 @@ impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::Lea
 pub fn lean_rs_host::meta::heartbeat_burn<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::meta::infer_type<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub fn lean_rs_host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanMetaService<(lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::meta::LeanMetaTransparency), bool>
+pub fn lean_rs_host::meta::pp_expr<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, alloc::string::String>
 pub fn lean_rs_host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 #[non_exhaustive] pub enum lean_rs_host::EvidenceStatus
 pub lean_rs_host::EvidenceStatus::Checked
@@ -966,9 +1105,14 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type(&mut self, name: &
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::option::Option<lean_rs::handle::expr::LeanExpr<'lean>>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, source: &str, expected_type: core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, sources: &[&str], options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, expr: &lean_rs::handle::expr::LeanExpr<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, name: &lean_rs::handle::name::LeanName<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, names: &[lean_rs::handle::name::LeanName<'lean>], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessFileOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, service: &lean_rs_host::meta::LeanMetaService<Req, Resp>, request: Req, options: &lean_rs_host::meta::LeanMetaOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
