@@ -238,4 +238,80 @@ def processWithInfoTree
       diagnostics := failure
     }
 
+/-- Outcome of `processModuleWithInfoTree`. Distinguishes a clean
+    header parse + processed body, a clean header whose imports are
+    not all present in the open env (soft failure — the body still
+    elaborates against whatever the env carries), and a header that
+    did not parse at all (in which case the body is never processed). -/
+inductive ProcessModuleOutcome where
+  | ok
+      (file : ProcessedFile)
+      (imports : Array String)
+  | missingImports
+      (file : ProcessedFile)
+      (imports : Array String)
+      (missing : Array String)
+  | headerParseFailed
+      (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  deriving Inhabited
+
+/-- Parse the header of a Lean source via `Lean.Parser.parseHeader`,
+    then resume `IO.processCommands` from the parser state the parser
+    produced. The single shared `InputContext.fileMap` covers the whole
+    source, so every position the elaborator records in info-tree nodes
+    is already in the original file's line/column coordinates — no Rust
+    offset arithmetic. Imports parsed from the header are returned as
+    strings; those that do not appear in the session's open env are
+    reported under `.missingImports` as a soft failure. A header parse
+    error (e.g., `import 123`) short-circuits before any body
+    elaboration runs. -/
+@[export lean_rs_host_process_module_with_info_tree]
+def processModuleWithInfoTree
+    (env : Environment) (source : String)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize)
+    : IO ProcessModuleOutcome := do
+  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let inputCtx := Parser.mkInputContext source fileLabel
+  let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
+  if headerMessages.hasErrors then
+    let (diags, trunc) ←
+      LeanRsFixture.Elaboration.serializeMessages headerMessages diagBytes fileLabel
+    return .headerParseFailed { diagnostics := diags, truncated := trunc }
+  -- Project the user-written imports only (omit the implicit `Init` the
+  -- elaborator inserts; downstream consumers care about what the user
+  -- typed, not what the elaborator adds for free).
+  -- Check user-written imports against the env's full transitive
+  -- module closure (`moduleNames`), not just its direct imports —
+  -- otherwise `import Lean` would be flagged as missing whenever the
+  -- session only directly imports a module that transitively pulls in
+  -- `Lean`.
+  let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
+  let loadedModules := env.header.moduleNames.map (·.toString)
+  let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
+  let mut commandState : Command.State := Command.mkState env {} opts
+  commandState := { commandState with infoState.enabled := true }
+  if !namespaceContext.isEmpty then
+    let head := commandState.scopes.headD { header := "", opts }
+    commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
+  let buildFile (acc : WalkAcc) (failure : LeanRsFixture.Elaboration.ElabFailure) : ProcessedFile :=
+    { commands := acc.commands, terms := acc.terms, tactics := acc.tactics
+      names := acc.names, diagnostics := failure }
+  let wrapOutcome (file : ProcessedFile) : ProcessModuleOutcome :=
+    if missing.isEmpty then .ok file userImports
+    else .missingImports file userImports missing
+  try
+    let st ← Lean.Elab.IO.processCommands inputCtx parserState commandState
+    let finalCmdState := st.commandState
+    let (diags, trunc) ←
+      LeanRsFixture.Elaboration.serializeMessages finalCmdState.messages diagBytes fileLabel
+    let failure : LeanRsFixture.Elaboration.ElabFailure :=
+      { diagnostics := diags, truncated := trunc }
+    let acc ← walkTrees inputCtx.fileMap diagBytes finalCmdState.infoState.trees
+    return wrapOutcome (buildFile acc failure)
+  catch ex =>
+    let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
+    let empty : WalkAcc := {}
+    return wrapOutcome (buildFile empty failure)
+
 end LeanRsFixture.InfoTree

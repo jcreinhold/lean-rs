@@ -1,11 +1,21 @@
 # Info-tree projection
 
-`LeanSession::process_with_info_tree` projects a processed Lean source string into the
+Two sibling session methods project a processed Lean source into the
 [`ProcessedFile`](../../crates/lean-rs-host/src/host/process/info_tree.rs) value type: four arrays of structurally
-distinct nodes (commands, terms, tactics, name references) plus the diagnostics the elaborator emitted. One Lean export,
-one Rust value, three downstream queries (`goal_at_position`, `type_at_position`, `references_of_name`) unblocked. Per
-POSD ch 6.1, the interface stays general-purpose (source, options, cancellation → `ProcessedFile`); the projection's
-*functionality* serves the cursor-query trio but its interface doesn't encode any of them.
+distinct nodes (commands, terms, tactics, name references) plus the diagnostics the elaborator emitted. The two methods
+answer different questions and live behind different Lean shim exports, but share the projection walker verbatim:
+
+| Method | Lean shim | When to use |
+| --- | --- | --- |
+| `LeanSession::process_with_info_tree` | `lean_rs_host_process_with_info_tree` | Body-only snippet, no header. The shim runs `IO.processCommands` from byte 0 with an empty `ModuleParserState`. Right for inline scratch buffers, prompt-05 fixture tests, and tactic-level snippets. |
+| `LeanSession::process_module_with_info_tree` | `lean_rs_host_process_module_with_info_tree` | Full Lean source file (header + body). The shim calls `Lean.Parser.parseHeader` first and resumes `IO.processCommands` from the parser state the header parser produced. Positions in the returned projection land in the original file's line/column system. Right for real-file inputs from `lean-host-mcp` and downstream position tools. |
+
+The four downstream queries (`goal_at_position`, `type_at_position`, `references_of_name`, `term_at`) are unblocked by
+either method — they consume the shared `ProcessedFile`. Per POSD ch 6.1, both interfaces stay general-purpose (source,
+options, cancellation → outcome); the projection's *functionality* serves the cursor-query set but its interface
+doesn't encode any of them. Per POSD ch 9 "better apart", the two methods are split because they answer different
+questions (snippet vs. file), not because they share a flag — folding into one shim with a `mode` parameter would push
+the choice into every caller.
 
 ## What the projection carries
 
@@ -37,12 +47,30 @@ when there is profile data to justify it. Per-command progress reporting is simi
 query operates on one buffer per call, so adding a `_progress` sibling shim would double the symbol contract for a
 hypothetical use case.
 
+## Outcome shape
+
+`process_with_info_tree` returns a two-arm `ProcessFileOutcome` (`Processed` + `Unsupported`). The header-aware
+`process_module_with_info_tree` returns a four-arm `ProcessModuleOutcome`:
+
+- `Ok { file, imports }` — header parsed; every user-written import is present in the session's open env's
+  transitive module closure; the body was processed.
+- `MissingImports { file, imports, missing }` — header parsed but some imports name modules absent from the env's
+  transitive closure. The body still elaborated; the projection is populated. Soft failure — callers typically
+  surface it as a warning.
+- `HeaderParseFailed { diagnostics }` — `Lean.Parser.parseHeader` reported error-severity messages.
+  `IO.processCommands` was not run.
+- `Unsupported` — the loaded capability dylib does not export the new symbol. No FFI call was made.
+
+The "missing imports" check compares against `env.header.moduleNames` (the transitive closure), not
+`env.header.imports` (only direct imports). Otherwise a session that imports `LeanRsHostShims.Elaboration` —
+which transitively pulls in `Lean` — would flag every `import Lean` in user files as missing.
+
 ## Optional capability
 
-`lean_rs_host_process_with_info_tree` is declared **optional** in the
-[capability contract](../lean-rs-host-capability-contract.md). A fork of the shim package that omits the symbol still
-loads cleanly; `process_with_info_tree` returns `ProcessFileOutcome::Unsupported` at dispatch time without invoking the
-FFI. The pattern matches the five `MetaM` services that already use this degradation path
+Both shim symbols are declared **optional** in the
+[capability contract](../lean-rs-host-capability-contract.md). A fork of the shim package that omits either symbol
+still loads cleanly; the corresponding session method returns its `Unsupported` arm at dispatch time without
+invoking the FFI. The pattern matches the five `MetaM` services that already use this degradation path
 (`LeanMetaResponse::Unsupported`).
 
 ## Position helpers

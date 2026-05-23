@@ -373,6 +373,28 @@ impl core::marker::Unpin for lean_rs_host::host::process::ProcessFileOutcome
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProcessFileOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
+#[non_exhaustive] pub enum lean_rs_host::host::process::ProcessModuleOutcome
+pub lean_rs_host::host::process::ProcessModuleOutcome::HeaderParseFailed
+pub lean_rs_host::host::process::ProcessModuleOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::process::ProcessModuleOutcome::MissingImports
+pub lean_rs_host::host::process::ProcessModuleOutcome::MissingImports::file: lean_rs_host::host::process::ProcessedFile
+pub lean_rs_host::host::process::ProcessModuleOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ProcessModuleOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ProcessModuleOutcome::Ok
+pub lean_rs_host::host::process::ProcessModuleOutcome::Ok::file: lean_rs_host::host::process::ProcessedFile
+pub lean_rs_host::host::process::ProcessModuleOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ProcessModuleOutcome::Unsupported
+impl core::fmt::Debug for lean_rs_host::host::process::ProcessModuleOutcome
+pub fn lean_rs_host::host::process::ProcessModuleOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ProcessModuleOutcome
+pub fn lean_rs_host::host::process::ProcessModuleOutcome::try_from_lean(obj: lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::marker::Send for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::marker::Sync for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::marker::Unpin for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProcessModuleOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProcessModuleOutcome
 pub struct lean_rs_host::host::process::CommandInfoNode
 pub lean_rs_host::host::process::CommandInfoNode::decl_name: core::option::Option<alloc::string::String>
 pub lean_rs_host::host::process::CommandInfoNode::end_column: u32
@@ -605,6 +627,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut sel
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, name: &lean_rs::handle::name::LeanName<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, names: &[lean_rs::handle::name::LeanName<'lean>], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessModuleOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessFileOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
@@ -1112,6 +1135,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut sel
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, filter: &lean_rs_host::LeanDeclarationFilter, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, name: &lean_rs::handle::name::LeanName<'lean>, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, names: &[lean_rs::handle::name::LeanName<'lean>], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessModuleOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_with_info_tree(&mut self, source: &str, options: &lean_rs_host::LeanElabOptions, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ProcessFileOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, name: &str, cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, names: &[&str], cancellation: core::option::Option<&lean_rs_host::LeanCancellationToken>, progress: core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>

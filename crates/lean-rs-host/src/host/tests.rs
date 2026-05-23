@@ -1268,3 +1268,141 @@ fn session_process_with_info_tree_records_diagnostics_for_failure() {
         "type-mismatched body must record at least one error diagnostic, got {diags:?}",
     );
 }
+
+// -- process_module_with_info_tree (header-aware info-tree projection) -------
+//
+// The dispatch shape is structurally identical to `process_with_info_tree`:
+// a single `let Some(addr) = self.capabilities.symbols().process_module_with_info_tree
+// else { return Unsupported; }`. The optional-symbol Unsupported branch is
+// exercised by `meta_missing_optional_symbol_returns_unsupported` above,
+// which fakes a missing symbol via the name-keyed meta dispatcher — the
+// same `resolve_optional_function_symbol` shape covers both. A bespoke
+// "synthesise None to confirm Unsupported" test for this field would need
+// a test-only mutation API on `SessionSymbols`; the marginal coverage does
+// not justify the surface growth (matches the precedent above).
+
+#[test]
+fn session_process_module_with_info_tree_roundtrips_real_file() {
+    use crate::host::process::ProcessModuleOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Line 1: import; line 2: blank; line 3: theorem.
+    let src = "import Lean\n\ntheorem t : True := by trivial\n";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::Ok { file, imports } = outcome else {
+        panic!("expected Ok, got {outcome:?}");
+    };
+    assert_eq!(
+        imports,
+        vec!["Lean".to_string()],
+        "imports must list the user-written modules only (no auto Init)",
+    );
+    let first = file.tactics.first().unwrap_or_else(|| {
+        panic!(
+            "the `by trivial` body must record ≥1 tactic node, got {:?}",
+            file.tactics
+        )
+    });
+    assert_eq!(
+        first.start_line, 3,
+        "first tactic must land on the original file's line 3 (theorem line), got {first:?}",
+    );
+}
+
+#[test]
+fn session_process_module_with_info_tree_reports_missing_imports() {
+    use crate::host::process::ProcessModuleOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Foo.Bar.Baz is not in the session's open env; the body still
+    // parses but per-command elaboration may fail. The outcome should
+    // be MissingImports with the absent module listed exactly once.
+    let src = "import Foo.Bar.Baz\n\ndef x := 1\n";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::MissingImports {
+        imports,
+        missing,
+        file: _,
+    } = outcome
+    else {
+        panic!("expected MissingImports, got {outcome:?}");
+    };
+    assert_eq!(imports, vec!["Foo.Bar.Baz".to_string()]);
+    assert_eq!(missing, vec!["Foo.Bar.Baz".to_string()]);
+}
+
+#[test]
+fn session_process_module_with_info_tree_surfaces_header_parse_error() {
+    use crate::host::process::ProcessModuleOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // `import 123` is a malformed header — the module-name slot
+    // requires an identifier. Confirmed via lean_run_code probe that
+    // `headerMessages.hasErrors == true` for this exact input.
+    let src = "import 123\n\ntheorem t : True := by trivial\n";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::HeaderParseFailed { diagnostics } = outcome else {
+        panic!("expected HeaderParseFailed, got {outcome:?}");
+    };
+    let diags = diagnostics.diagnostics();
+    assert!(
+        diags.iter().any(|d| d.severity() == LeanSeverity::Error),
+        "malformed header must record at least one error diagnostic, got {diags:?}",
+    );
+}
+
+#[test]
+fn session_process_module_with_info_tree_uses_original_file_line_numbers() {
+    use crate::host::process::ProcessModuleOutcome;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    // Five header lines + one blank, then the theorem on line 7. The
+    // returned tactic node must report start_line == 7 — not 1 (no
+    // header-aware processing) and not 6 (off-by-one from a naive
+    // header-line-count offset).
+    let src = "\
+import Lean
+import Lean
+import Lean
+import Lean
+import Lean
+
+theorem t : True := by trivial
+";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::Ok { file, .. } = outcome else {
+        panic!("expected Ok, got {outcome:?}");
+    };
+    let first = file
+        .tactics
+        .first()
+        .unwrap_or_else(|| panic!("expected ≥1 tactic, got {:?}", file.tactics));
+    assert_eq!(
+        first.start_line, 7,
+        "first tactic must be at original file's line 7, got {first:?}",
+    );
+}
