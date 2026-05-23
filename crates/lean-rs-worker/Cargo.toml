@@ -30,6 +30,14 @@ lean-toolchain = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# Used only to call `setrlimit(RLIMIT_CORE, 0)` in the worker child so
+# SIGABRT-triggered termination does not block on the kernel's core-dump
+# pipe handler (e.g. apport, systemd-coredump). See
+# `child::disable_core_dumps` and
+# `docs/architecture/06-panic-containment.md`.
+libc = "0.2"
+
 [dev-dependencies]
 ciborium = "0.2"
 criterion = { workspace = true }

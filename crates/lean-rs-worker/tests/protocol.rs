@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use lean_rs_worker::__test_support::{WorkerDataRow, WorkerHarnessError, WorkerProcess};
 use serde_json::json;
@@ -164,9 +165,11 @@ fn eof_before_rows_complete_is_reported_as_protocol_failure() {
 #[test]
 fn fatal_exit_after_partial_rows_is_reported_as_worker_failure() {
     let worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
+    let started = Instant::now();
     let err = worker
         .emit_rows_then_panic()
         .expect_err("fatal exit before terminal response should fail");
+    let elapsed = started.elapsed();
     match err {
         WorkerHarnessError::FatalExit(exit) => {
             assert!(
@@ -176,4 +179,16 @@ fn fatal_exit_after_partial_rows_is_reported_as_worker_failure() {
         }
         other => panic!("expected FatalExit, got {other:?}"),
     }
+    // Regression bound for `child::disable_core_dumps`. Without that fix,
+    // SIGABRT on Linux runners with `apport` (or any pipe-based
+    // `core_pattern`) keeps the dying child's file descriptors open while
+    // the kernel pipes the core image to the handler. The parent's EOF
+    // detection then takes 30–110 seconds, which is long enough that any
+    // supervisor request timeout fires before the panic is recognised as
+    // `ChildPanicOrAbort`. With core dumps disabled the round trip is
+    // bounded by ordinary IPC and process-wait latency.
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "panic-to-fatal-exit detection took {elapsed:?}; core-dump suppression in the worker child may have regressed",
+    );
 }

@@ -42,6 +42,7 @@ impl ProtocolWriter {
 }
 
 pub(crate) fn run_stdio() -> ExitCode {
+    disable_core_dumps();
     match serve_stdio() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -50,6 +51,53 @@ pub(crate) fn run_stdio() -> ExitCode {
         }
     }
 }
+
+/// Prevent the kernel from generating a core dump when this process aborts.
+///
+/// Lean internal panics with `LEAN_ABORT_ON_PANIC=1` (the worker child's
+/// default) terminate the child via `abort()` → `SIGABRT`. On Linux, when
+/// `core_pattern` pipes the core image to a handler such as `apport` or
+/// `systemd-coredump`, the kernel keeps the dying process's file descriptors
+/// open until that handler finishes reading the core. For a child that has
+/// loaded `libleanshared.so` plus a capability dylib chain, observed delays
+/// on GitHub Actions `ubuntu-latest` are 30–110 seconds, which is long enough
+/// that the parent supervisor's per-request timeout fires before it can see
+/// EOF on the child's stdout and translate it to
+/// `LeanWorkerError::ChildPanicOrAbort`.
+///
+/// Setting `RLIMIT_CORE` to zero before the abort tells the kernel to skip
+/// core-dump generation entirely. SIGABRT then terminates the process
+/// promptly, the pipes close, and the parent observes the fatal exit on the
+/// timescale of normal IPC.
+///
+/// The diagnostic the parent surfaces to callers does not include a core
+/// file in any supported configuration: typed errors (`ChildPanicOrAbort`,
+/// `Worker { code, message }`) and the captured child stderr cover the
+/// supported failure surface. Worker children therefore have no use for core
+/// dumps, and suppressing them is the right boundary policy.
+#[cfg(unix)]
+#[allow(unsafe_code, reason = "RLIMIT_CORE=0 requires a libc::setrlimit FFI call")]
+fn disable_core_dumps() {
+    let limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `setrlimit` requires a valid pointer to an `rlimit` and a
+    // valid resource id. Both are constants. The call modifies process-
+    // global state only (the soft and hard core-dump size limits) and has
+    // no aliasing or lifetime concerns. We deliberately ignore the return
+    // value: the worst case is that the limit was already lower (EPERM
+    // when reducing a rlimit is impossible because we're going to zero, the
+    // minimum) or the platform doesn't honour the limit. In either case the
+    // process should still terminate on SIGABRT; the timing may simply
+    // regress to the pre-fix behaviour.
+    unsafe {
+        let _ = libc::setrlimit(libc::RLIMIT_CORE, &raw const limit);
+    }
+}
+
+#[cfg(not(unix))]
+fn disable_core_dumps() {}
 
 #[allow(
     clippy::significant_drop_tightening,

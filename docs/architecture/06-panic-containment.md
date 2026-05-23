@@ -143,6 +143,35 @@ In-process embedders that use `LeanHost` directly (not via worker) are not affec
 own process environment, and the host shim's `import Lean` transitively initializes `Lean.Compiler.NameDemangling`, so
 the panic-time demangler callback resolves cleanly. The worker child is the case that needs the explicit boundary.
 
+## Decoupling from the kernel's core-dump pipe handler
+
+`LEAN_ABORT_ON_PANIC=1` turns a Lean internal panic into `abort()` → `SIGABRT`. The parent supervisor recognises that
+fatal exit by reading EOF on the child's stdout and translating it to `LeanWorkerError::ChildPanicOrAbort { exit }`.
+That round trip is fast — *unless* the kernel suspends the dying child to feed its core image to a pipe-based
+`core_pattern` handler.
+
+On GitHub Actions `ubuntu-latest`, the runner inherits Ubuntu's default `core_pattern`, which pipes the core image to
+`apport` (or `systemd-coredump` on newer images). For a worker child that has loaded `libleanshared.so` plus a
+capability dylib chain, the kernel holds the dying process's file descriptors open while it streams the image to the
+handler. Measured delays on the runner are 30–110 seconds; the supervisor's 30-second per-request timeout fires first
+and the parent reports `Timeout { operation, duration }` instead of the typed fatal exit.
+
+The contained workloads have no use for a core file: typed errors (`ChildPanicOrAbort`, `Worker { code, message }`)
+and the captured child stderr already cover the supported diagnostic surface. The fix is to suppress core dumps in
+every worker child: `child::disable_core_dumps` calls `setrlimit(RLIMIT_CORE, {0, 0})` at the top of the child entry
+point so any subsequent `SIGABRT` terminates the process immediately, closing the IPC pipes and letting the parent
+observe EOF on normal IPC timescales. The same call is a Windows no-op (Windows does not use POSIX rlimits or
+`core_pattern`).
+
+This boundary lives in the child binary rather than in `LeanWorker::spawn` because the policy belongs to "any process
+shipped as a `lean-rs-worker` child," including downstream binaries written using `run_worker_child_stdio`. Spawning
+the child from a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still
+inherits the boundary because it is baked into `run_stdio`. No public API change is required.
+
+Regression cover: `crates/lean-rs-worker/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure`
+asserts that panic-to-fatal-exit detection completes within 10 seconds. Without the rlimit fix, the same test takes
+30–110 seconds on Linux runners with `apport`.
+
 ## References
 
 - Rust `std::panic::catch_unwind`: <https://doc.rust-lang.org/std/panic/fn.catch_unwind.html>

@@ -379,6 +379,7 @@ dependencies = [
  "lean-rs",
  "lean-rs-host",
  "lean-toolchain",
+ "libc",
  "rmp-serde",
  "serde",
  "serde_json",
