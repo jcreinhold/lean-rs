@@ -179,16 +179,18 @@ fn fatal_exit_after_partial_rows_is_reported_as_worker_failure() {
         }
         other => panic!("expected FatalExit, got {other:?}"),
     }
-    // Regression bound for `child::disable_core_dumps`. Without that fix,
-    // SIGABRT on Linux runners with `apport` (or any pipe-based
-    // `core_pattern`) keeps the dying child's file descriptors open while
-    // the kernel pipes the core image to the handler. The parent's EOF
-    // detection then takes 30–110 seconds, which is long enough that any
-    // supervisor request timeout fires before the panic is recognised as
-    // `ChildPanicOrAbort`. With core dumps disabled the round trip is
-    // bounded by ordinary IPC and process-wait latency.
+    // Regression bound for `child::install_immediate_abort_exit`. Without
+    // that fix, `SIGABRT` from a Lean panic on Linux runners with `apport`
+    // (or any pipe-based `core_pattern`) keeps the dying child's file
+    // descriptors open while the kernel pipes the core image to the
+    // handler. The parent's EOF detection then takes 20–110 seconds, long
+    // enough that supervisor request timeouts fire before the panic is
+    // recognised as `ChildPanicOrAbort`. With the `SIGABRT` handler
+    // installed, the child calls `_exit(134)` directly, the pipes close
+    // immediately, and the round trip is bounded by ordinary IPC and
+    // process-wait latency.
     assert!(
         elapsed < Duration::from_secs(10),
-        "panic-to-fatal-exit detection took {elapsed:?}; core-dump suppression in the worker child may have regressed",
+        "panic-to-fatal-exit detection took {elapsed:?}; immediate-abort-exit in the worker child may have regressed",
     );
 }

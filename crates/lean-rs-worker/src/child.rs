@@ -42,7 +42,7 @@ impl ProtocolWriter {
 }
 
 pub(crate) fn run_stdio() -> ExitCode {
-    disable_core_dumps();
+    install_immediate_abort_exit();
     match serve_stdio() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -52,52 +52,93 @@ pub(crate) fn run_stdio() -> ExitCode {
     }
 }
 
-/// Prevent the kernel from generating a core dump when this process aborts.
+/// Convert any `SIGABRT` the worker child receives into an immediate
+/// `_exit(134)`, bypassing kernel core-dump machinery and any libc/runtime
+/// residual cleanup on `abort()`.
 ///
 /// Lean internal panics with `LEAN_ABORT_ON_PANIC=1` (the worker child's
-/// default) terminate the child via `abort()` → `SIGABRT`. On Linux, when
-/// `core_pattern` pipes the core image to a handler such as `apport` or
-/// `systemd-coredump`, the kernel keeps the dying process's file descriptors
-/// open until that handler finishes reading the core. For a child that has
-/// loaded `libleanshared.so` plus a capability dylib chain, observed delays
-/// on GitHub Actions `ubuntu-latest` are 30–110 seconds, which is long enough
-/// that the parent supervisor's per-request timeout fires before it can see
-/// EOF on the child's stdout and translate it to
-/// `LeanWorkerError::ChildPanicOrAbort`.
+/// default) terminate the child via `abort()` → `SIGABRT`. The kernel's
+/// default action for `SIGABRT` is *terminate with core dump*, and on
+/// GitHub Actions `ubuntu-latest` the inherited `core_pattern` pipes the
+/// image to `apport` (or `systemd-coredump`). The kernel holds the dying
+/// child's file descriptors open while the handler drains the pipe; for a
+/// child that has loaded `libleanshared.so` plus a capability dylib chain,
+/// the observed delay is tens of seconds, long enough that the parent
+/// supervisor's per-request timeout fires before it can see EOF on the
+/// child's stdout and translate it to `LeanWorkerError::ChildPanicOrAbort`.
 ///
-/// Setting `RLIMIT_CORE` to zero before the abort tells the kernel to skip
-/// core-dump generation entirely. SIGABRT then terminates the process
-/// promptly, the pipes close, and the parent observes the fatal exit on the
-/// timescale of normal IPC.
+/// `setrlimit(RLIMIT_CORE, 0)` and `prctl(PR_SET_DUMPABLE, 0)` are
+/// independently advertised as "no core dump" knobs; in practice on the
+/// `ubuntu-latest` runner they reduce the delay substantially but do not
+/// eliminate it (observed: ~107 s without either, ~23 s with `setrlimit`
+/// alone — still above the supervisor's 30 s budget). The decisive fix is
+/// to take over `SIGABRT` ourselves: a `sigaction` handler that calls
+/// `_exit(134)` short-circuits the entire kernel signal-default path,
+/// closes the pipes immediately, and lets the parent observe the fatal
+/// exit on normal IPC timescales.
 ///
 /// The diagnostic the parent surfaces to callers does not include a core
 /// file in any supported configuration: typed errors (`ChildPanicOrAbort`,
 /// `Worker { code, message }`) and the captured child stderr cover the
-/// supported failure surface. Worker children therefore have no use for core
-/// dumps, and suppressing them is the right boundary policy.
+/// supported failure surface. Worker children therefore have no use for
+/// core dumps, and suppressing them is the right boundary policy.
+///
+/// We also keep the `RLIMIT_CORE` and `PR_SET_DUMPABLE` knobs as a
+/// defence-in-depth: if anything later in the child's lifetime overwrites
+/// the `SIGABRT` handler (e.g. a future Lean runtime that installs its own
+/// signal handler during init), the kernel default action then runs but
+/// the core-dump step is still skipped, preserving the post-`setrlimit`
+/// timing rather than regressing to the unfixed ~107 s.
 #[cfg(unix)]
-#[allow(unsafe_code, reason = "RLIMIT_CORE=0 requires a libc::setrlimit FFI call")]
-fn disable_core_dumps() {
-    let limit = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: `setrlimit` requires a valid pointer to an `rlimit` and a
-    // valid resource id. Both are constants. The call modifies process-
-    // global state only (the soft and hard core-dump size limits) and has
-    // no aliasing or lifetime concerns. We deliberately ignore the return
-    // value: the worst case is that the limit was already lower (EPERM
-    // when reducing a rlimit is impossible because we're going to zero, the
-    // minimum) or the platform doesn't honour the limit. In either case the
-    // process should still terminate on SIGABRT; the timing may simply
-    // regress to the pre-fix behaviour.
+#[allow(
+    unsafe_code,
+    reason = "installing a signal handler and calling setrlimit/prctl require libc FFI"
+)]
+fn install_immediate_abort_exit() {
+    extern "C" fn on_sigabrt(_sig: libc::c_int) {
+        // SAFETY: `write` and `_exit` are async-signal-safe per POSIX.
+        // The marker lets test stderr distinguish this exit path from a
+        // raw kernel-default `SIGABRT` termination.
+        const MARKER: &[u8] = b"lean-rs-worker child: SIGABRT, exiting immediately\n";
+        unsafe {
+            let _ = libc::write(libc::STDERR_FILENO, MARKER.as_ptr().cast(), MARKER.len());
+            libc::_exit(134);
+        }
+    }
+
+    // SAFETY: zero-initialised `sigaction` is valid; we then populate the
+    // handler and flags fields. The call modifies process-global state only
+    // and has no aliasing or lifetime concerns. The handler itself uses
+    // only async-signal-safe calls.
     unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = on_sigabrt as *const () as libc::sighandler_t;
+        libc::sigemptyset(&raw mut action.sa_mask);
+        action.sa_flags = libc::SA_RESETHAND;
+        let _ = libc::sigaction(libc::SIGABRT, &raw const action, std::ptr::null_mut());
+    }
+
+    // SAFETY: defence-in-depth. `setrlimit` and `prctl` modify
+    // process-global state only and have no aliasing or lifetime concerns.
+    // Return values are deliberately ignored: the worst case is that the
+    // OS does not honour the request and we fall back on the `sigaction`
+    // handler installed above.
+    unsafe {
+        let limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
         let _ = libc::setrlimit(libc::RLIMIT_CORE, &raw const limit);
+        #[cfg(target_os = "linux")]
+        {
+            let zero: libc::c_ulong = 0;
+            let _ = libc::prctl(libc::PR_SET_DUMPABLE, zero, zero, zero, zero);
+        }
     }
 }
 
 #[cfg(not(unix))]
-fn disable_core_dumps() {}
+fn install_immediate_abort_exit() {}
 
 #[allow(
     clippy::significant_drop_tightening,
