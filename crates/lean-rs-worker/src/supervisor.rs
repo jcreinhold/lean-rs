@@ -29,10 +29,25 @@ pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mi
 
 /// Configuration for starting a `lean-rs-worker` child process.
 ///
-/// The executable should be the `lean-rs-worker-child` binary. The supervisor
-/// sets `LEAN_ABORT_ON_PANIC=1` by default so Lean internal panics become fatal
-/// child exits instead of attempting in-process recovery; explicit environment
-/// entries supplied here override that default.
+/// The executable should be the `lean-rs-worker-child` binary.
+///
+/// **Worker-child panic policy.** The supervisor spawns every child with two
+/// defaults that together pin a process boundary around Lean panics:
+///
+/// - `LEAN_ABORT_ON_PANIC=1` — Lean internal panics terminate the child
+///   instead of returning default values, so the parent observes a fatal
+///   exit rather than silently-corrupted state.
+/// - `LEAN_BACKTRACE=0` — Lean's panic-time backtrace handler is skipped.
+///   Since Lean 4.30 that handler calls back into Lean code (the demangler
+///   is now `@[export]`'d from `Lean.Compiler.NameDemangling`); a worker
+///   child embeds a minimal Lean and cannot guarantee that callback's
+///   transitive module dependencies are initialized when user code panics.
+///   Disabling the backtrace removes that dependency entirely. See
+///   `docs/architecture/06-panic-containment.md` for the boundary argument.
+///
+/// Both are safe defaults — explicit `.env()` entries supplied here override
+/// them, in case a caller knows the dependency is satisfied and wants a
+/// demangled backtrace on the child's stderr.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerConfig {
     executable: PathBuf,
@@ -571,6 +586,7 @@ impl LeanWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("LEAN_ABORT_ON_PANIC", "1")
+            .env("LEAN_BACKTRACE", "0")
             .env("RUST_BACKTRACE", "0");
 
         if let Some(current_dir) = &config.current_dir {

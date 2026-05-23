@@ -72,6 +72,11 @@ impl WorkerProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("LEAN_ABORT_ON_PANIC", "1")
+            // See `LeanWorkerConfig` docstring: `LEAN_BACKTRACE=0` prevents
+            // Lean 4.30+ from calling back into Lean code from its panic
+            // handler, which is unsafe when the child only initializes a
+            // minimal Lean.
+            .env("LEAN_BACKTRACE", "0")
             .env("RUST_BACKTRACE", "0")
             .spawn()
             .map_err(WorkerHarnessError::Spawn)?;

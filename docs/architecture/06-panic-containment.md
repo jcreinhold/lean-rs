@@ -30,11 +30,14 @@ ABI, `LeanSession` does not recover.
 and it does not provide a sound recovery contract for foreign exceptions crossing a non-unwinding C ABI. The Rust
 Reference also classifies unwinding into Rust through the wrong FFI ABI as undefined behavior.
 
-Lean's runtime panic paths are not a single Rust-style unwind mechanism. At Lean 4.29.1, two paths in the upstream
-sources cover the cases:
+Lean's runtime panic paths are not a single Rust-style unwind mechanism. Across the supported window two paths in the
+upstream sources cover the cases:
 
 - `runtime/object.cpp`: `lean_internal_panic` prints and exits; `lean_panic_impl` aborts when `LEAN_ABORT_ON_PANIC` is
-  set.
+  set. As of Lean 4.30 (upstream [PR #12539](https://github.com/leanprover/lean4/pull/12539)), `lean_panic_impl`
+  additionally calls `print_backtrace`, which delegates demangling to the Lean-side `@[export]`
+  `lean_demangle_bt_line_cstr` from `Lean.Compiler.NameDemangling`. See **Decoupling from Lean's panic-time runtime
+  callbacks** below.
 - `runtime/debug.h`: `lean_unreachable()` throws Lean's C++ `unreachable_reached` exception.
 
 Those mechanisms bypass the error channel that `LeanIo<T>` decodes. A session-poisoning API would catch only a subset of
@@ -84,10 +87,61 @@ the lifetime argument.
 ## Verification Fixture
 
 `crates/lean-rs-host/tests/panic_containment.rs` re-runs its own test binary as a child process with
-`LEAN_ABORT_ON_PANIC=1`, then calls the fixture export `lean_rs_fixture_panic_unit`. The parent asserts that the child
-exits unsuccessfully. This keeps the normal test runner alive while pinning the documented process-level behavior.
+`LEAN_ABORT_ON_PANIC=1` and `LEAN_BACKTRACE=0`, then calls the fixture export `lean_rs_fixture_panic_unit`. The parent
+asserts that the child exits unsuccessfully. This keeps the normal test runner alive while pinning the documented
+process-level behavior.
 
 The sanitizer workflow also runs this fixture under Linux AddressSanitizer.
+
+## Decoupling from Lean's panic-time runtime callbacks
+
+Lean 4.30 ([PR #12539](https://github.com/leanprover/lean4/pull/12539)) rewrote the C runtime's panic-time backtrace
+handler to call into a Lean-implemented demangler (`@[export] lean_demangle_bt_line_cstr` from
+`Lean.Compiler.NameDemangling`). The PR's stated invariant is that this is safe because `print_backtrace` is only
+called from `lean_panic_impl` (soft panics), where the Lean runtime is expected to be in a normal execution state.
+
+That invariant holds for the Lean compiler and lake projects, which always load the full compiler stdlib. **It does
+not hold for embedders.** A `lean-rs-worker` child process intentionally embeds a minimal Lean: it loads
+`libleanshared.so` plus a small capability dylib chain, and cannot guarantee that the modules a future Lean panic
+handler decides to call back into are initialized when user code panics. The observed symptom on Linux is that
+`lean_panic_impl` calls `print_backtrace` → `lean_demangle_bt_line_cstr` and hangs before reaching `abort_on_panic()`;
+the parent's request times out instead of observing a fatal exit.
+
+`lean-rs-worker` and the host-stack verification fixture therefore pin a structural boundary: **no Lean code may run
+from the C panic handler in a worker child.** The boundary is enforced with `LEAN_BACKTRACE=0`, which `lean_panic_impl`
+checks *before* calling `print_backtrace`:
+
+```cpp
+if (g_panic_messages) {
+    panic_eprintln(msg, size, force_stderr);                    // always
+    char * bt_env = getenv("LEAN_BACKTRACE");
+    if (!bt_env || strcmp(bt_env, "0") != 0) {
+        panic_eprintln("backtrace:", force_stderr);
+        print_backtrace(force_stderr);                          // <- entire C->Lean re-entry block
+    }
+}
+abort_on_panic();
+```
+
+With `LEAN_BACKTRACE=0` set, the panic message still prints to the child's stderr and the abort still fires; only the
+backtrace generation (and any C→Lean callback inside it) is skipped.
+
+`LEAN_BACKTRACE=0` is chosen, not `LEAN_BACKTRACE_RAW=1`, for two reasons:
+
+- **Wider availability.** `LEAN_BACKTRACE` is present in 4.26+; `LEAN_BACKTRACE_RAW` was introduced in 4.29.1 with the
+  PR that wired in the Lean demangler. The supported toolchain window spans the older variable.
+- **Narrower dependency on upstream internals.** `LEAN_BACKTRACE_RAW=1` runs `print_backtrace` and only skips the
+  demangler call. If a future upstream change adds another C→Lean callback elsewhere inside `print_backtrace`,
+  `LEAN_BACKTRACE_RAW` would not protect against it. `LEAN_BACKTRACE=0` skips the entire block, so the boundary
+  survives upstream reshuffles to what `print_backtrace` does internally.
+
+The `LeanWorkerConfig` docstring states the policy at the public surface. The supervisor's `Command::env` defaults
+apply before any explicit `LeanWorkerConfig::env(...)` entries, so a caller who has independently arranged for the
+demangler module to be initialized can opt back into a demangled backtrace with `.env("LEAN_BACKTRACE", "1")`.
+
+In-process embedders that use `LeanHost` directly (not via worker) are not affected by this default — they own their
+own process environment, and the host shim's `import Lean` transitively initializes `Lean.Compiler.NameDemangling`, so
+the panic-time demangler callback resolves cleanly. The worker child is the case that needs the explicit boundary.
 
 ## References
 

@@ -53,6 +53,15 @@ fn lean_internal_panic_terminates_child_process() {
         .arg("--nocapture")
         .env(CHILD_ENV, "1")
         .env("LEAN_ABORT_ON_PANIC", "1")
+        // Lean 4.30 wires `lean_panic_impl -> print_backtrace` into Lean
+        // code (`@[export] lean_demangle_bt_line_cstr` from
+        // `Lean.Compiler.NameDemangling`). The child here loads only
+        // `LeanRsFixture` and cannot guarantee the demangler module is
+        // initialized at panic time. `LEAN_BACKTRACE=0` skips the entire
+        // backtrace block, so the abort path is the only thing that runs
+        // and the parent observes a clean fatal exit. See
+        // `docs/architecture/06-panic-containment.md`.
+        .env("LEAN_BACKTRACE", "0")
         .env("RUST_BACKTRACE", "0")
         .output()
         .expect("child test process starts");
