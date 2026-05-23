@@ -131,6 +131,7 @@
 
 use core::cell::Cell;
 use core::ffi::c_void;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
@@ -443,6 +444,10 @@ pub struct LeanSession<'lean, 'c> {
     stats: Cell<SessionStats>,
 }
 
+/// Process-wide serialization for [`LeanSession::import`]. See the
+/// comment at the lock-acquire site for the Lean-4.30 race it closes.
+static SESSION_IMPORT_LOCK: Mutex<()> = Mutex::new(());
+
 impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Import the named modules into a fresh Lean environment and wrap
     /// it as a session.
@@ -477,6 +482,19 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 .into_owned(),
         ];
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
+        // Lean 4.30 strictly enforces `enableInitializersExecution` before
+        // `importModules (loadExts := true)`. The flag is process-global,
+        // but `Lean.withImporting` (wrapped around every import) resets it
+        // on completion — two threads importing concurrently race the
+        // shim's enable→import sequence and the loser sees the flag
+        // cleared by the winner's reset. Serializing the import phase
+        // across the process matches Lean's "single execution thread
+        // accessing the global references" requirement. Sessions operate
+        // concurrently on their own `Environment` values once import
+        // returns; the lock spans only the FFI call.
+        let _import_guard = SESSION_IMPORT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let environment = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
             let (handle, trampoline) = bridge.abi_parts();

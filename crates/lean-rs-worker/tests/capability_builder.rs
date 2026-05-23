@@ -237,6 +237,11 @@ fn bootstrap_report_distinguishes_missing_child_without_spawning() {
 
 #[test]
 fn manifest_backed_builder_uses_manifest_capability_identity() {
+    // The manifest, primary dylib, and worker binary are all produced by
+    // the template's `cargo build`; without this the test relied on a
+    // sibling having built the template earlier under nextest's scheduler.
+    build_shipped_template();
+
     let spec = LeanBuiltCapability::manifest_path(shipped_manifest_path());
     let report = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["ShipLeanDemo"])
         .expect("manifest-backed descriptor creates worker builder")

@@ -87,15 +87,19 @@ rebuild_lake_packages() {
 		"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims/.lake" \
 		"$REPO_ROOT/fixtures/lean/.lake" \
 		"$REPO_ROOT/fixtures/interop-shims/.lake" \
-		"$REPO_ROOT/templates/shipped-lean-crate/lean/.lake"
+		"$REPO_ROOT/templates/shipped-lean-crate/lean/.lake" \
+		"$REPO_ROOT/templates/shipped-lean-crate/target"
 	(cd "$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims" && lake build >/dev/null)
 	(cd "$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-interop-shims" && lake build >/dev/null)
 	(cd "$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims" && lake build >/dev/null)
 	(cd "$REPO_ROOT/fixtures/lean" && lake build >/dev/null)
 	(cd "$REPO_ROOT/fixtures/interop-shims" && lake build >/dev/null)
-	# Template .lake is rebuilt lazily by the worker tests (cargo build of
-	# the template invokes its build.rs which calls lake), so wiping the
-	# directory is sufficient here.
+	# The template's `.lake/` and `target/` are both rebuilt lazily by
+	# the worker tests (cargo-build of the template invokes its build.rs
+	# which calls lake). Wiping `target/` along with `.lake/` is what
+	# busts cargo's incremental fingerprint cache — without it, the
+	# embedded toolchain digest in the template's manifest stays at the
+	# previous sweep iteration's version even though `.lake/` is empty.
 }
 
 run_one_version() {

@@ -54,6 +54,13 @@ def sessionImport (searchPaths : Array String) (importNames : Array String) : IO
   -- operators like `+`, `=`, `∧`. With it set, the prompt-15
   -- `elaborate` / `kernel_check` shims see the full operator set
   -- the prelude defines.
+  --
+  -- Lean 4.30 enforces what earlier releases tolerated: `loadExts := true`
+  -- requires `enableInitializersExecution` to have been called first, or
+  -- `importModules` throws `IO.userError`. The flag is idempotent and
+  -- present on every toolchain in the supported window (4.26+), so we
+  -- call it unconditionally rather than version-branching.
+  unsafe Lean.enableInitializersExecution
   Lean.importModules imports Lean.Options.empty 0 (loadExts := true)
 
 @[export lean_rs_host_session_import_progress]
