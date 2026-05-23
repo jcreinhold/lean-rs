@@ -1,0 +1,21 @@
+[book]
+authors = ["Jacob Reinhold"]
+description = "Rust bindings for hosting Lean 4 capabilities."
+language = "en"
+src = "."
+title = "lean-rs"
+
+[build]
+build-dir = "../target/mdbook"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+edit-url-template = "https://github.com/jcreinhold/lean-rs/edit/main/docs/{path}"
+git-repository-url = "https://github.com/jcreinhold/lean-rs"
+
+[output.html.search]
+enable = true
+limit-results = 25
+use-boolean-and = true

@@ -3,6 +3,7 @@
 [![CI](https://github.com/jcreinhold/lean-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/ci.yml)
 [![Sanitizer](https://github.com/jcreinhold/lean-rs/actions/workflows/sanitizer.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/sanitizer.yml)
 [![Release](https://github.com/jcreinhold/lean-rs/actions/workflows/release.yml/badge.svg)](https://github.com/jcreinhold/lean-rs/actions/workflows/release.yml)
+[![Docs](https://img.shields.io/badge/docs-jcreinhold.github.io%2Flean--rs-blue)](https://jcreinhold.github.io/lean-rs/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](#license)
 
 Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns Lean semantics (elaboration, kernel
@@ -196,7 +197,8 @@ semantic commands, and chunk contents.
 > stance). The rest are reference for specific topics. The numbers reflect the order docs were written, not the order
 > they should be read.
 
-Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by topic:
+Architecture, safety, and policy docs live under [`docs/`](docs/), grouped by topic. The same content, with search and
+a curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 
 **Foundations**
 - [`00-charter.md`](docs/architecture/00-charter.md): design boundary, hidden knowledge, rejected alternatives.

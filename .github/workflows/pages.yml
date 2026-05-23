@@ -1,0 +1,51 @@
+name: pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Git ref to build documentation from.'
+        type: string
+        default: main
+        required: true
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MDBOOK_VERSION: "0.5.3"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5.3
+
+      - name: Build site
+        run: mdbook build docs/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/mdbook
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
