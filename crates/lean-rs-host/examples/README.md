@@ -1,12 +1,11 @@
 # lean-rs examples
 
-**New to this project? Start here.** The examples below drive the curated `lean_rs::*` and
-`lean_rs_host::*` surfaces end to end against the in-tree fixture; reading them is the
-fastest path from a blank consumer project to a working integration.
+**New to this project? Start here.** The examples below drive the curated `lean_rs::*` and `lean_rs_host::*` surfaces
+end to end against the in-tree fixture; reading them is the fastest path from a blank consumer project to a working
+integration.
 
-Six focused examples, one end-to-end tour, and one RSS reproducer. Each
-focused example sticks to one verb so a reader can scan it in a minute and reach for the
-matching crate API by analogy.
+Six focused examples, one end-to-end tour, and one RSS reproducer. Each focused example sticks to one verb so a reader
+can scan it in a minute and reach for the matching crate API by analogy.
 
 | Example | What it teaches |
 | --- | --- |
@@ -21,21 +20,18 @@ matching crate API by analogy.
 
 ## Prerequisites
 
-Every example loads the in-tree fixture Lake project from
-`fixtures/lean/`. Build it once before running any example:
+Every example loads the in-tree fixture Lake project from `fixtures/lean/`. Build it once before running any example:
 
 ```sh
 cd fixtures/lean && lake build && cd -
 ```
 
-The examples panic at `LeanRuntime::init` time with a clear diagnostic
-if the build is missing.
+The examples panic at `LeanRuntime::init` time with a clear diagnostic if the build is missing.
 
 ## Tracing output
 
-Each example installs a `tracing_subscriber::fmt` sink that respects
-`RUST_LOG`. The defaults stay quiet so the example's own `println`
-lines aren't drowned out; raise the level to see structured spans:
+Each example installs a `tracing_subscriber::fmt` sink that respects `RUST_LOG`. The defaults stay quiet so the
+example's own `println` lines aren't drowned out; raise the level to see structured spans:
 
 ```sh
 RUST_LOG=lean_rs=info  cargo run -p lean-rs --example theorem_query
@@ -43,32 +39,27 @@ RUST_LOG=lean_rs=debug cargo run -p lean-rs --example proof_check
 RUST_LOG=lean_rs=trace cargo run -p lean-rs --example meta_query
 ```
 
-See [`docs/diagnostics.md`](../../../docs/diagnostics.md) for the
-full span catalogue and the recommended `RUST_LOG` scope per
-workload.
+See [`docs/diagnostics.md`](../../../docs/diagnostics.md) for the full span catalogue and the recommended `RUST_LOG`
+scope per workload.
 
 ## Error output
 
-Every example wraps its happy-path work in `fn run() -> LeanResult<()>`
-and propagates with `?`. `main` prints the failure with the diagnostic
-code in brackets and exits non-zero:
+Every example wraps its happy-path work in `fn run() -> LeanResult<()>` and propagates with `?`. `main` prints the
+failure with the diagnostic code in brackets and exits non-zero:
 
 ```text
 [lean_rs.linking] lean-rs: host stage Link [lean_rs.linking]: ...
 ```
 
-The code names the failure family (see the
-[`LeanDiagnosticCode`](../../../docs/diagnostics.md#diagnostic-codes)
-catalogue); the bracketed text is `as_str()` and is stable across
-patch releases.
+The code names the failure family (see the [`LeanDiagnosticCode`](../../../docs/diagnostics.md#diagnostic-codes)
+catalogue); the bracketed text is `as_str()` and is stable across patch releases.
 
 ## Examples
 
 ### theorem_query
 
-**Goal:** open a session over the fixture Lake project and contrast
-how Lean classifies a definition (`Nat.add`) versus a theorem
-(`Nat.add_zero`).
+**Goal:** open a session over the fixture Lake project and contrast how Lean classifies a definition (`Nat.add`) versus
+a theorem (`Nat.add_zero`).
 
 **Run:**
 
@@ -85,27 +76,21 @@ Nat.add_zero: kind=theorem rendered=Nat.add_zero
 ok
 ```
 
-The exact `total_declarations` count tracks the active Lean
-toolchain prelude and will drift with the version pinned in
+The exact `total_declarations` count tracks the active Lean toolchain prelude and will drift with the version pinned in
 `lean-toolchain`.
 
 **Common failures:**
 
-- `[lean_rs.module_init] ... 'fixtures/lean' does not exist or is not
-  a directory`—run from a directory other than the workspace root.
-  Either `cd` to the workspace root or set `CARGO_MANIFEST_DIR`
-  appropriately.
-- `[lean_rs.module_init] ... failed to open Lean library`—the Lake
-  fixture has not been built. See *Prerequisites*.
-- `[lean_rs.abi_conversion] declaration 'Nat.add_zero' not found in
-  imported environment`—the imported module set excludes the
-  prelude; only happens if the example's import list is edited.
+- `[lean_rs.module_init] ... 'fixtures/lean' does not exist or is not a directory`—run from a directory other than the
+  workspace root. Either `cd` to the workspace root or set `CARGO_MANIFEST_DIR` appropriately.
+- `[lean_rs.module_init] ... failed to open Lean library`—the Lake fixture has not been built. See *Prerequisites*.
+- `[lean_rs.abi_conversion] declaration 'Nat.add_zero' not found in imported environment`—the imported module set
+  excludes the prelude; only happens if the example's import list is edited.
 
 ### evaluate
 
-**Goal:** call a typed `@[export]` Lean function from Rust through
-`LeanSession::call_capability` with both a boxed (`String`) and an
-unboxed (`u32`) signature.
+**Goal:** call a typed `@[export]` Lean function from Rust through `LeanSession::call_capability` with both a boxed
+(`String`) and an unboxed (`u32`) signature.
 
 **Run:**
 
@@ -123,20 +108,15 @@ ok
 
 **Common failures:**
 
-- `[lean_rs.symbol_lookup] unknown exported symbol
-  'lean_rs_fixture_string_identity' in ...`—the capability dylib
-  was built without the `LeanRsFixture.Strings` module's
-  `@[export]`. Re-run `lake build`.
-- `[lean_rs.abi_conversion] ...`—the example's hardcoded argument
-  type drifted from the Lean signature. Re-check the Rust
-  `(args), R` triple against `fixtures/lean/LeanRsFixture/Strings.lean`
-  and `Scalars.lean`.
+- `[lean_rs.symbol_lookup] unknown exported symbol 'lean_rs_fixture_string_identity' in ...`—the capability dylib was
+  built without the `LeanRsFixture.Strings` module's `@[export]`. Re-run `lake build`.
+- `[lean_rs.abi_conversion] ...`—the example's hardcoded argument type drifted from the Lean signature. Re-check the
+  Rust `(args), R` triple against `fixtures/lean/LeanRsFixture/Strings.lean` and `Scalars.lean`.
 
 ### proof_check
 
-**Goal:** submit a small theorem to `LeanSession::kernel_check`,
-re-validate the resulting evidence with `check_evidence`, and print
-the bounded `ProofSummary`.
+**Goal:** submit a small theorem to `LeanSession::kernel_check`, re-validate the resulting evidence with
+`check_evidence`, and print the bounded `ProofSummary`.
 
 **Run:**
 
@@ -152,22 +132,20 @@ check_evidence: Checked
 summary: name=demo_proof_check kind=theorem type=Eq.{1} Nat ...
 ```
 
-The `type=` rendering is Lean's pretty printer and tracks the active
-toolchain—the prefix `Eq.{1} Nat ...` is stable for this theorem
-but the exact bytes will drift with Lean version.
+The `type=` rendering is Lean's pretty printer and tracks the active toolchain—the prefix `Eq.{1} Nat ...` is stable for
+this theorem but the exact bytes will drift with Lean version.
 
 **Common failures:**
 
-- The kernel-check outcome prints `kernel rejected the proof: ...`—the proof term is bad. Edit the source string in `examples/proof_check.rs` and re-run.
-- `[lean_rs.lean_exception] Lean threw ...`—the elaboration shim
-  raised through IO before the kernel saw the term. The bounded
-  message names the cause.
+- The kernel-check outcome prints `kernel rejected the proof: ...`—the proof term is bad. Edit the source string in
+  `examples/proof_check.rs` and re-run.
+- `[lean_rs.lean_exception] Lean threw ...`—the elaboration shim raised through IO before the kernel saw the term. The
+  bounded message names the cause.
 
 ### meta_query
 
-**Goal:** elaborate `(Nat.succ 0 : Nat)` to a `LeanExpr`, run the
-`infer_type` `MetaM` service against it, and branch on every
-`LeanMetaResponse` status.
+**Goal:** elaborate `(Nat.succ 0 : Nat)` to a `LeanExpr`, run the `infer_type` `MetaM` service against it, and branch on
+every `LeanMetaResponse` status.
 
 **Run:**
 
@@ -184,18 +162,15 @@ ok
 
 **Common failures:**
 
-- `status=Unsupported: ...`—the capability dylib lacks the
-  `lean_rs_host_meta_infer_type` shim. Rebuild the fixture; the
-  in-tree fixture exports all four meta services
-  (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`).
-- `status=TimeoutOrHeartbeat: ...`—the heartbeat ceiling tripped
-  before `infer_type` finished. Raise `LeanMetaOptions::new()
-  .heartbeat_limit(N)`.
+- `status=Unsupported: ...`—the capability dylib lacks the `lean_rs_host_meta_infer_type` shim. Rebuild the fixture; the
+  in-tree fixture exports all four meta services (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`).
+- `status=TimeoutOrHeartbeat: ...`—the heartbeat ceiling tripped before `infer_type` finished. Raise
+  `LeanMetaOptions::new() .heartbeat_limit(N)`.
 
 ### progress
 
-**Goal:** attach a `LeanProgressSink` to a bulk query, then show a progress sink
-triggering a shared `LeanCancellationToken`.
+**Goal:** attach a `LeanProgressSink` to a bulk query, then show a progress sink triggering a shared
+`LeanCancellationToken`.
 
 **Run:**
 
@@ -203,24 +178,20 @@ triggering a shared `LeanCancellationToken`.
 cargo run -p lean-rs-host --example progress
 ```
 
-**Expected output:** one or more `progress phase=... current=... total=...`
-lines, followed by `queried_declarations=3`, a `cancel_progress ...` line,
-`cancelled_code=lean_rs.cancelled`, and `ok`.
+**Expected output:** one or more `progress phase=... current=... total=...` lines, followed by `queried_declarations=3`,
+a `cancel_progress ...` line, `cancelled_code=lean_rs.cancelled`, and `ok`.
 
 **Common failures:**
 
-- `[lean_rs.module_init] ... failed to open Lean library`—the Lake fixture has
-  not been built. See *Prerequisites*.
-- No progress output—check that the example passes `Some(&sink)` as the final
-  progress argument; `None` is intentionally silent and keeps the fast path.
+- `[lean_rs.module_init] ... failed to open Lean library`—the Lake fixture has not been built. See *Prerequisites*.
+- No progress output—check that the example passes `Some(&sink)` as the final progress argument; `None` is intentionally
+  silent and keeps the fast path.
 
 ### tour
 
-**Goal:** see how the four focused examples compose into one
-end-to-end workflow: host open → capability load → session import →
-two `elaborate` calls → one `kernel_check` → one bulk declaration
-query → one `Meta.whnf`. Output is per-stage wall-clock for
-performance triage (see [`docs/performance.md`](../../../docs/performance.md)).
+**Goal:** see how the four focused examples compose into one end-to-end workflow: host open → capability load → session
+import → two `elaborate` calls → one `kernel_check` → one bulk declaration query → one `Meta.whnf`. Output is per-stage
+wall-clock for performance triage (see [`docs/performance.md`](../../../docs/performance.md)).
 
 **Run:**
 
@@ -228,15 +199,13 @@ performance triage (see [`docs/performance.md`](../../../docs/performance.md)).
 cargo run -p lean-rs --example tour
 ```
 
-**Expected output:** one `name=<stage> elapsed_us=<u64>` line per
-stage, suitable for `grep`/`awk`. The exact `elapsed_us` values are
-machine-dependent.
+**Expected output:** one `name=<stage> elapsed_us=<u64>` line per stage, suitable for `grep`/`awk`. The exact
+`elapsed_us` values are machine-dependent.
 
 ### lake_build_helper
 
-**Goal:** demonstrate the downstream `build.rs` helper that runs
-`lake build <target>:shared`, caches the result, and returns the produced
-dylib path.
+**Goal:** demonstrate the downstream `build.rs` helper that runs `lake build <target>:shared`, caches the result, and
+returns the produced dylib path.
 
 **Run:**
 
@@ -244,22 +213,19 @@ dylib path.
 cargo run -p lean-rs-host --example lake_build_helper
 ```
 
-**Expected output:** `cargo:rerun-if-changed=...` lines from the helper,
-followed by:
+**Expected output:** `cargo:rerun-if-changed=...` lines from the helper, followed by:
 
 ```text
 dylib=.../.lake/build/lib/liblean__rs__fixture_LeanRsFixture.dylib
 ```
 
-The extension is `.so` on Linux. This example intentionally prints Cargo
-directives because the helper is meant for build scripts.
+The extension is `.so` on Linux. This example intentionally prints Cargo directives because the helper is meant for
+build scripts.
 
 ### long_session_memory
 
-**Goal:** characterize retained RSS across long-session lifetime boundaries:
-runtime initialization, capability loading, repeated fresh imports,
-bounded `SessionPool` reuse, bulk declaration queries, elaboration, and
-session/pool drops.
+**Goal:** characterize retained RSS across long-session lifetime boundaries: runtime initialization, capability loading,
+repeated fresh imports, bounded `SessionPool` reuse, bulk declaration queries, elaboration, and session/pool drops.
 
 **Run:**
 
@@ -267,28 +233,24 @@ session/pool drops.
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-**Expected output:** stable `key=value` lines including `lean_version`,
-`lean_resolved_version`, workload parameters, `pool_stats=...`, and
-`checkpoint=<stage> rss_kib=<u64>`.
+**Expected output:** stable `key=value` lines including `lean_version`, `lean_resolved_version`, workload parameters,
+`pool_stats=...`, and `checkpoint=<stage> rss_kib=<u64>`.
 
-This example is intentionally not a Criterion bench. It answers a
-retained-memory question over minutes and lifetime boundaries; Criterion
-answers per-iteration latency questions. The measured model and consumer
-guidance live in
+This example is intentionally not a Criterion bench. It answers a retained-memory question over minutes and lifetime
+boundaries; Criterion answers per-iteration latency questions. The measured model and consumer guidance live in
 [`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
 ## L1 callback interop
 
-Callbacks are an L1 `lean-rs` feature, not a `lean-rs-host` session feature.
-Run the generic interop example from the workspace root:
+Callbacks are an L1 `lean-rs` feature, not a `lean-rs-host` session feature. Run the generic interop example from the
+workspace root:
 
 ```sh
 cargo run -p lean-rs --example interop_callback
 ```
 
-That example builds the bundled `lean-rs-interop-shims` package and a downstream-style Lake
-target with `lean_toolchain::build_lake_target`, then invokes a Lean export that calls back
-into a Rust `LeanCallbackHandle`.
+That example builds the bundled `lean-rs-interop-shims` package and a downstream-style Lake target with
+`lean_toolchain::build_lake_target`, then invokes a Lean export that calls back into a Rust `LeanCallbackHandle`.
 
 ## Pointers
 

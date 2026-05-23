@@ -1,50 +1,48 @@
 # `lean-rs-host` Capability Contract
 
-The 28 mandatory + 6 optional `@[export] lean_rs_host_*` symbols
-[`lean-rs-host`](https://docs.rs/lean-rs-host)'s `LeanCapabilities::load_capabilities`
-resolves at runtime. The `lean-rs-host` crate ships the implementation under
+The 28 mandatory + 6 optional `@[export] lean_rs_host_*` symbols [`lean-rs-host`](https://docs.rs/lean-rs-host)'s
+`LeanCapabilities::load_capabilities` resolves at runtime. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
-`crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
-`lean_rs_host_shims` require line to their own `lakefile.lean`; the Rust loader builds and opens
-the crate-owned shim dylibs. Expected host-shim dylib name:
+`crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a `lean_rs_host_shims` require line to
+their own `lakefile.lean`; the Rust loader builds and opens the crate-owned shim dylibs. Expected host-shim dylib name:
 `liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
 
-This document covers the **wire-level contract**: each Lean signature, the typed Rust shape
-`LeanSession::*` exposes on top, and the Rust call-site mapping. The architectural rationale
-(generic interop dylib, host shim dylib, `RTLD_GLOBAL`, the consumer `lakefile.lean` shape) lives in
-[`architecture/03-host-stack.md`](architecture/03-host-stack.md).
+This document covers the **wire-level contract**: each Lean signature, the typed Rust shape `LeanSession::*` exposes on
+top, and the Rust call-site mapping. The architectural rationale (generic interop dylib, host shim dylib, `RTLD_GLOBAL`,
+the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](architecture/03-host-stack.md).
 
 ## Resolution
 
 `LeanCapabilities::new` performs:
 
-1. `LakeProject::interop_dylib()` builds the bundled generic interop shim target if needed, opens the generic interop dylib globally, and initializes `LeanRsInterop`.
+1. `LakeProject::interop_dylib()` builds the bundled generic interop shim target if needed, opens the generic interop
+   dylib globally, and initializes `LeanRsInterop`.
 2. `LakeProject::shim_dylib()` builds the bundled host shim target if needed.
-3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on Unix.
-4. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which transitively initializes `Lean.*` and the already-loaded generic callback module.
-5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not require or initialize host shims.
-6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
+3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on
+   Unix.
+4. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which
+   transitively initializes `Lean.*` and the already-loaded generic callback module.
+5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not
+   require or initialize host shims.
+6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer
+   dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
 
-`LeanSession::import` passes three `.olean` roots to the import shim: the
-consumer project, `lean_rs_interop_shims`, and `lean_rs_host_shims`.
+`LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
+`lean_rs_host_shims`.
 
-A missing mandatory symbol fails capability load with `LeanError::Host(stage = Link)`. A
-missing optional meta-service symbol stores `None` in `SessionSymbols`;
-`LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that service at dispatch
-time.
+A missing mandatory symbol fails capability load with `LeanError::Host(stage = Link)`. A missing optional meta-service
+symbol stores `None` in `SessionSymbols`; `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that
+service at dispatch time.
 
 ## Mandatory contract (28 symbols)
 
-Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`,
-`KernelOutcome`, `ProofSummary`, `MetaOpts`, `MetaResponse`, `DeclarationFilter`,
-`SourceRange`) live in
+Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`, `KernelOutcome`, `ProofSummary`,
+`MetaOpts`, `MetaResponse`, `DeclarationFilter`, `SourceRange`) live in
 [`crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
-and [`Meta.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and
-the `TryFromLean` / `IntoLean` impls crossing the ABI live in
-`crates/lean-rs-host/src/host/{elaboration,evidence,meta}/`.
-`DeclarationFilter` is a private wire record whose three flags are Nat-backed
-`0`/`1` values so it uses the same object-slot structure ABI as the rest of the
-host-defined records; Rust callers see ordinary `bool` fields.
+and [`Meta.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and the
+`TryFromLean` / `IntoLean` impls crossing the ABI live in `crates/lean-rs-host/src/host/{elaboration,evidence,meta}/`.
+`DeclarationFilter` is a private wire record whose three flags are Nat-backed `0`/`1` values so it uses the same
+object-slot structure ABI as the rest of the host-defined records; Rust callers see ordinary `bool` fields.
 
 ### Environment and declaration queries (15)
 
@@ -86,11 +84,10 @@ host-defined records; Rust callers see ordinary `bool` fields.
 
 ## Optional contract (6 symbols)
 
-If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for
-that slot; the dispatching call site degrades gracefully — `LeanSession::run_meta`
-synthesises `LeanMetaResponse::Unsupported` for the meta services, and
-`LeanSession::process_with_info_tree` returns `ProcessFileOutcome::Unsupported` for the
-info-tree projection.
+If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for that slot; the dispatching
+call site degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta
+services, and `LeanSession::process_with_info_tree` returns `ProcessFileOutcome::Unsupported` for the info-tree
+projection.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -103,16 +100,18 @@ info-tree projection.
 
 ## Forking the shim package
 
-The shim package is small (~700 LOC across four files). A fork that customises behaviour
-(e.g., different heartbeat policy, extra logging on the kernel-check path) must keep:
+The shim package is small (~700 LOC across four files). A fork that customises behaviour (e.g., different heartbeat
+policy, extra logging on the kernel-check path) must keep:
 
-- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can initialize the module and interpret symbol names consistently.
-- Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed shapes).
-- The 6 optional symbols are truly optional; omitting any collapses the corresponding session method to its `Unsupported` arm (`run_meta` for the five meta services, `process_with_info_tree` for the info-tree projection).
+- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can
+  initialize the module and interpret symbol names consistently.
+- Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed
+  shapes).
+- The 6 optional symbols are truly optional; omitting any collapses the corresponding session method to its
+  `Unsupported` arm (`run_meta` for the five meta services, `process_with_info_tree` for the info-tree projection).
 
-A fork that changes the Lean structure layouts also needs corresponding Rust changes—this
-is why the shim package isn't framed as "compatibility shims" but as the **implementation** of
-the wire contract.
+A fork that changes the Lean structure layouts also needs corresponding Rust changes—this is why the shim package isn't
+framed as "compatibility shims" but as the **implementation** of the wire contract.
 
-Forks should keep reusable callback/string/name/object ABI helpers in the generic
-`lean-rs-interop-shims` package when those helpers are not host-policy-specific.
+Forks should keep reusable callback/string/name/object ABI helpers in the generic `lean-rs-interop-shims` package when
+those helpers are not host-policy-specific.

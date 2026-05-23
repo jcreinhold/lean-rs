@@ -1,22 +1,19 @@
 # lean-rs-host
 
-Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability. Provides the
-`LeanHost` / `LeanCapabilities` / `LeanSession` trio, the kernel-check evidence types
-(`LeanEvidence`, `LeanKernelOutcome`, `ProofSummary`), the typed elaboration diagnostics
-(`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`, `LeanSeverity`, `LeanPosition`), the
-bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` /
+Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability. Provides the `LeanHost` /
+`LeanCapabilities` / `LeanSession` trio, the kernel-check evidence types (`LeanEvidence`, `LeanKernelOutcome`,
+`ProofSummary`), the typed elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`,
+`LeanSeverity`, `LeanPosition`), the bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` /
 `PooledSession` reuse helper.
 
-Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed-FFI primitive. The opaque
-semantic handles `LeanName`, `LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`;
-this crate consumes them through `use lean_rs::{...}`. If you only need to call typed
-`@[export]` Lean functions from Rust, depend on `lean-rs` directly: it is the typed-FFI
+Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed-FFI primitive. The opaque semantic handles `LeanName`,
+`LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`; this crate consumes them through `use lean_rs::{...}`.
+If you only need to call typed `@[export]` Lean functions from Rust, depend on `lean-rs` directly: it is the typed-FFI
 minimum and has no Lean-side shim contract.
 
-**You write zero shim exports yourself.** `lean-rs-host` bundles its host and generic
-interop shim packages and builds them on demand. Your `lakefile.lean` declares only your
-own capability library; you do not `require lean_rs_host_shims`, write
-`lean_rs_host_*` exports, or import the shim package from Lean.
+**You write zero shim exports yourself.** `lean-rs-host` bundles its host and generic interop shim packages and builds
+them on demand. Your `lakefile.lean` declares only your own capability library; you do not `require lean_rs_host_shims`,
+write `lean_rs_host_*` exports, or import the shim package from Lean.
 
 The three central types nest:
 
@@ -26,22 +23,19 @@ LeanHost            opened once per Lean runtime
        └─ LeanSession   one per call, returned from caps.session(...)
 ```
 
-Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into
-the same capability, and open a fresh `LeanSession` for each unit of work.
+Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into the same capability, and open a
+fresh `LeanSession` for each unit of work.
 
-Supports the same Lean toolchain window as
-[`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.26.0 through 4.29.1**; see
-[`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md).
-The capability loader transparently handles the Lake naming-convention change between Lean
-4.26 and 4.27 (dylib filename and module-initializer symbol shape), so consumer
-`lakefile.lean`s do not need version-conditional logic.
+Supports the same Lean toolchain window as [`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.26.0 through
+4.29.1**; see [`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md). The
+capability loader transparently handles the Lake naming-convention change between Lean 4.26 and 4.27 (dylib filename and
+module-initializer symbol shape), so consumer `lakefile.lean`s do not need version-conditional logic.
 
 ## Quick start
 
-Add a `lean-rs-host` dependency to `Cargo.toml`. The crate ships the matching host and
-generic interop shim sources and builds them on demand, so your `lakefile.lean` declares
-only your own capability library. Everything else mirrors the same-process setup in
-[`lean-rs`'s README](https://docs.rs/lean-rs).
+Add a `lean-rs-host` dependency to `Cargo.toml`. The crate ships the matching host and generic interop shim sources and
+builds them on demand, so your `lakefile.lean` declares only your own capability library. Everything else mirrors the
+same-process setup in [`lean-rs`'s README](https://docs.rs/lean-rs).
 
 **`Cargo.toml`**:
 
@@ -59,9 +53,8 @@ lean-rs-host = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**: build your capability with the same shipped-crate helper used by
-`lean-rs` applications. `lean-rs-host` builds its bundled host shims on demand, but your
-consumer capability still needs a Lake shared-library target:
+**`build.rs`**: build your capability with the same shipped-crate helper used by `lean-rs` applications. `lean-rs-host`
+builds its bundled host shims on demand, but your consumer capability still needs a Lake shared-library target:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,14 +66,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**`lean/lakefile.lean`**: declares your capability target. Do not add a
-`lean_rs_host_shims` require; `lean-rs-host` loads its bundled shims separately.
-Lake uses guillemets (`« »`) as its idiomatic quoting for package and library names;
+**`lean/lakefile.lean`**: declares your capability target. Do not add a `lean_rs_host_shims` require; `lean-rs-host`
+loads its bundled shims separately. Lake uses guillemets (`« »`) as its idiomatic quoting for package and library names;
 plain ASCII names also work.
 
-Long-running imports, bulk introspection, filtered listing, and kernel-check
-calls can receive a borrowed `LeanProgressSink` for live in-thread progress
-events. Passing `None` keeps the no-progress fast path.
+Long-running imports, bulk introspection, filtered listing, and kernel-check calls can receive a borrowed
+`LeanProgressSink` for live in-thread progress events. Passing `None` keeps the no-progress fast path.
 
 ```lean
 import Lake
@@ -135,25 +126,23 @@ Build and run:
 cargo run
 ```
 
-`CargoLeanCapability` runs `lake build MyCapability:shared`, emits Cargo rerun and link
-directives, and exposes the built dylib path at compile time. `load_capabilities` also builds
-and opens the crate-bundled `LeanRsInterop` and `LeanRsHostShims` dylibs, sharing one Lean
-runtime; per-module `initialize_*` functions are idempotent.
+`CargoLeanCapability` runs `lake build MyCapability:shared`, emits Cargo rerun and link directives, and exposes the
+built dylib path at compile time. `load_capabilities` also builds and opens the crate-bundled `LeanRsInterop` and
+`LeanRsHostShims` dylibs, sharing one Lean runtime; per-module `initialize_*` functions are idempotent.
 
 ## Capability contract
 
-The full per-symbol contract (each Lean signature, the Rust call site it maps to, and the
-typed `LeanSession::*` method on top) lives at
+The full per-symbol contract (each Lean signature, the Rust call site it maps to, and the typed `LeanSession::*` method
+on top) lives at
 [`docs/lean-rs-host-capability-contract.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/lean-rs-host-capability-contract.md).
 
 ## Caveats
 
-**Nullary unboxed-scalar globals trip the function-path dispatch.** A nullary `@[export]`
-returning an unboxed scalar (e.g., `def decideTrue : Bool := decide (1 + 1 = 2)`) is
-compiled by Lake as a persistent global, not a function symbol. `LeanModule::exported`'s
-function-path dispatch then reads the global's stored scalar-tagged value as if it were a
-function pointer, and `.call(...)` panics with `misaligned pointer dereference`. Workaround:
-add a `Unit` argument so Lake emits a function symbol:
+**Nullary unboxed-scalar globals trip the function-path dispatch.** A nullary `@[export]` returning an unboxed scalar
+(e.g., `def decideTrue : Bool := decide (1 + 1 = 2)`) is compiled by Lake as a persistent global, not a function symbol.
+`LeanModule::exported`'s function-path dispatch then reads the global's stored scalar-tagged value as if it were a
+function pointer, and `.call(...)` panics with `misaligned pointer dereference`. Workaround: add a `Unit` argument so
+Lake emits a function symbol:
 
 ```lean
 def decideTrue (_ : Unit) : Bool := decide (1 + 1 = 2)
@@ -164,8 +153,8 @@ The Rust call site then becomes `module.exported::<((),), bool>(...).call(())`.
 ## Worked examples
 
 Eight runnable examples under
-[`crates/lean-rs-host/examples/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/examples)
-drive `lean_rs_host::*` end to end against the in-tree fixture:
+[`crates/lean-rs-host/examples/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/examples) drive
+`lean_rs_host::*` end to end against the in-tree fixture:
 
 - `theorem_query`—open a session, contrast a definition's `kind` with a theorem's.
 - `evaluate`—call a typed `@[export]` through `LeanSession::call_capability`.
@@ -176,9 +165,8 @@ drive `lean_rs_host::*` end to end against the in-tree fixture:
 - `lake_build_helper`—build a Lake shared-library target through `lean-toolchain`.
 - `long_session_memory`—capture RSS checkpoints for a long-lived session workload.
 
-See the
-[examples README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/examples/README.md)
-for the per-example walkthrough, expected output, and common failures.
+See the [examples README](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/examples/README.md) for
+the per-example walkthrough, expected output, and common failures.
 
 ## License
 

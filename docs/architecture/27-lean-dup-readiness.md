@@ -1,10 +1,8 @@
 # Lean-Dup Readiness Proof
 
-A boundary check showing that the generic worker foundation can replace the
-subprocess-worker shape used by a `lean-dup`-class tool. The
-`lean-rs-worker` pool hosts the operational responsibilities; downstream
-crates keep their schemas and semantic policy. This is not a `lean-dup`
-implementation and not a migration guide.
+A boundary check showing that the generic worker foundation can replace the subprocess-worker shape used by a
+`lean-dup`-class tool. The `lean-rs-worker` pool hosts the operational responsibilities; downstream crates keep their
+schemas and semantic policy. This is not a `lean-dup` implementation and not a migration guide.
 
 ## What The Proof Covers
 
@@ -29,10 +27,8 @@ It exercises six command shapes through generic typed commands:
 - `index` as a typed streaming command;
 - `probe` as a typed streaming command.
 
-The fixture exports use command-like names only to stress the worker
-capability layer. They do not define declaration rows, feature rows, probe
-results, cache keys, ranking, report policy, or source provenance for
-`lean-dup`.
+The fixture exports use command-like names only to stress the worker capability layer. They do not define declaration
+rows, feature rows, probe results, cache keys, ranking, report policy, or source provenance for `lean-dup`.
 
 ## Responsibility Map
 
@@ -52,10 +48,9 @@ results, cache keys, ranking, report policy, or source provenance for
 | Observe large runs | `LeanWorkerPoolSnapshot` and lease snapshots |
 | Bound slow sinks | bounded row-delivery backpressure |
 
-This deletes caller-owned subprocess plumbing: ad hoc child spawning, stdin
-JSON request writing, stdout JSONL framing, stderr parsing, EOF classification,
-manual timeout kills, manual restart sequencing, pipe-draining loops, and
-RSS/pool bookkeeping.
+This deletes caller-owned subprocess plumbing: ad hoc child spawning, stdin JSON request writing, stdout JSONL framing,
+stderr parsing, EOF classification, manual timeout kills, manual restart sequencing, pipe-draining loops, and RSS/pool
+bookkeeping.
 
 ## What Remains Downstream-Owned
 
@@ -69,22 +64,18 @@ A downstream project still owns:
 - command names and CLI policy;
 - any compatibility decisions based on downstream metadata.
 
-This is the intended split. `lean-rs-worker` carries typed commands, rows,
-diagnostics, terminal summaries, timeouts, cycling, backpressure, and pool
-state; it does not know what a downstream row means.
+This is the intended split. `lean-rs-worker` carries typed commands, rows, diagnostics, terminal summaries, timeouts,
+cycling, backpressure, and pool state; it does not know what a downstream row means.
 
 ## Comparison Input
 
-A read-only downstream checkout (e.g., a `lean-dup` clone) can be supplied via the
-`LEAN_RS_LEAN_DUP_ROOT` environment variable. The readiness example records the checkout
-revision when the path is set and points to a git repository. If
-`LEAN_RS_WORKER_COMPARE_COMMAND` is also set, the example runs that command and prints its
-status and elapsed time. The comparison is optional because `lean-rs-worker` should not depend
-on a local downstream checkout.
+A read-only downstream checkout (e.g., a `lean-dup` clone) can be supplied via the `LEAN_RS_LEAN_DUP_ROOT` environment
+variable. The readiness example records the checkout revision when the path is set and points to a git repository. If
+`LEAN_RS_WORKER_COMPARE_COMMAND` is also set, the example runs that command and prints its status and elapsed time. The
+comparison is optional because `lean-rs-worker` should not depend on a local downstream checkout.
 
-Any comparison must name the command, revision, workload, and limits. Without
-that, the readiness proof only claims generic coverage and local worker-pool
-operating behavior.
+Any comparison must name the command, revision, workload, and limits. Without that, the readiness proof only claims
+generic coverage and local worker-pool operating behavior.
 
 ## Measured Local Envelope
 
@@ -93,12 +84,11 @@ The example prints:
 - command-shape coverage and row counts;
 - diagnostic and progress counts;
 - terminal summary command names;
-- timeout, cancellation, fatal-exit recovery, explicit cycle, and
-  backpressure outcomes;
+- timeout, cancellation, fatal-exit recovery, explicit cycle, and backpressure outcomes;
 - pool snapshot counters;
 - parent and child RSS when the platform permits sampling;
 - optional subprocess comparison status.
 
-Do not treat the fixture rows as `lean-dup` rows. They are small generic test
-data used to prove that the worker substrate can carry the shape.
+Do not treat the fixture rows as `lean-dup` rows. They are small generic test data used to prove that the worker
+substrate can carry the shape.
 

@@ -280,18 +280,18 @@ Redefine the operation's semantics so the "error" case is handled by the normal 
 
 - Windows: deleting an open file raises an error. Both processes need exception handling.
 - Unix: the file is marked for deletion, the call succeeds, cleanup happens when the last handle closes. Neither process
-    needs exception handling.
+  needs exception handling.
 
 **Deleting a variable:**
 
 - Tcl's `unset` originally threw on nonexistent variables. Every call was wrapped in try/catch. Redefining `unset` to
-    mean "ensure this doesn't exist" eliminated the exception without changing useful behavior.
+  mean "ensure this doesn't exist" eliminated the exception without changing useful behavior.
 
 ### Other techniques
 
 - **Mask at low levels:** TCP resends lost packets. NFS retries. The caller never sees transient failures.
 - **Aggregate handlers:** Handle multiple exception types with a single high-level handler rather than scattering
-    try/catch.
+  try/catch.
 
 ### Application in typed languages
 
@@ -302,7 +302,7 @@ redefined so the case doesn't arise:
 - A `remove` that returns `Ok(())` whether the key existed or not.
 - A `get_or_default` (Rust) / `Option.getD` (Lean) that never fails.
 - A lookup that returns an empty `Vec` / `List` / `Finset` instead of `None`. In Lean specifically, prefer
-    `Finset.erase` (idempotent) over a partial deletion that errors on absent keys.
+  `Finset.erase` (idempotent) over a partial deletion that errors on absent keys.
 
 ______________________________________________________________________
 
@@ -317,7 +317,7 @@ to one specific caller.
 
 - **Special-purpose:** `backspace()`, `delete()`, `deleteSelection()` — each shallow, each encoding UI knowledge.
 - **General-purpose:** `insert(position, string)` and `delete(range)` — two methods that handle every use case with no
-    UI coupling.
+  UI coupling.
 
 The general-purpose version has fewer methods, a simpler interface, better information hiding (no UI concepts leak in),
 and works in contexts the designer never imagined.

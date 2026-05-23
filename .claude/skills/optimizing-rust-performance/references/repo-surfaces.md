@@ -8,7 +8,8 @@ The conventions are stable across Rust workspaces. Look for:
 
 - `benches/` directories under each crate (`crates/<name>/benches/*.rs`).
 - A `[[bench]]` table in each crate's `Cargo.toml`.
-- Names that hint at scope: `*_bench.rs`, `unification_bench.rs`, `pipeline_bench.rs`, `regression_bench.rs`, `dhat_profile.rs`.
+- Names that hint at scope: `*_bench.rs`, `unification_bench.rs`, `pipeline_bench.rs`, `regression_bench.rs`,
+  `dhat_profile.rs`.
 
 The fastest way to enumerate benches is:
 
@@ -32,8 +33,8 @@ with one or more binaries that drive realistic workloads end to end. Common shap
 - `bin/collect_baseline_quick.rs` — timing-oriented baseline.
 - `bin/collect_baseline_full.rs` — timing plus allocation-aware baseline via DHAT.
 
-Plus supporting shell scripts under `scripts/` for sample-based capture
-(`profile.sh`, `profile_with_samply.sh`, `analyze_profile.sh`).
+Plus supporting shell scripts under `scripts/` for sample-based capture (`profile.sh`, `profile_with_samply.sh`,
+`analyze_profile.sh`).
 
 ## Look For Existing Profiling Hooks In Code
 
@@ -52,9 +53,9 @@ the term store.
 The pattern across compiler-style workspaces:
 
 - Microbenches are stronger than throughput benchmarks. Crates ship per-crate benches that exercise inner loops well but
-    do not compose into an end-to-end story.
+  do not compose into an end-to-end story.
 - Profiling crates, when they exist, are usually richer than per-crate `tools/cli` shims — the CLI shim is build-profile
-    selection, not a performance workflow.
+  selection, not a performance workflow.
 - Some hot areas rely on comments or one-off benches rather than a shared regression suite.
 
 Implication:
@@ -62,7 +63,7 @@ Implication:
 - Start with the closest existing bench.
 - If the change might affect overall compile latency, also run a broader pipeline or end-to-end workload.
 - If a hot path lacks a stable reproducer, add one in the nearest crate bench first, then consider whether the shared
-    profiling crate needs a new workload.
+  profiling crate needs a new workload.
 
 ## When To Add Measurement Support
 

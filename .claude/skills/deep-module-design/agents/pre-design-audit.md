@@ -39,11 +39,11 @@ constraints that prevent the design from getting worse.
     Name the specific pressure. Don't say "general complexity."
 
 1. **List the independent concerns.** For each major public type or trait in the module, list what independent things it
-    handles. Flag any type that handles more than one independently-varying concern.
+   handles. Flag any type that handles more than one independently-varying concern.
 
 1. **Check for complecting patterns.** If the changed files are Rust, read `references/rust-patterns.md`; if Lean 4,
-    read `references/lean4-patterns.md`. For Lean changes, also remind yourself of the Lean-side `AGENTS.md` — and load
-    the `translating-proofs-to-lean4` skill if proof obligations are involved. Look for:
+   read `references/lean4-patterns.md`. For Lean changes, also remind yourself of the Lean-side `AGENTS.md` — and load
+   the `translating-proofs-to-lean4` skill if proof obligations are involved. Look for:
 
     - State + identity braided
     - Mechanism + policy braided
@@ -53,7 +53,7 @@ constraints that prevent the design from getting worse.
     - Temporal steps disguised as API ordering
 
 1. **Assess depth.** Is the module deep (simple interface, complex internals) or shallow (complex interface, little
-    hidden)? Use the audit script's depth estimate as a starting point, but also consider:
+   hidden)? Use the audit script's depth estimate as a starting point, but also consider:
 
     - How many use cases do the public methods serve?
     - How much implementation detail is hidden?

@@ -58,15 +58,15 @@ Still unsure?
 
 ## Quick Decision Table
 
-| Situation                        | Tool              | Why                                        |
-| -------------------------------- | ----------------- | ------------------------------------------ |
-| Same impl for a list of types    | `macro_rules!`    | Stamp-out pattern; no introspection needed |
-| `From<X>` for N error variants   | `macro_rules!`    | Uniform boilerplate                        |
-| `file!()`/`line!()` at call site | `macro_rules!`    | Built-in macros must expand at call site   |
-| Builder pattern with attributes  | proc macro derive | Per-field attribute parsing                |
-| Visitor over enum variants       | proc macro derive | Needs field indexing and name generation   |
-| Trait impls for primitives       | `macro_rules!`    | Type list stamp-out                        |
-| DSL with custom syntax           | either            | Depends on syntax complexity               |
+| Situation | Tool | Why |
+| --- | --- | --- |
+| Same impl for a list of types | `macro_rules!` | Stamp-out pattern; no introspection needed |
+| `From<X>` for N error variants | `macro_rules!` | Uniform boilerplate |
+| `file!()`/`line!()` at call site | `macro_rules!` | Built-in macros must expand at call site |
+| Builder pattern with attributes | proc macro derive | Per-field attribute parsing |
+| Visitor over enum variants | proc macro derive | Needs field indexing and name generation |
+| Trait impls for primitives | `macro_rules!` | Type list stamp-out |
+| DSL with custom syntax | either | Depends on syntax complexity |
 
 ## Debugging
 

@@ -1,34 +1,32 @@
 # Unsafe Inventory
 
-Every `unsafe` block and `pub unsafe fn` in the workspace, paired with two things: the caller's
-**precondition** (what the call site must guarantee before invoking) and the block's
-**invariant** (what it promises in return). Audience: auditors reviewing the safety story, and
-maintainers about to change an unsafe seam.
+Every `unsafe` block and `pub unsafe fn` in the workspace, paired with two things: the caller's **precondition** (what
+the call site must guarantee before invoking) and the block's **invariant** (what it promises in return). Audience:
+auditors reviewing the safety story, and maintainers about to change an unsafe seam.
 
-**Maintenance rule.** Any commit that adds, removes, or reshapes an `unsafe` block must update
-the matching row in this file in the same commit. CI catches `unsafe` without a `// SAFETY:`
-comment (the `missing_safety_doc` lint at `warn`); this file catches the inverse—invariants
-that drifted away from what the code actually relies on.
+**Maintenance rule.** Any commit that adds, removes, or reshapes an `unsafe` block must update the matching row in this
+file in the same commit. CI catches `unsafe` without a `// SAFETY:` comment (the `missing_safety_doc` lint at `warn`);
+this file catches the inverse—invariants that drifted away from what the code actually relies on.
 
 The thesis these invariants serve is in [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
-Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; `lean-rs` consumes them
-through narrow per-file `#![allow(unsafe_code)]` opt-outs; `lean-toolchain` has no `unsafe`.
+Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; `lean-rs` consumes them through narrow per-file
+`#![allow(unsafe_code)]` opt-outs; `lean-toolchain` has no `unsafe`.
 
 ## `lean-rs-sys`—the load-bearing boundary
 
-`lean-rs-sys` is the one crate-wide `#[allow(unsafe_code)]` opt-out (`crates/lean-rs-sys/src/lib.rs:32`).
-`lean_object` is opaque (`[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`)
-and downstream code reaches state only through `pub unsafe fn` helpers. Each helper documents
-its caller obligations in a `# Safety` block; each in-body `unsafe { ... }` restates the
-ABI/layout invariant it relies on.
+`lean-rs-sys` is the one crate-wide `#[allow(unsafe_code)]` opt-out (`crates/lean-rs-sys/src/lib.rs:32`). `lean_object`
+is opaque (`[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`) and downstream code reaches state only through
+`pub unsafe fn` helpers. Each helper documents its caller obligations in a `# Safety` block; each in-body
+`unsafe { ... }` restates the ABI/layout invariant it relies on.
 
 The blanket allow is justified by two cross-checks:
 
 - **`SUPPORTED_TOOLCHAINS` digest** pins `lean.h` bytes across every release in the supported window.
-- **`REQUIRED_SYMBOLS` link-time test** confirms every symbol the inline helpers cast through is exported by `libleanshared` for every release in the window.
+- **`REQUIRED_SYMBOLS` link-time test** confirms every symbol the inline helpers cast through is exported by
+  `libleanshared` for every release in the window.
 
-Each table below groups blocks by `pub unsafe fn`; the function-level `# Safety` doc is the
-authoritative statement, and in-body blocks rely on the same caller obligations.
+Each table below groups blocks by `pub unsafe fn`; the function-level `# Safety` doc is the authoritative statement, and
+in-body blocks rely on the same caller obligations.
 
 ### `crates/lean-rs-sys/src/object.rs`—13 `pub unsafe fn`, 12 blocks
 
@@ -50,8 +48,8 @@ Object inspection, tagging, and runtime-mode reads. Mirrors `lean.h:312–630`.
 
 ### `crates/lean-rs-sys/src/refcount.rs`—6 `pub unsafe fn`, 8 blocks
 
-Refcount fast paths. The atomic operations go through `AtomicI32::from_ptr(&raw mut (*repr).m_rc)`
-(Rust 1.75+), so the load/store/`fetch_sub` sites see a safe `&AtomicI32`.
+Refcount fast paths. The atomic operations go through `AtomicI32::from_ptr(&raw mut (*repr).m_rc)` (Rust 1.75+), so the
+load/store/`fetch_sub` sites see a safe `&AtomicI32`.
 
 | `pub unsafe fn` (line) | Precondition | Invariant |
 | --- | --- | --- |
@@ -65,8 +63,8 @@ Refcount fast paths. The atomic operations go through `AtomicI32::from_ptr(&raw 
 
 ### `crates/lean-rs-sys/src/ctor.rs`—24 `pub unsafe fn`, 36 blocks
 
-Constructor objects, polymorphic boxing, per-width scalar getters and setters. Mirrors
-`lean.h:642–760` and `lean.h:2811–2873`.
+Constructor objects, polymorphic boxing, per-width scalar getters and setters. Mirrors `lean.h:642–760` and
+`lean.h:2811–2873`.
 
 | `pub unsafe fn` (line) | Precondition | Invariant |
 | --- | --- | --- |
@@ -158,26 +156,35 @@ External objects (C `void*` payloads). Mirrors `lean.h:295–1332`.
 
 ### Other `lean-rs-sys` files
 
-- **`init.rs`**—0 blocks; 7 extern declarations (`lean_initialize`, `lean_initialize_runtime_module`, `lean_initialize_thread`, `lean_finalize_thread`, `lean_setup_args`, `lean_init_task_manager`, `lean_init_task_manager_using`, `lean_finalize_task_manager`). Calling any of them is `unsafe` per Lean's runtime entry-point rules: `lean_initialize` exactly once per process; `lean_initialize_thread` paired with `lean_finalize_thread` on every worker thread; `lean_setup_args` argv must outlive readers.
-- **`nat_int.rs`**—0 blocks; bignum externs from `lean.h:1334–1853` (`lean_cstr_to_nat`, `lean_cstr_to_int`, bignum arithmetic helpers).
-- **`repr.rs`**—1 block in a `#[cfg(test)]` layout assertion that the in-memory layout matches the bytes pinned by every `SUPPORTED_TOOLCHAINS` entry. Production paths never touch `repr` directly except through layout casts in the inline accessors of the sibling modules.
-- **`lib.rs`**—1 block and 2 `pub unsafe fn`; the block forwards a discovery helper returning a `&'static` view of the `REQUIRED_SYMBOLS` table. The `unsafe` is the caller's invariant that the link-time test has succeeded.
-- **`consts.rs`**, **`types.rs`**—0 blocks. `consts.rs` holds the `build.rs`-resolved version and digest constants. `types.rs` defines opaque `lean_object` and calling-convention typedefs; its one `pub unsafe fn` is a `Default`-like constructor stub with no body that callers cannot reach.
+- **`init.rs`**—0 blocks; 7 extern declarations (`lean_initialize`, `lean_initialize_runtime_module`,
+  `lean_initialize_thread`, `lean_finalize_thread`, `lean_setup_args`, `lean_init_task_manager`,
+  `lean_init_task_manager_using`, `lean_finalize_task_manager`). Calling any of them is `unsafe` per Lean's runtime
+  entry-point rules: `lean_initialize` exactly once per process; `lean_initialize_thread` paired with
+  `lean_finalize_thread` on every worker thread; `lean_setup_args` argv must outlive readers.
+- **`nat_int.rs`**—0 blocks; bignum externs from `lean.h:1334–1853` (`lean_cstr_to_nat`, `lean_cstr_to_int`, bignum
+  arithmetic helpers).
+- **`repr.rs`**—1 block in a `#[cfg(test)]` layout assertion that the in-memory layout matches the bytes pinned by every
+  `SUPPORTED_TOOLCHAINS` entry. Production paths never touch `repr` directly except through layout casts in the inline
+  accessors of the sibling modules.
+- **`lib.rs`**—1 block and 2 `pub unsafe fn`; the block forwards a discovery helper returning a `&'static` view of the
+  `REQUIRED_SYMBOLS` table. The `unsafe` is the caller's invariant that the link-time test has succeeded.
+- **`consts.rs`**, **`types.rs`**—0 blocks. `consts.rs` holds the `build.rs`-resolved version and digest constants.
+  `types.rs` defines opaque `lean_object` and calling-convention typedefs; its one `pub unsafe fn` is a `Default`-like
+  constructor stub with no body that callers cannot reach.
 
 ---
 
 ## `lean-rs`—per-file opt-outs
 
-Every block below ultimately calls a `pub unsafe fn` from `lean-rs-sys`; the invariant is what
-that `# Safety` doc requires, satisfied by the call site's local context. Per-file
-`#![allow(unsafe_code)]` keeps the opt-out as narrow as the safety model demands.
+Every block below ultimately calls a `pub unsafe fn` from `lean-rs-sys`; the invariant is what that `# Safety` doc
+requires, satisfied by the call site's local context. Per-file `#![allow(unsafe_code)]` keeps the opt-out as narrow as
+the safety model demands.
 
 ### Runtime—`crates/lean-rs/src/runtime/`
 
 #### `runtime/obj.rs`—19 blocks (`#![allow(unsafe_code)]` at line 20)
 
-Owned (`Obj<'lean>`) and borrowed (`ObjRef<'lean, 'a>`) handles. Six production blocks plus
-test-module RC observations.
+Owned (`Obj<'lean>`) and borrowed (`ObjRef<'lean, 'a>`) handles. Six production blocks plus test-module RC observations.
 
 | Line | Block | Calls (`lean-rs-sys`) | Precondition |
 | --- | --- | --- | --- |
@@ -194,26 +201,24 @@ test-module RC observations.
 
 #### `runtime/init.rs`—3 blocks (`#![allow(unsafe_code)]` at line 14)
 
-`LeanRuntime::init` calls `lean_initialize_runtime_module`, `lean_initialize`, and
-`lean_init_task_manager`. The triple block at line 106 carries one `// SAFETY:` comment
-covering all three: process-once initialisation, sequenced as Lake's compiler expects.
+`LeanRuntime::init` calls `lean_initialize_runtime_module`, `lean_initialize`, and `lean_init_task_manager`. The triple
+block at line 106 carries one `// SAFETY:` comment covering all three: process-once initialisation, sequenced as Lake's
+compiler expects.
 
-Line 128—`unsafe { NonNull::<LeanRuntime>::dangling().as_ref() }`—synthesises the ZST
-`&LeanRuntime` from the runtime cell pointer; sound because `LeanRuntime` is zero-sized and the
-caller has just verified the cell is initialised.
+Line 128—`unsafe { NonNull::<LeanRuntime>::dangling().as_ref() }`—synthesises the ZST `&LeanRuntime` from the runtime
+cell pointer; sound because `LeanRuntime` is zero-sized and the caller has just verified the cell is initialised.
 
 #### `runtime/thread.rs`—3 blocks (`#![allow(unsafe_code)]` at line 13)
 
-`LeanThreadGuard::attach` calls `lean_initialize_thread`; `Drop` calls `lean_finalize_thread`.
-The blocks at lines 67 and 84 each pair an `attach` / `finalize` on the **same** OS thread,
-guarded by an RAII handle that cannot be `Send` (the FFI calls require thread-local Lean state).
+`LeanThreadGuard::attach` calls `lean_initialize_thread`; `Drop` calls `lean_finalize_thread`. The blocks at lines 67
+and 84 each pair an `attach` / `finalize` on the **same** OS thread, guarded by an RAII handle that cannot be `Send`
+(the FFI calls require thread-local Lean state).
 
 ### ABI—`crates/lean-rs/src/abi/`
 
-Every block in this directory either (a) wraps a freshly-allocated Lean value as a fresh
-`Obj<'lean>` via `Obj::from_owned_raw` (sys symbol is the matching `lean_alloc_*` or
-`lean_*_to_nat`), or (b) inspects a borrowed object's header via a sys predicate
-(`lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_ctor_num_objs`, …).
+Every block in this directory either (a) wraps a freshly-allocated Lean value as a fresh `Obj<'lean>` via
+`Obj::from_owned_raw` (sys symbol is the matching `lean_alloc_*` or `lean_*_to_nat`), or (b) inspects a borrowed
+object's header via a sys predicate (`lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_ctor_num_objs`, …).
 
 | File | Blocks | Opt-out | Calls (`lean-rs-sys`) | Notes |
 | --- | ---: | --- | --- | --- |
@@ -233,44 +238,39 @@ Every block in this directory either (a) wraps a freshly-allocated Lean value as
 
 #### `module/library.rs`—6 blocks (`#![allow(unsafe_code)]` at line 32)
 
-Calls `libloading::Library::new` (line 112) and `library.get` (lines 186, 212, 233, 253). All
-`unsafe` for dlopen-time reasons: the loaded library may run constructors, and resolved symbols
-are typed by the caller.
+Calls `libloading::Library::new` (line 112) and `library.get` (lines 186, 212, 233, 253). All `unsafe` for dlopen-time
+reasons: the loaded library may run constructors, and resolved symbols are typed by the caller.
 
 #### `module/initializer.rs`—4 blocks (`#![allow(unsafe_code)]` at line 34)
 
-Calls a Lake-emitted module initializer function pointer (line 198, wrapped in `catch_unwind`)
-and wraps the returned `IO α` result as an `Obj` (line 218). Block 116 is a
-`from_utf8_unchecked` on bytes already validated by the symbol-bytes builder.
+Calls a Lake-emitted module initializer function pointer (line 198, wrapped in `catch_unwind`) and wraps the returned
+`IO α` result as an `Obj` (line 218). Block 116 is a `from_utf8_unchecked` on bytes already validated by the
+symbol-bytes builder.
 
 #### `module/exported.rs`—7 blocks (`#![allow(unsafe_code)]` at line 59)
 
-The typed `LeanExported::call` machinery. Each block at lines 246, 310, 314, 473, 489, 512, 517
-either wraps a freshly-returned `lean_object*` as an `Obj`, transmutes between `R::CRepr` and
-`*mut lean_object` (line 517—sound because `R: LeanAbi` constrains `CRepr` to either a scalar
-primitive or `*mut lean_object`), or dispatches the function-pointer call through the per-arity
-macro.
+The typed `LeanExported::call` machinery. Each block at lines 246, 310, 314, 473, 489, 512, 517 either wraps a
+freshly-returned `lean_object*` as an `Obj`, transmutes between `R::CRepr` and `*mut lean_object` (line 517—sound
+because `R: LeanAbi` constrains `CRepr` to either a scalar primitive or `*mut lean_object`), or dispatches the
+function-pointer call through the per-arity macro.
 
 ### Fuzzing entry—`crates/lean-rs/src/fuzz_entry.rs`
 
-Feature-gated by `fuzzing` (off by default, not semver-stable). Seven `pub unsafe fn` wrappers
-(`decode_string`, `decode_bytearray`, `decode_array_u64`, `decode_option_u64`, `decode_except`,
-`decode_nat_u64`, `decode_ctor_tag`) plus seven matching inner blocks. Each takes a `*mut lean_object`
-owning one transferred refcount and wraps it in an `Obj<'lean>` via
-`unsafe { Obj::from_owned_raw(runtime, raw) }`; the invariant is the same as `Obj::from_owned_raw`'s
-`# Safety` doc, discharged by the fuzz harness constructing inputs through `lean-rs-sys`'s public
-allocators. The module sits at the crate root so the `pub(crate) abi` boundary stays intact when
-the feature is off.
+Feature-gated by `fuzzing` (off by default, not semver-stable). Seven `pub unsafe fn` wrappers (`decode_string`,
+`decode_bytearray`, `decode_array_u64`, `decode_option_u64`, `decode_except`, `decode_nat_u64`, `decode_ctor_tag`) plus
+seven matching inner blocks. Each takes a `*mut lean_object` owning one transferred refcount and wraps it in an
+`Obj<'lean>` via `unsafe { Obj::from_owned_raw(runtime, raw) }`; the invariant is the same as `Obj::from_owned_raw`'s
+`# Safety` doc, discharged by the fuzz harness constructing inputs through `lean-rs-sys`'s public allocators. The module
+sits at the crate root so the `pub(crate) abi` boundary stays intact when the feature is off.
 
 ### Error—`crates/lean-rs/src/error/`
 
 #### `error/io.rs`—16 blocks (`#![allow(unsafe_code)]` at line 28)
 
-The `IO α` result decoder. Blocks at lines 64, 69, 73, 80, 125, 136, 153, 158, 163, 165, 169,
-175 read the `IO.Error` constructor's fields via `lean_io_result_*`, `lean_obj_tag`,
-`lean_ctor_num_objs`, `lean_ctor_obj_cptr`, `lean_is_scalar`, `lean_is_string`,
-`lean_string_cstr`/`lean_string_len`. The test-support block at line 247 transmutes a resolved
-`dlsym` address into a typed function pointer.
+The `IO α` result decoder. Blocks at lines 64, 69, 73, 80, 125, 136, 153, 158, 163, 165, 169, 175 read the `IO.Error`
+constructor's fields via `lean_io_result_*`, `lean_obj_tag`, `lean_ctor_num_objs`, `lean_ctor_obj_cptr`,
+`lean_is_scalar`, `lean_is_string`, `lean_string_cstr`/`lean_string_len`. The test-support block at line 247 transmutes
+a resolved `dlsym` address into a typed function pointer.
 
 #### `error/panic.rs`—0 blocks
 
@@ -280,16 +280,15 @@ The `IO α` result decoder. Blocks at lines 64, 69, 73, 80, 125, 136, 153, 158, 
 
 #### `host/session.rs`—16 blocks (`#![allow(unsafe_code)]` at line 89)
 
-Each `LeanSession` method that dispatches into a Lake-installed function constructs a typed
-`LeanExported` via `unsafe { LeanExported::from_function_address(runtime, address) }`. The
-address comes from `SessionSymbols`, populated by one `dlsym` per symbol at capability load.
-`from_function_address`'s `# Safety` requires the address to have been resolved as the correct
-typed symbol; `SessionSymbols::resolve` is the one place that obligation is discharged.
+Each `LeanSession` method that dispatches into a Lake-installed function constructs a typed `LeanExported` via
+`unsafe { LeanExported::from_function_address(runtime, address) }`. The address comes from `SessionSymbols`, populated
+by one `dlsym` per symbol at capability load. `from_function_address`'s `# Safety` requires the address to have been
+resolved as the correct typed symbol; `SessionSymbols::resolve` is the one place that obligation is discharged.
 
 #### `host/handle/{name,level,expr,declaration}.rs`—1 block each (per-block)
 
-Each constructs the public handle's inner `Obj` from a freshly-returned `lean_object*` produced
-by a fixture export. Invariant is the `LeanExported::call` return contract.
+Each constructs the public handle's inner `Obj` from a freshly-returned `lean_object*` produced by a fixture export.
+Invariant is the `LeanExported::call` return contract.
 
 #### `host/elaboration/failure.rs`—2 blocks (`#![allow(unsafe_code)]` at line 14)
 
@@ -297,8 +296,7 @@ by a fixture export. Invariant is the `LeanExported::call` return contract.
 
 #### `host/elaboration/diagnostic.rs`—5 blocks (`#![allow(unsafe_code)]` at line 25)
 
-`lean_ctor_get_uint8`, `lean_is_scalar`, `lean_unbox`, `lean_obj_tag` reads on the diagnostic
-ctor and its severity tag.
+`lean_ctor_get_uint8`, `lean_is_scalar`, `lean_unbox`, `lean_obj_tag` reads on the diagnostic ctor and its severity tag.
 
 #### `host/evidence/handle.rs`—1 block (per-block)
 
@@ -306,18 +304,17 @@ Wraps the evidence handle's `Obj` from a fixture-returned pointer.
 
 #### `host/evidence/status.rs`—2 blocks (per-block, lines 103 and 108)
 
-Reads the `EvidenceStatus` scalar tag (`lean_is_scalar` + `lean_unbox`), with a heap-ctor
-fallback gated by `lean_obj_tag` (not currently triggered but kept for forward-compat with a
-Lean representation change).
+Reads the `EvidenceStatus` scalar tag (`lean_is_scalar` + `lean_unbox`), with a heap-ctor fallback gated by
+`lean_obj_tag` (not currently triggered but kept for forward-compat with a Lean representation change).
 
 ---
 
 ## `lean-toolchain`—0 unsafe blocks
 
-`rg -n "unsafe" crates/lean-toolchain/src` returns nothing. The crate is build-time-only
-(toolchain discovery, fingerprinting, link diagnostics) and consumes `lean-rs-sys` constants
-through their safe re-export. Any new `unsafe` here would require a `#![allow(unsafe_code)]`
-opt-out with reviewer sign-off per [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
+`rg -n "unsafe" crates/lean-toolchain/src` returns nothing. The crate is build-time-only (toolchain discovery,
+fingerprinting, link diagnostics) and consumes `lean-rs-sys` constants through their safe re-export. Any new `unsafe`
+here would require a `#![allow(unsafe_code)]` opt-out with reviewer sign-off per
+[`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
 
 ---
 
@@ -333,14 +330,13 @@ cargo +nightly test -p lean-toolchain --target x86_64-unknown-linux-gnu \
   -- --test-threads=1
 ```
 
-`-Z sanitizer=address` instruments pure-Rust helper code. CI intentionally does not run
-in-process Lean runtime tests under Linux ASan: Lean's shared runtime is not ASan-instrumented
-and currently crashes the sanitizer before it can produce actionable Rust diagnostics. The
-in-process Lean paths are instead covered by normal workspace tests, loader regressions,
-worker crash-containment tests, and the release/manual ABI fuzz target. Loader-negative-path
-regressions also run outside ASan because they intentionally exercise platform dynamic-loader
-failure behavior with uninstrumented Lean shared libraries. `--test-threads=1` preserves
-the per-thread Lean runtime invariant for the helper checks that do touch runtime discovery.
+`-Z sanitizer=address` instruments pure-Rust helper code. CI intentionally does not run in-process Lean runtime tests
+under Linux ASan: Lean's shared runtime is not ASan-instrumented and currently crashes the sanitizer before it can
+produce actionable Rust diagnostics. The in-process Lean paths are instead covered by normal workspace tests, loader
+regressions, worker crash-containment tests, and the release/manual ABI fuzz target. Loader-negative-path regressions
+also run outside ASan because they intentionally exercise platform dynamic-loader failure behavior with uninstrumented
+Lean shared libraries. `--test-threads=1` preserves the per-thread Lean runtime invariant for the helper checks that do
+touch runtime discovery.
 
 ### Local—fuzz target (Linux or macOS, nightly)
 
@@ -354,21 +350,26 @@ cargo +nightly fuzz run abi_decode -- \
   -runs=200000 -max_total_time=120
 ```
 
-`abi_decode` drives `lean_rs::abi`'s `{string, bytearray, array, option, except, structure}`
-decoders with `Arbitrary`-generated Lean-shaped inputs constructed via `lean-rs-sys`'s public
-helpers. Every input must decode to `Ok(_)` or `Err(LeanError::Host(stage = Conversion))`;
-any panic, exception kind, or sanitizer-detected fault is a finding.
+`abi_decode` drives `lean_rs::abi`'s `{string, bytearray, array, option, except, structure}` decoders with
+`Arbitrary`-generated Lean-shaped inputs constructed via `lean-rs-sys`'s public helpers. Every input must decode to
+`Ok(_)` or `Err(LeanError::Host(stage = Conversion))`; any panic, exception kind, or sanitizer-detected fault is a
+finding.
 
 ### CI
 
-A dedicated workflow at `.github/workflows/sanitizer.yml` runs the Rust-only Linux ASan command
-above on `ubuntu-latest` nightly and runs loader regressions outside ASan. The ASan job runs on
-every push to `main`, every pull request, a weekly cron, and manual dispatch. The ABI fuzz smoke
-is manual-only in the sanitizer workflow and is a release gate in `.github/workflows/release.yml`;
-it is not part of routine push/PR CI. The stable workspace matrix at `.github/workflows/ci.yml`
-is unchanged.
+A dedicated workflow at `.github/workflows/sanitizer.yml` runs the Rust-only Linux ASan command above on `ubuntu-latest`
+nightly and runs loader regressions outside ASan. The ASan job runs on every push to `main`, every pull request, a
+weekly cron, and manual dispatch. The ABI fuzz smoke is manual-only in the sanitizer workflow and is a release gate in
+`.github/workflows/release.yml`; it is not part of routine push/PR CI. The stable workspace matrix at
+`.github/workflows/ci.yml` is unchanged.
 
 ### Coverage gaps
 
-- **macOS AddressSanitizer is not yet run in CI.** ASan is available on `aarch64-apple-darwin` nightly, but the interaction between Lean's runtime (`libleanrt` links its own mimalloc) and ASan's allocator-shim on macOS has not been validated. Open future work.
-- **Miri does not cover the Lean C runtime.** Miri can validate the pure-Rust seams in `lean-rs-sys` (refcount mirror's `AtomicI32::from_ptr`, layout casts in `repr` tests, `NonNull` arithmetic on mock pointers), but it cannot execute `libleanshared`. The safety-test guidance in [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md) accepts this by naming sanitizers and stress tests as the alternative.
+- **macOS AddressSanitizer is not yet run in CI.** ASan is available on `aarch64-apple-darwin` nightly, but the
+  interaction between Lean's runtime (`libleanrt` links its own mimalloc) and ASan's allocator-shim on macOS has not
+  been validated. Open future work.
+- **Miri does not cover the Lean C runtime.** Miri can validate the pure-Rust seams in `lean-rs-sys` (refcount mirror's
+  `AtomicI32::from_ptr`, layout casts in `repr` tests, `NonNull` arithmetic on mock pointers), but it cannot execute
+  `libleanshared`. The safety-test guidance in
+  [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md) accepts this by naming sanitizers and
+  stress tests as the alternative.

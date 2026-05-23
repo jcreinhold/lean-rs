@@ -21,7 +21,7 @@ Applying this:
 - Keep baseline management explicit.
 - Use `--save-baseline` and `--baseline` instead of eyeballing numbers.
 - Use `--profile-time` when attaching profilers so the profiler sees the benchmarked code, not Criterion's adaptive
-    measurement machinery.
+  measurement machinery.
 
 Applying this:
 
@@ -55,20 +55,20 @@ Applying this:
 
 - Built-in lightweight profiling and batch analysis tools make iterative optimization practical.
 - Performance debugging gets much faster when the codebase has command-driven workloads instead of IDE-only
-    reproduction.
+  reproduction.
 
 Applying this:
 
 - prefer command-line reproductions over GUI-only ones
 - if a hot path only reproduces through a larger workflow, consider adding a dedicated workload rather than relying on
-    manual reproduction
+  manual reproduction
 
 ## From ripgrep
 
 - Benchmark design must isolate the real task instead of accidentally measuring hidden fast paths.
 - Representative workload shape matters more than generic "faster engine" claims.
 - The right optimization may be choosing a strategy that better matches the input, not just making the current strategy
-    cheaper.
+  cheaper.
 
 Applying this:
 
@@ -84,7 +84,7 @@ Applying this:
 Applying this:
 
 - be explicit when choosing between arena slices, persistent vectors, hash tables, dense indices, or cached normalized
-    forms
+  forms
 - measure build-time and runtime effects separately when a representation change impacts both
 
 ## From hashbrown

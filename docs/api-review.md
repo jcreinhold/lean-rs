@@ -1,8 +1,7 @@
 # Public-API Review
 
-`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the five
-published crates. CI diffs the live surface against these files on every PR; intentional
-changes regenerate the matching baseline in the same commit.
+`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the five published crates. CI diffs the
+live surface against these files on every PR; intentional changes regenerate the matching baseline in the same commit.
 
 ## Regenerate
 
@@ -14,28 +13,31 @@ done
 
 ## Red-flag checklist (review before regenerating)
 
-Walk the diff with these questions. Any "yes" is a stop-and-discuss signal, not necessarily
-a block.
+Walk the diff with these questions. Any "yes" is a stop-and-discuss signal, not necessarily a block.
 
-1. **Shallow module.** Does a new module own enough state and behaviour to be its own concept, or is it a file-per-symbol split?
+1. **Shallow module.** Does a new module own enough state and behaviour to be its own concept, or is it a
+   file-per-symbol split?
 2. **Pass-through wrapper.** Does a new wrapper type add real transformation, or just rename an existing one?
-3. **Temporal decomposition.** Do new error variants model lifecycle stages of one concern (Ousterhout ch. 5.3), instead of independent failure classes?
+3. **Temporal decomposition.** Do new error variants model lifecycle stages of one concern (Ousterhout ch. 5.3), instead
+   of independent failure classes?
 4. **Information leakage.** Does per-call C ABI shape (unboxed vs boxed, IO-wrap vs pure) leak into the caller's types?
-5. **Special-general mixture.** Are optional or specialised items being mixed into the crate root alongside mandatory ones?
+5. **Special-general mixture.** Are optional or specialised items being mixed into the crate root alongside mandatory
+   ones?
 6. **Conjoined methods.** Does a single method bundle two operations callers should be able to pay for independently?
 7. **Hard-to-describe API.** Can a new reader reduce the surface to one sentence and a five-line snippet?
-8. **Implementation details in comments.** `rg -nE "(land(s|ed|ing)|follow(s|ed)|scheduled).*\b(prompt|RD-[0-9])" crates/` should return no matches.
+8. **Implementation details in comments.**
+   `rg -nE "(land(s|ed|ing)|follow(s|ed)|scheduled).*\b(prompt|RD-[0-9])" crates/` should return no matches.
 
 ## Doc rules
 
 Each `pub` item carries:
 
 - `# Errors` on every fallible function returning `LeanResult`, naming failure modes.
-- `# Safety` on every `pub unsafe fn` in `lean-rs-sys`, naming the precondition. No placeholder patterns ("see lean.h", "uphold all Lean invariants").
-- Doc links: bare `[`Type`]` for crate-root items; `crate::`-qualified for sub-modules.
+- `# Safety` on every `pub unsafe fn` in `lean-rs-sys`, naming the precondition. No placeholder patterns ("see lean.h",
+  "uphold all Lean invariants").
+- Doc links: bare ``[`Type`]`` for crate-root items; `crate::`-qualified for sub-modules.
 
-`RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items` must
-be clean.
+`RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items` must be clean.
 
 ## Verification
 

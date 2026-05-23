@@ -1,24 +1,21 @@
 # Diagnostics and Observability
 
-`lean-rs` and `lean-rs-host` project errors to the same stable
-[`lean_rs::LeanDiagnosticCode`] taxonomy and emit structured `tracing` spans against the
-`lean_rs` target. Long-running host session operations can also report live progress through
-`lean_rs_host::LeanProgressSink`; see
-[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md).
-`lean-rs-worker` uses its own `LeanWorkerError` surface for process-boundary outcomes such as
-child exit, request timeout, cancellation, data-sink panic, diagnostic-sink panic, and typed
-command decode failures. A downstream caller gets:
+`lean-rs` and `lean-rs-host` project errors to the same stable [`lean_rs::LeanDiagnosticCode`] taxonomy and emit
+structured `tracing` spans against the `lean_rs` target. Long-running host session operations can also report live
+progress through `lean_rs_host::LeanProgressSink`; see
+[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md). `lean-rs-worker` uses its own
+`LeanWorkerError` surface for process-boundary outcomes such as child exit, request timeout, cancellation, data-sink
+panic, diagnostic-sink panic, and typed command decode failures. A downstream caller gets:
 
 - a stable identifier (`err.code()`) to react by family, independent of internal stage tags that may grow new variants;
 - visibility into where time is spent and where failures originate, without rebuilding the crates.
 
-The taxonomy is unified across `lean-rs` and `lean-rs-host` (every recoverable failure on
-either side maps to a stable code); the span catalogue is split by emitting crate so the layer boundary is
-visible at the log line. Lean internal panics are outside this error taxonomy: there is no
-`SessionPoisoned` code. A Lean runtime panic during a `LeanSession` call may terminate the
-process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md).
-When the same failure happens inside `lean-rs-worker`, the parent observes a typed worker exit
-instead of an in-process `LeanDiagnosticCode`.
+The taxonomy is unified across `lean-rs` and `lean-rs-host` (every recoverable failure on either side maps to a stable
+code); the span catalogue is split by emitting crate so the layer boundary is visible at the log line. Lean internal
+panics are outside this error taxonomy: there is no `SessionPoisoned` code. A Lean runtime panic during a `LeanSession`
+call may terminate the process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md). When
+the same failure happens inside `lean-rs-worker`, the parent observes a typed worker exit instead of an in-process
+`LeanDiagnosticCode`.
 
 ## Diagnostic codes
 
@@ -35,13 +32,12 @@ instead of an in-process `LeanDiagnosticCode`.
 | `Cancelled` | `lean_rs.cancelled` | A `lean-rs-host` cooperative cancellation token was observed before a host-controlled FFI dispatch. | Treat the operation as aborted and discard partial work. Create a fresh token before retrying. |
 | `Internal` | `lean_rs.internal` | A `pub(crate)` invariant tripped, or a callback panicked inside the safe boundary. | File a bug; include the bounded message and the `as_str()` id. |
 
-The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids
-are stable across patch releases.
+The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids are stable across patch
+releases.
 
 ## Loader preflight
 
-Manifest-backed shipped capabilities can be checked before `LeanCapability`
-opens any dylib:
+Manifest-backed shipped capabilities can be checked before `LeanCapability` opens any dylib:
 
 ```rust
 let report = lean_rs::LeanCapabilityPreflight::new(
@@ -54,10 +50,9 @@ if let Some(check) = report.first_error() {
 }
 ```
 
-`LeanCapability::from_build_manifest` runs the same preflight internally when
-that produces a clearer failure. The broad `LeanError` still reports
-`LeanDiagnosticCode::ModuleInit`, but the bounded message includes the stable
-loader code and repair hint.
+`LeanCapability::from_build_manifest` runs the same preflight internally when that produces a clearer failure. The broad
+`LeanError` still reports `LeanDiagnosticCode::ModuleInit`, but the bounded message includes the stable loader code and
+repair hint.
 
 | Loader code | `as_str()` | Meaning | Common fix |
 | --- | --- | --- | --- |
@@ -72,14 +67,12 @@ loader code and repair hint.
 | `MissingInitializer` | `lean_rs.loader.missing_initializer` | The primary dylib does not export the package/module initializer named by the manifest. | Check package/module names and rebuild the shared target. |
 | `MissingImportedSymbol` | `lean_rs.loader.missing_imported_symbol` | A Lean/imported symbol is not supplied by the manifest dependency set. | Rebuild through `CargoLeanCapability` so dependency dylibs are recorded. |
 
-Normal users should not repair shipped apps by setting `LD_LIBRARY_PATH` or
-`DYLD_*`. A missing search path in the canonical flow is a packaging or
-artifact-manifest problem, not a caller-managed loader-flag problem.
+Normal users should not repair shipped apps by setting `LD_LIBRARY_PATH` or `DYLD_*`. A missing search path in the
+canonical flow is a packaging or artifact-manifest problem, not a caller-managed loader-flag problem.
 
 ## Worker bootstrap checks
 
-Packaged worker applications can check deployment state before running a real
-command:
+Packaged worker applications can check deployment state before running a real command:
 
 ```rust
 let report = builder.check();
@@ -88,11 +81,9 @@ if let Some(check) = report.first_error() {
 }
 ```
 
-`LeanWorkerCapabilityBuilder::check()` validates the app-owned worker child,
-manifest-backed capability artifact, protocol handshake, import session, and
-optional metadata expectation. It returns `LeanWorkerBootstrapReport`, not raw
-child pids, pipe handles, protocol frames, loader flags, or `std::process`
-configuration.
+`LeanWorkerCapabilityBuilder::check()` validates the app-owned worker child, manifest-backed capability artifact,
+protocol handshake, import session, and optional metadata expectation. It returns `LeanWorkerBootstrapReport`, not raw
+child pids, pipe handles, protocol frames, loader flags, or `std::process` configuration.
 
 | Worker bootstrap code | `as_str()` | Meaning | Common fix |
 | --- | --- | --- | --- |
@@ -103,48 +94,39 @@ configuration.
 | `CapabilityMetadataMismatch` | `lean_rs.worker.bootstrap.metadata_mismatch` | The capability metadata export did not match the caller's expectation. | Select or rebuild the intended capability package. |
 | `WorkerStartupFailed` | `lean_rs.worker.bootstrap.startup_failed` | Startup failed outside a more specific bootstrap class. | Run the bootstrap check in the deployment environment and inspect the bounded message. |
 
-`Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not
-mean a Lean kernel/runtime panic was contained. Those failures require a worker-process
-boundary.
+`Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not mean a Lean
+kernel/runtime panic was contained. Those failures require a worker-process boundary.
 
-L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. `Ok = 0`
-continues the Lean-side callback loop; `StaleHandle = 1` means Lean called a dropped handle;
-`Panic = 2` means Rust contained a callback panic and recorded `LeanError::Host` on the live
-handle; `WrongPayload = 3` means Lean used a handle with the wrong payload trampoline; and
-`Stopped = 4` means the Rust callback asked Lean to stop cleanly.
+L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. `Ok = 0` continues the Lean-side
+callback loop; `StaleHandle = 1` means Lean called a dropped handle; `Panic = 2` means Rust contained a callback panic
+and recorded `LeanError::Host` on the live handle; `WrongPayload = 3` means Lean used a handle with the wrong payload
+trampoline; and `Stopped = 4` means the Rust callback asked Lean to stop cleanly.
 
-`lean-toolchain` uses a separate `LinkDiagnostics` enum for build-script work.
-Those diagnostics cover Lean discovery, unsupported toolchains, missing `lake`,
-missing Lake targets, Lake build failures, and unresolved Lake outputs. They
-render as one line so a `build.rs` can either return them or print them through
-`cargo:warning=`.
+`lean-toolchain` uses a separate `LinkDiagnostics` enum for build-script work. Those diagnostics cover Lean discovery,
+unsupported toolchains, missing `lake`, missing Lake targets, Lake build failures, and unresolved Lake outputs. They
+render as one line so a `build.rs` can either return them or print them through `cargo:warning=`.
 
-`Cancelled` is cooperative. It is returned only when `lean-rs-host` regains
-control and checks the token; it does not pre-empt an in-flight Lean call.
-See [`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-cancellation.md).
+`Cancelled` is cooperative. It is returned only when `lean-rs-host` regains control and checks the token; it does not
+pre-empt an in-flight Lean call. See
+[`architecture/07-cooperative-cancellation.md`](architecture/07-cooperative-cancellation.md).
 
-Progress sink panics are caught at the Rust callback boundary and surfaced as
-`LeanError::Host` with stage `CallbackPanic`, code `lean_rs.internal`.
+Progress sink panics are caught at the Rust callback boundary and surfaced as `LeanError::Host` with stage
+`CallbackPanic`, code `lean_rs.internal`.
 
 ## Worker process diagnostics and pool snapshots
 
-`lean-rs-worker` deliberately uses a separate worker error surface for process
-boundary failures. Child panic/abort, request timeout, cancellation-triggered
-cycle, stale lease use, row sink panic, diagnostic sink panic, and typed command
-decode failure are worker outcomes, not `LeanDiagnosticCode` values from the
-in-process host stack.
+`lean-rs-worker` deliberately uses a separate worker error surface for process boundary failures. Child panic/abort,
+request timeout, cancellation-triggered cycle, stale lease use, row sink panic, diagnostic sink panic, and typed command
+decode failure are worker outcomes, not `LeanDiagnosticCode` values from the in-process host stack.
 
-For large local runs, use `LeanWorkerPoolSnapshot` and
-`LeanWorkerSessionLease::snapshot()` for operational state. Snapshots summarize
-queue depth, active workers, warm leases, restart reasons, best-effort child
-RSS, stream outcomes, delivered row counts, payload bytes, elapsed stream time,
-and backpressure counters. They intentionally do not expose child pids, worker
-ids, pipe handles, protocol frames, or scheduling internals.
+For large local runs, use `LeanWorkerPoolSnapshot` and `LeanWorkerSessionLease::snapshot()` for operational state.
+Snapshots summarize queue depth, active workers, warm leases, restart reasons, best-effort child RSS, stream outcomes,
+delivered row counts, payload bytes, elapsed stream time, and backpressure counters. They intentionally do not expose
+child pids, worker ids, pipe handles, protocol frames, or scheduling internals.
 
 ## Matching on codes
 
-`LeanError`, `LeanElabFailure`, and `LeanMetaResponse` all project to the same taxonomy via
-`.code()`:
+`LeanError`, `LeanElabFailure`, and `LeanMetaResponse` all project to the same taxonomy via `.code()`:
 
 ```rust
 use lean_rs::{LeanDiagnosticCode, LeanError};
@@ -164,16 +146,14 @@ fn report(err: &LeanError) {
 }
 ```
 
-`LeanMetaResponse::code()` returns an `Option`: `None` on `Ok`, `Some(Unsupported)` when the
-capability lacked the requested service, and `Some(Elaboration)` on the other two failure
-shapes (which carry a `LeanElabFailure`). `LeanElabFailure::code()` always returns
-`Elaboration`.
+`LeanMetaResponse::code()` returns an `Option`: `None` on `Ok`, `Some(Unsupported)` when the capability lacked the
+requested service, and `Some(Elaboration)` on the other two failure shapes (which carry a `LeanElabFailure`).
+`LeanElabFailure::code()` always returns `Elaboration`.
 
 ## Tracing
 
-`lean-rs` and `lean-rs-host` declare spans against the `lean_rs` target. Neither installs a
-subscriber—pick one downstream, or use [`DiagnosticCapture`](#capturing-diagnostics-in-tests)
-for tests.
+`lean-rs` and `lean-rs-host` declare spans against the `lean_rs` target. Neither installs a subscriber—pick one
+downstream, or use [`DiagnosticCapture`](#capturing-diagnostics-in-tests) for tests.
 
 Recommended `RUST_LOG` scopes:
 
@@ -183,9 +163,9 @@ Recommended `RUST_LOG` scopes:
 | Dev iteration | `lean_rs=debug,lean_toolchain=debug` |
 | Full dispatch trace | `lean_rs=trace,lean_toolchain=trace` |
 
-`info` covers init, library open, and session import (once-per-cycle events). `debug` adds
-per-session-method dispatch (`query_declaration`, `elaborate`, `kernel_check`, bulk methods,
-pool acquire/release). `trace` adds per-dispatch (`LeanExported::call`) and per-decoder events.
+`info` covers init, library open, and session import (once-per-cycle events). `debug` adds per-session-method dispatch
+(`query_declaration`, `elaborate`, `kernel_check`, bulk methods, pool acquire/release). `trace` adds per-dispatch
+(`LeanExported::call`) and per-decoder events.
 
 A typical `tracing-subscriber` wire-up:
 
@@ -200,8 +180,8 @@ tracing_subscriber::fmt()
 
 ### Spans emitted by `lean-rs` (L1)
 
-FFI-primitive spans: init, library open, module initializer, typed-export dispatch, ABI decode.
-Fire whether the caller is `lean-rs-host` or any other downstream of `lean-rs`.
+FFI-primitive spans: init, library open, module initializer, typed-export dispatch, ABI decode. Fire whether the caller
+is `lean-rs-host` or any other downstream of `lean-rs`.
 
 | Span | Level | Fields |
 | --- | --- | --- |
@@ -214,8 +194,7 @@ Fire whether the caller is `lean-rs-host` or any other downstream of `lean-rs`.
 
 ### Spans emitted by `lean-rs-host` (L2)
 
-Host-stack session and pool spans. Fire only if the caller opted into the L2 stack and is
-driving a session.
+Host-stack session and pool spans. Fire only if the caller opted into the L2 stack and is driving a session.
 
 | Span | Level | Fields |
 | --- | --- | --- |
@@ -240,8 +219,8 @@ driving a session.
 
 ## Capturing diagnostics in tests
 
-`DiagnosticCapture` is an in-process buffer for spans and events emitted against the `lean_rs`
-target. Thread-local and bounded; the guard restores the previous subscriber on `Drop`.
+`DiagnosticCapture` is an in-process buffer for spans and events emitted against the `lean_rs` target. Thread-local and
+bounded; the guard restores the previous subscriber on `Drop`.
 
 ```rust
 use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
@@ -265,32 +244,39 @@ fn rebuild_advice_fires_on_missing_dylib() {
 }
 ```
 
-The guard is `!Send + !Sync`: it pins to the installing thread. Default capacity is 256 events;
-over-capacity drops the oldest entry and bumps `capture.overflowed()`. Use
-`DiagnosticCapture::with_capacity(N)` for larger budgets. Scope is just `lean_rs`; events from
-other crates pass through untouched.
+The guard is `!Send + !Sync`: it pins to the installing thread. Default capacity is 256 events; over-capacity drops the
+oldest entry and bumps `capture.overflowed()`. Use `DiagnosticCapture::with_capacity(N)` for larger budgets. Scope is
+just `lean_rs`; events from other crates pass through untouched.
 
 ## Redaction and bounding
 
-Two values can grow without bound: Lean-authored text (capability messages, diagnostic
-messages) and filesystem paths. Both are bounded at the construction site:
+Two values can grow without bound: Lean-authored text (capability messages, diagnostic messages) and filesystem paths.
+Both are bounded at the construction site:
 
-- **Lean-authored strings** pass through `bound_message` (the same 4 KiB cap that protects `LeanError::message`). Enforced on the UTF-8 char boundary, so multibyte sequences are never split.
-- **Filesystem paths** emitted as span fields are shortened to the basename plus up to two parent components (`build/lib/lib.dylib`). The full absolute path is only emitted at `trace` level by call sites that explicitly need it.
+- **Lean-authored strings** pass through `bound_message` (the same 4 KiB cap that protects `LeanError::message`).
+  Enforced on the UTF-8 char boundary, so multibyte sequences are never split.
+- **Filesystem paths** emitted as span fields are shortened to the basename plus up to two parent components
+  (`build/lib/lib.dylib`). The full absolute path is only emitted at `trace` level by call sites that explicitly need
+  it.
 
-Paths are not treated as secrets; shortening is a bounding decision, not a redaction decision.
-If a downstream policy requires full path suppression, install a `tracing-subscriber` filter
-that drops the relevant fields.
+Paths are not treated as secrets; shortening is a bounding decision, not a redaction decision. If a downstream policy
+requires full path suppression, install a `tracing-subscriber` filter that drops the relevant fields.
 
 ## Cross-references
 
-- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; defined on L1, `lean-rs` and `lean-rs-host` project to it.
-- [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
-- [Host stack surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans above.
+- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; defined on L1, `lean-rs` and
+  `lean-rs-host` project to it.
+- [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from
+  `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
+- [Host stack surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans
+  above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
 - [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.
-- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what they cannot interrupt.
+- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what
+  they cannot interrupt.
 - [Callback registry](architecture/10-callback-registry.md)—how L1 callback statuses relate to the error taxonomy.
-- [Interop build and link](architecture/12-interop-build-and-link.md)—typed `lean-toolchain` build diagnostics and cache behavior.
-- [Structured progress](architecture/13-structured-progress.md)—live in-process progress events for long-running host calls.
+- [Interop build and link](architecture/12-interop-build-and-link.md)—typed `lean-toolchain` build diagnostics and cache
+  behavior.
+- [Structured progress](architecture/13-structured-progress.md)—live in-process progress events for long-running host
+  calls.

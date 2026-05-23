@@ -2,23 +2,23 @@
 
 ## Fragment Specifier Reference
 
-| Specifier   | Matches                                          | Follow-set restrictions                                                          |
-| ----------- | ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `expr`      | Any expression (2024+: includes `_` and `const`) | `=>`, `,`, `;`                                                                   |
-| `expr_2021` | Expression without `_` or `const {}` at top      | `=>`, `,`, `;`                                                                   |
-| `ty`        | Any type                                         | `=>`, `,`, `=`, `\|`, `;`, `:`, `>`, `>>`, `[`, `{`, `as`, `where`, `block` frag |
-| `path`      | Type path (`std::fmt::Debug`)                    | Same as `ty`                                                                     |
-| `pat`       | Pattern (2021+: includes top-level `\|`)         | `=>`, `,`, `=`, `if`, `in`                                                       |
-| `pat_param` | Pattern without top-level `\|`                   | `=>`, `,`, `=`, `\|`, `if`, `in`                                                 |
-| `ident`     | Identifier or keyword (not `_`)                  | Any token                                                                        |
-| `tt`        | Single token tree (token or delimited group)     | Any token                                                                        |
-| `stmt`      | Statement (no trailing `;`)                      | `=>`, `,`, `;`                                                                   |
-| `block`     | `{ ... }` block                                  | Any token                                                                        |
-| `item`      | Function, struct, impl, etc.                     | Any token                                                                        |
-| `meta`      | Attribute contents                               | Any token                                                                        |
-| `vis`       | Visibility qualifier (possibly empty)            | `,`, identifier (not raw `priv`), any type-start token                           |
-| `lifetime`  | `'a`, `'static`, etc.                            | Any token                                                                        |
-| `literal`   | `-?` + literal value                             | Any token                                                                        |
+| Specifier | Matches | Follow-set restrictions |
+| --- | --- | --- |
+| `expr` | Any expression (2024+: includes `_` and `const`) | `=>`, `,`, `;` |
+| `expr_2021` | Expression without `_` or `const {}` at top | `=>`, `,`, `;` |
+| `ty` | Any type | `=>`, `,`, `=`, `\|`, `;`, `:`, `>`, `>>`, `[`, `{`, `as`, `where`, `block` frag |
+| `path` | Type path (`std::fmt::Debug`) | Same as `ty` |
+| `pat` | Pattern (2021+: includes top-level `\|`) | `=>`, `,`, `=`, `if`, `in` |
+| `pat_param` | Pattern without top-level `\|` | `=>`, `,`, `=`, `\|`, `if`, `in` |
+| `ident` | Identifier or keyword (not `_`) | Any token |
+| `tt` | Single token tree (token or delimited group) | Any token |
+| `stmt` | Statement (no trailing `;`) | `=>`, `,`, `;` |
+| `block` | `{ ... }` block | Any token |
+| `item` | Function, struct, impl, etc. | Any token |
+| `meta` | Attribute contents | Any token |
+| `vis` | Visibility qualifier (possibly empty) | `,`, identifier (not raw `priv`), any type-start token |
+| `lifetime` | `'a`, `'static`, etc. | Any token |
+| `literal` | `-?` + literal value | Any token |
 
 **Edition variants:** `expr_2021` for pre-2024 `expr` behavior. `pat_param` for pre-2021 `pat` behavior. The relevant
 edition is the one at the `macro_rules!` definition.
@@ -141,23 +141,23 @@ macro_rules! define_expr {
 
 ## Known Limitations
 
-| Limitation                           | Workaround                                   |
-| ------------------------------------ | -------------------------------------------- |
-| Cannot concatenate identifiers       | `paste` crate: `paste! { [<visit_ $name>] }` |
-| Cannot convert case                  | `paste` crate: `$name:snake`, `$name:camel`  |
-| Cannot index tuple fields (\_0, \_1) | Hardcoded counter arms or proc macro         |
-| Cannot introspect types/fields       | Proc macro with `syn`                        |
-| Cannot generate distinct names       | Proc macro for indexing                      |
+| Limitation | Workaround |
+| --- | --- |
+| Cannot concatenate identifiers | `paste` crate: `paste! { [<visit_ $name>] }` |
+| Cannot convert case | `paste` crate: `$name:snake`, `$name:camel` |
+| Cannot index tuple fields (\_0, \_1) | Hardcoded counter arms or proc macro |
+| Cannot introspect types/fields | Proc macro with `syn` |
+| Cannot generate distinct names | Proc macro for indexing |
 
 ## Procedural Macros
 
 ### Three Types
 
-| Type          | Annotation                                    | Input                  | Use Case                  |
-| ------------- | --------------------------------------------- | ---------------------- | ------------------------- |
-| Derive        | `#[proc_macro_derive(Name, attributes(...))]` | Struct/enum definition | Generate impls from types |
-| Attribute     | `#[proc_macro_attribute]`                     | Args + annotated item  | Transform any item        |
-| Function-like | `#[proc_macro]`                               | Token stream           | Custom syntax, DSLs       |
+| Type | Annotation | Input | Use Case |
+| --- | --- | --- | --- |
+| Derive | `#[proc_macro_derive(Name, attributes(...))]` | Struct/enum definition | Generate impls from types |
+| Attribute | `#[proc_macro_attribute]` | Args + annotated item | Transform any item |
+| Function-like | `#[proc_macro]` | Token stream | Custom syntax, DSLs |
 
 ### Structure: Parse + Transform
 

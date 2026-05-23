@@ -16,16 +16,16 @@ tests.
 
 Before writing or changing tests, name the pressure:
 
-| Pressure               | What to look for                                                       |
-| ---------------------- | ---------------------------------------------------------------------- |
-| **False confidence**   | Many tests pass, but a serious bug class could still escape            |
-| **Shallow coverage**   | Tests exercise examples, not the contract or invariant                 |
-| **Brittle assertions** | Tests fail on harmless refactors, wording, or formatting shifts        |
-| **Missing oracle**     | The test has no trustworthy way to tell right from wrong               |
-| **Wrong layer**        | The test is too low-level or too end-to-end for the risk               |
-| **Regression amnesia** | A real bug was fixed with no minimal regression test                   |
-| **Slow suite**         | Test runtime blocks routine use or pushes checks out of the inner loop |
-| **Weak generators**    | Property tests generate trivial cases or shrink poorly                 |
+| Pressure | What to look for |
+| --- | --- |
+| **False confidence** | Many tests pass, but a serious bug class could still escape |
+| **Shallow coverage** | Tests exercise examples, not the contract or invariant |
+| **Brittle assertions** | Tests fail on harmless refactors, wording, or formatting shifts |
+| **Missing oracle** | The test has no trustworthy way to tell right from wrong |
+| **Wrong layer** | The test is too low-level or too end-to-end for the risk |
+| **Regression amnesia** | A real bug was fixed with no minimal regression test |
+| **Slow suite** | Test runtime blocks routine use or pushes checks out of the inner loop |
+| **Weak generators** | Property tests generate trivial cases or shrink poorly |
 
 If the pressure is unclear, run the audit script first:
 
@@ -92,7 +92,7 @@ Treat this as the repo default unless a crate already has a stronger local rule.
 - Use `<area>_<suite>.rs`.
 - Allowed suite suffixes are `laws`, `regressions`, `validation`, `generators`, and `helpers`.
 - Name files by the contract area, not the mechanism. Prefer `binding_coordinates_laws.rs` over
-    `binding_coordinates_proptest.rs`.
+  `binding_coordinates_proptest.rs`.
 - Put property tests and exhaustive tests in `*_laws.rs` when they check laws.
 - Keep generator-only code in `*_generators.rs`.
 - Keep shared test helpers in `*_helpers.rs`, and only when more than one file genuinely reuses them.
@@ -118,15 +118,15 @@ Ask these questions in order. Stop at the first "no" and fix that problem.
 1. **What bug would escape today?** If you cannot name one, you do not yet know what to test.
 1. **What is the real contract?** State the invariant in one sentence.
 1. **Is there an oracle?** A law, roundtrip, reference solver, or stable public behavior is stronger than ad hoc
-    expected values.
+   expected values.
 1. **Is the current test at the right layer?** Move up or down if the present surface is too brittle or too indirect.
 1. **Is this better as a property than an example?** If many examples only restate the same law, replace them with one
-    good property test.
+   good property test.
 1. **Is the suite over-coupled to representation?** If a harmless refactor would break the test, the assertion is
-    probably too shallow.
+   probably too shallow.
 1. **Is there a missing regression for known bug history?** Fixes without a minimal repro are invitations to regress.
 1. **Would a bench be the right guardrail instead?** If the concern is time, allocation, or scaling, switch to
-    `optimizing-rust-performance`.
+   `optimizing-rust-performance`.
 
 ## Working Rules By Context
 
@@ -167,18 +167,18 @@ Ask these questions in order. Stop at the first "no" and fix that problem.
 
 ## Failure Smells
 
-| Smell                                                | What it means                               | Fix direction                                              |
-| ---------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
-| Many smoke tests, no invariant                       | Activity without confidence                 | Replace with contract-level checks                         |
-| `assert!(is_err())` with no error shape              | The rejection contract is underspecified    | Check the relevant error variant or stable diagnostic fact |
-| Full-string snapshots for unstable diagnostics       | Test is coupled to wording churn            | Assert stable fragments or structured fields               |
-| Large fixtures instead of minimal repros             | Regression is hard to diagnose              | Shrink to the smallest failing case                        |
-| Helper layers hide the actual assertion              | Test logic is opaque                        | Inline the key assertion and narrow helpers                |
-| Property tests with weak generators                  | Randomness without coverage                 | Improve the generator and shrink story                     |
-| Integration tests for a local invariant              | Test is too slow and noisy                  | Move the check down a layer                                |
-| Slow proptests with unjustified case counts          | The suite will be skipped                   | Reduce sizes/cases and justify the remainder               |
-| Benchmark-like logic inside `#[test]`                | Performance risk is using the wrong surface | Hand off to `optimizing-rust-performance`                  |
-| Duplicate tests across layers for the same bug class | Maintenance cost without new confidence     | Keep the most diagnostic layer and delete the rest         |
+| Smell | What it means | Fix direction |
+| --- | --- | --- |
+| Many smoke tests, no invariant | Activity without confidence | Replace with contract-level checks |
+| `assert!(is_err())` with no error shape | The rejection contract is underspecified | Check the relevant error variant or stable diagnostic fact |
+| Full-string snapshots for unstable diagnostics | Test is coupled to wording churn | Assert stable fragments or structured fields |
+| Large fixtures instead of minimal repros | Regression is hard to diagnose | Shrink to the smallest failing case |
+| Helper layers hide the actual assertion | Test logic is opaque | Inline the key assertion and narrow helpers |
+| Property tests with weak generators | Randomness without coverage | Improve the generator and shrink story |
+| Integration tests for a local invariant | Test is too slow and noisy | Move the check down a layer |
+| Slow proptests with unjustified case counts | The suite will be skipped | Reduce sizes/cases and justify the remainder |
+| Benchmark-like logic inside `#[test]` | Performance risk is using the wrong surface | Hand off to `optimizing-rust-performance` |
+| Duplicate tests across layers for the same bug class | Maintenance cost without new confidence | Keep the most diagnostic layer and delete the rest |
 
 For more examples of shallow or brittle tests, read [failure-smells.md](references/failure-smells.md).
 
