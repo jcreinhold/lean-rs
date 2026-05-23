@@ -72,6 +72,12 @@ impl WorkerProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("LEAN_ABORT_ON_PANIC", "1")
+            // See `LeanWorkerSupervisor::spawn` for why we also set
+            // `LEAN_BACKTRACE_RAW=1`: Lean 4.30's panic-time backtrace
+            // handler calls back into the Lean runtime for name demangling,
+            // which hangs on Linux child panics. Raw symbols are fine for
+            // the harness — the parent only needs the fatal exit.
+            .env("LEAN_BACKTRACE_RAW", "1")
             .env("RUST_BACKTRACE", "0")
             .spawn()
             .map_err(WorkerHarnessError::Spawn)?;

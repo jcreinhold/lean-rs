@@ -32,7 +32,13 @@ pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mi
 /// The executable should be the `lean-rs-worker-child` binary. The supervisor
 /// sets `LEAN_ABORT_ON_PANIC=1` by default so Lean internal panics become fatal
 /// child exits instead of attempting in-process recovery; explicit environment
-/// entries supplied here override that default.
+/// entries supplied here override that default. `LEAN_BACKTRACE_RAW=1` is also
+/// set: Lean 4.30 wired the C++ panic-time backtrace handler to call back into
+/// the Lean runtime for name demangling (lean4 PR #12539), and that callback
+/// hangs on Linux during a child-process panic — the worker would time out
+/// instead of producing the fatal exit the parent is waiting for. Raw symbols
+/// in the panic trace are not a regression in practice; the parent only needs
+/// to observe the fatal exit.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerConfig {
     executable: PathBuf,
@@ -571,6 +577,7 @@ impl LeanWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("LEAN_ABORT_ON_PANIC", "1")
+            .env("LEAN_BACKTRACE_RAW", "1")
             .env("RUST_BACKTRACE", "0");
 
         if let Some(current_dir) = &config.current_dir {
