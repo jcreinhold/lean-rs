@@ -1,0 +1,141 @@
+# syntax=docker/dockerfile:1.7
+# scripts/Dockerfile.prerelease — minimal Ubuntu 24.04 image that
+# reproduces the .github/workflows/release.yml::verify environment for
+# local pre-release runs via `scripts/prerelease.sh --docker`.
+#
+# Base image: ubuntu:24.04 (matches the OS of `ubuntu-latest` GitHub
+# Actions runners at the time of writing). We deliberately do NOT pull
+# `catthehacker/ubuntu:full-24.04` (the closest publicly-available
+# replica of GitHub-hosted runners) because it weighs ~50 GiB and
+# bundles tooling we do not exercise; this Dockerfile installs only
+# what the verify job actually invokes.
+#
+# Build args:
+#   LEAN_VERSION    — Lean release pinned in the image (default matches
+#                     `release.yml::env.LEAN_VERSION_HEAD`).
+#   RUST_CHANNEL    — Stable Rust channel to install via rustup.
+#
+# The image is consumed by `scripts/prerelease.sh --docker`, which
+# bind-mounts the repo at /workspace, mounts cargo/target volumes for
+# incremental builds, and re-executes the script inside the container.
+# Nothing in the repo is COPYd into the image so iterating on the repo
+# never invalidates the image cache.
+
+# The platform is supplied by the caller (`docker build --platform
+# ...`). `scripts/prerelease.sh` defaults the platform to the host's
+# native arch (linux/arm64 on Apple Silicon, linux/amd64 on Intel /
+# AMD), which keeps the container fast and gives every syscall the
+# same semantics CI would see on that arch. Pass `--docker-platform
+# linux/amd64` to the script for CI-exact reproduction on Apple
+# Silicon — that route emulates under QEMU, which is slow and can
+# subtly break timing-sensitive or syscall-sensitive tests (the
+# session-leak loops time out and `posix_spawn` defers ENOENT to the
+# child process instead of returning synchronously).
+FROM ubuntu:24.04
+
+ARG LEAN_VERSION=4.30.0-rc2
+ARG RUST_CHANNEL=stable
+
+# Reproducibility:
+#   - DEBIAN_FRONTEND=noninteractive silences apt prompts.
+#   - LANG/LC_ALL pinned to C.UTF-8 so rustc / cargo / lean produce
+#     deterministic byte-for-byte output across hosts.
+#   - PATH includes the tool roots we install below.
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    CARGO_HOME=/root/.cargo \
+    RUSTUP_HOME=/root/.rustup \
+    ELAN_HOME=/root/.elan \
+    PATH=/root/.cargo/bin:/root/.elan/bin:/root/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Single apt layer: install everything we need and clear apt cache.
+#
+#   build-essential, libc6-dev — Rust + Lean both need cc + system libs
+#   pkg-config, libssl-dev     — cargo-public-api pulls in openssl-sys
+#                                transitively; the CI workflow sidesteps
+#                                this by fetching a pre-built binary
+#                                via taiki-e/install-action, but we
+#                                cargo-install from source here.
+#   ca-certificates, curl, git — bootstrap for rustup + elan + cargo deps
+#   python3                    — scripts/check_package_docsrs.py
+#   jq                         — scripts/test-all-toolchains.sh fallback path
+#   golang-go                  — installs actionlint via `go install`
+#   libgcc-s1, libstdc++6      — runtime libs Lean's shared runtime needs
+#                                (LD_PRELOAD target on the nextest gate)
+#   rsync                      — prerelease.sh syncs the bind-mounted
+#                                read-only host repo into the writable
+#                                /workspace volume, excluding host-built
+#                                target/ and .lake/ artifacts so they
+#                                cannot leak macOS dylibs into the
+#                                Linux container.
+RUN apt-get update \
+ && apt-get install --no-install-recommends -y \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        golang-go \
+        jq \
+        libc6-dev \
+        libgcc-s1 \
+        libssl-dev \
+        libstdc++6 \
+        pkg-config \
+        python3 \
+        rsync \
+ && rm -rf /var/lib/apt/lists/*
+
+# Rust stable + components rustfmt, clippy, and rust-src. The
+# rust-src component is what lets the compiler emit the source-snippet
+# blocks (`| pub struct PhantomData<...>; ^^^^^^^^^^^^`) inside the
+# `note:` blocks of E0277 diagnostics. The committed trybuild .stderr
+# baselines were captured on a host that has rust-src installed, so
+# the container has to install it too — otherwise the diagnostic
+# notes lose their snippet blocks and trybuild reports a mismatch.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain "${RUST_CHANNEL}" \
+        --component rustfmt --component clippy --component rust-src
+
+# Rust nightly is required by `cargo public-api` (drives `cargo
+# +nightly rustdoc` internally) and by `cargo fuzz` (rust-src). The
+# rust-src component is gated on nightly.
+RUN /root/.cargo/bin/rustup toolchain install nightly --profile minimal \
+        --component rust-src
+
+# Workspace tools the verify job uses. `--locked` keeps the install
+# reproducible by honoring each crate's Cargo.lock.
+RUN /root/.cargo/bin/cargo install --locked cargo-nextest cargo-public-api cargo-fuzz
+
+# elan + the pinned Lean toolchain. The toolchain landing dir
+# (`/root/.elan/toolchains/leanprover--lean4---v${LEAN_VERSION}`) is
+# what `scripts/prerelease.sh` resolves `LEAN_SYSROOT` against.
+RUN curl --proto '=https' --tlsv1.2 -sSf \
+        https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain "leanprover/lean4:v${LEAN_VERSION}"
+
+# actionlint — verifies our GitHub Actions YAML hasn't regressed. The
+# Go install lands the binary in /root/go/bin (on $PATH above).
+RUN go install github.com/rhysd/actionlint/cmd/actionlint@latest \
+ && rm -rf /root/go/pkg /root/go/src /root/.cache/go-build
+
+# Smoke-test the install order so a broken image fails at build time
+# rather than at first script invocation.
+RUN cargo --version \
+ && rustup show \
+ && lake --version \
+ && lean --version \
+ && cargo nextest --version \
+ && cargo public-api --version \
+ && cargo fuzz --version \
+ && actionlint --version \
+ && python3 --version
+
+WORKDIR /workspace
+
+# No ENTRYPOINT: the caller (scripts/prerelease.sh --docker) supplies
+# `bash scripts/prerelease.sh <args>` explicitly. Leaving ENTRYPOINT
+# unset means `docker run -it <image> bash` drops into an interactive
+# shell without --entrypoint overrides, which is what you want when
+# debugging a failing gate.
+CMD ["bash"]
