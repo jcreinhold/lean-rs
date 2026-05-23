@@ -131,7 +131,17 @@ jobs:
       - name: ABI fuzz smoke
         if: matrix.os == 'ubuntu-latest'
         working-directory: crates/lean-rs/fuzz
-        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120
+        # `-detect_leaks=0` disables LeakSanitizer, which libFuzzer
+        # enables alongside ASan by default. Lean's shared runtime
+        # intentionally retains process-global allocations at shutdown
+        # (the same reason `docs/safety/unsafe-inventory.md` excludes
+        # Lean from Linux ASan instrumentation); LSan flags those as
+        # leaks and exits non-zero before any actual fuzz finding can
+        # be reported. The goal of this gate is ABI-decode coverage in
+        # the Rust harness, not auditing Lean's runtime cleanup. LSan
+        # does not run on macOS, so local repros on darwin won't see
+        # the difference.
+        run: cargo +nightly fuzz run abi_decode -- -runs=200000 -max_total_time=120 -detect_leaks=0
 
       - name: cargo fmt --check
         run: cargo fmt --check
