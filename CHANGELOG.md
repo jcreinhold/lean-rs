@@ -9,6 +9,22 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-05-23
+
+### `lean-rs-worker` 0.1.5
+
+#### Per-call imports on `LeanWorkerCapability`
+
+- Added `LeanWorkerCapability::open_session_with_imports(imports, cancellation, progress)` alongside the existing
+  `open_session`. The new method opens a worker session with a caller-supplied import set, overriding the imports the
+  capability was built with; `project_root` / `package` / `lib_name` remain those of the capability. Lifecycle and
+  error contract are identical to `open_session`.
+- Motivated by parent-side per-imports session caching in downstream MCP hosts that vary `imports` across requests:
+  before this method, switching import sets required tearing down the capability (and its worker child). The wire
+  protocol already carried `OpenHostSession.imports` per message and the child already opened a fresh `LeanSession`
+  per request, so this is a Rust-side ergonomic gap closing, not a new capability.
+- Existing `open_session` is unchanged. No removals; additive on the public API.
+
 ## [0.1.4] — 2026-05-23
 
 ### `lean-rs-host` 0.1.4
@@ -32,12 +48,12 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 #### Runtime initialization
 
 - `LeanRuntime::init` now calls `lean_io_mark_end_initialization()` after the core-runtime + built-in bootstrap. Without
-  this call, Lean's `IO.initializing` flag stayed `true` for the process lifetime and any Lean API gated on it
-  (most notably `Lean.mkEmptyEnvironment`, transitively used by `Lean.Parser.parseHeader`) threw
+  this call, Lean's `IO.initializing` flag stayed `true` for the process lifetime and any Lean API gated on it (most
+  notably `Lean.mkEmptyEnvironment`, transitively used by `Lean.Parser.parseHeader`) threw
   `"environment objects cannot be created during initialization"`. The omission was documented as already-fixed in
-  `crates/lean-rs/examples/cold_probe.rs:62` but was missing from the runtime init body. No public API change; downstream
-  module initializers loaded via `LeanLibrary::initialize_module` continue to run normally because Lake-emitted
-  initializers do not check the flag.
+  `crates/lean-rs/examples/cold_probe.rs:62` but was missing from the runtime init body. No public API change;
+  downstream module initializers loaded via `LeanLibrary::initialize_module` continue to run normally because
+  Lake-emitted initializers do not check the flag.
 
 ## [0.1.3] — 2026-05-23
 

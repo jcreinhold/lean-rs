@@ -388,3 +388,22 @@ fn restart_policy_override_is_applied_during_builder_startup() {
         "health then session-open should trigger the max-request restart policy, stats={stats:?}",
     );
 }
+
+#[test]
+fn open_session_with_imports_overrides_builder_imports() {
+    let mut capability = builder().open().expect("builder opens capability");
+
+    capability
+        .open_session(None, None)
+        .expect("baseline open_session still works after adding the override sibling");
+
+    capability
+        .open_session_with_imports(["LeanRsInteropConsumer"], None, None)
+        .expect("override with a different real import set opens a session");
+
+    match capability.open_session_with_imports(["LeanRsInteropConsumer.DefinitelyDoesNotExist"], None, None) {
+        Ok(_) => panic!("override with a bogus import should be rejected by the child"),
+        Err(LeanWorkerError::Worker { .. } | LeanWorkerError::CapabilityBuild { .. }) => {}
+        Err(other) => panic!("expected the child to reject the bad import, got {other:?}"),
+    }
+}

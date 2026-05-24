@@ -12,10 +12,10 @@ answer different questions and live behind different Lean shim exports, but shar
 
 The four downstream queries (`goal_at_position`, `type_at_position`, `references_of_name`, `term_at`) are unblocked by
 either method — they consume the shared `ProcessedFile`. Per POSD ch 6.1, both interfaces stay general-purpose (source,
-options, cancellation → outcome); the projection's *functionality* serves the cursor-query set but its interface
-doesn't encode any of them. Per POSD ch 9 "better apart", the two methods are split because they answer different
-questions (snippet vs. file), not because they share a flag — folding into one shim with a `mode` parameter would push
-the choice into every caller.
+options, cancellation → outcome); the projection's *functionality* serves the cursor-query set but its interface doesn't
+encode any of them. Per POSD ch 9 "better apart", the two methods are split because they answer different questions
+(snippet vs. file), not because they share a flag — folding into one shim with a `mode` parameter would push the choice
+into every caller.
 
 ## What the projection carries
 
@@ -52,26 +52,25 @@ hypothetical use case.
 `process_with_info_tree` returns a two-arm `ProcessFileOutcome` (`Processed` + `Unsupported`). The header-aware
 `process_module_with_info_tree` returns a four-arm `ProcessModuleOutcome`:
 
-- `Ok { file, imports }` — header parsed; every user-written import is present in the session's open env's
-  transitive module closure; the body was processed.
+- `Ok { file, imports }` — header parsed; every user-written import is present in the session's open env's transitive
+  module closure; the body was processed.
 - `MissingImports { file, imports, missing }` — header parsed but some imports name modules absent from the env's
-  transitive closure. The body still elaborated; the projection is populated. Soft failure — callers typically
-  surface it as a warning.
-- `HeaderParseFailed { diagnostics }` — `Lean.Parser.parseHeader` reported error-severity messages.
-  `IO.processCommands` was not run.
+  transitive closure. The body still elaborated; the projection is populated. Soft failure — callers typically surface
+  it as a warning.
+- `HeaderParseFailed { diagnostics }` — `Lean.Parser.parseHeader` reported error-severity messages. `IO.processCommands`
+  was not run.
 - `Unsupported` — the loaded capability dylib does not export the new symbol. No FFI call was made.
 
-The "missing imports" check compares against `env.header.moduleNames` (the transitive closure), not
-`env.header.imports` (only direct imports). Otherwise a session that imports `LeanRsHostShims.Elaboration` —
-which transitively pulls in `Lean` — would flag every `import Lean` in user files as missing.
+The "missing imports" check compares against `env.header.moduleNames` (the transitive closure), not `env.header.imports`
+(only direct imports). Otherwise a session that imports `LeanRsHostShims.Elaboration` — which transitively pulls in
+`Lean` — would flag every `import Lean` in user files as missing.
 
 ## Optional capability
 
-Both shim symbols are declared **optional** in the
-[capability contract](../lean-rs-host-capability-contract.md). A fork of the shim package that omits either symbol
-still loads cleanly; the corresponding session method returns its `Unsupported` arm at dispatch time without
-invoking the FFI. The pattern matches the five `MetaM` services that already use this degradation path
-(`LeanMetaResponse::Unsupported`).
+Both shim symbols are declared **optional** in the [capability contract](../lean-rs-host-capability-contract.md). A fork
+of the shim package that omits either symbol still loads cleanly; the corresponding session method returns its
+`Unsupported` arm at dispatch time without invoking the FFI. The pattern matches the five `MetaM` services that already
+use this degradation path (`LeanMetaResponse::Unsupported`).
 
 ## Position helpers
 

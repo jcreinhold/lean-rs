@@ -11,9 +11,9 @@ create-missing = false
 
 [output.html]
 default-theme = "rust"
-preferred-dark-theme = "ayu"
 edit-url-template = "https://github.com/jcreinhold/lean-rs/edit/main/docs/{path}"
 git-repository-url = "https://github.com/jcreinhold/lean-rs"
+preferred-dark-theme = "ayu"
 
 [output.html.search]
 enable = true

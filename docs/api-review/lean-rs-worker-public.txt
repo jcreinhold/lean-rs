@@ -392,6 +392,7 @@ pub struct lean_rs_worker::LeanWorkerCapability
 impl lean_rs_worker::LeanWorkerCapability
 pub fn lean_rs_worker::LeanWorkerCapability::dylib_path(&self) -> &std::path::Path
 pub fn lean_rs_worker::LeanWorkerCapability::open_session(&mut self, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerSession<'_>, lean_rs_worker::LeanWorkerError>
+pub fn lean_rs_worker::LeanWorkerCapability::open_session_with_imports(&mut self, imports: impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>, cancellation: core::option::Option<&lean_rs_worker::LeanWorkerCancellationToken>, progress: core::option::Option<&dyn lean_rs_worker::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker::LeanWorkerSession<'_>, lean_rs_worker::LeanWorkerError>
 pub fn lean_rs_worker::LeanWorkerCapability::runtime_metadata(&self) -> lean_rs_worker::LeanWorkerRuntimeMetadata
 pub fn lean_rs_worker::LeanWorkerCapability::session_config(&self) -> &lean_rs_worker::LeanWorkerSessionConfig
 pub fn lean_rs_worker::LeanWorkerCapability::terminate(self) -> core::result::Result<lean_rs_worker::LeanWorkerExit, lean_rs_worker::LeanWorkerError>

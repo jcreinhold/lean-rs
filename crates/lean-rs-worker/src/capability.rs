@@ -546,6 +546,31 @@ impl LeanWorkerCapability {
         self.worker.open_session(&self.session_config, cancellation, progress)
     }
 
+    /// Open a worker session with a caller-supplied import set, overriding the imports
+    /// the builder was constructed with. The capability's `project_root` / `package` /
+    /// `lib_name` are unchanged.
+    ///
+    /// Lifecycle is identical to [`open_session`](Self::open_session): the returned
+    /// session borrows from `&mut self` and dies when dropped.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`open_session`](Self::open_session).
+    pub fn open_session_with_imports(
+        &mut self,
+        imports: impl IntoIterator<Item = impl Into<String>>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
+        let config = LeanWorkerSessionConfig::new(
+            self.session_config.project_root_string(),
+            self.session_config.package().to_owned(),
+            self.session_config.lib_name().to_owned(),
+            imports,
+        );
+        self.worker.open_session(&config, cancellation, progress)
+    }
+
     /// Return the built capability dylib path resolved by `lean-toolchain`.
     #[must_use]
     pub fn dylib_path(&self) -> &Path {
