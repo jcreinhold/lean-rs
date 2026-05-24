@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### `lean-rs-worker` — internal
+
+Collapsed two duplicated dispatch policies inside `lean-rs-worker`. The session-invalidation rule (Cancelled / Timeout
+→ `LeanWorkerSession::open = false`) now lives in a single private `LeanWorkerSession::with_session` helper instead of
+being inlined in 16 typed methods. The Worker IPC round-trip (cancel-check → send → record → read → variant-extract)
+now lives in a single private `LeanWorker::round_trip` helper instead of being inlined in 14 `worker_*` methods with a
+22-variant exhaustive wildcard each. The new helpers narrow each typed method to a single delegating call and centralize
+the design decision so future invalidation-policy or dispatch-shape changes are one-site edits. No public API change;
+no behaviour change.
+
 ## [0.1.6] — 2026-05-24
 
 ### `lean-rs-worker` 0.1.6

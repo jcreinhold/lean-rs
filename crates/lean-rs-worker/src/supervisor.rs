@@ -1096,6 +1096,10 @@ impl LeanWorker {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_elaborate(
         &mut self,
         source: &str,
@@ -1103,43 +1107,26 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerElabResult, LeanWorkerError> {
-        const OPERATION: &str = "worker_elaborate";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::Elaborate {
-            source: source.to_owned(),
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::Elaboration { outcome } => Ok(outcome),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_elaborate",
+            Request::Elaborate {
+                source: source.to_owned(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::Elaboration { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_kernel_check(
         &mut self,
         source: &str,
@@ -1147,130 +1134,79 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerKernelResult, LeanWorkerError> {
-        const OPERATION: &str = "worker_kernel_check";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::KernelCheck {
-            source: source.to_owned(),
-            options: options.clone(),
-            progress: progress.is_some(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::KernelCheck { outcome } => Ok(outcome),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_kernel_check",
+            Request::KernelCheck {
+                source: source.to_owned(),
+                options: options.clone(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::KernelCheck { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_declaration_kinds(
         &mut self,
         names: &[&str],
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
-        const OPERATION: &str = "worker_declaration_kinds";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::DeclarationKinds {
-            names: names.iter().map(|name| (*name).to_owned()).collect(),
-            progress: progress.is_some(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::Strings { values } => Ok(values),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_declaration_kinds",
+            Request::DeclarationKinds {
+                names: names.iter().map(|name| (*name).to_owned()).collect(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::Strings { values } => Ok(values),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_declaration_names(
         &mut self,
         names: &[&str],
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
-        const OPERATION: &str = "worker_declaration_names";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::DeclarationNames {
-            names: names.iter().map(|name| (*name).to_owned()).collect(),
-            progress: progress.is_some(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::Strings { values } => Ok(values),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_declaration_names",
+            Request::DeclarationNames {
+                names: names.iter().map(|name| (*name).to_owned()).collect(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::Strings { values } => Ok(values),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_infer_type(
         &mut self,
         source: &str,
@@ -1278,43 +1214,26 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
-        const OPERATION: &str = "worker_infer_type";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::InferType {
-            source: source.to_owned(),
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::MetaExpr { result } => Ok(result),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_infer_type",
+            Request::InferType {
+                source: source.to_owned(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::MetaExpr { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_whnf(
         &mut self,
         source: &str,
@@ -1322,43 +1241,26 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
-        const OPERATION: &str = "worker_whnf";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::Whnf {
-            source: source.to_owned(),
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::MetaExpr { result } => Ok(result),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_whnf",
+            Request::Whnf {
+                source: source.to_owned(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::MetaExpr { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_is_def_eq(
         &mut self,
         lhs: &str,
@@ -1368,83 +1270,45 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<bool>, LeanWorkerError> {
-        const OPERATION: &str = "worker_is_def_eq";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::IsDefEq {
-            lhs: lhs.to_owned(),
-            rhs: rhs.to_owned(),
-            transparency,
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::MetaBool { result } => Ok(result),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_is_def_eq",
+            Request::IsDefEq {
+                lhs: lhs.to_owned(),
+                rhs: rhs.to_owned(),
+                transparency,
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::MetaBool { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_describe(
         &mut self,
         name: &str,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Option<LeanWorkerDeclarationRow>, LeanWorkerError> {
-        const OPERATION: &str = "worker_describe";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::Describe { name: name.to_owned() })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::Declaration { row } => Ok(row),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_describe",
+            Request::Describe { name: name.to_owned() },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::Declaration { row } => Ok(row),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
     #[allow(
@@ -1516,49 +1380,36 @@ impl LeanWorker {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_describe_bulk(
         &mut self,
         names: &[&str],
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<LeanWorkerDeclarationRow>, LeanWorkerError> {
-        const OPERATION: &str = "worker_describe_bulk";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::DescribeBulk {
-            names: names.iter().map(|name| (*name).to_owned()).collect(),
-            progress: progress.is_some(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::DeclarationBulk { rows } => Ok(rows),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_describe_bulk",
+            Request::DescribeBulk {
+                names: names.iter().map(|name| (*name).to_owned()).collect(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationBulk { rows } => Ok(rows),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_process_file(
         &mut self,
         source: &str,
@@ -1566,43 +1417,26 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
-        const OPERATION: &str = "worker_process_file";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::ProcessFile {
-            source: source.to_owned(),
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::ProcessFile { outcome } => Ok(outcome),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_process_file",
+            Request::ProcessFile {
+                source: source.to_owned(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::ProcessFile { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_process_module(
         &mut self,
         source: &str,
@@ -1610,41 +1444,20 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
-        const OPERATION: &str = "worker_process_module";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::ProcessModule {
-            source: source.to_owned(),
-            options: options.clone(),
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::ProcessModule { outcome } => Ok(outcome),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_process_module",
+            Request::ProcessModule {
+                source: source.to_owned(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::ProcessModule { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
     pub(crate) fn worker_run_data_stream(
@@ -1744,6 +1557,10 @@ impl LeanWorker {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_capability_metadata(
         &mut self,
         export: &str,
@@ -1751,48 +1568,32 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
-        const OPERATION: &str = "worker_capability_metadata";
-        check_cancelled(OPERATION, cancellation)?;
         let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker capability metadata request JSON encode failed: {err}"),
         })?;
-        self.prepare_request(false)?;
-        self.send_request(Request::CapabilityMetadata {
-            export: export.to_owned(),
-            request_json,
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::CapabilityMetadata { metadata } => Ok(metadata),
-            Response::CapabilityMetadataMalformed { message } => {
-                Err(LeanWorkerError::CapabilityMetadataMalformed { message })
-            }
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_capability_metadata",
+            Request::CapabilityMetadata {
+                export: export.to_owned(),
+                request_json,
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::CapabilityMetadata { metadata } => Ok(metadata),
+                Response::CapabilityMetadataMalformed { message } => {
+                    Err(LeanWorkerError::CapabilityMetadataMalformed { message })
+                }
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_capability_doctor(
         &mut self,
         export: &str,
@@ -1800,48 +1601,32 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDoctorReport, LeanWorkerError> {
-        const OPERATION: &str = "worker_capability_doctor";
-        check_cancelled(OPERATION, cancellation)?;
         let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker capability doctor request JSON encode failed: {err}"),
         })?;
-        self.prepare_request(false)?;
-        self.send_request(Request::CapabilityDoctor {
-            export: export.to_owned(),
-            request_json,
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::CapabilityDoctor { report } => Ok(report),
-            Response::CapabilityDoctorMalformed { message } => {
-                Err(LeanWorkerError::CapabilityDoctorMalformed { message })
-            }
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::JsonCommand { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_capability_doctor",
+            Request::CapabilityDoctor {
+                export: export.to_owned(),
+                request_json,
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::CapabilityDoctor { report } => Ok(report),
+                Response::CapabilityDoctorMalformed { message } => {
+                    Err(LeanWorkerError::CapabilityDoctorMalformed { message })
+                }
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
     pub(crate) fn worker_json_command(
         &mut self,
         export: &str,
@@ -1849,41 +1634,20 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<String, LeanWorkerError> {
-        const OPERATION: &str = "worker_json_command";
-        check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
-        self.send_request(Request::JsonCommand {
-            export: export.to_owned(),
-            request_json,
-        })?;
-        self.record_request(false);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::JsonCommand { response_json } => Ok(response_json),
-            other @ (Response::HealthOk
-            | Response::CapabilityLoaded
-            | Response::U64 { .. }
-            | Response::HostSessionOpened
-            | Response::Elaboration { .. }
-            | Response::KernelCheck { .. }
-            | Response::Strings { .. }
-            | Response::StreamComplete { .. }
-            | Response::StreamExportFailed { .. }
-            | Response::StreamCallbackFailed { .. }
-            | Response::StreamRowMalformed { .. }
-            | Response::CapabilityMetadata { .. }
-            | Response::CapabilityDoctor { .. }
-            | Response::CapabilityMetadataMalformed { .. }
-            | Response::CapabilityDoctorMalformed { .. }
-            | Response::MetaExpr { .. }
-            | Response::MetaBool { .. }
-            | Response::Declaration { .. }
-            | Response::DeclarationBulk { .. }
-            | Response::ProcessFile { .. }
-            | Response::ProcessModule { .. }
-            | Response::RowsComplete { .. }
-            | Response::Terminating
-            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
-        }
+        self.round_trip(
+            "worker_json_command",
+            Request::JsonCommand {
+                export: export.to_owned(),
+                request_json,
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::JsonCommand { response_json } => Ok(response_json),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
     }
 
     fn send_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
@@ -1971,6 +1735,33 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<Response, LeanWorkerError> {
         self.read_response_with_events(operation, progress, cancellation, None, None)
+    }
+
+    /// Run one Request/Response round-trip and project the response into a
+    /// typed value.
+    ///
+    /// Centralizes the cancel-check → send → record → read sequence so every
+    /// `worker_*` helper above delegates here instead of repeating five
+    /// identical lines plus a 22-variant wildcard arm. The `extract` closure
+    /// receives the response together with the operation name; it returns the
+    /// typed value, the typed error variant the protocol expects (e.g.,
+    /// `*Malformed`), or `unexpected_response(operation, &other)` for any
+    /// wire variant the operation never expects.
+    fn round_trip<R>(
+        &mut self,
+        operation: &'static str,
+        request: Request,
+        import_like: bool,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        extract: impl FnOnce(Response, &'static str) -> Result<R, LeanWorkerError>,
+    ) -> Result<R, LeanWorkerError> {
+        check_cancelled(operation, cancellation)?;
+        self.prepare_request(import_like)?;
+        self.send_request(request)?;
+        self.record_request(import_like);
+        let response = self.read_response_with_progress(operation, progress, cancellation)?;
+        extract(response, operation)
     }
 
     fn read_response_with_events(

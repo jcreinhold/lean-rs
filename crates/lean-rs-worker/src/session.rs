@@ -435,15 +435,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerElabResult, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_elaborate(source, options, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_elaborate(source, options, cancellation, progress))
     }
 
     /// Kernel-check one declaration and return only process-safe status/diagnostics.
@@ -460,15 +452,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerKernelResult, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_kernel_check(source, options, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_kernel_check(source, options, cancellation, progress))
     }
 
     /// Query declaration kinds in bulk.
@@ -484,15 +468,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_declaration_kinds(names, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_declaration_kinds(names, cancellation, progress))
     }
 
     /// Render declaration names in bulk.
@@ -508,15 +484,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_declaration_names(names, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_declaration_names(names, cancellation, progress))
     }
 
     /// Elaborate `source` and infer the resulting expression's type.
@@ -539,15 +507,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_infer_type(source, options, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_infer_type(source, options, cancellation, progress))
     }
 
     /// Elaborate `source` and reduce it to weak head normal form.
@@ -566,15 +526,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_whnf(source, options, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_whnf(source, options, cancellation, progress))
     }
 
     /// Elaborate `lhs` and `rhs` and ask Lean whether they are definitionally
@@ -594,18 +546,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerMetaResult<bool>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_is_def_eq(lhs, rhs, transparency, options, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_is_def_eq(lhs, rhs, transparency, options, cancellation, progress))
     }
 
     /// Describe a declaration: its kind, rendered type, and source range.
@@ -624,15 +565,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Option<LeanWorkerDeclarationRow>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_describe(name, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_describe(name, cancellation, progress))
     }
 
     /// Enumerate the session's open environment and return the matching
@@ -651,18 +584,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_list_declarations_strings(*filter, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_list_declarations_strings(*filter, cancellation, progress))
     }
 
     /// Describe a batch of declarations in one IPC round-trip.
@@ -682,15 +604,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<LeanWorkerDeclarationRow>, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_describe_bulk(names, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_describe_bulk(names, cancellation, progress))
     }
 
     /// Parse, elaborate, and project a Lean source string into an
@@ -712,15 +626,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
-        self.ensure_open()?;
-        match self.worker.worker_process_file(source, options, cancellation, progress) {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_process_file(source, options, cancellation, progress))
     }
 
     /// Parse a Lean module header (`import` declarations and prelude) and
@@ -740,18 +646,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_process_module(source, options, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_process_module(source, options, cancellation, progress))
     }
 
     /// Run a downstream streaming export and deliver JSON rows to `rows`.
@@ -776,18 +671,9 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_run_data_stream(export, request, rows, diagnostics, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| {
+            worker.worker_run_data_stream(export, request, rows, diagnostics, cancellation, progress)
+        })
     }
 
     fn run_data_stream_raw(
@@ -799,18 +685,9 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_run_data_stream_raw(export, request, rows, diagnostics, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| {
+            worker.worker_run_data_stream_raw(export, request, rows, diagnostics, cancellation, progress)
+        })
     }
 
     /// Run a typed non-streaming downstream JSON command.
@@ -836,28 +713,18 @@ impl LeanWorkerSession<'_> {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        self.ensure_open()?;
         let request_json =
             serde_json::to_string(request).map_err(|err| LeanWorkerError::TypedCommandRequestEncode {
                 export: command.export().to_owned(),
                 message: err.to_string(),
             })?;
-        match self
-            .worker
-            .worker_json_command(command.export(), request_json, cancellation, progress)
-        {
-            Ok(response_json) => {
-                serde_json::from_str(&response_json).map_err(|err| LeanWorkerError::TypedCommandResponseDecode {
-                    export: command.export().to_owned(),
-                    message: err.to_string(),
-                })
-            }
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        let response_json = self.with_session(|worker| {
+            worker.worker_json_command(command.export(), request_json, cancellation, progress)
+        })?;
+        serde_json::from_str(&response_json).map_err(|err| LeanWorkerError::TypedCommandResponseDecode {
+            export: command.export().to_owned(),
+            message: err.to_string(),
+        })
     }
 
     /// Run a typed downstream streaming command.
@@ -889,7 +756,6 @@ impl LeanWorkerSession<'_> {
         Row: DeserializeOwned,
         Summary: DeserializeOwned,
     {
-        self.ensure_open()?;
         let request_value =
             serde_json::to_value(request).map_err(|err| LeanWorkerError::TypedCommandRequestEncode {
                 export: command.export().to_owned(),
@@ -904,6 +770,8 @@ impl LeanWorkerSession<'_> {
             decode_error: std::sync::Mutex::new(None),
         };
 
+        // `run_data_stream_raw` invalidates the session on Cancelled/Timeout
+        // via `with_session`; we only reshape the result here.
         match self.run_data_stream_raw(
             command.export(),
             &request_value,
@@ -936,7 +804,6 @@ impl LeanWorkerSession<'_> {
                 if let Some(err) = typed_sink.take_decode_error() {
                     Err(err)
                 } else {
-                    self.open = false;
                     Err(LeanWorkerError::Cancelled {
                         operation: "worker_run_data_stream",
                     })
@@ -965,18 +832,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_capability_metadata(export, request, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_capability_metadata(export, request, cancellation, progress))
     }
 
     /// Run a generic doctor check from a downstream capability export.
@@ -998,18 +854,7 @@ impl LeanWorkerSession<'_> {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDoctorReport, LeanWorkerError> {
-        self.ensure_open()?;
-        match self
-            .worker
-            .worker_capability_doctor(export, request, cancellation, progress)
-        {
-            Ok(value) => Ok(value),
-            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
-                self.open = false;
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+        self.with_session(|worker| worker.worker_capability_doctor(export, request, cancellation, progress))
     }
 
     fn ensure_open(&self) -> Result<(), LeanWorkerError> {
@@ -1020,6 +865,28 @@ impl LeanWorkerSession<'_> {
                 operation: "worker_session_invalidated",
             })
         }
+    }
+
+    /// Run an operation against the underlying worker, applying the session
+    /// invalidation policy uniformly.
+    ///
+    /// Centralizes the rule "Cancelled or Timeout from the worker invalidates
+    /// this session" so every typed method delegates here instead of repeating
+    /// the same `match` discriminator. Adding a new terminal-failure variant
+    /// to the invalidation set is now a one-line edit.
+    fn with_session<T>(
+        &mut self,
+        f: impl FnOnce(&mut LeanWorker) -> Result<T, LeanWorkerError>,
+    ) -> Result<T, LeanWorkerError> {
+        self.ensure_open()?;
+        let result = f(self.worker);
+        if matches!(
+            result,
+            Err(LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })
+        ) {
+            self.open = false;
+        }
+        result
     }
 }
 
