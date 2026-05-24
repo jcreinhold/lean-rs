@@ -35,9 +35,8 @@ upstream sources cover the cases:
 
 - `runtime/object.cpp`: `lean_internal_panic` prints and exits; `lean_panic_impl` aborts when `LEAN_ABORT_ON_PANIC` is
   set. As of Lean 4.30 (upstream [PR #12539](https://github.com/leanprover/lean4/pull/12539)), `lean_panic_impl` also
-  calls `print_backtrace`, which delegates demangling to the Lean-side `@[export]`
-  `lean_demangle_bt_line_cstr` from `Lean.Compiler.NameDemangling`. See **Decoupling from Lean's panic-time runtime
-  callbacks** below.
+  calls `print_backtrace`, which delegates demangling to the Lean-side `@[export]` `lean_demangle_bt_line_cstr` from
+  `Lean.Compiler.NameDemangling`. See **Decoupling from Lean's panic-time runtime callbacks** below.
 - `runtime/debug.h`: `lean_unreachable()` throws Lean's C++ `unreachable_reached` exception.
 
 Those mechanisms bypass the error channel that `LeanIo<T>` decodes. A session-poisoning API would catch only a subset of

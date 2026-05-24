@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 
 use lean_rs_worker::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerSessionConfig,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendering,
+    LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -84,10 +85,17 @@ fn infer_type_returns_rendered_type_for_known_term() {
         .expect("worker infer_type dispatch succeeds");
 
     match result {
-        LeanWorkerMetaResult::Ok { value: rendered } => assert!(
-            rendered.contains("Nat"),
-            "rendered type should mention Nat, got {rendered:?}"
-        ),
+        LeanWorkerMetaResult::Ok { value: rendered } => {
+            assert!(
+                rendered.value.contains("Nat"),
+                "rendered type should mention Nat, got {rendered:?}"
+            );
+            assert_eq!(
+                rendered.rendering,
+                LeanWorkerRendering::Pretty,
+                "fixture loads the meta_pp_expr shim, so notation-aware rendering should fire"
+            );
+        }
         other => panic!("expected Ok meta result, got {other:?}"),
     }
 }

@@ -21,7 +21,7 @@ use crate::session::{
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -1213,7 +1213,7 @@ impl LeanWorker {
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+    ) -> Result<LeanWorkerMetaResult<LeanWorkerRendered>, LeanWorkerError> {
         self.round_trip(
             "worker_infer_type",
             Request::InferType {
@@ -1240,7 +1240,7 @@ impl LeanWorker {
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+    ) -> Result<LeanWorkerMetaResult<LeanWorkerRendered>, LeanWorkerError> {
         self.round_trip(
             "worker_whnf",
             Request::Whnf {

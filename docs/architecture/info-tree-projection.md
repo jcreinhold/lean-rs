@@ -13,8 +13,8 @@ answer different questions and live behind different Lean shim exports, but shar
 Both methods feed the same downstream cursor queries (`goal_at_position`, `type_at_position`, `references_of_name`,
 `term_at`), which consume `ProcessedFile` and don't care which method produced it. The split is by question, not by
 flag: a `mode` parameter on a single shim would push the snippet-vs-file choice into every caller. Both interfaces stay
-general-purpose (source, options, cancellation → outcome) so the projection serves the cursor-query set without
-encoding any of those queries in its signature.
+general-purpose (source, options, cancellation → outcome) so the projection serves the cursor-query set without encoding
+any of those queries in its signature.
 
 ## What the projection carries
 

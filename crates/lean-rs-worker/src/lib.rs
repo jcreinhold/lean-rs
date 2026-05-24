@@ -43,9 +43,10 @@ pub use types::{
     LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerCommandMetadata,
     LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic,
     LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
-    LeanWorkerProcessedFile, LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
+    LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome,
+    LeanWorkerProcessModuleOutcome, LeanWorkerProcessedFile, LeanWorkerRendered, LeanWorkerRendering,
+    LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
 };
 
 /// Run the worker child process on stdin/stdout.

@@ -96,11 +96,31 @@ pub enum LeanWorkerKernelStatus {
 }
 
 /// Serializable kernel-check result returned over the worker boundary.
+///
+/// `summary` is `Some` if and only if `status == Checked`; the field is
+/// populated from `lean_rs_host::LeanSession::summarize_evidence` against the
+/// proof evidence the kernel returned. The three failure statuses leave it
+/// `None`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerKernelResult {
     pub status: LeanWorkerKernelStatus,
     pub diagnostics: Vec<LeanWorkerDiagnostic>,
     pub truncated: bool,
+    pub summary: Option<LeanWorkerKernelSummary>,
+}
+
+/// Projection of `lean_rs_host::ProofSummary` for the kernel-check success arm.
+///
+/// `declaration_name` is a dotted-path rendering of the checked declaration
+/// (diagnostic only — multiple distinct `Lean.Name`s can render to the same
+/// string). `kind` is one of `"theorem"`, `"definition"`, `"axiom"`,
+/// `"opaque"`, or `"unsupported"`. `type_signature` is the pretty-printed
+/// declaration type as the host's `ProofSummary` emits it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerKernelSummary {
+    pub declaration_name: String,
+    pub kind: String,
+    pub type_signature: String,
 }
 
 /// One diagnostic emitted by worker elaboration, kernel checks, or `MetaM`
@@ -140,6 +160,31 @@ pub enum LeanWorkerMetaTransparency {
     Instances,
     /// Every definition unfolds (most aggressive).
     All,
+}
+
+/// A Lean expression rendered to a string, together with the rendering path
+/// that produced it.
+///
+/// `LeanWorkerSession::infer_type` and `whnf` attempt notation-aware rendering
+/// via the optional `meta_pp_expr` shim and fall back to `Expr.toString` when
+/// the shim is absent or reports `Unsupported`. The `rendering` field reports
+/// which path produced the `value`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerRendered {
+    pub value: String,
+    pub rendering: LeanWorkerRendering,
+}
+
+/// Which rendering path produced a [`LeanWorkerRendered::value`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerRendering {
+    /// Rendered via `Lean.PrettyPrinter.ppExpr` (notation-aware).
+    Pretty,
+    /// Rendered via `Expr.toString` (deterministic, no notation). Either the
+    /// `meta_pp_expr` shim was absent on the loaded capability, or the
+    /// pretty-printer reported `Unsupported`.
+    Raw,
 }
 
 /// Outcome of one bounded `MetaM` service call over the worker boundary.

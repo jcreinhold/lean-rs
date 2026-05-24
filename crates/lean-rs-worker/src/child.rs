@@ -26,9 +26,10 @@ use crate::protocol::{
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow,
     LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerProcessedFile,
-    LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
+    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+    LeanWorkerProcessedFile, LeanWorkerRendered, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTacticInfo,
+    LeanWorkerTermInfo,
 };
 
 #[derive(Clone)]
@@ -515,11 +516,19 @@ impl HostSessionState {
             emit_progress(writer, "kernel_check", 1, Some(1));
         }
         Ok(match outcome {
-            LeanKernelOutcome::Checked(_) => LeanWorkerKernelResult {
-                status: LeanWorkerKernelStatus::Checked,
-                diagnostics: Vec::new(),
-                truncated: false,
-            },
+            LeanKernelOutcome::Checked(evidence) => {
+                let summary = self.session.summarize_evidence(&evidence, None)?;
+                LeanWorkerKernelResult {
+                    status: LeanWorkerKernelStatus::Checked,
+                    diagnostics: Vec::new(),
+                    truncated: false,
+                    summary: Some(LeanWorkerKernelSummary {
+                        declaration_name: summary.declaration_name().to_owned(),
+                        kind: summary.kind().to_owned(),
+                        type_signature: summary.type_signature().to_owned(),
+                    }),
+                }
+            }
             LeanKernelOutcome::Rejected(failure) => kernel_failure_outcome(LeanWorkerKernelStatus::Rejected, &failure),
             LeanKernelOutcome::Unavailable(failure) => {
                 kernel_failure_outcome(LeanWorkerKernelStatus::Unavailable, &failure)
@@ -742,7 +751,7 @@ impl HostSessionState {
         &mut self,
         source: &str,
         options: &LeanWorkerElabOptions,
-    ) -> LeanResult<LeanWorkerMetaResult<String>> {
+    ) -> LeanResult<LeanWorkerMetaResult<LeanWorkerRendered>> {
         let elab_options = options.to_host_options();
         let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
         let expr = match elab_outcome {
@@ -751,10 +760,14 @@ impl HostSessionState {
         };
         let meta_options = options.to_host_meta_options(LeanMetaTransparency::Default);
         let response = self.session.run_meta(&meta::infer_type(), expr, &meta_options, None)?;
-        meta_render_expr(&mut self.session, response)
+        meta_render_expr(&mut self.session, response, &meta_options)
     }
 
-    fn whnf(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerMetaResult<String>> {
+    fn whnf(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerMetaResult<LeanWorkerRendered>> {
         let elab_options = options.to_host_options();
         let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
         let expr = match elab_outcome {
@@ -763,7 +776,7 @@ impl HostSessionState {
         };
         let meta_options = options.to_host_meta_options(LeanMetaTransparency::Default);
         let response = self.session.run_meta(&meta::whnf(), expr, &meta_options, None)?;
-        meta_render_expr(&mut self.session, response)
+        meta_render_expr(&mut self.session, response, &meta_options)
     }
 
     fn is_def_eq(
@@ -1142,21 +1155,47 @@ fn meta_failure_from_elab<T>(failure: &LeanElabFailure) -> LeanWorkerMetaResult<
 fn meta_render_expr(
     session: &mut LeanSession<'static, 'static>,
     response: LeanMetaResponse<lean_rs::LeanExpr<'static>>,
-) -> LeanResult<LeanWorkerMetaResult<String>> {
-    match response {
-        LeanMetaResponse::Ok(expr) => Ok(LeanWorkerMetaResult::Ok {
-            value: session.expr_to_string_raw(&expr, None)?,
-        }),
-        LeanMetaResponse::Failed(failure) => Ok(LeanWorkerMetaResult::Failed {
+    meta_options: &LeanMetaOptions,
+) -> LeanResult<LeanWorkerMetaResult<LeanWorkerRendered>> {
+    let expr = match response {
+        LeanMetaResponse::Ok(expr) => expr,
+        LeanMetaResponse::Failed(failure) => {
+            return Ok(LeanWorkerMetaResult::Failed {
+                failure: elab_failure_wire(&failure),
+            });
+        }
+        LeanMetaResponse::TimeoutOrHeartbeat(failure) => {
+            return Ok(LeanWorkerMetaResult::TimeoutOrHeartbeat {
+                failure: elab_failure_wire(&failure),
+            });
+        }
+        LeanMetaResponse::Unsupported(failure) => {
+            return Ok(LeanWorkerMetaResult::Unsupported {
+                failure: elab_failure_wire(&failure),
+            });
+        }
+    };
+    let pp_response = session.run_meta(&meta::pp_expr(), expr.clone(), meta_options, None)?;
+    Ok(match pp_response {
+        LeanMetaResponse::Ok(rendered) => LeanWorkerMetaResult::Ok {
+            value: LeanWorkerRendered {
+                value: rendered,
+                rendering: LeanWorkerRendering::Pretty,
+            },
+        },
+        LeanMetaResponse::Unsupported(_) => LeanWorkerMetaResult::Ok {
+            value: LeanWorkerRendered {
+                value: session.expr_to_string_raw(&expr, None)?,
+                rendering: LeanWorkerRendering::Raw,
+            },
+        },
+        LeanMetaResponse::Failed(failure) => LeanWorkerMetaResult::Failed {
             failure: elab_failure_wire(&failure),
-        }),
-        LeanMetaResponse::TimeoutOrHeartbeat(failure) => Ok(LeanWorkerMetaResult::TimeoutOrHeartbeat {
+        },
+        LeanMetaResponse::TimeoutOrHeartbeat(failure) => LeanWorkerMetaResult::TimeoutOrHeartbeat {
             failure: elab_failure_wire(&failure),
-        }),
-        LeanMetaResponse::Unsupported(failure) => Ok(LeanWorkerMetaResult::Unsupported {
-            failure: elab_failure_wire(&failure),
-        }),
-    }
+        },
+    })
 }
 
 fn source_range_wire(range: LeanSourceRange) -> LeanWorkerSourceRange {
@@ -1236,6 +1275,7 @@ fn kernel_failure_outcome(status: LeanWorkerKernelStatus, failure: &LeanElabFail
         status,
         diagnostics: diagnostics(failure),
         truncated: failure.truncated(),
+        summary: None,
     }
 }
 

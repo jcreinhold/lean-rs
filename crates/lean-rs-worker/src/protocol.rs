@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
 };
 
 pub(crate) const PROTOCOL_VERSION: u16 = 2;
@@ -149,29 +149,73 @@ pub(crate) enum Request {
 pub(crate) enum Response {
     HealthOk,
     CapabilityLoaded,
-    U64 { value: u64 },
+    U64 {
+        value: u64,
+    },
     HostSessionOpened,
-    Elaboration { outcome: LeanWorkerElabResult },
-    KernelCheck { outcome: LeanWorkerKernelResult },
-    Strings { values: Vec<String> },
-    StreamComplete { summary: StreamSummary },
-    StreamExportFailed { status_byte: u8 },
-    StreamCallbackFailed { status_byte: u8, description: String },
-    StreamRowMalformed { message: String },
-    CapabilityMetadata { metadata: LeanWorkerCapabilityMetadata },
-    CapabilityDoctor { report: LeanWorkerDoctorReport },
-    CapabilityMetadataMalformed { message: String },
-    CapabilityDoctorMalformed { message: String },
-    JsonCommand { response_json: String },
-    MetaExpr { result: LeanWorkerMetaResult<String> },
-    MetaBool { result: LeanWorkerMetaResult<bool> },
-    Declaration { row: Option<LeanWorkerDeclarationRow> },
-    DeclarationBulk { rows: Vec<LeanWorkerDeclarationRow> },
-    ProcessFile { outcome: LeanWorkerProcessFileOutcome },
-    ProcessModule { outcome: LeanWorkerProcessModuleOutcome },
-    RowsComplete { count: u64 },
+    Elaboration {
+        outcome: LeanWorkerElabResult,
+    },
+    KernelCheck {
+        outcome: LeanWorkerKernelResult,
+    },
+    Strings {
+        values: Vec<String>,
+    },
+    StreamComplete {
+        summary: StreamSummary,
+    },
+    StreamExportFailed {
+        status_byte: u8,
+    },
+    StreamCallbackFailed {
+        status_byte: u8,
+        description: String,
+    },
+    StreamRowMalformed {
+        message: String,
+    },
+    CapabilityMetadata {
+        metadata: LeanWorkerCapabilityMetadata,
+    },
+    CapabilityDoctor {
+        report: LeanWorkerDoctorReport,
+    },
+    CapabilityMetadataMalformed {
+        message: String,
+    },
+    CapabilityDoctorMalformed {
+        message: String,
+    },
+    JsonCommand {
+        response_json: String,
+    },
+    MetaExpr {
+        result: LeanWorkerMetaResult<LeanWorkerRendered>,
+    },
+    MetaBool {
+        result: LeanWorkerMetaResult<bool>,
+    },
+    Declaration {
+        row: Option<LeanWorkerDeclarationRow>,
+    },
+    DeclarationBulk {
+        rows: Vec<LeanWorkerDeclarationRow>,
+    },
+    ProcessFile {
+        outcome: LeanWorkerProcessFileOutcome,
+    },
+    ProcessModule {
+        outcome: LeanWorkerProcessModuleOutcome,
+    },
+    RowsComplete {
+        count: u64,
+    },
     Terminating,
-    Error { code: String, message: String },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

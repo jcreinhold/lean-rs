@@ -153,6 +153,27 @@ fn elaboration_and_kernel_adapter_match_status_shape() {
     assert!(!bad.success);
     assert!(!bad.diagnostics.is_empty(), "failed elaboration carries diagnostics");
     assert_eq!(checked.status, LeanWorkerKernelStatus::Checked);
+    let summary = checked
+        .summary
+        .as_ref()
+        .expect("Checked kernel result carries a proof summary");
+    assert_eq!(summary.declaration_name, "lean_rs_worker_checked");
+    assert_eq!(summary.kind, "theorem");
+    assert!(
+        summary.type_signature.contains("Nat") && summary.type_signature.contains("Eq"),
+        "summary type_signature should mention the underlying Nat equality, got {:?}",
+        summary.type_signature
+    );
+
+    let rejected = session
+        .kernel_check("theorem lean_rs_worker_rejected : 1 + 1 = 3 := rfl", &opts, None, None)
+        .expect("worker kernel check dispatch succeeds on rejected source");
+    assert_eq!(rejected.status, LeanWorkerKernelStatus::Rejected);
+    assert!(
+        rejected.summary.is_none(),
+        "Rejected kernel result must not carry a summary, got {:?}",
+        rejected.summary
+    );
 
     let host = direct_host();
     let caps = host

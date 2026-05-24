@@ -9,6 +9,28 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-05-24
+
+### `lean-rs-worker` 0.1.7
+
+Two information-loss regressions reported by the first downstream consumer migrating from in-process `LeanSession` to
+the worker IPC boundary. Both restore behaviour that the host already implements; the worker now transports it.
+
+- `LeanWorkerKernelResult` now carries `summary: Option<LeanWorkerKernelSummary>`, populated from
+  `LeanSession::summarize_evidence` on the `Checked` arm. The `Some iff Checked` invariant is part of the documented
+  contract. Restores the proof-summary surface in-process callers relied on before the worker boundary.
+- `LeanWorkerSession::infer_type` and `whnf` now attempt notation-aware rendering via the optional `meta_pp_expr` shim
+  (`Lean.PrettyPrinter.ppExpr`) and fall back to `Expr.toString` when the shim is absent or reports `Unsupported`. Both
+  return `LeanWorkerMetaResult<LeanWorkerRendered>` so callers can see which path was taken via the `rendering`
+  (`LeanWorkerRendering::Pretty | Raw`) field. Heartbeat budget is shared with the primary meta call — a slow
+  pretty-print on a deeply nested term can in principle starve the meta op (acceptable in practice; `pp_expr` is cheap
+  relative to inference).
+- A failed `pp_expr` pass (`Failed` / `TimeoutOrHeartbeat`) propagates as the meta call's failure rather than falling
+  back to raw. Matches the in-process behaviour the downstream MCP tool already implements.
+
+Pre-1.0; the changed return types on `infer_type` / `whnf` and the added field on `LeanWorkerKernelResult` break 0.1.6
+callers at the call-site. No other crate in the workspace changes.
+
 ### Docs
 
 - Removed the stale post-publish step in `docs/release.md` referencing nonexistent `lean-rs-downstream` and

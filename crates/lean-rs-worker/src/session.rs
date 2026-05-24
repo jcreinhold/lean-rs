@@ -23,7 +23,7 @@ use crate::supervisor::{LeanWorker, LeanWorkerError};
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
 };
 
 /// Configuration for opening one host session inside a worker child.
@@ -489,9 +489,17 @@ impl LeanWorkerSession<'_> {
 
     /// Elaborate `source` and infer the resulting expression's type.
     ///
-    /// The rendered type uses `Expr.toString` (the cheap, deterministic
-    /// projection backed by the host's `lean_rs_host_env_expr_to_string_raw`
-    /// shim) — the same shape `LeanWorkerProcessedFile` term nodes use.
+    /// The child attempts notation-aware rendering via the optional
+    /// `meta_pp_expr` shim (`Lean.PrettyPrinter.ppExpr`) and falls back to
+    /// `Expr.toString` when the shim is absent or reports `Unsupported`. The
+    /// returned [`LeanWorkerRendered::rendering`] reports which path produced
+    /// the value.
+    ///
+    /// Heartbeat budgeting: elaboration, the primary `inferType` call, and the
+    /// pretty-printing pass all share the single heartbeat budget set by
+    /// [`LeanWorkerElabOptions::heartbeat_limit`]. A deeply nested term whose
+    /// pretty-printing is slow can in principle starve the primary call;
+    /// `pp_expr` is cheap relative to type inference in practice.
     ///
     /// # Errors
     ///
@@ -506,13 +514,16 @@ impl LeanWorkerSession<'_> {
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+    ) -> Result<LeanWorkerMetaResult<LeanWorkerRendered>, LeanWorkerError> {
         self.with_session(|worker| worker.worker_infer_type(source, options, cancellation, progress))
     }
 
     /// Elaborate `source` and reduce it to weak head normal form.
     ///
-    /// The rendered result uses `Expr.toString`, matching [`Self::infer_type`].
+    /// Rendering and heartbeat-budgeting semantics match [`Self::infer_type`]:
+    /// the child attempts notation-aware rendering via `meta_pp_expr` and
+    /// falls back to `Expr.toString` when the shim is unavailable, and the
+    /// primary `whnf` call shares the heartbeat budget with the pretty-printer.
     ///
     /// # Errors
     ///
@@ -525,7 +536,7 @@ impl LeanWorkerSession<'_> {
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+    ) -> Result<LeanWorkerMetaResult<LeanWorkerRendered>, LeanWorkerError> {
         self.with_session(|worker| worker.worker_whnf(source, options, cancellation, progress))
     }
 

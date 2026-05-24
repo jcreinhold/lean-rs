@@ -128,8 +128,8 @@ cargo run
 built dylib path at compile time. `load_capabilities` also builds and opens the crate-bundled `LeanRsInterop` and
 `LeanRsHostShims` dylibs, sharing one Lean runtime; per-module `initialize_*` functions are idempotent.
 
-Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed
-`LeanProgressSink` for live in-thread progress events. Passing `None` keeps the no-progress fast path.
+Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed `LeanProgressSink`
+for live in-thread progress events. Passing `None` keeps the no-progress fast path.
 
 ## Capability contract
 
