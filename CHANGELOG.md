@@ -9,23 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
-### `lean-rs-worker` — internal
-
-Collapsed two duplicated dispatch policies inside `lean-rs-worker`. The session-invalidation rule (Cancelled / Timeout →
-`LeanWorkerSession::open = false`) now lives in a single private `LeanWorkerSession::with_session` helper instead of
-being inlined in 16 typed methods. The Worker IPC round-trip (cancel-check → send → record → read → variant-extract) now
-lives in a single private `LeanWorker::round_trip` helper instead of being inlined in 14 `worker_*` methods with a
-22-variant exhaustive wildcard each. The new helpers narrow each typed method to a single delegating call and centralize
-the design decision so future invalidation-policy or dispatch-shape changes are one-site edits. No public API change; no
-behaviour change.
-
 ## [0.1.6] — 2026-05-24
 
 ### `lean-rs-worker` 0.1.6
 
 This release adds eight typed methods on `LeanWorkerSession` for the host meta and projection surface, collapses the
-worker's public-type layering from three representations per shape to one, and streams `list_declarations_strings` so
-unbounded Lean environments enumerate without hitting the protocol frame cap.
+worker's public-type layering from three representations per shape to one, streams `list_declarations_strings` so
+unbounded Lean environments enumerate without hitting the protocol frame cap, and centralizes the worker's
+session-invalidation and IPC round-trip dispatch policies into two private helpers so each typed method delegates to a
+single source of truth.
 
 Pre-1.0; the type-surface change is a breaking change against 0.1.5 callers. There are no external consumers of this
 crate, so the diff is deliberate.
@@ -75,6 +67,19 @@ fits well under that) instead of per-response; total environment size is unbound
 
 The 0.1.6 work added a doc warning about the per-response cap as a known leak; that warning is gone in this release.
 `tests/typed_session.rs` exercises the streaming path against the full Lean stdlib through the fixture environment.
+
+#### Centralized session-invalidation and IPC round-trip policies
+
+Two repeated dispatch policies inside `lean-rs-worker` now live in one place each. The session-invalidation rule
+(`Cancelled` / `Timeout` → `LeanWorkerSession::open = false`) is captured in a single private
+`LeanWorkerSession::with_session` helper; the 16 typed `LeanWorkerSession` methods (`elaborate`, `kernel_check`,
+`infer_type`, `whnf`, `is_def_eq`, `describe`, `list_declarations_strings`, `describe_bulk`, `process_file`,
+`process_module`, `run_data_stream`, `run_data_stream_raw`, `capability_metadata`, `capability_doctor`,
+`run_json_command`, `run_streaming_command`) each delegate through it instead of inlining the policy. The Worker IPC
+round-trip (cancel-check → send → record → read → variant-extract) is captured in a single private
+`LeanWorker::round_trip` helper; the 14 simple `worker_*` methods on `LeanWorker` each delegate through it with a small
+extract closure, replacing what was a 22-variant exhaustive `Response` wildcard arm per method with a uniform
+`unexpected_response` branch. No public API change; no behaviour change.
 
 ### Workspace-wide: enums and structs are exhaustive
 
