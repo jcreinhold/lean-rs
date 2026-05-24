@@ -9,6 +9,7 @@
 build/
 .lake/
 *.olean
+*.bak
 
 # Editor / IDE
 .idea/
