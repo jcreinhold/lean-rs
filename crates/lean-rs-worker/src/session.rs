@@ -495,11 +495,15 @@ impl LeanWorkerSession<'_> {
     /// returned [`LeanWorkerRendered::rendering`] reports which path produced
     /// the value.
     ///
-    /// Heartbeat budgeting: elaboration, the primary `inferType` call, and the
-    /// pretty-printing pass all share the single heartbeat budget set by
-    /// [`LeanWorkerElabOptions::heartbeat_limit`]. A deeply nested term whose
-    /// pretty-printing is slow can in principle starve the primary call;
-    /// `pp_expr` is cheap relative to type inference in practice.
+    /// Heartbeat budgeting: each `MetaM` pass (the primary `inferType` call
+    /// and the pretty-printer) runs under the same
+    /// [`LeanWorkerElabOptions::heartbeat_limit`] value, independently
+    /// bounded — the pretty-printer does not consume budget left over from
+    /// the primary call. A `Failed` or `TimeoutOrHeartbeat` reported by the
+    /// pretty-printer surfaces as the *whole* call's failure (matching
+    /// in-process behaviour); there is no path that returns the inferred
+    /// expression alongside a pretty-printer failure. Only `Unsupported`
+    /// from `pp_expr` triggers the raw fallback.
     ///
     /// # Errors
     ///
@@ -522,8 +526,10 @@ impl LeanWorkerSession<'_> {
     ///
     /// Rendering and heartbeat-budgeting semantics match [`Self::infer_type`]:
     /// the child attempts notation-aware rendering via `meta_pp_expr` and
-    /// falls back to `Expr.toString` when the shim is unavailable, and the
-    /// primary `whnf` call shares the heartbeat budget with the pretty-printer.
+    /// falls back to `Expr.toString` when the shim reports `Unsupported`.
+    /// Each `MetaM` pass is independently bounded by `heartbeat_limit`; a
+    /// `Failed` or `TimeoutOrHeartbeat` from the pretty-printer surfaces as
+    /// the whole call's failure.
     ///
     /// # Errors
     ///

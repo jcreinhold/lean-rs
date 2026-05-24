@@ -27,6 +27,10 @@ the worker IPC boundary. Both restore behaviour that the host already implements
   relative to inference).
 - A failed `pp_expr` pass (`Failed` / `TimeoutOrHeartbeat`) propagates as the meta call's failure rather than falling
   back to raw. Matches the in-process behaviour the downstream MCP tool already implements.
+- Bumped the worker IPC `PROTOCOL_VERSION` from `2` to `3`. The added `summary` field on `LeanWorkerKernelResult` and
+  the changed `MetaExpr` payload (`LeanWorkerMetaResult<LeanWorkerRendered>` instead of `<String>`) are
+  wire-incompatible with 0.1.6 — a mismatched parent/child pair now fails the handshake with a clear
+  `LeanWorkerError::Handshake` rather than a cryptic deserialize error on the first request.
 
 Pre-1.0; the changed return types on `infer_type` / `whnf` and the added field on `LeanWorkerKernelResult` break 0.1.6
 callers at the call-site. No other crate in the workspace changes.
