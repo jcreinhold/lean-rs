@@ -152,7 +152,7 @@ Not in scope; will not be added.
 
 ## Rejected alternatives
 
-Each was considered before the adopted shape. Recorded so later prompts can recognize a regression toward one of them.
+Each was considered before the adopted shape. Recorded so reviewers can recognize a regression toward one of them.
 
 - **A safe wrapper over all of `lean.h`.** Surface is large and shallow. Every ABI decision (`lean_obj_arg` direction,
   RC obligation, initializer ordering, ctor field layout) ends up in the public type system, so the caller still has to

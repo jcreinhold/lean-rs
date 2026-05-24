@@ -48,8 +48,7 @@ needed.
 ## Specialised sub-module surfaces
 
 The crate root names mandatory session capabilities and entry points only. Sub-module paths host **specialised or
-optional** capabilities so the layer difference is visible at the import site (Ousterhout ch. 7—different layer,
-different abstraction).
+optional** capabilities so the layer difference is visible at the import site: different layer, different abstraction.
 
 - **`lean_rs_host::meta`**—the bounded `MetaM` capability. Five of the thirty-four `SessionSymbols` (`meta_infer_type`,
   `meta_whnf`, `meta_heartbeat_burn`, `meta_is_def_eq`, `meta_pp_expr`) are optional, and `run_meta` is the only call
@@ -235,12 +234,11 @@ its own host-defined types (`LeanEvidence`, etc.); external crates are blocked b
 ## Rejected approaches
 
 - **Re-export every `pub` item from every internal module at the crate root.** Path-shortening dressed up as curation;
-  gives mandatory and specialised items equal status. Violates Ousterhout ch. 17 (consistency requires dissimilar things
-  to be done differently).
-- **One `LeanHost` god-type with every operation as a method.** The canonical "complect" case (Ousterhout ch. 4 +
-  Hickey): runtime, modules, sessions, semantic handles, and error policy braided into one mechanism. Kills the `'lean`
-  cascade—`LeanExpr<'lean>` cannot outlive its session, but a god type would have to be `'static` to host every
-  method—and forces caller code to thread one large `&mut` through every layer.
+  gives mandatory and specialised items equal status. Consistency requires dissimilar things to be done differently.
+- **One `LeanHost` god-type with every operation as a method.** Braids runtime, modules, sessions, semantic handles, and
+  error policy into one mechanism. Kills the `'lean` cascade — `LeanExpr<'lean>` cannot outlive its session, but a god
+  type would have to be `'static` to host every method — and forces caller code to thread one large `&mut` through every
+  layer.
 - **Hide `lean-rs-host`'s internal modules behind a top-level façade.** Over-encapsulates for hypothetical safety wins.
   Advanced users already have a clean escape hatch via `lean-rs-sys`, but that drops them to raw FFI. Keeping
   `lean-rs::module` visible at module paths preserves the middle tier: typed handles, no raw `lean_*` symbols.

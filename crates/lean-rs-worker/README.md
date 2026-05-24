@@ -18,8 +18,7 @@ The runner is the normal downstream shape: `LeanWorkerCapabilityBuilder` manages
 and rows, diagnostics arrive on a separate sink, and explicit cycling resets process-global memory. The full recipe is
 [`docs/recipes/worker-capability-runner.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/worker-capability-runner.md).
 
-This in-tree example uses the workspace worker child. It is useful for learning the API and for testing `lean-rs-worker`
-itself.
+The example uses the workspace worker child — adapt it as a template for the production packaging path below.
 
 ## Ship your own worker app
 

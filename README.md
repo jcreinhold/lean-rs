@@ -32,8 +32,7 @@ That path builds the Lean shared library in `build.rs`, opens it from Rust, and 
 app-owned worker child. The full recipe is
 [`docs/recipes/ship-crate-with-lean.md`](docs/recipes/ship-crate-with-lean.md).
 
-The in-tree host tour is a workspace orientation example, not the canonical shipped-crate layout. Build the fixture
-once, then run the tour:
+The in-tree host tour is a workspace orientation example. Build the fixture once, then run it:
 
 ```sh
 cd fixtures/lean && lake build && cd -
@@ -73,8 +72,8 @@ The minimum same-process setup is five pieces: a `Cargo.toml`, a `build.rs`, a L
 a Rust `main.rs`. The example calls a user-authored `@[export]` Lean function from Rust without depending on
 `lean-rs-host`.
 
-All five crates are published on crates.io at the same workspace version (currently 0.1.2). The `Cargo.toml` snippets in
-this repo use `"0.1"` so they pick up the latest 0.1.x.
+All five crates are published on crates.io at the same workspace version. The `Cargo.toml` snippets in this repo use
+`"0.1"` so they pick up the latest 0.1.x.
 
 **`Cargo.toml`**: `lean-rs` for the API; `lean-toolchain` is a build-dep that emits link directives and the runtime
 rpath:

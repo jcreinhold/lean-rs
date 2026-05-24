@@ -7,15 +7,14 @@ answer different questions and live behind different Lean shim exports, but shar
 
 | Method | Lean shim | When to use |
 | --- | --- | --- |
-| `LeanSession::process_with_info_tree` | `lean_rs_host_process_with_info_tree` | Body-only snippet, no header. The shim runs `IO.processCommands` from byte 0 with an empty `ModuleParserState`. Right for inline scratch buffers, prompt-05 fixture tests, and tactic-level snippets. |
-| `LeanSession::process_module_with_info_tree` | `lean_rs_host_process_module_with_info_tree` | Full Lean source file (header + body). The shim calls `Lean.Parser.parseHeader` first and resumes `IO.processCommands` from the parser state the header parser produced. Positions in the returned projection land in the original file's line/column system. Right for real-file inputs from `lean-host-mcp` and downstream position tools. |
+| `LeanSession::process_with_info_tree` | `lean_rs_host_process_with_info_tree` | Body-only snippet, no header. The shim runs `IO.processCommands` from byte 0 with an empty `ModuleParserState`. Right for inline scratch buffers and tactic-level snippets. |
+| `LeanSession::process_module_with_info_tree` | `lean_rs_host_process_module_with_info_tree` | Full Lean source file (header + body). The shim calls `Lean.Parser.parseHeader` first and resumes `IO.processCommands` from the parser state the header parser produced. Positions in the returned projection land in the original file's line/column system. Right for real-file inputs and downstream position tools. |
 
-The four downstream queries (`goal_at_position`, `type_at_position`, `references_of_name`, `term_at`) are unblocked by
-either method — they consume the shared `ProcessedFile`. Per POSD ch 6.1, both interfaces stay general-purpose (source,
-options, cancellation → outcome); the projection's *functionality* serves the cursor-query set but its interface doesn't
-encode any of them. Per POSD ch 9 "better apart", the two methods are split because they answer different questions
-(snippet vs. file), not because they share a flag — folding into one shim with a `mode` parameter would push the choice
-into every caller.
+Both methods feed the same downstream cursor queries (`goal_at_position`, `type_at_position`, `references_of_name`,
+`term_at`), which consume `ProcessedFile` and don't care which method produced it. The split is by question, not by
+flag: a `mode` parameter on a single shim would push the snippet-vs-file choice into every caller. Both interfaces stay
+general-purpose (source, options, cancellation → outcome) so the projection serves the cursor-query set without
+encoding any of those queries in its signature.
 
 ## What the projection carries
 
@@ -41,11 +40,10 @@ projecting to strings + ranges is what keeps the cross-thread guarantee. Callers
 specific expression use the optional `lean_rs_host::meta::pp_expr` service against the captured expression on the Lean
 side, not the projection.
 
-The shim is also explicitly **not** incremental in v1. Every call re-runs `Lean.Elab.IO.processCommands` against the
-supplied source — the same path Lean's LSP server uses for each `didChange`. Incremental reuse is a v0.3 optimisation
-when there is profile data to justify it. Per-command progress reporting is similarly deferred: every prompt-06 cursor
-query operates on one buffer per call, so adding a `_progress` sibling shim would double the symbol contract for a
-hypothetical use case.
+The shim is not incremental. Every call re-runs `Lean.Elab.IO.processCommands` against the supplied source — the same
+path Lean's LSP server uses for each `didChange`. Incremental reuse is a future optimisation, gated on profile data.
+Per-command progress reporting is similarly out of scope: each cursor query operates on one buffer per call, so a
+`_progress` sibling shim would double the symbol contract without a concrete use case.
 
 ## Outcome shape
 
