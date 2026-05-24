@@ -120,9 +120,6 @@ assertion prevents re-tagging against the wrong workspace version.
 - Verify the release on crates.io: `cargo search lean-rs` (all five crates should appear with the new version).
 - Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other four)
   within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
-- Open PRs against the downstream proof repos (`lean-rs-downstream`, `lean-rs-host-downstream`) to bump crate
-  dependencies. Shim sources are bundled with `lean-rs` and `lean-rs-host`, so downstream Lake files should not pin a
-  separate shim tag.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 
 ## Fallback—local publish when CI is unavailable

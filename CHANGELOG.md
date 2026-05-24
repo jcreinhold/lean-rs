@@ -9,6 +9,11 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Docs
+
+- Removed the stale post-publish step in `docs/release.md` referencing nonexistent `lean-rs-downstream` and
+  `lean-rs-host-downstream` proof repos. No such repositories exist under the project; the line was aspirational.
+
 ## [0.1.6] — 2026-05-24
 
 ### `lean-rs-worker` 0.1.6
