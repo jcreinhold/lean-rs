@@ -26,7 +26,6 @@ use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStat
 /// restart-policy knob as key material; memory-aware scheduling and richer
 /// policy admission are not part of the session-key contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-#[non_exhaustive]
 pub enum LeanWorkerRestartPolicyClass {
     Default,
     Custom,
@@ -79,7 +78,7 @@ impl LeanWorkerSessionKey {
         mut self,
         export: impl Into<String>,
         request: Value,
-        expected: Option<crate::session::LeanWorkerCapabilityMetadata>,
+        expected: Option<crate::types::LeanWorkerCapabilityMetadata>,
     ) -> Self {
         self.metadata_expectation = Some(LeanWorkerMetadataExpectationKey {
             export: export.into(),
@@ -137,7 +136,7 @@ impl LeanWorkerSessionKey {
 struct LeanWorkerMetadataExpectationKey {
     export: String,
     request: Value,
-    expected: Option<crate::session::LeanWorkerCapabilityMetadata>,
+    expected: Option<crate::types::LeanWorkerCapabilityMetadata>,
 }
 
 /// Configuration for a local `LeanWorkerPool`.

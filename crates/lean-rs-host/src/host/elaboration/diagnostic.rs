@@ -35,11 +35,7 @@ use lean_rs::error::{LeanResult, bound_message};
 
 /// Severity classification attached to each [`LeanDiagnostic`]. Mirrors
 /// Lean's `MessageSeverity` constructors at 4.29.1.
-///
-/// `#[non_exhaustive]` so future Lean refinements can extend the
-/// taxonomy without breaking exhaustive matches in downstream code.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum LeanSeverity {
     /// Informational diagnostic; the operation may still have succeeded.
     Info,

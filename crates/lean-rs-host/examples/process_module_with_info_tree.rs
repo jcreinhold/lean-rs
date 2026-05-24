@@ -84,10 +84,6 @@ fn run() -> Result<ExitCode, LeanError> {
             eprintln!("capability dylib does not export `lean_rs_host_process_module_with_info_tree`");
             Ok(ExitCode::from(2))
         }
-        other => {
-            eprintln!("unexpected non-exhaustive outcome: {other:?}");
-            Ok(ExitCode::from(3))
-        }
     }
 }
 

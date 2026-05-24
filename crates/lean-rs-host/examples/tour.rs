@@ -114,7 +114,6 @@ fn main() {
         LeanKernelOutcome::Unavailable(failure)
         | LeanKernelOutcome::Rejected(failure)
         | LeanKernelOutcome::Unsupported(failure) => panic!("kernel_check did not check: {failure:?}"),
-        _ => panic!("kernel_check returned an unexpected non-exhaustive variant"),
     }
     report("kernel_check_1", t.elapsed().as_micros());
 
@@ -153,7 +152,6 @@ fn main() {
         | LeanMetaResponse::Unsupported(failure) => {
             panic!("Meta.whnf on Nat.zero's type expected Ok, got non-Ok: {failure:?}")
         }
-        _ => panic!("Meta.whnf returned an unexpected non-exhaustive variant"),
     }
     report("meta_whnf", t.elapsed().as_micros());
 }

@@ -8,16 +8,27 @@ use lean_rs::module::LeanIo;
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
+use lean_rs_host::host::process::{
+    CommandInfoNode, NameRefNode, ProcessFileOutcome, ProcessModuleOutcome, ProcessedFile, TacticInfoNode, TermInfoNode,
+};
+use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
-    LeanCapabilities, LeanElabFailure, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
+    LeanCapabilities, LeanDeclarationFilter, LeanElabFailure, LeanElabOptions, LeanHost, LeanKernelOutcome,
+    LeanSession, LeanSeverity, LeanSourceRange,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use crate::protocol::{
-    DataRowEmitter, Diagnostic, Message, ProgressTick, ProtocolError, Request, Response, StreamSummary,
-    WorkerCapabilityMetadata, WorkerDiagnostic, WorkerDoctorReport, WorkerElabOptions, WorkerElabOutcome,
-    WorkerKernelOutcome, WorkerKernelStatus, read_frame, write_frame,
+    DataRowEmitter, Diagnostic, Message, ProgressTick, ProtocolError, Request, Response, StreamSummary, read_frame,
+    write_frame,
+};
+use crate::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow,
+    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerProcessedFile,
+    LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
 };
 
 #[derive(Clone)]
@@ -309,6 +320,91 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 writer.write(Message::Response(response))?;
             }
+            Request::InferType { source, options } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.infer_type(&source, &options) {
+                        Ok(result) => Response::MetaExpr { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::Whnf { source, options } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.whnf(&source, &options) {
+                        Ok(result) => Response::MetaExpr { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::IsDefEq {
+                lhs,
+                rhs,
+                transparency,
+                options,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.is_def_eq(&lhs, &rhs, transparency, &options) {
+                        Ok(result) => Response::MetaBool { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::Describe { name } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.describe(&name) {
+                        Ok(row) => Response::Declaration { row },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::ListDeclarationsStrings { filter, progress } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.list_declarations_strings(filter, progress, &writer) {
+                        Ok(count) => Response::RowsComplete { count },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::DescribeBulk { names, progress } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.describe_bulk(&names, progress, &writer) {
+                        Ok(rows) => Response::DeclarationBulk { rows },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::ProcessFile { source, options } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.process_file(&source, &options) {
+                        Ok(outcome) => Response::ProcessFile { outcome },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
+            Request::ProcessModule { source, options } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.process_module(&source, &options) {
+                        Ok(outcome) => Response::ProcessModule { outcome },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                writer.write(Message::Response(response))?;
+            }
             Request::EmitTestRows { streams } => {
                 let count = emit_test_rows(&writer, &streams)?;
                 writer.write(Message::Response(Response::RowsComplete { count }))?;
@@ -390,11 +486,11 @@ impl HostSessionState {
         })
     }
 
-    fn elaborate(&mut self, source: &str, options: &WorkerElabOptions) -> LeanResult<WorkerElabOutcome> {
+    fn elaborate(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerElabResult> {
         let options = options.to_host_options();
         let outcome = self.session.elaborate(source, None, &options, None)?;
         Ok(match outcome {
-            Ok(_expr) => WorkerElabOutcome {
+            Ok(_expr) => LeanWorkerElabResult {
                 success: true,
                 diagnostics: Vec::new(),
                 truncated: false,
@@ -406,10 +502,10 @@ impl HostSessionState {
     fn kernel_check(
         &mut self,
         source: &str,
-        options: &WorkerElabOptions,
+        options: &LeanWorkerElabOptions,
         progress: bool,
         writer: &ProtocolWriter,
-    ) -> LeanResult<WorkerKernelOutcome> {
+    ) -> LeanResult<LeanWorkerKernelResult> {
         if progress {
             emit_progress(writer, "kernel_check", 0, Some(1));
         }
@@ -419,23 +515,18 @@ impl HostSessionState {
             emit_progress(writer, "kernel_check", 1, Some(1));
         }
         Ok(match outcome {
-            LeanKernelOutcome::Checked(_) => WorkerKernelOutcome {
-                status: WorkerKernelStatus::Checked,
+            LeanKernelOutcome::Checked(_) => LeanWorkerKernelResult {
+                status: LeanWorkerKernelStatus::Checked,
                 diagnostics: Vec::new(),
                 truncated: false,
             },
-            LeanKernelOutcome::Rejected(failure) => kernel_failure_outcome(WorkerKernelStatus::Rejected, &failure),
+            LeanKernelOutcome::Rejected(failure) => kernel_failure_outcome(LeanWorkerKernelStatus::Rejected, &failure),
             LeanKernelOutcome::Unavailable(failure) => {
-                kernel_failure_outcome(WorkerKernelStatus::Unavailable, &failure)
+                kernel_failure_outcome(LeanWorkerKernelStatus::Unavailable, &failure)
             }
             LeanKernelOutcome::Unsupported(failure) => {
-                kernel_failure_outcome(WorkerKernelStatus::Unsupported, &failure)
+                kernel_failure_outcome(LeanWorkerKernelStatus::Unsupported, &failure)
             }
-            _ => WorkerKernelOutcome {
-                status: WorkerKernelStatus::Unsupported,
-                diagnostics: Vec::new(),
-                truncated: false,
-            },
         })
     }
 
@@ -622,7 +713,7 @@ impl HostSessionState {
         &mut self,
         export: &str,
         request_json: &str,
-    ) -> Result<WorkerCapabilityMetadata, CapabilityJsonError> {
+    ) -> Result<LeanWorkerCapabilityMetadata, CapabilityJsonError> {
         let raw = self
             .session
             .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
@@ -634,7 +725,7 @@ impl HostSessionState {
         &mut self,
         export: &str,
         request_json: &str,
-    ) -> Result<WorkerDoctorReport, CapabilityJsonError> {
+    ) -> Result<LeanWorkerDoctorReport, CapabilityJsonError> {
         let raw = self
             .session
             .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
@@ -645,6 +736,218 @@ impl HostSessionState {
     fn json_command(&mut self, export: &str, request_json: &str) -> LeanResult<String> {
         self.session
             .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
+    }
+
+    fn infer_type(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerMetaResult<String>> {
+        let elab_options = options.to_host_options();
+        let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
+        let expr = match elab_outcome {
+            Ok(expr) => expr,
+            Err(failure) => return Ok(meta_failure_from_elab(&failure)),
+        };
+        let meta_options = options.to_host_meta_options(LeanMetaTransparency::Default);
+        let response = self.session.run_meta(&meta::infer_type(), expr, &meta_options, None)?;
+        meta_render_expr(&mut self.session, response)
+    }
+
+    fn whnf(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerMetaResult<String>> {
+        let elab_options = options.to_host_options();
+        let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
+        let expr = match elab_outcome {
+            Ok(expr) => expr,
+            Err(failure) => return Ok(meta_failure_from_elab(&failure)),
+        };
+        let meta_options = options.to_host_meta_options(LeanMetaTransparency::Default);
+        let response = self.session.run_meta(&meta::whnf(), expr, &meta_options, None)?;
+        meta_render_expr(&mut self.session, response)
+    }
+
+    fn is_def_eq(
+        &mut self,
+        lhs: &str,
+        rhs: &str,
+        transparency: LeanWorkerMetaTransparency,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerMetaResult<bool>> {
+        let elab_options = options.to_host_options();
+        let lhs_outcome = self.session.elaborate(lhs, None, &elab_options, None)?;
+        let lhs_expr = match lhs_outcome {
+            Ok(expr) => expr,
+            Err(failure) => return Ok(meta_failure_from_elab(&failure)),
+        };
+        let rhs_outcome = self.session.elaborate(rhs, None, &elab_options, None)?;
+        let rhs_expr = match rhs_outcome {
+            Ok(expr) => expr,
+            Err(failure) => return Ok(meta_failure_from_elab(&failure)),
+        };
+        let transparency_host = transparency.into();
+        let meta_options = options.to_host_meta_options(transparency_host);
+        let response = self.session.run_meta(
+            &meta::is_def_eq(),
+            (lhs_expr, rhs_expr, transparency_host),
+            &meta_options,
+            None,
+        )?;
+        match response {
+            LeanMetaResponse::Ok(value) => Ok(LeanWorkerMetaResult::Ok { value }),
+            LeanMetaResponse::Failed(failure) => Ok(LeanWorkerMetaResult::Failed {
+                failure: elab_failure_wire(&failure),
+            }),
+            LeanMetaResponse::TimeoutOrHeartbeat(failure) => Ok(LeanWorkerMetaResult::TimeoutOrHeartbeat {
+                failure: elab_failure_wire(&failure),
+            }),
+            LeanMetaResponse::Unsupported(failure) => Ok(LeanWorkerMetaResult::Unsupported {
+                failure: elab_failure_wire(&failure),
+            }),
+        }
+    }
+
+    fn describe(&mut self, name: &str) -> LeanResult<Option<LeanWorkerDeclarationRow>> {
+        let kind = self.session.declaration_kind(name, None)?;
+        if kind == "missing" {
+            return Ok(None);
+        }
+        let type_signature = match self.session.declaration_type(name, None)? {
+            Some(expr) => Some(self.session.expr_to_string_raw(&expr, None)?),
+            None => None,
+        };
+        let source = self
+            .session
+            .declaration_source_range(name, None)?
+            .map(source_range_wire);
+        Ok(Some(LeanWorkerDeclarationRow {
+            name: name.to_owned(),
+            kind,
+            type_signature,
+            source,
+        }))
+    }
+
+    fn list_declarations_strings(
+        &mut self,
+        filter: LeanWorkerDeclarationFilter,
+        progress: bool,
+        writer: &ProtocolWriter,
+    ) -> LeanResult<u64> {
+        let host_filter = LeanDeclarationFilter {
+            include_private: filter.include_private,
+            include_generated: filter.include_generated,
+            include_internal: filter.include_internal,
+        };
+        if progress {
+            emit_progress(writer, "list_declarations_strings", 0, None);
+        }
+        let names = self.session.list_declarations_strings(&host_filter, None, None)?;
+        let total = u64::try_from(names.len()).unwrap_or(u64::MAX);
+        let mut emitter = DataRowEmitter::default();
+        for name in names {
+            let payload = serde_json::value::to_raw_value(&name)
+                .map_err(|err| host_internal(format!("list_declarations_strings row payload encode failed: {err}")))?;
+            let row = emitter.next("rows", payload);
+            writer
+                .write(Message::DataRow(row))
+                .map_err(|err| host_internal(format!("list_declarations_strings row frame write failed: {err}")))?;
+        }
+        if progress {
+            emit_progress(writer, "list_declarations_strings", total, Some(total));
+        }
+        Ok(emitter.count())
+    }
+
+    fn describe_bulk(
+        &mut self,
+        names: &[String],
+        progress: bool,
+        writer: &ProtocolWriter,
+    ) -> LeanResult<Vec<LeanWorkerDeclarationRow>> {
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let kinds = self.session.declaration_kind_bulk(&refs, None, None)?;
+        let types = self.session.declaration_type_bulk(&refs, None, None)?;
+        let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
+        let mut rows = Vec::with_capacity(names.len());
+        for (idx, name) in names.iter().enumerate() {
+            let kind = kinds.get(idx).cloned().unwrap_or_else(|| "missing".to_owned());
+            let row = if kind == "missing" {
+                LeanWorkerDeclarationRow {
+                    name: name.clone(),
+                    kind,
+                    type_signature: None,
+                    source: None,
+                }
+            } else {
+                let type_signature = match types.get(idx).and_then(Option::as_ref) {
+                    Some(expr) => Some(self.session.expr_to_string_raw(expr, None)?),
+                    None => None,
+                };
+                let source = self
+                    .session
+                    .declaration_source_range(name, None)?
+                    .map(source_range_wire);
+                LeanWorkerDeclarationRow {
+                    name: name.clone(),
+                    kind,
+                    type_signature,
+                    source,
+                }
+            };
+            rows.push(row);
+            if progress {
+                emit_progress(
+                    writer,
+                    "describe_bulk",
+                    u64::try_from(idx.saturating_add(1)).unwrap_or(u64::MAX),
+                    total,
+                );
+            }
+        }
+        Ok(rows)
+    }
+
+    fn process_file(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerProcessFileOutcome> {
+        let options = options.to_host_options();
+        Ok(match self.session.process_with_info_tree(source, &options, None)? {
+            ProcessFileOutcome::Processed(file) => LeanWorkerProcessFileOutcome::Processed {
+                file: processed_file_wire(file),
+            },
+            ProcessFileOutcome::Unsupported => LeanWorkerProcessFileOutcome::Unsupported,
+        })
+    }
+
+    fn process_module(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerProcessModuleOutcome> {
+        let options = options.to_host_options();
+        Ok(
+            match self.session.process_module_with_info_tree(source, &options, None)? {
+                ProcessModuleOutcome::Ok { file, imports } => LeanWorkerProcessModuleOutcome::Ok {
+                    file: processed_file_wire(file),
+                    imports,
+                },
+                ProcessModuleOutcome::MissingImports { file, imports, missing } => {
+                    LeanWorkerProcessModuleOutcome::MissingImports {
+                        file: processed_file_wire(file),
+                        imports,
+                        missing,
+                    }
+                }
+                ProcessModuleOutcome::HeaderParseFailed { diagnostics } => {
+                    LeanWorkerProcessModuleOutcome::HeaderParseFailed {
+                        diagnostics: elab_failure_wire(&diagnostics),
+                    }
+                }
+                ProcessModuleOutcome::Unsupported => LeanWorkerProcessModuleOutcome::Unsupported,
+            },
+        )
     }
 }
 
@@ -794,7 +1097,7 @@ struct RowCallbackProgress {
     total: Option<u64>,
 }
 
-impl WorkerElabOptions {
+impl LeanWorkerElabOptions {
     fn to_host_options(&self) -> LeanElabOptions {
         LeanElabOptions::new()
             .namespace_context(&self.namespace_context)
@@ -802,25 +1105,141 @@ impl WorkerElabOptions {
             .heartbeat_limit(self.heartbeat_limit)
             .diagnostic_byte_limit(self.diagnostic_byte_limit)
     }
+
+    fn to_host_meta_options(&self, transparency: LeanMetaTransparency) -> LeanMetaOptions {
+        LeanMetaOptions::new()
+            .namespace_context(&self.namespace_context)
+            .heartbeat_limit(self.heartbeat_limit)
+            .diagnostic_byte_limit(self.diagnostic_byte_limit)
+            .transparency(transparency)
+    }
 }
 
-fn elab_failure_outcome(failure: &LeanElabFailure) -> WorkerElabOutcome {
-    WorkerElabOutcome {
+impl From<LeanWorkerMetaTransparency> for LeanMetaTransparency {
+    fn from(value: LeanWorkerMetaTransparency) -> Self {
+        match value {
+            LeanWorkerMetaTransparency::Default => Self::Default,
+            LeanWorkerMetaTransparency::Reducible => Self::Reducible,
+            LeanWorkerMetaTransparency::Instances => Self::Instances,
+            LeanWorkerMetaTransparency::All => Self::All,
+        }
+    }
+}
+
+fn elab_failure_wire(failure: &LeanElabFailure) -> LeanWorkerElabFailure {
+    LeanWorkerElabFailure {
+        diagnostics: diagnostics(failure),
+        truncated: failure.truncated(),
+    }
+}
+
+fn meta_failure_from_elab<T>(failure: &LeanElabFailure) -> LeanWorkerMetaResult<T> {
+    LeanWorkerMetaResult::Failed {
+        failure: elab_failure_wire(failure),
+    }
+}
+
+fn meta_render_expr(
+    session: &mut LeanSession<'static, 'static>,
+    response: LeanMetaResponse<lean_rs::LeanExpr<'static>>,
+) -> LeanResult<LeanWorkerMetaResult<String>> {
+    match response {
+        LeanMetaResponse::Ok(expr) => Ok(LeanWorkerMetaResult::Ok {
+            value: session.expr_to_string_raw(&expr, None)?,
+        }),
+        LeanMetaResponse::Failed(failure) => Ok(LeanWorkerMetaResult::Failed {
+            failure: elab_failure_wire(&failure),
+        }),
+        LeanMetaResponse::TimeoutOrHeartbeat(failure) => Ok(LeanWorkerMetaResult::TimeoutOrHeartbeat {
+            failure: elab_failure_wire(&failure),
+        }),
+        LeanMetaResponse::Unsupported(failure) => Ok(LeanWorkerMetaResult::Unsupported {
+            failure: elab_failure_wire(&failure),
+        }),
+    }
+}
+
+fn source_range_wire(range: LeanSourceRange) -> LeanWorkerSourceRange {
+    LeanWorkerSourceRange {
+        file: range.file,
+        start_line: range.start_line,
+        start_column: range.start_column,
+        end_line: range.end_line,
+        end_column: range.end_column,
+    }
+}
+
+fn command_info_wire(node: CommandInfoNode) -> LeanWorkerCommandInfo {
+    LeanWorkerCommandInfo {
+        start_line: node.start_line,
+        start_column: node.start_column,
+        end_line: node.end_line,
+        end_column: node.end_column,
+        decl_name: node.decl_name,
+    }
+}
+
+fn term_info_wire(node: TermInfoNode) -> LeanWorkerTermInfo {
+    LeanWorkerTermInfo {
+        start_line: node.start_line,
+        start_column: node.start_column,
+        end_line: node.end_line,
+        end_column: node.end_column,
+        expr_str: node.expr_str,
+        type_str: node.type_str,
+        expected_type_str: node.expected_type_str,
+    }
+}
+
+fn tactic_info_wire(node: TacticInfoNode) -> LeanWorkerTacticInfo {
+    LeanWorkerTacticInfo {
+        start_line: node.start_line,
+        start_column: node.start_column,
+        end_line: node.end_line,
+        end_column: node.end_column,
+        goals_before: node.goals_before,
+        goals_after: node.goals_after,
+    }
+}
+
+fn name_ref_wire(node: NameRefNode) -> LeanWorkerNameRef {
+    LeanWorkerNameRef {
+        start_line: node.start_line,
+        start_column: node.start_column,
+        end_line: node.end_line,
+        end_column: node.end_column,
+        name: node.name,
+        is_binder: node.is_binder,
+    }
+}
+
+fn processed_file_wire(file: ProcessedFile) -> LeanWorkerProcessedFile {
+    LeanWorkerProcessedFile {
+        commands: file.commands.into_iter().map(command_info_wire).collect(),
+        terms: file.terms.into_iter().map(term_info_wire).collect(),
+        tactics: file.tactics.into_iter().map(tactic_info_wire).collect(),
+        names: file.names.into_iter().map(name_ref_wire).collect(),
+        diagnostics: elab_failure_wire(&file.diagnostics),
+    }
+}
+
+fn elab_failure_outcome(failure: &LeanElabFailure) -> LeanWorkerElabResult {
+    LeanWorkerElabResult {
         success: false,
         diagnostics: diagnostics(failure),
         truncated: failure.truncated(),
     }
 }
 
-fn kernel_failure_outcome(status: WorkerKernelStatus, failure: &LeanElabFailure) -> WorkerKernelOutcome {
-    WorkerKernelOutcome {
+fn kernel_failure_outcome(status: LeanWorkerKernelStatus, failure: &LeanElabFailure) -> LeanWorkerKernelResult {
+    LeanWorkerKernelResult {
         status,
         diagnostics: diagnostics(failure),
         truncated: failure.truncated(),
     }
 }
 
-fn diagnostics(failure: &LeanElabFailure) -> Vec<WorkerDiagnostic> {
+fn diagnostics(failure: &LeanElabFailure) -> Vec<LeanWorkerDiagnostic> {
     failure
         .diagnostics()
         .iter()
@@ -834,12 +1253,11 @@ fn diagnostics(failure: &LeanElabFailure) -> Vec<WorkerDiagnostic> {
                         position.end_column(),
                     )
                 });
-            WorkerDiagnostic {
+            LeanWorkerDiagnostic {
                 severity: match diagnostic.severity() {
                     LeanSeverity::Info => "info",
                     LeanSeverity::Warning => "warning",
                     LeanSeverity::Error => "error",
-                    _ => "unknown",
                 }
                 .to_owned(),
                 message: diagnostic.message().to_owned(),

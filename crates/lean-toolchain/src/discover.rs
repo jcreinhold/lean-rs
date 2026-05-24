@@ -65,10 +65,6 @@ impl Default for DiscoverOptions {
 }
 
 /// Outcome of a successful discovery.
-///
-/// `#[non_exhaustive]` so additional fields can be added without breaking
-/// downstream pattern-matchers.
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct ToolchainInfo {
     /// The discovered Lean prefix directory (`<prefix>/include/lean/lean.h` exists).

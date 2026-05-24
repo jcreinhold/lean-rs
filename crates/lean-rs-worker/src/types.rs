@@ -1,0 +1,356 @@
+//! Wire-stable, serde-derived value types crossing the worker process boundary.
+//!
+//! These types are the single representation of every shape that flows through
+//! the worker IPC. The earlier triple-layer split (host type → `pub(crate)`
+//! wire type → public worker mirror) collapsed once it became clear that the
+//! worker's "different abstraction" from the host is process supervision —
+//! not data shape — so the wire format and the public surface are the same
+//! concern. See `docs/architecture/16-production-boundary.md` for the boundary
+//! contract.
+//!
+//! Conversion from opaque host types (`LeanExpr`, `LeanName`, …) into these
+//! value types lives in `crate::child` next to the Lean calls that produce
+//! them. No type in this module references `lean_rs_host`; the asymmetry is
+//! deliberate so the worker's public API does not couple to host's semver.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Bounded elaboration options for worker-session requests.
+///
+/// Mirrors the stable knobs from `lean_rs_host::LeanElabOptions` without
+/// exposing the in-child host object across the process boundary. The child
+/// applies the host ceilings for `heartbeat_limit` and `diagnostic_byte_limit`;
+/// the values here are caller intent, not post-clamp guarantees.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerElabOptions {
+    pub namespace_context: String,
+    pub file_label: String,
+    pub heartbeat_limit: u64,
+    pub diagnostic_byte_limit: usize,
+}
+
+impl LeanWorkerElabOptions {
+    /// Create worker elaboration options with host defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replace the namespace context.
+    #[must_use]
+    pub fn namespace_context(mut self, namespace: &str) -> Self {
+        namespace.clone_into(&mut self.namespace_context);
+        self
+    }
+
+    /// Replace the diagnostic file label.
+    #[must_use]
+    pub fn file_label(mut self, label: &str) -> Self {
+        label.clone_into(&mut self.file_label);
+        self
+    }
+
+    /// Replace the heartbeat limit. The child applies the host ceiling.
+    #[must_use]
+    pub fn heartbeat_limit(mut self, heartbeats: u64) -> Self {
+        self.heartbeat_limit = heartbeats;
+        self
+    }
+
+    /// Replace the diagnostic byte limit. The child applies the host ceiling.
+    #[must_use]
+    pub fn diagnostic_byte_limit(mut self, bytes: usize) -> Self {
+        self.diagnostic_byte_limit = bytes;
+        self
+    }
+}
+
+impl Default for LeanWorkerElabOptions {
+    fn default() -> Self {
+        Self {
+            namespace_context: String::new(),
+            file_label: "<elaborate>".to_owned(),
+            heartbeat_limit: lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT,
+            diagnostic_byte_limit: lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
+        }
+    }
+}
+
+/// Serializable elaboration result returned over the worker boundary.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerElabResult {
+    pub success: bool,
+    pub diagnostics: Vec<LeanWorkerDiagnostic>,
+    pub truncated: bool,
+}
+
+/// Kernel-check status returned over the worker boundary.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerKernelStatus {
+    Checked,
+    Rejected,
+    Unavailable,
+    Unsupported,
+}
+
+/// Serializable kernel-check result returned over the worker boundary.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerKernelResult {
+    pub status: LeanWorkerKernelStatus,
+    pub diagnostics: Vec<LeanWorkerDiagnostic>,
+    pub truncated: bool,
+}
+
+/// One diagnostic emitted by worker elaboration, kernel checks, or `MetaM`
+/// services.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDiagnostic {
+    pub severity: String,
+    pub message: String,
+    pub file_label: String,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+    pub end_line: Option<u32>,
+    pub end_column: Option<u32>,
+}
+
+/// Diagnostic payload returned alongside meta and elaboration failures.
+///
+/// `truncated` indicates the diagnostic projection hit the host byte budget
+/// and later messages were dropped.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerElabFailure {
+    pub diagnostics: Vec<LeanWorkerDiagnostic>,
+    pub truncated: bool,
+}
+
+/// Reducibility setting for `is_def_eq`, mirroring
+/// `lean_rs_host::meta::LeanMetaTransparency`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerMetaTransparency {
+    /// Lean's standard reducibility (default).
+    #[default]
+    Default,
+    /// Only `@[reducible]` definitions unfold.
+    Reducible,
+    /// Default plus instance-binding bodies.
+    Instances,
+    /// Every definition unfolds (most aggressive).
+    All,
+}
+
+/// Outcome of one bounded `MetaM` service call over the worker boundary.
+///
+/// Mirrors `lean_rs_host::meta::LeanMetaResponse<T>`. Callers branch on the
+/// variant; the typed payload lives in `Ok { value }`, and the three
+/// non-success arms carry a structured [`LeanWorkerElabFailure`].
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum LeanWorkerMetaResult<T> {
+    /// The `MetaM` action returned a typed payload.
+    Ok { value: T },
+    /// The `MetaM` action raised a non-resource-exhaustion exception.
+    Failed { failure: LeanWorkerElabFailure },
+    /// The heartbeat ceiling tripped before the action finished.
+    TimeoutOrHeartbeat { failure: LeanWorkerElabFailure },
+    /// The capability did not provide this service.
+    Unsupported { failure: LeanWorkerElabFailure },
+}
+
+/// Filter applied when enumerating declarations from a session's open
+/// environment.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationFilter {
+    /// Keep names Lean marks as private.
+    pub include_private: bool,
+    /// Keep generated names with numeric components.
+    pub include_generated: bool,
+    /// Keep Lean internal-detail names such as `_`, `match_`, `proof_`, ….
+    pub include_internal: bool,
+}
+
+impl Default for LeanWorkerDeclarationFilter {
+    fn default() -> Self {
+        Self {
+            include_private: true,
+            include_generated: false,
+            include_internal: false,
+        }
+    }
+}
+
+/// Source range Lean recorded for one declaration. Positions are 1-based.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerSourceRange {
+    pub file: String,
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+}
+
+/// One declaration row returned by `LeanWorkerSession::describe` or
+/// `LeanWorkerSession::describe_bulk`.
+///
+/// `kind` is the literal string `LeanSession::declaration_kind` returns
+/// (`"axiom"`, `"definition"`, `"theorem"`, …, or `"missing"` for an absent
+/// name). The `describe_bulk` path preserves the slot for absent names by
+/// keeping `kind == "missing"` with `type_signature: None` and `source: None`
+/// so the response length matches the input length.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationRow {
+    pub name: String,
+    pub kind: String,
+    pub type_signature: Option<String>,
+    pub source: Option<LeanWorkerSourceRange>,
+}
+
+/// One top-level command projection. Mirrors
+/// `lean_rs_host::process::CommandInfoNode`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerCommandInfo {
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+    pub decl_name: Option<String>,
+}
+
+/// One term projection. Mirrors `lean_rs_host::process::TermInfoNode`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerTermInfo {
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+    pub expr_str: String,
+    pub type_str: String,
+    pub expected_type_str: Option<String>,
+}
+
+/// One tactic projection. Mirrors `lean_rs_host::process::TacticInfoNode`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerTacticInfo {
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+    pub goals_before: Vec<String>,
+    pub goals_after: Vec<String>,
+}
+
+/// One identifier occurrence the elaborator recorded. `is_binder` distinguishes
+/// binding sites from use sites.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerNameRef {
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+    pub name: String,
+    pub is_binder: bool,
+}
+
+/// FFI-safe `Elab.InfoTree` projection. Mirrors
+/// `lean_rs_host::process::ProcessedFile`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProcessedFile {
+    pub commands: Vec<LeanWorkerCommandInfo>,
+    pub terms: Vec<LeanWorkerTermInfo>,
+    pub tactics: Vec<LeanWorkerTacticInfo>,
+    pub names: Vec<LeanWorkerNameRef>,
+    pub diagnostics: LeanWorkerElabFailure,
+}
+
+/// Outcome of `LeanWorkerSession::process_file`. Mirrors
+/// `lean_rs_host::process::ProcessFileOutcome`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum LeanWorkerProcessFileOutcome {
+    /// The elaborator ran and produced an info-tree projection.
+    Processed { file: LeanWorkerProcessedFile },
+    /// The capability dylib does not export
+    /// `lean_rs_host_process_with_info_tree`.
+    Unsupported,
+}
+
+/// Outcome of `LeanWorkerSession::process_module`. Mirrors
+/// `lean_rs_host::process::ProcessModuleOutcome`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum LeanWorkerProcessModuleOutcome {
+    /// Header parsed; every parsed import is present in the session's open
+    /// env; the body was processed.
+    Ok {
+        file: LeanWorkerProcessedFile,
+        imports: Vec<String>,
+    },
+    /// Header parsed but some imports name modules the session's open env
+    /// does not have. The body was still processed against the available env.
+    MissingImports {
+        file: LeanWorkerProcessedFile,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    /// `Lean.Parser.parseHeader` reported error-severity messages; the body
+    /// was never elaborated.
+    HeaderParseFailed { diagnostics: LeanWorkerElabFailure },
+    /// The capability dylib does not export
+    /// `lean_rs_host_process_module_with_info_tree`.
+    Unsupported,
+}
+
+/// Generic metadata reported by one downstream capability package.
+///
+/// Command names, capability names, versions, and `extra` JSON are downstream
+/// semantics. `lean-rs-worker` transports and validates the envelope; it does
+/// not decide which values affect caches.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerCapabilityMetadata {
+    pub commands: Vec<LeanWorkerCommandMetadata>,
+    pub capabilities: Vec<LeanWorkerCapabilityFact>,
+    pub lean_version: Option<String>,
+    pub extra: Option<Value>,
+}
+
+/// One downstream command advertised by capability metadata.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerCommandMetadata {
+    pub name: String,
+    pub version: String,
+}
+
+/// One named capability advertised by capability metadata.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerCapabilityFact {
+    pub name: String,
+    pub version: String,
+}
+
+/// Capability health report returned by a downstream doctor export.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDoctorReport {
+    pub diagnostics: Vec<LeanWorkerDoctorDiagnostic>,
+    pub metadata: Option<Value>,
+}
+
+/// One structured capability health diagnostic.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDoctorDiagnostic {
+    pub severity: LeanWorkerDoctorSeverity,
+    pub code: String,
+    pub message: String,
+    pub details: Option<Value>,
+}
+
+/// Severity for a capability doctor diagnostic.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerDoctorSeverity {
+    Pass,
+    Warning,
+    Error,
+}

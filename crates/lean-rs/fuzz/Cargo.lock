@@ -55,9 +55,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77727bb15fa921304124b128af125e7e3b968275d1b108b379190264f4423710"
+checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
  "hybrid-array",
 ]
@@ -135,7 +135,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lean-rs"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "lean-rs-sys",
  "lean-toolchain",
@@ -158,14 +158,14 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "lean-toolchain"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "lean-rs-sys",
  "serde_json",

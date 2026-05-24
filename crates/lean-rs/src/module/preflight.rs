@@ -16,7 +16,6 @@ use super::{LeanBuiltCapability, LeanLibraryDependency};
 use crate::error::{LeanError, bound_message};
 
 /// Stable preflight diagnostic codes for manifest-backed capability loading.
-#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LeanLoaderDiagnosticCode {
     /// The manifest path was absent, unreadable, or pointed at a missing file.
@@ -67,7 +66,6 @@ impl std::fmt::Display for LeanLoaderDiagnosticCode {
 }
 
 /// Severity of one loader preflight finding.
-#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LeanLoaderSeverity {
     /// Informational finding that does not block loading.

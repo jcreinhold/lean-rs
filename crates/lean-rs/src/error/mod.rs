@@ -64,12 +64,6 @@ pub const LEAN_ERROR_MESSAGE_LIMIT: usize = 4096;
 pub type LeanResult<T> = Result<T, LeanError>;
 
 /// Errors reported across the safe `lean-rs` boundary.
-///
-/// `#[non_exhaustive]` so future toolchain or platform refinements can add
-/// new diagnostic tags inside [`HostStage`] / [`LeanExceptionKind`]
-/// without breaking pattern-matching code that already handles the
-/// top-level variants.
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum LeanError {
     /// Lean threw through its `IO` error channel; see [`LeanException`].
@@ -328,9 +322,7 @@ impl fmt::Display for HostFailure {
 /// [`HostFailure::message`] instead. Use [`LeanDiagnosticCode`] for the
 /// stable, caller-facing failure taxonomy — `HostStage` is the
 /// host-stack's internal classification and may grow new variants when
-/// new internal paths are added. Marked `#[non_exhaustive]` so later
-/// prompts can add variants without breaking exhaustive matches.
-#[non_exhaustive]
+/// new internal paths are added.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum HostStage {
     /// `OnceLock` + `lean_initialize_*` panic-or-failure.
@@ -365,11 +357,8 @@ pub enum HostStage {
 /// host-stack's internal classification (and accept that it may grow new
 /// variants). The string form returned by [`Self::as_str`] is also the
 /// identifier emitted in tracing fields and listed in
-/// `docs/diagnostics.md`.
-///
-/// `#[non_exhaustive]` so later prompts may add new families. The
-/// variant names and `as_str()` ids are stable across patch releases.
-#[non_exhaustive]
+/// `docs/diagnostics.md`. Variant names and `as_str()` ids are stable
+/// across patch releases.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LeanDiagnosticCode {
     /// Lean runtime initialization failed (panic in `lean_initialize`,
@@ -466,7 +455,6 @@ impl fmt::Display for LeanDiagnosticCode {
 /// and will fail if the constructor index drifts.
 ///
 /// [`Other`]: Self::Other
-#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LeanExceptionKind {
     /// `IO.Error.alreadyExists`

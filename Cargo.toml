@@ -9,13 +9,13 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jcreinhold/lean-rs"
 rust-version = "1.91"
-version = "0.1.5"
+version = "0.1.6"
 
 [workspace.dependencies]
-lean-rs = { path = "crates/lean-rs", version = "0.1.5" }
-lean-rs-host = { path = "crates/lean-rs-host", version = "0.1.5" }
-lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.1.5" }
-lean-toolchain = { path = "crates/lean-toolchain", version = "0.1.5" }
+lean-rs = { path = "crates/lean-rs", version = "0.1.6" }
+lean-rs-host = { path = "crates/lean-rs-host", version = "0.1.6" }
+lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.1.6" }
+lean-toolchain = { path = "crates/lean-toolchain", version = "0.1.6" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 serde_json = { version = "1", features = ["raw_value"] }

@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::value::RawValue;
 
+use crate::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+};
+
 pub(crate) const PROTOCOL_VERSION: u16 = 2;
 const MAX_FRAME_BYTES: u32 = 1024 * 1024;
 
@@ -63,11 +69,11 @@ pub(crate) enum Request {
     },
     Elaborate {
         source: String,
-        options: WorkerElabOptions,
+        options: LeanWorkerElabOptions,
     },
     KernelCheck {
         source: String,
-        options: WorkerElabOptions,
+        options: LeanWorkerElabOptions,
         progress: bool,
     },
     DeclarationKinds {
@@ -95,6 +101,39 @@ pub(crate) enum Request {
         export: String,
         request_json: String,
     },
+    InferType {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    Whnf {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    IsDefEq {
+        lhs: String,
+        rhs: String,
+        transparency: LeanWorkerMetaTransparency,
+        options: LeanWorkerElabOptions,
+    },
+    Describe {
+        name: String,
+    },
+    ListDeclarationsStrings {
+        filter: LeanWorkerDeclarationFilter,
+        progress: bool,
+    },
+    DescribeBulk {
+        names: Vec<String>,
+        progress: bool,
+    },
+    ProcessFile {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    ProcessModule {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
     // Private harness requests that exercise streaming frame behavior.
     // Not part of the public row sink API.
     EmitTestRows {
@@ -112,18 +151,24 @@ pub(crate) enum Response {
     CapabilityLoaded,
     U64 { value: u64 },
     HostSessionOpened,
-    Elaboration { outcome: WorkerElabOutcome },
-    KernelCheck { outcome: WorkerKernelOutcome },
+    Elaboration { outcome: LeanWorkerElabResult },
+    KernelCheck { outcome: LeanWorkerKernelResult },
     Strings { values: Vec<String> },
     StreamComplete { summary: StreamSummary },
     StreamExportFailed { status_byte: u8 },
     StreamCallbackFailed { status_byte: u8, description: String },
     StreamRowMalformed { message: String },
-    CapabilityMetadata { metadata: WorkerCapabilityMetadata },
-    CapabilityDoctor { report: WorkerDoctorReport },
+    CapabilityMetadata { metadata: LeanWorkerCapabilityMetadata },
+    CapabilityDoctor { report: LeanWorkerDoctorReport },
     CapabilityMetadataMalformed { message: String },
     CapabilityDoctorMalformed { message: String },
     JsonCommand { response_json: String },
+    MetaExpr { result: LeanWorkerMetaResult<String> },
+    MetaBool { result: LeanWorkerMetaResult<bool> },
+    Declaration { row: Option<LeanWorkerDeclarationRow> },
+    DeclarationBulk { rows: Vec<LeanWorkerDeclarationRow> },
+    ProcessFile { outcome: LeanWorkerProcessFileOutcome },
+    ProcessModule { outcome: LeanWorkerProcessModuleOutcome },
     RowsComplete { count: u64 },
     Terminating,
     Error { code: String, message: String },
@@ -163,48 +208,6 @@ pub(crate) struct StreamSummary {
     pub(crate) per_stream_counts: BTreeMap<String, u64>,
     pub(crate) elapsed_micros: u64,
     pub(crate) metadata: Option<Value>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerCapabilityMetadata {
-    pub(crate) commands: Vec<WorkerCommandMetadata>,
-    pub(crate) capabilities: Vec<WorkerCapabilityFact>,
-    pub(crate) lean_version: Option<String>,
-    pub(crate) extra: Option<Value>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerCommandMetadata {
-    pub(crate) name: String,
-    pub(crate) version: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerCapabilityFact {
-    pub(crate) name: String,
-    pub(crate) version: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerDoctorReport {
-    pub(crate) diagnostics: Vec<WorkerDoctorDiagnostic>,
-    pub(crate) metadata: Option<Value>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerDoctorDiagnostic {
-    pub(crate) severity: WorkerDoctorSeverity,
-    pub(crate) code: String,
-    pub(crate) message: String,
-    pub(crate) details: Option<Value>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum WorkerDoctorSeverity {
-    Pass,
-    Warning,
-    Error,
 }
 
 impl StreamSummary {
@@ -261,48 +264,6 @@ impl DataRowEmitter {
     pub(crate) fn per_stream_counts(&self) -> BTreeMap<String, u64> {
         self.sequences.clone()
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerElabOptions {
-    pub(crate) namespace_context: String,
-    pub(crate) file_label: String,
-    pub(crate) heartbeat_limit: u64,
-    pub(crate) diagnostic_byte_limit: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerElabOutcome {
-    pub(crate) success: bool,
-    pub(crate) diagnostics: Vec<WorkerDiagnostic>,
-    pub(crate) truncated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerKernelOutcome {
-    pub(crate) status: WorkerKernelStatus,
-    pub(crate) diagnostics: Vec<WorkerDiagnostic>,
-    pub(crate) truncated: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum WorkerKernelStatus {
-    Checked,
-    Rejected,
-    Unavailable,
-    Unsupported,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct WorkerDiagnostic {
-    pub(crate) severity: String,
-    pub(crate) message: String,
-    pub(crate) file_label: String,
-    pub(crate) line: Option<u32>,
-    pub(crate) column: Option<u32>,
-    pub(crate) end_line: Option<u32>,
-    pub(crate) end_column: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

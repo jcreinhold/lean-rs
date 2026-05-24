@@ -1,7 +1,7 @@
 pub mod lean_rs_host
 pub mod lean_rs_host::host
 pub mod lean_rs_host::host::elaboration
-#[non_exhaustive] pub enum lean_rs_host::host::elaboration::LeanSeverity
+pub enum lean_rs_host::host::elaboration::LeanSeverity
 pub lean_rs_host::host::elaboration::LeanSeverity::Error
 pub lean_rs_host::host::elaboration::LeanSeverity::Info
 pub lean_rs_host::host::elaboration::LeanSeverity::Warning
@@ -110,7 +110,7 @@ pub const lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
 pub const lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
 pub const lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_MAX: u64
 pub mod lean_rs_host::host::evidence
-#[non_exhaustive] pub enum lean_rs_host::host::evidence::EvidenceStatus
+pub enum lean_rs_host::host::evidence::EvidenceStatus
 pub lean_rs_host::host::evidence::EvidenceStatus::Checked
 pub lean_rs_host::host::evidence::EvidenceStatus::Rejected
 pub lean_rs_host::host::evidence::EvidenceStatus::Unavailable
@@ -133,7 +133,7 @@ impl core::marker::Unpin for lean_rs_host::EvidenceStatus
 impl core::marker::UnsafeUnpin for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::EvidenceStatus
-#[non_exhaustive] pub enum lean_rs_host::host::evidence::LeanKernelOutcome<'lean>
+pub enum lean_rs_host::host::evidence::LeanKernelOutcome<'lean>
 pub lean_rs_host::host::evidence::LeanKernelOutcome::Checked(lean_rs_host::LeanEvidence<'lean>)
 pub lean_rs_host::host::evidence::LeanKernelOutcome::Rejected(lean_rs_host::LeanElabFailure)
 pub lean_rs_host::host::evidence::LeanKernelOutcome::Unavailable(lean_rs_host::LeanElabFailure)
@@ -188,7 +188,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofSummary
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofSummary
 pub const lean_rs_host::host::evidence::LEAN_PROOF_SUMMARY_BYTE_LIMIT: usize
 pub mod lean_rs_host::host::meta
-#[non_exhaustive] pub enum lean_rs_host::host::meta::LeanMetaResponse<Resp>
+pub enum lean_rs_host::host::meta::LeanMetaResponse<Resp>
 pub lean_rs_host::host::meta::LeanMetaResponse::Failed(lean_rs_host::LeanElabFailure)
 pub lean_rs_host::host::meta::LeanMetaResponse::Ok(Resp)
 pub lean_rs_host::host::meta::LeanMetaResponse::TimeoutOrHeartbeat(lean_rs_host::LeanElabFailure)
@@ -207,7 +207,7 @@ impl<Resp> core::marker::Unpin for lean_rs_host::meta::LeanMetaResponse<Resp> wh
 impl<Resp> core::marker::UnsafeUnpin for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::marker::UnsafeUnpin
 impl<Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::RefUnwindSafe
 impl<Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::UnwindSafe
-#[non_exhaustive] pub enum lean_rs_host::host::meta::LeanMetaTransparency
+pub enum lean_rs_host::host::meta::LeanMetaTransparency
 pub lean_rs_host::host::meta::LeanMetaTransparency::All
 pub lean_rs_host::host::meta::LeanMetaTransparency::Default
 pub lean_rs_host::host::meta::LeanMetaTransparency::Instances
@@ -236,7 +236,7 @@ impl core::marker::Unpin for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::UnsafeUnpin for lean_rs_host::meta::LeanMetaTransparency
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::LeanMetaTransparency
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaTransparency
-#[non_exhaustive] pub enum lean_rs_host::host::meta::MetaCallStatus
+pub enum lean_rs_host::host::meta::MetaCallStatus
 pub lean_rs_host::host::meta::MetaCallStatus::Failed
 pub lean_rs_host::host::meta::MetaCallStatus::Ok
 pub lean_rs_host::host::meta::MetaCallStatus::TimeoutOrHeartbeat
@@ -361,7 +361,7 @@ impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 pub mod lean_rs_host::host::process
-#[non_exhaustive] pub enum lean_rs_host::host::process::ProcessFileOutcome
+pub enum lean_rs_host::host::process::ProcessFileOutcome
 pub lean_rs_host::host::process::ProcessFileOutcome::Processed(lean_rs_host::host::process::ProcessedFile)
 pub lean_rs_host::host::process::ProcessFileOutcome::Unsupported
 impl core::fmt::Debug for lean_rs_host::host::process::ProcessFileOutcome
@@ -373,7 +373,7 @@ impl core::marker::Unpin for lean_rs_host::host::process::ProcessFileOutcome
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProcessFileOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProcessFileOutcome
-#[non_exhaustive] pub enum lean_rs_host::host::process::ProcessModuleOutcome
+pub enum lean_rs_host::host::process::ProcessModuleOutcome
 pub lean_rs_host::host::process::ProcessModuleOutcome::HeaderParseFailed
 pub lean_rs_host::host::process::ProcessModuleOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
 pub lean_rs_host::host::process::ProcessModuleOutcome::MissingImports
@@ -750,7 +750,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::SessionStats
 pub trait lean_rs_host::host::LeanProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_host::host::LeanProgressSink::report(&self, event: lean_rs_host::LeanProgressEvent)
 pub mod lean_rs_host::meta
-#[non_exhaustive] pub enum lean_rs_host::meta::LeanMetaResponse<Resp>
+pub enum lean_rs_host::meta::LeanMetaResponse<Resp>
 pub lean_rs_host::meta::LeanMetaResponse::Failed(lean_rs_host::LeanElabFailure)
 pub lean_rs_host::meta::LeanMetaResponse::Ok(Resp)
 pub lean_rs_host::meta::LeanMetaResponse::TimeoutOrHeartbeat(lean_rs_host::LeanElabFailure)
@@ -769,7 +769,7 @@ impl<Resp> core::marker::Unpin for lean_rs_host::meta::LeanMetaResponse<Resp> wh
 impl<Resp> core::marker::UnsafeUnpin for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::marker::UnsafeUnpin
 impl<Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::RefUnwindSafe
 impl<Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaResponse<Resp> where Resp: core::panic::unwind_safe::UnwindSafe
-#[non_exhaustive] pub enum lean_rs_host::meta::LeanMetaTransparency
+pub enum lean_rs_host::meta::LeanMetaTransparency
 pub lean_rs_host::meta::LeanMetaTransparency::All
 pub lean_rs_host::meta::LeanMetaTransparency::Default
 pub lean_rs_host::meta::LeanMetaTransparency::Instances
@@ -798,7 +798,7 @@ impl core::marker::Unpin for lean_rs_host::meta::LeanMetaTransparency
 impl core::marker::UnsafeUnpin for lean_rs_host::meta::LeanMetaTransparency
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::meta::LeanMetaTransparency
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::meta::LeanMetaTransparency
-#[non_exhaustive] pub enum lean_rs_host::meta::MetaCallStatus
+pub enum lean_rs_host::meta::MetaCallStatus
 pub lean_rs_host::meta::MetaCallStatus::Failed
 pub lean_rs_host::meta::MetaCallStatus::Ok
 pub lean_rs_host::meta::MetaCallStatus::TimeoutOrHeartbeat
@@ -860,7 +860,7 @@ pub fn lean_rs_host::meta::infer_type<'lean>() -> lean_rs_host::meta::LeanMetaSe
 pub fn lean_rs_host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanMetaService<(lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::meta::LeanMetaTransparency), bool>
 pub fn lean_rs_host::meta::pp_expr<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, alloc::string::String>
 pub fn lean_rs_host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
-#[non_exhaustive] pub enum lean_rs_host::EvidenceStatus
+pub enum lean_rs_host::EvidenceStatus
 pub lean_rs_host::EvidenceStatus::Checked
 pub lean_rs_host::EvidenceStatus::Rejected
 pub lean_rs_host::EvidenceStatus::Unavailable
@@ -883,7 +883,7 @@ impl core::marker::Unpin for lean_rs_host::EvidenceStatus
 impl core::marker::UnsafeUnpin for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::EvidenceStatus
-#[non_exhaustive] pub enum lean_rs_host::LeanKernelOutcome<'lean>
+pub enum lean_rs_host::LeanKernelOutcome<'lean>
 pub lean_rs_host::LeanKernelOutcome::Checked(lean_rs_host::LeanEvidence<'lean>)
 pub lean_rs_host::LeanKernelOutcome::Rejected(lean_rs_host::LeanElabFailure)
 pub lean_rs_host::LeanKernelOutcome::Unavailable(lean_rs_host::LeanElabFailure)
@@ -901,7 +901,7 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanKernelOutcome<'lean>
-#[non_exhaustive] pub enum lean_rs_host::LeanSeverity
+pub enum lean_rs_host::LeanSeverity
 pub lean_rs_host::LeanSeverity::Error
 pub lean_rs_host::LeanSeverity::Info
 pub lean_rs_host::LeanSeverity::Warning

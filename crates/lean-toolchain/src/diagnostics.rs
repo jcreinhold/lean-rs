@@ -9,9 +9,6 @@ use std::path::PathBuf;
 /// Reasons the Lean toolchain or its linkage could not be resolved.
 ///
 /// Variants carry enough context to produce a single actionable diagnostic.
-/// The enum is `#[non_exhaustive]` — adding a new failure mode is not a
-/// breaking change.
-#[non_exhaustive]
 #[derive(Debug)]
 pub enum LinkDiagnostics {
     /// No discovery probe could locate a Lean prefix containing `include/lean/lean.h`.

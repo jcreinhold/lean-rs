@@ -23,10 +23,7 @@ use lean_rs::error::LeanResult;
 /// The tag accessor on [`LeanKernelOutcome::status`] returns values of
 /// this type, as does [`crate::LeanSession::check_evidence`] when
 /// re-validating a captured [`crate::LeanEvidence`] handle.
-/// `#[non_exhaustive]` so future capability refinements can extend the
-/// taxonomy without breaking exhaustive matches.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum EvidenceStatus {
     /// The kernel accepted the declaration. A [`crate::LeanEvidence`]
     /// handle is available on the [`LeanKernelOutcome::Checked`] branch.
@@ -50,11 +47,7 @@ pub enum EvidenceStatus {
 /// [`LeanElabFailure`] (on every other status) so callers can both
 /// branch on the typed status tag via [`Self::status`] and read the
 /// structured diagnostics in the failure cases.
-///
-/// `#[non_exhaustive]` so the variant set tracks future toolchain
-/// classification refinements without breaking exhaustive matches.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum LeanKernelOutcome<'lean> {
     /// The kernel accepted the declaration.
     Checked(LeanEvidence<'lean>),

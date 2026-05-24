@@ -15,8 +15,8 @@ use serde_json::Value;
 
 use crate::capability::LeanWorkerCapabilityBuilder;
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
-use crate::session::LeanWorkerCapabilityMetadata;
 use crate::supervisor::LeanWorkerRestartPolicy;
+use crate::types::LeanWorkerCapabilityMetadata;
 
 /// Capability and session requirements used to plan worker batches.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -192,7 +192,6 @@ pub struct LeanWorkerBatchFingerprint {
 }
 
 /// Import planning diagnostics.
-#[non_exhaustive]
 #[derive(Debug)]
 pub enum LeanWorkerImportPlanError {
     ModuleDiscovery { diagnostic: LeanModuleDiscoveryDiagnostic },

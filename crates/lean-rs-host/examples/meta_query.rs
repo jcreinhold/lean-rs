@@ -94,9 +94,6 @@ fn run() -> LeanResult<()> {
             // `unsupported` for the request shape.
             println!("status=Unsupported: {failure}");
         }
-        other => {
-            println!("status=<non-exhaustive>: {other:?}");
-        }
     }
 
     Ok(())

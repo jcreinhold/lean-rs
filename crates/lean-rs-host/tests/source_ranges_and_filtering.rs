@@ -49,7 +49,6 @@ fn assert_cancelled(err: LeanError) {
         LeanError::Cancelled(_) => {}
         LeanError::Host(failure) => panic!("expected LeanError::Cancelled, got Host {failure:?}"),
         LeanError::LeanException(exc) => panic!("expected LeanError::Cancelled, got LeanException {exc:?}"),
-        _ => panic!("expected LeanError::Cancelled, got future LeanError variant"),
     }
 }
 

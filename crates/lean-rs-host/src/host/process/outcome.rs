@@ -27,11 +27,7 @@ use crate::host::elaboration::LeanElabFailure;
 use crate::host::process::info_tree::ProcessedFile;
 
 /// Outcome of [`crate::LeanSession::process_with_info_tree`].
-///
-/// `#[non_exhaustive]` so future capability refinements can extend the
-/// taxonomy without breaking exhaustive matches.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum ProcessFileOutcome {
     /// The elaborator ran and produced an `Elab.InfoTree` projection.
     /// `ProcessedFile::diagnostics` carries every error-severity entry
@@ -53,11 +49,7 @@ pub enum ProcessFileOutcome {
 /// [`ProcessedFile`] (its `diagnostics` field captures any elaboration
 /// failure of the body); `HeaderParseFailed` short-circuits with just
 /// the parser's diagnostics.
-///
-/// `#[non_exhaustive]` so future capability refinements can extend the
-/// taxonomy without breaking exhaustive matches.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum ProcessModuleOutcome {
     /// Header parsed; every parsed import is present in the session's
     /// open env; the body was processed. `imports` lists the

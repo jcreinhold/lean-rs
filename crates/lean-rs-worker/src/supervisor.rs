@@ -7,15 +7,21 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
+
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
 use crate::protocol::{Message, Request, Response, read_frame, write_frame};
 use crate::session::LeanWorkerDataSinkTarget;
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerCapabilityMetadata, LeanWorkerDataSink, LeanWorkerDiagnosticSink,
-    LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult,
-    LeanWorkerProgressSink, LeanWorkerRawDataSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig,
+    LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerDiagnosticSink, LeanWorkerProgressSink,
+    LeanWorkerRawDataRow, LeanWorkerRawDataSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig,
     LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic,
     report_parent_progress,
+};
+use crate::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -704,6 +710,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("health", &other)),
@@ -743,6 +755,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("load_fixture_capability", &other)),
@@ -785,6 +803,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response("call_fixture_mul", &other)),
@@ -940,6 +964,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Error { .. }) => Err(unexpected_response("terminate", &other)),
         }
@@ -1010,6 +1040,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -1048,6 +1084,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1066,11 +1108,11 @@ impl LeanWorker {
         self.prepare_request(false)?;
         self.send_request(Request::Elaborate {
             source: source.to_owned(),
-            options: options.wire(),
+            options: options.clone(),
         })?;
         self.record_request(false);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::Elaboration { outcome } => Ok(outcome.into()),
+            Response::Elaboration { outcome } => Ok(outcome),
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
             | Response::U64 { .. }
@@ -1086,6 +1128,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1104,12 +1152,12 @@ impl LeanWorker {
         self.prepare_request(false)?;
         self.send_request(Request::KernelCheck {
             source: source.to_owned(),
-            options: options.wire(),
+            options: options.clone(),
             progress: progress.is_some(),
         })?;
         self.record_request(false);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::KernelCheck { outcome } => Ok(outcome.into()),
+            Response::KernelCheck { outcome } => Ok(outcome),
             other @ (Response::HealthOk
             | Response::CapabilityLoaded
             | Response::U64 { .. }
@@ -1125,6 +1173,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1162,6 +1216,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1199,6 +1259,388 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_infer_type(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+        const OPERATION: &str = "worker_infer_type";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::InferType {
+            source: source.to_owned(),
+            options: options.clone(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::MetaExpr { result } => Ok(result),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_whnf(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+        const OPERATION: &str = "worker_whnf";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::Whnf {
+            source: source.to_owned(),
+            options: options.clone(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::MetaExpr { result } => Ok(result),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_is_def_eq(
+        &mut self,
+        lhs: &str,
+        rhs: &str,
+        transparency: LeanWorkerMetaTransparency,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<bool>, LeanWorkerError> {
+        const OPERATION: &str = "worker_is_def_eq";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::IsDefEq {
+            lhs: lhs.to_owned(),
+            rhs: rhs.to_owned(),
+            transparency,
+            options: options.clone(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::MetaBool { result } => Ok(result),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_describe(
+        &mut self,
+        name: &str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Option<LeanWorkerDeclarationRow>, LeanWorkerError> {
+        const OPERATION: &str = "worker_describe";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::Describe { name: name.to_owned() })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::Declaration { row } => Ok(row),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "filter is cheap to clone, passed by value matches caller shape"
+    )]
+    pub(crate) fn worker_list_declarations_strings(
+        &mut self,
+        filter: LeanWorkerDeclarationFilter,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<String>, LeanWorkerError> {
+        const OPERATION: &str = "worker_list_declarations_strings";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::ListDeclarationsStrings {
+            filter,
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        let collector = DeclarationNameCollector::default();
+        let response = self.read_response_with_events(
+            OPERATION,
+            progress,
+            cancellation,
+            Some(LeanWorkerDataSinkTarget::Raw(&collector)),
+            None,
+        )?;
+        if let Some(message) = collector.decode_error.lock().ok().and_then(|guard| guard.clone()) {
+            return Err(LeanWorkerError::Protocol { message });
+        }
+        match response {
+            Response::RowsComplete { count } => {
+                let names = collector.into_inner();
+                let observed = u64::try_from(names.len()).unwrap_or(u64::MAX);
+                if observed != count {
+                    return Err(LeanWorkerError::Protocol {
+                        message: format!(
+                            "worker_list_declarations_strings: parent collected {observed} rows but child reported {count}"
+                        ),
+                    });
+                }
+                Ok(names)
+            }
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_describe_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<LeanWorkerDeclarationRow>, LeanWorkerError> {
+        const OPERATION: &str = "worker_describe_bulk";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::DescribeBulk {
+            names: names.iter().map(|name| (*name).to_owned()).collect(),
+            progress: progress.is_some(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::DeclarationBulk { rows } => Ok(rows),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_process_file(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
+        const OPERATION: &str = "worker_process_file";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::ProcessFile {
+            source: source.to_owned(),
+            options: options.clone(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::ProcessFile { outcome } => Ok(outcome),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessModule { .. }
+            | Response::RowsComplete { .. }
+            | Response::Terminating
+            | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
+        }
+    }
+
+    pub(crate) fn worker_process_module(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
+        const OPERATION: &str = "worker_process_module";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::ProcessModule {
+            source: source.to_owned(),
+            options: options.clone(),
+        })?;
+        self.record_request(false);
+        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+            Response::ProcessModule { outcome } => Ok(outcome),
+            other @ (Response::HealthOk
+            | Response::CapabilityLoaded
+            | Response::U64 { .. }
+            | Response::HostSessionOpened
+            | Response::Elaboration { .. }
+            | Response::KernelCheck { .. }
+            | Response::Strings { .. }
+            | Response::StreamComplete { .. }
+            | Response::StreamExportFailed { .. }
+            | Response::StreamCallbackFailed { .. }
+            | Response::StreamRowMalformed { .. }
+            | Response::CapabilityMetadata { .. }
+            | Response::CapabilityDoctor { .. }
+            | Response::CapabilityMetadataMalformed { .. }
+            | Response::CapabilityDoctorMalformed { .. }
+            | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1291,6 +1733,12 @@ impl LeanWorker {
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
         }
@@ -1315,7 +1763,7 @@ impl LeanWorker {
         })?;
         self.record_request(false);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::CapabilityMetadata { metadata } => Ok(metadata.into()),
+            Response::CapabilityMetadata { metadata } => Ok(metadata),
             Response::CapabilityMetadataMalformed { message } => {
                 Err(LeanWorkerError::CapabilityMetadataMalformed { message })
             }
@@ -1333,6 +1781,12 @@ impl LeanWorker {
             | Response::CapabilityDoctor { .. }
             | Response::CapabilityDoctorMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1358,7 +1812,7 @@ impl LeanWorker {
         })?;
         self.record_request(false);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::CapabilityDoctor { report } => Ok(report.into()),
+            Response::CapabilityDoctor { report } => Ok(report),
             Response::CapabilityDoctorMalformed { message } => {
                 Err(LeanWorkerError::CapabilityDoctorMalformed { message })
             }
@@ -1376,6 +1830,12 @@ impl LeanWorker {
             | Response::CapabilityMetadata { .. }
             | Response::CapabilityMetadataMalformed { .. }
             | Response::JsonCommand { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1414,6 +1874,12 @@ impl LeanWorker {
             | Response::CapabilityDoctor { .. }
             | Response::CapabilityMetadataMalformed { .. }
             | Response::CapabilityDoctorMalformed { .. }
+            | Response::MetaExpr { .. }
+            | Response::MetaBool { .. }
+            | Response::Declaration { .. }
+            | Response::DeclarationBulk { .. }
+            | Response::ProcessFile { .. }
+            | Response::ProcessModule { .. }
             | Response::RowsComplete { .. }
             | Response::Terminating
             | Response::Error { .. }) => Err(unexpected_response(OPERATION, &other)),
@@ -1923,6 +2389,44 @@ fn unexpected_response(operation: &'static str, response: &Response) -> LeanWork
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+/// Parent-side collector that decodes per-row JSON-string payloads from
+/// `list_declarations_strings` into an owned `Vec<String>`.
+///
+/// Each name lands as its own `Message::DataRow` so the 1 MiB protocol frame
+/// cap binds per-name (any single Lean name is well under that) rather than
+/// per-response. Decoding failures or sink panics are surfaced through the
+/// usual `LeanWorkerError::Protocol` / `DataSinkPanic` paths.
+#[derive(Debug, Default)]
+struct DeclarationNameCollector {
+    names: Mutex<Vec<String>>,
+    decode_error: Mutex<Option<String>>,
+}
+
+impl DeclarationNameCollector {
+    fn into_inner(self) -> Vec<String> {
+        self.names.into_inner().unwrap_or_default()
+    }
+}
+
+impl LeanWorkerRawDataSink for DeclarationNameCollector {
+    fn report(&self, row: LeanWorkerRawDataRow) {
+        match serde_json::from_str::<String>(row.payload.get()) {
+            Ok(name) => {
+                if let Ok(mut guard) = self.names.lock() {
+                    guard.push(name);
+                }
+            }
+            Err(err) => {
+                if let Ok(mut slot) = self.decode_error.lock()
+                    && slot.is_none()
+                {
+                    *slot = Some(format!("list_declarations_strings row payload decode failed: {err}"));
+                }
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

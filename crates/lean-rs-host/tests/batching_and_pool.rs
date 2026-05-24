@@ -54,7 +54,6 @@ fn assert_cancelled(err: LeanError) {
         LeanError::Cancelled(_) => {}
         LeanError::Host(failure) => panic!("expected LeanError::Cancelled, got Host {failure:?}"),
         LeanError::LeanException(exc) => panic!("expected LeanError::Cancelled, got LeanException {exc:?}"),
-        _ => panic!("expected LeanError::Cancelled, got future LeanError variant"),
     }
 }
 
@@ -132,7 +131,6 @@ fn query_declarations_bulk_errors_on_missing_name() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Conversion), got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Conversion), got cancellation {cancelled:?}"),
-        _ => panic!("LeanError gained a future variant; update this match"),
     }
 }
 
@@ -491,7 +489,6 @@ fn call_capability_unknown_symbol_is_link_error() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Link), got cancellation {cancelled:?}"),
-        _ => panic!("LeanError gained a future variant; update this match"),
     }
 }
 

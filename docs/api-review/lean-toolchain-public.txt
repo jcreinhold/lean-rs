@@ -24,7 +24,7 @@ impl core::marker::Unpin for lean_toolchain::DiscoverySource
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverySource
-#[non_exhaustive] pub enum lean_toolchain::LeanModuleDiscoveryDiagnostic
+pub enum lean_toolchain::LeanModuleDiscoveryDiagnostic
 pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName
 pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::module: alloc::string::String
 pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::reason: alloc::string::String
@@ -53,7 +53,7 @@ impl core::marker::Unpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDiscoveryDiagnostic
 impl !core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
 impl !core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDiscoveryDiagnostic
-#[non_exhaustive] pub enum lean_toolchain::LinkDiagnostics
+pub enum lean_toolchain::LinkDiagnostics
 pub lean_toolchain::LinkDiagnostics::AllowlistFailure
 pub lean_toolchain::LinkDiagnostics::AllowlistFailure::name: &'static str
 pub lean_toolchain::LinkDiagnostics::FixtureArtifactMissing
@@ -275,7 +275,7 @@ impl core::marker::Unpin for lean_toolchain::ToolchainFingerprint
 impl core::marker::UnsafeUnpin for lean_toolchain::ToolchainFingerprint
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::ToolchainFingerprint
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainFingerprint
-#[non_exhaustive] pub struct lean_toolchain::ToolchainInfo
+pub struct lean_toolchain::ToolchainInfo
 pub lean_toolchain::ToolchainInfo::fingerprint: lean_toolchain::ToolchainFingerprint
 pub lean_toolchain::ToolchainInfo::header_path: std::path::PathBuf
 pub lean_toolchain::ToolchainInfo::lean_binary: core::option::Option<std::path::PathBuf>

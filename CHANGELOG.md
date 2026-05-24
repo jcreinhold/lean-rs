@@ -9,6 +9,81 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-05-24
+
+### `lean-rs-worker` 0.1.6
+
+This release adds eight typed methods on `LeanWorkerSession` for the host meta and projection surface, collapses the
+worker's public-type layering from three representations per shape to one, and streams
+`list_declarations_strings` so unbounded Lean environments enumerate without hitting the protocol frame cap.
+
+Pre-1.0; the type-surface change is a breaking change against 0.1.5 callers. There are no external consumers of this
+crate, so the diff is deliberate.
+
+#### Eight new typed methods on `LeanWorkerSession`
+
+- Added `infer_type`, `whnf`, `is_def_eq`, `describe`, `list_declarations_strings`, `describe_bulk`, `process_file`,
+  and `process_module`. Each follows the established `elaborate` / `kernel_check` template — `ensure_open` →
+  typed `Request` → typed `Response` projection — and invalidates the session on `Cancelled` / `Timeout`.
+- The methods compose existing `LeanSession::*` primitives in the child: `infer_type` / `whnf` run a bounded
+  `MetaM` call and render the result `LeanExpr` through `LeanSession::expr_to_string_raw` (deterministic, no
+  second MetaM round-trip, same shape `ProcessedFile.TermInfo.expr_str` already uses). `describe` composes three
+  primitives — `declaration_kind`, `declaration_type`, `declaration_source_range` — into one IPC round-trip.
+- No changes to `lean-rs-sys`, `lean-rs`, `lean-rs-host`, `lean-rs-host-shims`, or the JSON command protocol.
+
+#### Type-surface refactor: one representation per shape
+
+The crate previously held three representations of every value shape: a host type, a `pub(crate)` serde-derived
+wire type in `protocol.rs`, and a public `LeanWorker*` mirror in `session.rs` with a hand-written `From` impl.
+Twenty-one shapes followed this pattern; for ten of them the public mirror was a pure field-by-field rename with
+no methods or validation.
+
+The new layout collapses to one representation:
+
+- New `lean_rs_worker::types` module holds the public, serde-derived `LeanWorker*` types directly.
+  `protocol.rs` keeps `Request` / `Response` / framing crate-private and references the public types in its
+  enum variants without an intermediate wire layer.
+- Conversion from opaque host types (`LeanExpr`, `LeanName`, `LeanElabFailure`, …) into worker value types
+  remains in `child.rs` next to the Lean calls that produce them. No `lean_rs_host` type appears in
+  `lean-rs-worker`'s public API.
+- Enums in `crate::types` are exhaustive. The worker owns these shapes; their variants are part of
+  the public contract, not a host-evolution defence. Generic `LeanWorkerMetaResult<T>` keeps its
+  four variants (`Ok { value }`, `Failed { failure }`, `TimeoutOrHeartbeat { failure }`,
+  `Unsupported { failure }`); the variant shape is named-fields throughout, matching the wire
+  format.
+- Breaking against 0.1.5: pattern matches on `LeanWorkerMetaResult` and `LeanWorkerProcessFileOutcome` now use
+  struct-variant syntax (`Ok { value }` / `Processed { file }`) instead of tuple-variant syntax. All other
+  type names are preserved.
+
+Net effect: ~21 type definitions and ~21 `From` impls removed (~550 LOC), one named concept per shape, and the
+worker's public API decouples from host's internal representation by construction rather than by a translation
+layer.
+
+#### Streaming `list_declarations_strings`
+
+The public signature is unchanged: `list_declarations_strings(filter, cancellation, progress) ->
+Result<Vec<String>, _>`. The implementation now emits one `Message::DataRow` per name from the child and
+collects them on the parent side, terminated by `Response::RowsComplete { count }`. The 1 MiB protocol frame
+cap binds per-row (any individual Lean name fits well under that) instead of per-response; total environment
+size is unbounded by framing.
+
+The 0.1.6 work added a doc warning about the per-response cap as a known leak; that warning is gone in this
+release. `tests/typed_session.rs` exercises the streaming path against the full Lean stdlib through the
+fixture environment.
+
+### Workspace-wide: enums and structs are exhaustive
+
+`#[non_exhaustive]` has been removed from every public enum and struct it was attached to across `lean-rs`,
+`lean-rs-host`, `lean-rs-worker`, and `lean-toolchain` — 17 attributes in total (`LeanError`, `HostStage`,
+`LeanDiagnosticCode`, `LeanExceptionKind`, `LeanLoaderDiagnosticCode`, `LeanLoaderSeverity`, `EvidenceStatus`,
+`LeanKernelOutcome`, `MetaCallStatus`, `LeanMetaResponse`, `LeanMetaTransparency`, `LeanSeverity`,
+`ProcessFileOutcome`, `ProcessModuleOutcome`, `LinkDiagnostics`, `LeanModuleDiscoveryDiagnostic`,
+`ToolchainInfo`, plus the worker's pre-existing six). Pre-1.0, no external consumers, and host versions are pinned to the workspace, so the
+forward-compat insurance these annotations bought wasn't doing meaningful work. Callers that exhaustively
+matched these enums can now rely on the variant set being closed; the worker's `child.rs` defensive wildcard
+arms over host enums (`LeanMetaResponse`, `LeanKernelOutcome`, `ProcessFileOutcome`, `ProcessModuleOutcome`,
+`LeanSeverity`) are gone for the same reason.
+
 ## [0.1.5] — 2026-05-23
 
 ### `lean-rs-worker` 0.1.5

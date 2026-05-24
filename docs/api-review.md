@@ -7,9 +7,13 @@ live surface against these files on every PR; intentional changes regenerate the
 
 ```sh
 for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
-  cargo public-api -p "$c" --simplified > "docs/api-review/${c}-public.txt"
+  cargo public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
 done
 ```
+
+The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a build and the
+progress lines would otherwise land in the baseline file and trip the next diff. The prerelease
+script's internal regeneration drops stderr the same way.
 
 ## Red-flag checklist (review before regenerating)
 

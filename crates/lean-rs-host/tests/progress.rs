@@ -84,7 +84,6 @@ fn assert_cancelled(err: LeanError) {
         other @ (LeanError::LeanException(_) | LeanError::Host(_)) => {
             panic!("expected LeanError::Cancelled, got {other:?}");
         }
-        other => panic!("expected LeanError::Cancelled, got {other:?}"),
     }
 }
 
@@ -253,7 +252,6 @@ fn progress_sink_panic_is_contained_by_callback_trampoline() {
         other @ (LeanError::LeanException(_) | LeanError::Cancelled(_)) => {
             panic!("expected Host(CallbackPanic), got {other:?}");
         }
-        other => panic!("expected Host(CallbackPanic), got {other:?}"),
     }
 }
 

@@ -59,9 +59,7 @@ fn run() -> LeanResult<()> {
 
     // The outcome is a four-tag enum. Only `Checked` carries a
     // `LeanEvidence` handle for re-validation; the other three carry
-    // structured diagnostics. `#[non_exhaustive]` allows for future
-    // toolchain refinements — match the closed case and group the
-    // rest.
+    // structured diagnostics.
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
         LeanKernelOutcome::Rejected(failure) => {
@@ -74,10 +72,6 @@ fn run() -> LeanResult<()> {
         }
         LeanKernelOutcome::Unsupported(failure) => {
             eprintln!("source not supported by `kernel_check`: {failure}");
-            return Ok(());
-        }
-        other => {
-            eprintln!("unexpected non-exhaustive outcome: {other:?}");
             return Ok(());
         }
     };

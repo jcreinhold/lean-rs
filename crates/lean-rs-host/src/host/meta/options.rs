@@ -25,11 +25,8 @@ use lean_rs::{LeanRuntime, Obj};
 /// Maps 1-1 onto Lean's `Meta.TransparencyMode` at 4.29.1. Declaration
 /// order doubles as the on-wire byte the Lean shim reads; the
 /// [`Self::as_byte`] accessor exposes that contract for the dispatch
-/// site. `#[non_exhaustive]` so toolchain refinements can extend the
-/// taxonomy (e.g., a hypothetical `None`) without breaking exhaustive
-/// matches downstream.
+/// site.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum LeanMetaTransparency {
     /// Lean's standard reducibility — non-reducible / non-irreducible
     /// definitions unfold on demand.

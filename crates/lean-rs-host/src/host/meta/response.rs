@@ -22,10 +22,8 @@ use lean_rs::error::{LeanDiagnosticCode, LeanResult};
 /// Classification tag for a meta-service call.
 ///
 /// Returned by [`LeanMetaResponse::status`] without inspecting the
-/// payload. `#[non_exhaustive]` so future capability refinements can
-/// extend the taxonomy without breaking exhaustive matches downstream.
+/// payload.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum MetaCallStatus {
     /// The `MetaM` action returned a typed payload.
     Ok,
@@ -48,11 +46,7 @@ pub enum MetaCallStatus {
 /// [`LeanElabFailure`] (on every other status) so callers can both
 /// branch on the typed status tag via [`Self::status`] and read the
 /// structured diagnostics in the failure cases.
-///
-/// `#[non_exhaustive]` so the variant set tracks future toolchain
-/// classification refinements without breaking exhaustive matches.
 #[derive(Debug)]
-#[non_exhaustive]
 pub enum LeanMetaResponse<Resp> {
     /// The `MetaM` action returned a typed payload.
     Ok(Resp),

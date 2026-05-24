@@ -40,9 +40,9 @@
 //! ## Module map
 //!
 //! - [`error`] — typed error boundary. [`LeanError`] is a three-variant
-//!   `#[non_exhaustive]` enum (`LeanException` for Lean-thrown `IO`
-//!   errors, `Host` for host-stack failures, `Cancelled` for cooperative
-//!   host cancellation); payload structs ([`LeanException`],
+//!   enum (`LeanException` for Lean-thrown `IO` errors, `Host` for
+//!   host-stack failures, `Cancelled` for cooperative host
+//!   cancellation); payload structs ([`LeanException`],
 //!   [`HostFailure`], [`LeanCancelled`]) have private fields so the
 //!   bounded-message invariant is structural. Every error projects to a
 //!   [`LeanDiagnosticCode`] via `.code()`. The in-process

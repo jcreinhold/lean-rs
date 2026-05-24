@@ -59,7 +59,6 @@ fn from_lake_project_missing_path_is_load_error() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Load) failure, got cancellation {cancelled:?}"),
-        _ => panic!("expected Host(Load) failure, got future LeanError variant"),
     }
 }
 
@@ -94,7 +93,6 @@ fn load_capabilities_missing_dylib_is_load_error() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Load) failure, got cancellation {cancelled:?}"),
-        _ => panic!("expected Host(Load) failure, got future LeanError variant"),
     }
 }
 
@@ -219,7 +217,6 @@ fn session_query_missing_declaration_is_host_error() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Conversion) failure, got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Conversion) failure, got cancellation {cancelled:?}"),
-        _ => panic!("expected Host(Conversion) failure, got future LeanError variant"),
     }
 }
 
@@ -1118,7 +1115,6 @@ fn meta_is_def_eq_pre_cancelled_token_returns_cancelled() {
         LeanError::Cancelled(_) => {}
         LeanError::LeanException(exc) => panic!("expected Cancelled, got LeanException {exc:?}"),
         LeanError::Host(failure) => panic!("expected Cancelled, got Host {failure:?}"),
-        _ => panic!("expected Cancelled, got future LeanError variant"),
     }
     assert_eq!(
         session.stats().ffi_calls,

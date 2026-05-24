@@ -15,12 +15,13 @@ use serde_json::Value;
 
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
 use crate::session::{
-    LeanWorkerCancellationToken, LeanWorkerCapabilityMetadata, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata,
-    LeanWorkerSession, LeanWorkerSessionConfig,
+    LeanWorkerCancellationToken, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSession,
+    LeanWorkerSessionConfig,
 };
 use crate::supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy,
 };
+use crate::types::LeanWorkerCapabilityMetadata;
 
 const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
 
@@ -366,7 +367,6 @@ impl LeanWorkerCapabilityBuilder {
 
 /// Stable worker bootstrap diagnostic codes.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub enum LeanWorkerBootstrapDiagnosticCode {
     /// The worker child locator did not resolve to a file.
     WorkerChildUnresolved,
@@ -405,7 +405,6 @@ impl std::fmt::Display for LeanWorkerBootstrapDiagnosticCode {
 
 /// Severity of one worker bootstrap finding.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
 pub enum LeanWorkerBootstrapSeverity {
     /// Informational finding that does not block startup.
     Info,

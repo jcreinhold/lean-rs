@@ -272,7 +272,7 @@ pub trait lean_rs::callback::LeanCallbackPayload: lean_rs::callback::private::Se
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
 pub mod lean_rs::error
-#[non_exhaustive] pub enum lean_rs::error::HostStage
+pub enum lean_rs::error::HostStage
 pub lean_rs::error::HostStage::CallbackPanic
 pub lean_rs::error::HostStage::Conversion
 pub lean_rs::error::HostStage::Internal
@@ -295,7 +295,7 @@ impl core::marker::Unpin for lean_rs::error::HostStage
 impl core::marker::UnsafeUnpin for lean_rs::error::HostStage
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostStage
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostStage
-#[non_exhaustive] pub enum lean_rs::error::LeanDiagnosticCode
+pub enum lean_rs::error::LeanDiagnosticCode
 pub lean_rs::error::LeanDiagnosticCode::AbiConversion
 pub lean_rs::error::LeanDiagnosticCode::Cancelled
 pub lean_rs::error::LeanDiagnosticCode::Elaboration
@@ -329,7 +329,7 @@ impl core::marker::Unpin for lean_rs::error::LeanDiagnosticCode
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanDiagnosticCode
-#[non_exhaustive] pub enum lean_rs::error::LeanError
+pub enum lean_rs::error::LeanError
 pub lean_rs::error::LeanError::Cancelled(lean_rs::error::LeanCancelled)
 pub lean_rs::error::LeanError::Host(lean_rs::error::HostFailure)
 pub lean_rs::error::LeanError::LeanException(lean_rs::error::LeanException)
@@ -349,7 +349,7 @@ impl core::marker::Unpin for lean_rs::error::LeanError
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanError
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanError
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanError
-#[non_exhaustive] pub enum lean_rs::error::LeanExceptionKind
+pub enum lean_rs::error::LeanExceptionKind
 pub lean_rs::error::LeanExceptionKind::AlreadyExists
 pub lean_rs::error::LeanExceptionKind::HardwareFault
 pub lean_rs::error::LeanExceptionKind::IllegalOperation
@@ -549,7 +549,7 @@ impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
 pub mod lean_rs::module
-#[non_exhaustive] pub enum lean_rs::module::LeanLoaderDiagnosticCode
+pub enum lean_rs::module::LeanLoaderDiagnosticCode
 pub lean_rs::module::LeanLoaderDiagnosticCode::MalformedManifest
 pub lean_rs::module::LeanLoaderDiagnosticCode::MissingImportedSymbol
 pub lean_rs::module::LeanLoaderDiagnosticCode::MissingInitializer
@@ -582,7 +582,7 @@ impl core::marker::Unpin for lean_rs::LeanLoaderDiagnosticCode
 impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-#[non_exhaustive] pub enum lean_rs::module::LeanLoaderSeverity
+pub enum lean_rs::module::LeanLoaderSeverity
 pub lean_rs::module::LeanLoaderSeverity::Error
 pub lean_rs::module::LeanLoaderSeverity::Info
 pub lean_rs::module::LeanLoaderSeverity::Warning
@@ -1011,7 +1011,7 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanThreadGuard<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanThreadGuard<'lean>
-#[non_exhaustive] pub enum lean_rs::HostStage
+pub enum lean_rs::HostStage
 pub lean_rs::HostStage::CallbackPanic
 pub lean_rs::HostStage::Conversion
 pub lean_rs::HostStage::Internal
@@ -1079,7 +1079,7 @@ impl core::marker::Unpin for lean_rs::callback::LeanCallbackStatus
 impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackStatus
-#[non_exhaustive] pub enum lean_rs::LeanDiagnosticCode
+pub enum lean_rs::LeanDiagnosticCode
 pub lean_rs::LeanDiagnosticCode::AbiConversion
 pub lean_rs::LeanDiagnosticCode::Cancelled
 pub lean_rs::LeanDiagnosticCode::Elaboration
@@ -1113,7 +1113,7 @@ impl core::marker::Unpin for lean_rs::error::LeanDiagnosticCode
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanDiagnosticCode
-#[non_exhaustive] pub enum lean_rs::LeanError
+pub enum lean_rs::LeanError
 pub lean_rs::LeanError::Cancelled(lean_rs::error::LeanCancelled)
 pub lean_rs::LeanError::Host(lean_rs::error::HostFailure)
 pub lean_rs::LeanError::LeanException(lean_rs::error::LeanException)
@@ -1133,7 +1133,7 @@ impl core::marker::Unpin for lean_rs::error::LeanError
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanError
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanError
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanError
-#[non_exhaustive] pub enum lean_rs::LeanExceptionKind
+pub enum lean_rs::LeanExceptionKind
 pub lean_rs::LeanExceptionKind::AlreadyExists
 pub lean_rs::LeanExceptionKind::HardwareFault
 pub lean_rs::LeanExceptionKind::IllegalOperation
@@ -1170,7 +1170,7 @@ impl core::marker::Unpin for lean_rs::error::LeanExceptionKind
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanExceptionKind
-#[non_exhaustive] pub enum lean_rs::LeanLoaderDiagnosticCode
+pub enum lean_rs::LeanLoaderDiagnosticCode
 pub lean_rs::LeanLoaderDiagnosticCode::MalformedManifest
 pub lean_rs::LeanLoaderDiagnosticCode::MissingImportedSymbol
 pub lean_rs::LeanLoaderDiagnosticCode::MissingInitializer
@@ -1203,7 +1203,7 @@ impl core::marker::Unpin for lean_rs::LeanLoaderDiagnosticCode
 impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderDiagnosticCode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderDiagnosticCode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-#[non_exhaustive] pub enum lean_rs::LeanLoaderSeverity
+pub enum lean_rs::LeanLoaderSeverity
 pub lean_rs::LeanLoaderSeverity::Error
 pub lean_rs::LeanLoaderSeverity::Info
 pub lean_rs::LeanLoaderSeverity::Warning

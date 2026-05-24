@@ -18,12 +18,13 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use serde_json::value::RawValue;
 
-use crate::protocol::{
-    DataRow, Diagnostic, StreamSummary, WorkerCapabilityFact, WorkerCapabilityMetadata, WorkerCommandMetadata,
-    WorkerDiagnostic, WorkerDoctorDiagnostic, WorkerDoctorReport, WorkerDoctorSeverity, WorkerElabOptions,
-    WorkerElabOutcome, WorkerKernelOutcome, WorkerKernelStatus,
-};
+use crate::protocol::{DataRow, Diagnostic, StreamSummary};
 use crate::supervisor::{LeanWorker, LeanWorkerError};
+use crate::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+};
 
 /// Configuration for opening one host session inside a worker child.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,74 +68,6 @@ impl LeanWorkerSessionConfig {
     }
 }
 
-/// Bounded elaboration options for worker-session requests.
-///
-/// This mirrors the stable knobs from `lean-rs-host::LeanElabOptions` without
-/// exposing the in-child host object itself across the process boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerElabOptions {
-    namespace_context: String,
-    file_label: String,
-    heartbeat_limit: u64,
-    diagnostic_byte_limit: usize,
-}
-
-impl LeanWorkerElabOptions {
-    /// Create worker elaboration options with `lean-rs-host` defaults.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Replace the namespace context.
-    #[must_use]
-    pub fn namespace_context(mut self, namespace: &str) -> Self {
-        namespace.clone_into(&mut self.namespace_context);
-        self
-    }
-
-    /// Replace the diagnostic file label.
-    #[must_use]
-    pub fn file_label(mut self, label: &str) -> Self {
-        label.clone_into(&mut self.file_label);
-        self
-    }
-
-    /// Replace the heartbeat limit. The child applies the host ceiling.
-    #[must_use]
-    pub fn heartbeat_limit(mut self, heartbeats: u64) -> Self {
-        self.heartbeat_limit = heartbeats;
-        self
-    }
-
-    /// Replace the diagnostic byte limit. The child applies the host ceiling.
-    #[must_use]
-    pub fn diagnostic_byte_limit(mut self, bytes: usize) -> Self {
-        self.diagnostic_byte_limit = bytes;
-        self
-    }
-
-    pub(crate) fn wire(&self) -> WorkerElabOptions {
-        WorkerElabOptions {
-            namespace_context: self.namespace_context.clone(),
-            file_label: self.file_label.clone(),
-            heartbeat_limit: self.heartbeat_limit,
-            diagnostic_byte_limit: self.diagnostic_byte_limit,
-        }
-    }
-}
-
-impl Default for LeanWorkerElabOptions {
-    fn default() -> Self {
-        Self {
-            namespace_context: String::new(),
-            file_label: "<elaborate>".to_owned(),
-            heartbeat_limit: lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT,
-            diagnostic_byte_limit: lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
-        }
-    }
-}
-
 /// Protocol/runtime facts reported by the worker child during handshake.
 ///
 /// These facts describe the `lean-rs-worker` process and framing contract.
@@ -145,117 +78,6 @@ pub struct LeanWorkerRuntimeMetadata {
     pub worker_version: String,
     pub protocol_version: u16,
     pub lean_version: Option<String>,
-}
-
-/// Generic metadata reported by one downstream capability package.
-///
-/// Command names, capability names, versions, and `extra` JSON are downstream
-/// semantics. `lean-rs-worker` transports and validates the envelope; it does
-/// not decide which values affect caches.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerCapabilityMetadata {
-    pub commands: Vec<LeanWorkerCommandMetadata>,
-    pub capabilities: Vec<LeanWorkerCapabilityFact>,
-    pub lean_version: Option<String>,
-    pub extra: Option<Value>,
-}
-
-impl From<WorkerCapabilityMetadata> for LeanWorkerCapabilityMetadata {
-    fn from(value: WorkerCapabilityMetadata) -> Self {
-        Self {
-            commands: value.commands.into_iter().map(Into::into).collect(),
-            capabilities: value.capabilities.into_iter().map(Into::into).collect(),
-            lean_version: value.lean_version,
-            extra: value.extra,
-        }
-    }
-}
-
-/// One downstream command advertised by capability metadata.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerCommandMetadata {
-    pub name: String,
-    pub version: String,
-}
-
-impl From<WorkerCommandMetadata> for LeanWorkerCommandMetadata {
-    fn from(value: WorkerCommandMetadata) -> Self {
-        Self {
-            name: value.name,
-            version: value.version,
-        }
-    }
-}
-
-/// One named capability advertised by capability metadata.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerCapabilityFact {
-    pub name: String,
-    pub version: String,
-}
-
-impl From<WorkerCapabilityFact> for LeanWorkerCapabilityFact {
-    fn from(value: WorkerCapabilityFact) -> Self {
-        Self {
-            name: value.name,
-            version: value.version,
-        }
-    }
-}
-
-/// Severity for a capability doctor diagnostic.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum LeanWorkerDoctorSeverity {
-    Pass,
-    Warning,
-    Error,
-}
-
-impl From<WorkerDoctorSeverity> for LeanWorkerDoctorSeverity {
-    fn from(value: WorkerDoctorSeverity) -> Self {
-        match value {
-            WorkerDoctorSeverity::Pass => Self::Pass,
-            WorkerDoctorSeverity::Warning => Self::Warning,
-            WorkerDoctorSeverity::Error => Self::Error,
-        }
-    }
-}
-
-/// One structured capability health diagnostic.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerDoctorDiagnostic {
-    pub severity: LeanWorkerDoctorSeverity,
-    pub code: String,
-    pub message: String,
-    pub details: Option<Value>,
-}
-
-impl From<WorkerDoctorDiagnostic> for LeanWorkerDoctorDiagnostic {
-    fn from(value: WorkerDoctorDiagnostic) -> Self {
-        Self {
-            severity: value.severity.into(),
-            code: value.code,
-            message: value.message,
-            details: value.details,
-        }
-    }
-}
-
-/// Capability health report returned by a downstream doctor export.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerDoctorReport {
-    pub diagnostics: Vec<LeanWorkerDoctorDiagnostic>,
-    pub metadata: Option<Value>,
-}
-
-impl From<WorkerDoctorReport> for LeanWorkerDoctorReport {
-    fn from(value: WorkerDoctorReport) -> Self {
-        Self {
-            diagnostics: value.diagnostics.into_iter().map(Into::into).collect(),
-            metadata: value.metadata,
-        }
-    }
 }
 
 /// Parent-side cancellation token for worker-session requests.
@@ -552,83 +374,6 @@ pub struct LeanWorkerTypedStreamSummary<Summary> {
     pub metadata: Option<Summary>,
 }
 
-/// Serializable elaboration result returned over the worker boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerElabResult {
-    pub success: bool,
-    pub diagnostics: Vec<LeanWorkerDiagnostic>,
-    pub truncated: bool,
-}
-
-impl From<WorkerElabOutcome> for LeanWorkerElabResult {
-    fn from(value: WorkerElabOutcome) -> Self {
-        Self {
-            success: value.success,
-            diagnostics: value.diagnostics.into_iter().map(Into::into).collect(),
-            truncated: value.truncated,
-        }
-    }
-}
-
-/// Kernel-check status returned over the worker boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum LeanWorkerKernelStatus {
-    Checked,
-    Rejected,
-    Unavailable,
-    Unsupported,
-}
-
-/// Serializable kernel-check result returned over the worker boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerKernelResult {
-    pub status: LeanWorkerKernelStatus,
-    pub diagnostics: Vec<LeanWorkerDiagnostic>,
-    pub truncated: bool,
-}
-
-impl From<WorkerKernelOutcome> for LeanWorkerKernelResult {
-    fn from(value: WorkerKernelOutcome) -> Self {
-        Self {
-            status: match value.status {
-                WorkerKernelStatus::Checked => LeanWorkerKernelStatus::Checked,
-                WorkerKernelStatus::Rejected => LeanWorkerKernelStatus::Rejected,
-                WorkerKernelStatus::Unavailable => LeanWorkerKernelStatus::Unavailable,
-                WorkerKernelStatus::Unsupported => LeanWorkerKernelStatus::Unsupported,
-            },
-            diagnostics: value.diagnostics.into_iter().map(Into::into).collect(),
-            truncated: value.truncated,
-        }
-    }
-}
-
-/// Serializable diagnostic returned by worker elaboration and kernel checks.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanWorkerDiagnostic {
-    pub severity: String,
-    pub message: String,
-    pub file_label: String,
-    pub line: Option<u32>,
-    pub column: Option<u32>,
-    pub end_line: Option<u32>,
-    pub end_column: Option<u32>,
-}
-
-impl From<WorkerDiagnostic> for LeanWorkerDiagnostic {
-    fn from(value: WorkerDiagnostic) -> Self {
-        Self {
-            severity: value.severity,
-            message: value.message,
-            file_label: value.file_label,
-            line: value.line,
-            column: value.column,
-            end_line: value.end_line,
-            end_column: value.end_column,
-        }
-    }
-}
-
 /// Narrow host-session adapter over a live `LeanWorker`.
 ///
 /// Dropping this value does not stop the worker. If a request is cancelled
@@ -765,6 +510,241 @@ impl LeanWorkerSession<'_> {
     ) -> Result<Vec<String>, LeanWorkerError> {
         self.ensure_open()?;
         match self.worker.worker_declaration_names(names, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Elaborate `source` and infer the resulting expression's type.
+    ///
+    /// The rendered type uses `Expr.toString` (the cheap, deterministic
+    /// projection backed by the host's `lean_rs_host_env_expr_to_string_raw`
+    /// shim) — the same shape `LeanWorkerProcessedFile` term nodes use.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child reports a
+    /// host error, cancellation is observed, a progress sink panics, or
+    /// protocol communication fails. Lean-side failures (type errors,
+    /// heartbeat exhaustion, missing capability) surface inside the returned
+    /// [`LeanWorkerMetaResult`] rather than as `Err`.
+    pub fn infer_type(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self.worker.worker_infer_type(source, options, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Elaborate `source` and reduce it to weak head normal form.
+    ///
+    /// The rendered result uses `Expr.toString`, matching [`Self::infer_type`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::infer_type`]. Lean-side failures surface inside the returned
+    /// [`LeanWorkerMetaResult`].
+    pub fn whnf(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<String>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self.worker.worker_whnf(source, options, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Elaborate `lhs` and `rhs` and ask Lean whether they are definitionally
+    /// equal at the supplied transparency.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::infer_type`]. Lean-side failures surface inside the returned
+    /// [`LeanWorkerMetaResult`].
+    pub fn is_def_eq(
+        &mut self,
+        lhs: &str,
+        rhs: &str,
+        transparency: LeanWorkerMetaTransparency,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerMetaResult<bool>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_is_def_eq(lhs, rhs, transparency, options, cancellation, progress)
+        {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Describe a declaration: its kind, rendered type, and source range.
+    ///
+    /// Returns `Ok(None)` when the name is not in the session's open
+    /// environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child reports a
+    /// host error, cancellation is observed, a progress sink panics, or
+    /// protocol communication fails.
+    pub fn describe(
+        &mut self,
+        name: &str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Option<LeanWorkerDeclarationRow>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self.worker.worker_describe(name, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Enumerate the session's open environment and return the matching
+    /// declaration names as dotted strings.
+    ///
+    /// The child streams names one per protocol frame so total payload size
+    /// is unbounded; any single Lean name fits well under the per-frame cap.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::describe`].
+    pub fn list_declarations_strings(
+        &mut self,
+        filter: &LeanWorkerDeclarationFilter,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<String>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_list_declarations_strings(*filter, cancellation, progress)
+        {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Describe a batch of declarations in one IPC round-trip.
+    ///
+    /// Each input name produces one row in the returned vector, in the same
+    /// order. Absent names keep their slot with `kind == "missing"`,
+    /// `type_signature: None`, and `source: None` so callers can correlate
+    /// rows back to inputs positionally.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::describe`].
+    pub fn describe_bulk(
+        &mut self,
+        names: &[&str],
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Vec<LeanWorkerDeclarationRow>, LeanWorkerError> {
+        self.ensure_open()?;
+        match self.worker.worker_describe_bulk(names, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse, elaborate, and project a Lean source string into an
+    /// `Elab.InfoTree` projection. The session's open environment supplies
+    /// the imports; the source must not declare its own header.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child reports a
+    /// host error, cancellation is observed, a progress sink panics, or
+    /// protocol communication fails. Per-command elaboration failures appear
+    /// inside `LeanWorkerProcessedFile::diagnostics`; the
+    /// `LeanWorkerProcessFileOutcome::Unsupported` arm surfaces missing
+    /// capability shims.
+    pub fn process_file(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
+        self.ensure_open()?;
+        match self.worker.worker_process_file(source, options, cancellation, progress) {
+            Ok(value) => Ok(value),
+            Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
+                self.open = false;
+                Err(err)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parse a Lean module header (`import` declarations and prelude) and
+    /// elaborate the body; project both into an `Elab.InfoTree` projection
+    /// plus the parsed import list.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::process_file`]. Header-parse failures, missing imports, and
+    /// missing capability shims surface as variants of
+    /// [`LeanWorkerProcessModuleOutcome`].
+    pub fn process_module(
+        &mut self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
+        self.ensure_open()?;
+        match self
+            .worker
+            .worker_process_module(source, options, cancellation, progress)
+        {
             Ok(value) => Ok(value),
             Err(err @ (LeanWorkerError::Cancelled { .. } | LeanWorkerError::Timeout { .. })) => {
                 self.open = false;

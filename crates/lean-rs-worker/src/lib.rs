@@ -14,6 +14,7 @@ mod pool;
 mod protocol;
 mod session;
 mod supervisor;
+mod types;
 
 pub use capability::{
     LeanWorkerBootstrapCheck, LeanWorkerBootstrapDiagnosticCode, LeanWorkerBootstrapReport,
@@ -28,18 +29,23 @@ pub use pool::{
     LeanWorkerSessionLease,
 };
 pub use session::{
-    LeanWorkerCancellationToken, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
-    LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnostic, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink,
-    LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerJsonCommand, LeanWorkerKernelResult, LeanWorkerKernelStatus,
-    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRuntimeMetadata, LeanWorkerSession,
-    LeanWorkerSessionConfig, LeanWorkerStreamSummary, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
-    LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
+    LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,
+    LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerSessionConfig, LeanWorkerStreamSummary,
+    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
 pub use supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig,
     LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
     LeanWorkerStatus,
+};
+pub use types::{
+    LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerCommandMetadata,
+    LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic,
+    LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
+    LeanWorkerProcessedFile, LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
 };
 
 /// Run the worker child process on stdin/stdout.
