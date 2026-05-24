@@ -11,9 +11,9 @@ for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
 done
 ```
 
-The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a build and the
-progress lines would otherwise land in the baseline file and trip the next diff. The prerelease
-script's internal regeneration drops stderr the same way.
+The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a build and the progress lines would
+otherwise land in the baseline file and trip the next diff. The prerelease script's internal regeneration drops stderr
+the same way.
 
 ## Red-flag checklist (review before regenerating)
 
