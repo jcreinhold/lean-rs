@@ -275,6 +275,51 @@ fn startup_timeout_is_typed() {
     }
 }
 
+/// The supervisor's per-spawn `LeanWorkerConfig::env` is the carrier for
+/// the per-toolchain `LEAN_SYSROOT` set by `LeanWorkerChild::for_toolchain`.
+/// Confirm it actually reaches the spawned child's environment.
+#[cfg(unix)]
+#[test]
+fn config_env_propagates_lean_sysroot_to_spawned_child() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    const SENTINEL: &str = "/synthetic/sysroot/marker-7f3a";
+    let script_path = std::env::temp_dir().join(format!(
+        "lean-rs-worker-sysroot-env-{}-{}.sh",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    ));
+    // The script echoes the LEAN_SYSROOT it sees and exits non-zero without
+    // a handshake. Stderr is captured by the post-mortem path and surfaces
+    // in LeanWorkerExit.diagnostics.
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nprintf 'sysroot=%s\\n' \"$LEAN_SYSROOT\" >&2\nexit 1\n",
+    )
+    .expect("temp script writes");
+    let mut perms = fs::metadata(&script_path).expect("temp script stat").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).expect("temp script chmod");
+
+    let err = LeanWorker::spawn(&LeanWorkerConfig::new(&script_path).env("LEAN_SYSROOT", SENTINEL))
+        .expect_err("script exits without a handshake; spawn must fail");
+    drop(fs::remove_file(&script_path));
+
+    match err {
+        LeanWorkerError::ChildPanicOrAbort { exit } => {
+            assert!(
+                exit.diagnostics.contains(&format!("sysroot={SENTINEL}")),
+                "spawned child must see the LEAN_SYSROOT set via LeanWorkerConfig::env; got: {:?}",
+                exit.diagnostics,
+            );
+        }
+        other => panic!("expected ChildPanicOrAbort, got {other:?}"),
+    }
+}
+
 /// When a child fails *before* sending its handshake frame (closing stdout
 /// without a valid frame), the supervisor must surface the child's stderr in
 /// `LeanWorkerExit.diagnostics` rather than dropping it. Regression for a

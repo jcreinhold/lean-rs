@@ -310,12 +310,12 @@ impl LeanWorkerCapabilityBuilder {
             None => lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
                 .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?,
         };
-        let worker_executable = self
-            .worker_child
-            .map_or_else(resolve_default_worker_executable, |child| child.resolve())?;
+        let worker_child = self.worker_child.unwrap_or_default();
+        let worker_executable = worker_child.resolve()?;
         validate_worker_child_path(&worker_executable)?;
+        let lean_sysroot = worker_child.resolve_lean_sysroot()?;
 
-        let mut config = LeanWorkerConfig::new(worker_executable);
+        let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
         if let Some(timeout) = self.startup_timeout {
             config = config.startup_timeout(timeout);
         }
@@ -707,11 +707,38 @@ struct WorkerCapabilityManifest {
 /// applications. Production apps should ship a tiny binary that calls
 /// `lean_rs_worker_child::run_worker_child_stdio` and point the capability
 /// builder at it through this locator.
+///
+/// # Toolchain binding
+///
+/// A worker child binary is *built against one Lean toolchain*: its rpath
+/// points at one `libleanshared`, and `LEAN_SYSROOT` at spawn time must point
+/// at the matching stdlib oleans (`<sysroot>/lib/lean/Init.olean`). Mismatched
+/// rpath and sysroot abort with `incompatible header` before the handshake.
+///
+/// The locator carries both: the binary path (via [`Self::path`] or
+/// [`Self::sibling`]) and, optionally, the matching sysroot (via
+/// [`Self::for_toolchain`] or [`Self::lean_sysroot`]). When the supervisor
+/// spawns the child, it sets `LEAN_SYSROOT` from the locator (or from
+/// [`lean_toolchain::discover_toolchain`] as a fallback) so callers never have
+/// to thread the env var manually.
+///
+/// # Design note: no generic `env(key, value)` passthrough
+///
+/// `LeanWorkerCapabilityBuilder` and `LeanWorkerChild` deliberately do **not**
+/// expose a general `env(key, value)` builder. Every environment variable the
+/// worker child cares about has a typed method whose name describes the
+/// invariant it enforces (e.g. [`Self::lean_sysroot`] enforces the
+/// rpath/sysroot match). If a future env var needs to be plumbed through, add
+/// a typed builder for it — do **not** add a generic `env(...)`. Generic
+/// passthroughs leak implementation knowledge (env var names, framing
+/// invariants) into every caller and erode the structural guarantee that
+/// supported configurations cannot be misconstructed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerChild {
     executable_name: Option<String>,
     explicit_path: Option<PathBuf>,
     env_var: Option<String>,
+    lean_sysroot: Option<PathBuf>,
 }
 
 impl LeanWorkerChild {
@@ -723,6 +750,7 @@ impl LeanWorkerChild {
             executable_name: Some(with_exe_suffix(executable_name.into())),
             explicit_path: None,
             env_var: None,
+            lean_sysroot: None,
         }
     }
 
@@ -733,7 +761,35 @@ impl LeanWorkerChild {
             executable_name: None,
             explicit_path: Some(path.into()),
             env_var: None,
+            lean_sysroot: None,
         }
+    }
+
+    /// Locate a worker child and declare the Lean toolchain its rpath was
+    /// built against.
+    ///
+    /// `sysroot` is the Lean prefix containing `lib/lean/Init.olean`. The
+    /// supervisor sets `LEAN_SYSROOT` to this value when spawning the child,
+    /// so a single parent process can host multiple workers each pinned to a
+    /// different toolchain.
+    #[must_use]
+    pub fn for_toolchain(path: impl Into<PathBuf>, sysroot: impl Into<PathBuf>) -> Self {
+        Self {
+            executable_name: None,
+            explicit_path: Some(path.into()),
+            env_var: None,
+            lean_sysroot: Some(sysroot.into()),
+        }
+    }
+
+    /// Set or override the Lean sysroot the spawned child uses.
+    ///
+    /// When unset, the supervisor falls back to
+    /// [`lean_toolchain::discover_toolchain`] at spawn time.
+    #[must_use]
+    pub fn lean_sysroot(mut self, sysroot: impl Into<PathBuf>) -> Self {
+        self.lean_sysroot = Some(sysroot.into());
+        self
     }
 
     /// Add an environment-variable override for launchers and tests.
@@ -741,6 +797,24 @@ impl LeanWorkerChild {
     pub fn env_override(mut self, env_var: impl Into<String>) -> Self {
         self.env_var = Some(env_var.into());
         self
+    }
+
+    /// Return the sysroot the supervisor will set as `LEAN_SYSROOT`.
+    ///
+    /// Returns the explicit sysroot if one was bound via
+    /// [`Self::for_toolchain`] or [`Self::lean_sysroot`]; otherwise runs
+    /// [`lean_toolchain::discover_toolchain`] with default options and returns
+    /// the discovered prefix.
+    fn resolve_lean_sysroot(&self) -> Result<PathBuf, LeanWorkerError> {
+        if let Some(sysroot) = &self.lean_sysroot {
+            return Ok(sysroot.clone());
+        }
+        let info = lean_toolchain::discover_toolchain(&lean_toolchain::DiscoverOptions::default()).map_err(|diag| {
+            LeanWorkerError::Setup {
+                message: format!("could not discover Lean sysroot for worker spawn: {diag}"),
+            }
+        })?;
+        Ok(info.prefix)
     }
 
     fn resolve(&self) -> Result<PathBuf, LeanWorkerError> {
@@ -1000,4 +1074,41 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     unique
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::LeanWorkerChild;
+    use std::path::PathBuf;
+
+    #[test]
+    fn for_toolchain_carries_sysroot_through_resolve() {
+        let sysroot = PathBuf::from("/opt/some/lean/prefix");
+        let child = LeanWorkerChild::for_toolchain("/opt/worker", &sysroot);
+        let resolved = child.resolve_lean_sysroot().expect("explicit sysroot resolves");
+        assert_eq!(resolved, sysroot);
+    }
+
+    #[test]
+    fn lean_sysroot_setter_overrides_default() {
+        let sysroot = PathBuf::from("/opt/override/lean");
+        let child = LeanWorkerChild::path("/opt/worker").lean_sysroot(&sysroot);
+        let resolved = child.resolve_lean_sysroot().expect("explicit sysroot resolves");
+        assert_eq!(resolved, sysroot);
+    }
+
+    #[test]
+    fn explicit_sysroot_bypasses_discovery_even_when_path_is_nonexistent() {
+        // The supervisor only sets `LEAN_SYSROOT`; it does not validate that
+        // the path exists. Validation is the spawned child's responsibility
+        // (an invalid sysroot manifests as a typed handshake/abort error
+        // carrying the child's bootstrap stderr).
+        let sysroot = PathBuf::from("/definitely/not/a/real/sysroot");
+        let child = LeanWorkerChild::for_toolchain("/opt/worker", &sysroot);
+        let resolved = child
+            .resolve_lean_sysroot()
+            .expect("explicit sysroot resolves without filesystem checks");
+        assert_eq!(resolved, sysroot);
+    }
 }
