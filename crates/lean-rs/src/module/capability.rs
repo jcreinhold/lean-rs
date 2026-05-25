@@ -49,7 +49,9 @@ impl<'lean> LeanCapability<'lean> {
         if !report.is_ok() {
             return Err(report_into_error(report));
         }
-        let manifest_path = spec.resolved_manifest_path().map_err(|err| built_capability_error_to_lean_error(&err))?;
+        let manifest_path = spec
+            .resolved_manifest_path()
+            .map_err(|err| built_capability_error_to_lean_error(&err))?;
         let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;
         Self::open_with_dependencies(
             runtime,
@@ -72,7 +74,9 @@ impl<'lean> LeanCapability<'lean> {
     /// dynamic loader cannot open it, or the configured module initializer
     /// fails.
     pub fn from_build_env(runtime: &'lean LeanRuntime, mut spec: LeanBuiltCapability) -> LeanResult<Self> {
-        let dylib_path = spec.dylib_path().map_err(|err| built_capability_error_to_lean_error(&err))?;
+        let dylib_path = spec
+            .dylib_path()
+            .map_err(|err| built_capability_error_to_lean_error(&err))?;
         let package = spec.take_package_name().ok_or_else(|| {
             LeanError::linking("LeanBuiltCapability is missing the Lake package name; call `.package(...)`")
         })?;
@@ -171,7 +175,10 @@ impl<'lean> LeanCapability<'lean> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{BuiltCapabilityArtifact, CapabilityManifest, LeanBuiltCapability, LeanBuiltCapabilityError, LeanLibraryDependency};
+    use super::{
+        BuiltCapabilityArtifact, CapabilityManifest, LeanBuiltCapability, LeanBuiltCapabilityError,
+        LeanLibraryDependency,
+    };
     use std::fs;
     use std::path::PathBuf;
 

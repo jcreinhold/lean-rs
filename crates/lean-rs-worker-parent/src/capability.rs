@@ -962,7 +962,7 @@ fn try_build_workspace_worker_child(executable_name: &str, tried: &mut Vec<PathB
     let workspace = manifest_dir.parent()?.parent()?;
     if !workspace
         .join("crates")
-        .join("lean-rs-worker")
+        .join("lean-rs-worker-child")
         .join("Cargo.toml")
         .is_file()
     {
@@ -983,7 +983,7 @@ fn try_build_workspace_worker_child(executable_name: &str, tried: &mut Vec<PathB
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = Command::new(cargo)
         .current_dir(workspace)
-        .args(["build", "-p", "lean-rs-worker", "--bin", "lean-rs-worker-child"])
+        .args(["build", "-p", "lean-rs-worker-child", "--bin", "lean-rs-worker-child"])
         .status()
         .ok()?;
     if !status.success() {

@@ -23,7 +23,8 @@ include = [
 
 [dependencies]
 lean-rs = { path = "../../crates/lean-rs" }
-lean-rs-worker = { path = "../../crates/lean-rs-worker" }
+lean-rs-worker-child = { path = "../../crates/lean-rs-worker-child" }
+lean-rs-worker-parent = { path = "../../crates/lean-rs-worker-parent" }
 
 [build-dependencies]
 lean-toolchain = { path = "../../crates/lean-toolchain" }

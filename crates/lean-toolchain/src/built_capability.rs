@@ -209,12 +209,12 @@ impl LeanBuiltCapability {
             .env_var
             .as_deref()
             .ok_or(LeanBuiltCapabilityError::MissingDylibSource)?;
-        std::env::var_os(env_var).map(PathBuf::from).ok_or_else(|| {
-            LeanBuiltCapabilityError::EnvVarNotSet {
+        std::env::var_os(env_var)
+            .map(PathBuf::from)
+            .ok_or_else(|| LeanBuiltCapabilityError::EnvVarNotSet {
                 env_var: env_var.to_owned(),
                 kind: BuiltCapabilityArtifact::Dylib,
-            }
-        })
+            })
     }
 
     /// Resolve the build artifact manifest path.
@@ -233,12 +233,12 @@ impl LeanBuiltCapability {
             .manifest_env_var
             .as_deref()
             .ok_or(LeanBuiltCapabilityError::MissingManifestSource)?;
-        std::env::var_os(env_var).map(PathBuf::from).ok_or_else(|| {
-            LeanBuiltCapabilityError::EnvVarNotSet {
+        std::env::var_os(env_var)
+            .map(PathBuf::from)
+            .ok_or_else(|| LeanBuiltCapabilityError::EnvVarNotSet {
                 env_var: env_var.to_owned(),
                 kind: BuiltCapabilityArtifact::Manifest,
-            }
-        })
+            })
     }
 }
 
@@ -293,12 +293,12 @@ pub enum LeanBuiltCapabilityError {
 impl std::fmt::Display for LeanBuiltCapabilityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingDylibSource => f.write_str(
-                "LeanBuiltCapability needs either a dylib path or an environment variable",
-            ),
-            Self::MissingManifestSource => f.write_str(
-                "LeanBuiltCapability needs either a manifest path or manifest environment variable",
-            ),
+            Self::MissingDylibSource => {
+                f.write_str("LeanBuiltCapability needs either a dylib path or an environment variable")
+            }
+            Self::MissingManifestSource => {
+                f.write_str("LeanBuiltCapability needs either a manifest path or manifest environment variable")
+            }
             Self::EnvVarNotSet { env_var, kind } => {
                 write!(f, "environment variable {env_var} is not set for {}", kind.as_str())
             }
@@ -376,9 +376,7 @@ mod tests {
 
     #[test]
     fn missing_manifest_source_is_typed() {
-        let spec = LeanBuiltCapability::path("/tmp/libcap.so")
-            .package("pkg")
-            .module("Cap");
+        let spec = LeanBuiltCapability::path("/tmp/libcap.so").package("pkg").module("Cap");
         let err = match spec.resolved_manifest_path() {
             Ok(path) => panic!("expected missing manifest source error, got {}", path.display()),
             Err(err) => err,

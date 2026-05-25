@@ -22,6 +22,7 @@
 //! `lean-rs`'s `pub(crate)` modules.
 
 mod build_helpers;
+mod built_capability;
 mod diagnostics;
 mod discover;
 mod fingerprint;
@@ -29,14 +30,13 @@ mod limits;
 mod loader;
 pub mod manifest_validation;
 mod modules;
-mod built_capability;
 
-pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
     build_lake_target_quiet, capability_env_var, capability_manifest_env_var, emit_lean_link_directives,
     emit_lean_link_directives_checked,
 };
+pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};

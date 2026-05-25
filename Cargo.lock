@@ -370,7 +370,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lean-rs-worker"
+name = "lean-rs-worker-child"
 version = "0.1.8"
 dependencies = [
  "ciborium",
@@ -378,6 +378,8 @@ dependencies = [
  "dhat",
  "lean-rs",
  "lean-rs-host",
+ "lean-rs-worker-parent",
+ "lean-rs-worker-protocol",
  "lean-toolchain",
  "libc",
  "rmp-serde",

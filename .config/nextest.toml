@@ -11,10 +11,23 @@
 # developer workflow.
 
 [profile.default]
-# Cap parallel test processes. 4 × ~1 GiB per process ≈ 4 GiB working
-# set worst-case — comfortably fits inside CI runner memory. Override
-# locally with `NEXTEST_TEST_THREADS=N cargo nextest run ...`.
-test-threads = 4
+# Cap parallel test processes. Two factors set the bound:
+#   1. Each test that opens a `LeanHost` and imports
+#      `LeanRsFixture.Handles` commits several hundred MB of resident
+#      memory (the Lean compiler environment).
+#   2. The `lean-rs-worker-child` integration tests in
+#      `capability_builder` and `loader_regressions` shell out to
+#      `cargo build` on the `shipped-lean-crate` template. Each of
+#      those `cargo build` invocations is itself capped at `--jobs 2`,
+#      but the *outer* concurrency multiplies that swarm: with N test
+#      threads you can see up to `N × 2` rustc workers compiling
+#      Lean-linked code in addition to the Lean compiler driven by the
+#      template's `build.rs`.
+# Net: keep this conservative. 2 × ~1 GiB per process + 2 × 2 rustc
+# workers when a template build is active is the worst case and fits
+# inside an 8–16 GiB working set. Override locally with
+# `NEXTEST_TEST_THREADS=N cargo nextest run ...`.
+test-threads = 2
 
 # We want full visibility into all failures in a single run rather than
 # stopping at the first.
