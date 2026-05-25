@@ -30,13 +30,26 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
-/// Hard ceiling on one frame's serialised JSON payload in bytes.
+/// Default per-frame size limit applied by the parent when no explicit cap is
+/// configured on the capability builder.
 ///
-/// Both [`write_frame`] and [`read_frame`] reject frames over this limit so a
-/// runaway producer cannot make the peer allocate without bound.
+/// The cap is a parent-side policy decision negotiated to the child at
+/// handshake time via [`Message::ConfigureFrameLimit`]. Both [`write_frame`]
+/// and [`read_frame`] reject frames whose serialised JSON payload exceeds the
+/// cap passed in, so a runaway producer cannot make the peer allocate without
+/// bound. The cap is per-connection — set once at handshake, applied to every
+/// subsequent frame in both directions.
 pub const MAX_FRAME_BYTES: u32 = 1024 * 1024;
+
+/// Floor on the configurable frame cap. Trivial requests and the handshake
+/// itself must fit inside this; callers cannot configure smaller.
+pub const MIN_FRAME_BYTES: u32 = 64 * 1024;
+
+/// Ceiling on the configurable frame cap. Prevents callers from defeating the
+/// memory-safety policy by passing an absurdly large value.
+pub const MAX_FRAME_BYTES_HARD_CAP: u32 = 256 * 1024 * 1024;
 
 /// Versioned envelope around a single protocol [`Message`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -71,6 +84,16 @@ pub enum Message {
         worker_version: String,
         /// Protocol version the child speaks. Parent rejects mismatches.
         protocol_version: u16,
+    },
+    /// Sent by the parent immediately after the handshake frame to negotiate
+    /// the per-frame size cap for the remainder of this connection.
+    ///
+    /// The parent owns the memory-safety policy: it clamps the requested cap
+    /// into <code>[[MIN_FRAME_BYTES], [MAX_FRAME_BYTES_HARD_CAP]]</code>
+    /// before sending. The child installs the value as-is.
+    ConfigureFrameLimit {
+        /// Per-frame byte cap applied in both directions for this connection.
+        max_frame_bytes: u32,
     },
     /// Parent → child request frame.
     Request(Request),
@@ -399,7 +422,7 @@ impl DataRowEmitter {
         payload: &Value,
     ) -> Result<(), ProtocolError> {
         let row = self.next(stream, serde_json::value::to_raw_value(payload)?);
-        write_frame(writer, Message::DataRow(row))
+        write_frame(writer, Message::DataRow(row), MAX_FRAME_BYTES)
     }
 
     /// Total rows emitted across all streams.
@@ -505,21 +528,26 @@ impl From<serde_json::Error> for ProtocolError {
 
 /// Serialise `message` as a length-delimited JSON frame to `writer`.
 ///
+/// `max_frame_bytes` is the per-frame cap negotiated for this connection.
+/// Until the handshake completes, callers pass [`MAX_FRAME_BYTES`] as the
+/// default; afterwards the supervisor passes the
+/// [`Message::ConfigureFrameLimit`] value installed on the connection.
+///
 /// # Errors
 ///
 /// Returns [`ProtocolError::FrameTooLarge`] if the serialised body would
-/// exceed [`MAX_FRAME_BYTES`], or the underlying [`ProtocolError::Io`] /
+/// exceed `max_frame_bytes`, or the underlying [`ProtocolError::Io`] /
 /// [`ProtocolError::Json`] for codec failures.
-pub fn write_frame(writer: &mut impl Write, message: Message) -> Result<(), ProtocolError> {
+pub fn write_frame(writer: &mut impl Write, message: Message, max_frame_bytes: u32) -> Result<(), ProtocolError> {
     let bytes = serde_json::to_vec(&Frame::new(message))?;
     let len = u32::try_from(bytes.len()).map_err(|_| ProtocolError::FrameTooLarge {
         len: u32::MAX,
-        max: MAX_FRAME_BYTES,
+        max: max_frame_bytes,
     })?;
-    if len > MAX_FRAME_BYTES {
+    if len > max_frame_bytes {
         return Err(ProtocolError::FrameTooLarge {
             len,
-            max: MAX_FRAME_BYTES,
+            max: max_frame_bytes,
         });
     }
     writer.write_all(&len.to_be_bytes())?;
@@ -530,21 +558,24 @@ pub fn write_frame(writer: &mut impl Write, message: Message) -> Result<(), Prot
 
 /// Read one length-delimited JSON frame from `reader`.
 ///
+/// `max_frame_bytes` is the per-frame cap negotiated for this connection. See
+/// [`write_frame`] for the back-compat default and post-handshake semantics.
+///
 /// # Errors
 ///
 /// Returns [`ProtocolError::FrameTooLarge`] if the framed length exceeds
-/// [`MAX_FRAME_BYTES`] (rejected before allocation),
+/// `max_frame_bytes` (rejected before allocation),
 /// [`ProtocolError::VersionMismatch`] if the peer's version does not match
 /// [`PROTOCOL_VERSION`], or the underlying [`ProtocolError::Io`] /
 /// [`ProtocolError::Json`] for codec failures.
-pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
+pub fn read_frame(reader: &mut impl Read, max_frame_bytes: u32) -> Result<Frame, ProtocolError> {
     let mut len_bytes = [0_u8; 4];
     reader.read_exact(&mut len_bytes)?;
     let len = u32::from_be_bytes(len_bytes);
-    if len > MAX_FRAME_BYTES {
+    if len > max_frame_bytes {
         return Err(ProtocolError::FrameTooLarge {
             len,
-            max: MAX_FRAME_BYTES,
+            max: max_frame_bytes,
         });
     }
     let mut bytes = vec![0_u8; len as usize];
@@ -568,7 +599,10 @@ mod tests {
     use serde_json::json;
     use serde_json::value::RawValue;
 
-    use super::{DataRow, DataRowEmitter, MAX_FRAME_BYTES, Message, ProtocolError, Response, read_frame, write_frame};
+    use super::{
+        DataRow, DataRowEmitter, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, ProtocolError,
+        Response, read_frame, write_frame,
+    };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
         serde_json::value::to_raw_value(value).expect("test JSON converts to raw value")
@@ -582,8 +616,8 @@ mod tests {
             payload: raw_json(&json!({ "name": "Nat.add", "score": 3 })),
         };
         let mut bytes = Vec::new();
-        write_frame(&mut bytes, Message::DataRow(row.clone())).expect("data row writes");
-        let frame = read_frame(&mut Cursor::new(bytes)).expect("data row reads");
+        write_frame(&mut bytes, Message::DataRow(row.clone()), MAX_FRAME_BYTES).expect("data row writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("data row reads");
         assert_eq!(frame.message, Message::DataRow(row));
     }
 
@@ -604,9 +638,9 @@ mod tests {
 
         let mut cursor = Cursor::new(bytes);
         let rows = [
-            read_frame(&mut cursor).expect("first row reads"),
-            read_frame(&mut cursor).expect("second row reads"),
-            read_frame(&mut cursor).expect("third row reads"),
+            read_frame(&mut cursor, MAX_FRAME_BYTES).expect("first row reads"),
+            read_frame(&mut cursor, MAX_FRAME_BYTES).expect("second row reads"),
+            read_frame(&mut cursor, MAX_FRAME_BYTES).expect("third row reads"),
         ];
         assert_eq!(
             rows.map(|frame| frame.message),
@@ -638,7 +672,8 @@ mod tests {
             payload: raw_json(&json!({ "blob": "x".repeat(MAX_FRAME_BYTES as usize) })),
         };
         let mut bytes = Vec::new();
-        let err = write_frame(&mut bytes, Message::DataRow(row)).expect_err("oversized frame is rejected");
+        let err =
+            write_frame(&mut bytes, Message::DataRow(row), MAX_FRAME_BYTES).expect_err("oversized frame is rejected");
         match err {
             ProtocolError::FrameTooLarge { len, max } => {
                 assert!(len > max);
@@ -654,7 +689,7 @@ mod tests {
     fn oversized_data_row_is_rejected_before_read_allocation() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&(MAX_FRAME_BYTES.saturating_add(1)).to_be_bytes());
-        let err = read_frame(&mut Cursor::new(bytes)).expect_err("oversized frame is rejected");
+        let err = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect_err("oversized frame is rejected");
         match err {
             ProtocolError::FrameTooLarge { len, max } => {
                 assert_eq!(len, MAX_FRAME_BYTES + 1);
@@ -667,11 +702,34 @@ mod tests {
     }
 
     #[test]
+    fn larger_cap_accepts_frame_rejected_under_default() {
+        // A 2 MiB payload is rejected under MAX_FRAME_BYTES (1 MiB) but
+        // accepted when the cap is raised — proving the cap parameter is the
+        // only thing the codec consults.
+        let raised = MAX_FRAME_BYTES.saturating_mul(8);
+        let row = DataRow {
+            stream: "rows".to_owned(),
+            sequence: 0,
+            payload: raw_json(&json!({ "blob": "x".repeat(2 * MAX_FRAME_BYTES as usize) })),
+        };
+        let mut buf = Vec::new();
+        write_frame(&mut buf, Message::DataRow(row.clone()), raised).expect("oversize-under-default frame writes");
+        let frame = read_frame(&mut Cursor::new(buf), raised).expect("oversize-under-default frame reads");
+        assert_eq!(frame.message, Message::DataRow(row));
+    }
+
+    #[test]
+    fn frame_cap_bounds_constants_are_consistent() {
+        const { assert!(MIN_FRAME_BYTES <= MAX_FRAME_BYTES) };
+        const { assert!(MAX_FRAME_BYTES <= MAX_FRAME_BYTES_HARD_CAP) };
+    }
+
+    #[test]
     fn malformed_frame_payload_is_protocol_error() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&1_u32.to_be_bytes());
         bytes.push(b'{');
-        let err = read_frame(&mut Cursor::new(bytes)).expect_err("malformed JSON is rejected");
+        let err = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect_err("malformed JSON is rejected");
         match err {
             ProtocolError::Json(_) => {}
             other @ (ProtocolError::Io(_)
@@ -685,8 +743,13 @@ mod tests {
     #[test]
     fn rows_complete_response_round_trips() {
         let mut bytes = Vec::new();
-        write_frame(&mut bytes, Message::Response(Response::RowsComplete { count: 2 })).expect("rows complete writes");
-        let frame = read_frame(&mut Cursor::new(bytes)).expect("rows complete reads");
+        write_frame(
+            &mut bytes,
+            Message::Response(Response::RowsComplete { count: 2 }),
+            MAX_FRAME_BYTES,
+        )
+        .expect("rows complete writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("rows complete reads");
         assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
     }
 }

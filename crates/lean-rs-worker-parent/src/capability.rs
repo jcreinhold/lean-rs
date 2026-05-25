@@ -52,6 +52,7 @@ pub struct LeanWorkerCapabilityBuilder {
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     metadata_check: Option<CapabilityMetadataCheck>,
+    max_frame_bytes: Option<u32>,
 }
 
 impl LeanWorkerCapabilityBuilder {
@@ -79,6 +80,7 @@ impl LeanWorkerCapabilityBuilder {
             request_timeout: None,
             restart_policy: None,
             metadata_check: None,
+            max_frame_bytes: None,
         }
     }
 
@@ -115,6 +117,7 @@ impl LeanWorkerCapabilityBuilder {
             request_timeout: None,
             restart_policy: None,
             metadata_check: None,
+            max_frame_bytes: None,
         })
     }
 
@@ -160,6 +163,19 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Set the per-frame byte cap negotiated with the worker child at handshake.
+    ///
+    /// See [`LeanWorkerConfig::max_frame_bytes`] for the policy and the
+    /// `[MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP]` clamp. Raise this for
+    /// capabilities whose single logical result composes into one frame
+    /// (e.g. an outline of an entire module, a file-scoped diagnostics
+    /// snapshot) and would otherwise trip `FrameTooLarge`.
+    #[must_use]
+    pub fn max_frame_bytes(mut self, max_frame_bytes: u32) -> Self {
+        self.max_frame_bytes = Some(max_frame_bytes);
         self
     }
 
@@ -324,6 +340,9 @@ impl LeanWorkerCapabilityBuilder {
         }
         if let Some(policy) = self.restart_policy {
             config = config.restart_policy(policy);
+        }
+        if let Some(cap) = self.max_frame_bytes {
+            config = config.max_frame_bytes(cap);
         }
 
         let mut worker = LeanWorker::spawn(&config)?;

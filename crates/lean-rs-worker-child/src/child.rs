@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -20,8 +21,8 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use lean_rs_worker_protocol::protocol::{
-    DataRowEmitter, Diagnostic, Message, ProgressTick, ProtocolError, Request, Response, StreamSummary, read_frame,
-    write_frame,
+    DataRowEmitter, Diagnostic, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request, Response,
+    StreamSummary, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow,
@@ -35,21 +36,32 @@ use lean_rs_worker_protocol::types::{
 #[derive(Clone)]
 struct ProtocolWriter {
     stdout: Arc<Mutex<std::io::Stdout>>,
+    max_frame_bytes: Arc<AtomicU32>,
 }
 
 impl ProtocolWriter {
     fn new() -> Self {
         Self {
             stdout: Arc::new(Mutex::new(std::io::stdout())),
+            max_frame_bytes: Arc::new(AtomicU32::new(MAX_FRAME_BYTES)),
         }
     }
 
+    fn set_max_frame_bytes(&self, value: u32) {
+        self.max_frame_bytes.store(value, Ordering::Release);
+    }
+
+    fn max_frame_bytes(&self) -> u32 {
+        self.max_frame_bytes.load(Ordering::Acquire)
+    }
+
     fn write(&self, message: Message) -> Result<(), ProtocolError> {
+        let cap = self.max_frame_bytes();
         let mut stdout = self
             .stdout
             .lock()
             .map_err(|_| ProtocolError::Io(std::io::Error::other("worker stdout mutex was poisoned")))?;
-        write_frame(&mut *stdout, message)
+        write_frame(&mut *stdout, message, cap)
     }
 }
 
@@ -168,8 +180,22 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
         protocol_version: lean_rs_worker_protocol::protocol::PROTOCOL_VERSION,
     })?;
 
+    // The first frame from the parent after the handshake must be a
+    // ConfigureFrameLimit announcing the per-connection cap the parent has
+    // clamped. Both directions use that cap for the remainder of this
+    // connection. Read it with the default cap (every clamped value is
+    // already well below `MAX_FRAME_BYTES`).
+    let configure_frame = read_frame(&mut reader, MAX_FRAME_BYTES)?;
+    let Message::ConfigureFrameLimit { max_frame_bytes } = configure_frame.message else {
+        return Err(Box::new(std::io::Error::other(format!(
+            "worker child expected ConfigureFrameLimit, got {:?}",
+            configure_frame.message
+        ))));
+    };
+    writer.set_max_frame_bytes(max_frame_bytes);
+
     loop {
-        let frame = read_frame(&mut reader)?;
+        let frame = read_frame(&mut reader, writer.max_frame_bytes())?;
         let Message::Request(request) = frame.message else {
             writer.write(Message::Response(Response::Error {
                 code: "lean_rs.worker.protocol.unexpected_frame".to_owned(),

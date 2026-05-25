@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use std::sync::Mutex;
 
-use lean_rs_worker_protocol::protocol::{Message, Request, Response, read_frame, write_frame};
+use lean_rs_worker_protocol::protocol::{
+    MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, Request, Response, read_frame, write_frame,
+};
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
@@ -63,6 +65,7 @@ pub struct LeanWorkerConfig {
     startup_timeout: Duration,
     request_timeout: Duration,
     restart_policy: LeanWorkerRestartPolicy,
+    max_frame_bytes: u32,
 }
 
 impl LeanWorkerConfig {
@@ -75,6 +78,7 @@ impl LeanWorkerConfig {
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
             restart_policy: LeanWorkerRestartPolicy::default(),
+            max_frame_bytes: MAX_FRAME_BYTES,
         }
     }
 
@@ -130,6 +134,26 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = policy;
+        self
+    }
+
+    /// Set the per-frame byte cap negotiated with the worker child at handshake.
+    ///
+    /// The cap is announced to the child immediately after its handshake frame
+    /// and applies in both directions for the lifetime of the connection. The
+    /// default is [`MAX_FRAME_BYTES`] (1 MiB), which is enough for every
+    /// session-backed tool whose result composes from many frames. Capabilities
+    /// whose *single* logical result is a frame — e.g. an outline of an
+    /// entire module, or a diagnostics snapshot of a refactor-in-progress
+    /// file — can raise the cap here to admit larger envelopes.
+    ///
+    /// Values are clamped into <code>[[MIN_FRAME_BYTES], [MAX_FRAME_BYTES_HARD_CAP]]</code>.
+    /// The floor keeps even a malformed setter from breaking the handshake
+    /// itself; the ceiling prevents the memory-safety policy from being
+    /// defeated by an absurd value.
+    #[must_use]
+    pub fn max_frame_bytes(mut self, max_frame_bytes: u32) -> Self {
+        self.max_frame_bytes = max_frame_bytes.clamp(MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP);
         self
     }
 }
@@ -612,7 +636,7 @@ impl LeanWorker {
             source,
         })?;
 
-        let stdin = child
+        let mut stdin = child
             .stdin
             .take()
             .map(BufWriter::new)
@@ -624,10 +648,11 @@ impl LeanWorker {
         })?;
         let stderr = child.stderr.take();
 
+        let max_frame_bytes = config.max_frame_bytes;
         let (sender, receiver) = mpsc::channel();
         let _handshake_reader = thread::spawn(move || {
             let mut stdout = BufReader::new(stdout);
-            let result = expect_handshake(&mut stdout);
+            let result = expect_handshake(&mut stdout, max_frame_bytes);
             drop(sender.send((stdout, result)));
         });
 
@@ -663,6 +688,18 @@ impl LeanWorker {
                 });
             }
         };
+
+        // Negotiate the per-connection frame cap to the child. The child
+        // blocks on this frame after sending its handshake; until it lands,
+        // no Request frame can be sent.
+        write_frame(
+            &mut stdin,
+            Message::ConfigureFrameLimit { max_frame_bytes },
+            max_frame_bytes,
+        )
+        .map_err(|err| LeanWorkerError::Protocol {
+            message: format!("failed to send ConfigureFrameLimit: {err}"),
+        })?;
 
         Ok(Self {
             config: config.clone(),
@@ -1463,10 +1500,11 @@ impl LeanWorker {
 
     fn send_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
         self.ensure_running()?;
+        let max_frame_bytes = self.config.max_frame_bytes;
         let Some(stdin) = self.stdin.as_mut() else {
             return Err(self.dead_error());
         };
-        write_frame(stdin, Message::Request(request)).map_err(|err| LeanWorkerError::Protocol {
+        write_frame(stdin, Message::Request(request), max_frame_bytes).map_err(|err| LeanWorkerError::Protocol {
             message: err.to_string(),
         })
     }
@@ -1589,8 +1627,9 @@ impl LeanWorker {
         let streaming = data.is_some();
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
+        let max_frame_bytes = self.config.max_frame_bytes;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let _reader = thread::spawn(move || read_request_messages(stdout, sender));
+        let _reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
 
         loop {
             let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
@@ -1861,9 +1900,13 @@ impl RequestReaderEvent {
     clippy::needless_pass_by_value,
     reason = "the request reader thread must own the sender"
 )]
-fn read_request_messages(mut stdout: BufReader<ChildStdout>, sender: mpsc::SyncSender<RequestReaderEvent>) {
+fn read_request_messages(
+    mut stdout: BufReader<ChildStdout>,
+    sender: mpsc::SyncSender<RequestReaderEvent>,
+    max_frame_bytes: u32,
+) {
     loop {
-        match read_frame(&mut stdout) {
+        match read_frame(&mut stdout, max_frame_bytes) {
             Ok(frame) if matches!(frame.message, Message::Response(_)) => {
                 let _ = send_reader_event(
                     &sender,
@@ -1927,8 +1970,11 @@ impl Drop for LeanWorker {
     clippy::wildcard_enum_match_arm,
     reason = "Message is #[non_exhaustive] across the lean-rs-worker-protocol crate boundary; the wildcard arm uniformly rejects any non-handshake frame"
 )]
-fn expect_handshake(stdout: &mut BufReader<ChildStdout>) -> Result<LeanWorkerRuntimeMetadata, LeanWorkerError> {
-    let frame = read_frame(stdout).map_err(|err| {
+fn expect_handshake(
+    stdout: &mut BufReader<ChildStdout>,
+    max_frame_bytes: u32,
+) -> Result<LeanWorkerRuntimeMetadata, LeanWorkerError> {
+    let frame = read_frame(stdout, max_frame_bytes).map_err(|err| {
         if err.is_eof() {
             LeanWorkerError::Handshake {
                 message: "child closed stdout before handshake".to_owned(),
@@ -2031,4 +2077,39 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
     }
     let text = String::from_utf8_lossy(&output.stdout);
     text.trim().parse::<u64>().ok().filter(|value| *value > 0)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::{LeanWorkerConfig, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES};
+    use std::path::PathBuf;
+
+    fn dummy_config() -> LeanWorkerConfig {
+        LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
+    }
+
+    #[test]
+    fn max_frame_bytes_default_matches_legacy_cap() {
+        let config = dummy_config();
+        assert_eq!(config.max_frame_bytes, MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn max_frame_bytes_clamps_below_floor() {
+        let config = dummy_config().max_frame_bytes(1024);
+        assert_eq!(config.max_frame_bytes, MIN_FRAME_BYTES);
+    }
+
+    #[test]
+    fn max_frame_bytes_clamps_above_ceiling() {
+        let config = dummy_config().max_frame_bytes(u32::MAX);
+        assert_eq!(config.max_frame_bytes, MAX_FRAME_BYTES_HARD_CAP);
+    }
+
+    #[test]
+    fn max_frame_bytes_passes_through_in_range() {
+        let config = dummy_config().max_frame_bytes(8 * 1024 * 1024);
+        assert_eq!(config.max_frame_bytes, 8 * 1024 * 1024);
+    }
 }

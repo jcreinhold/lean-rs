@@ -50,7 +50,10 @@ fn runtime_and_capability_metadata_are_separate() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let runtime = worker.runtime_metadata();
     assert_eq!(runtime.worker_version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(runtime.protocol_version, 3);
+    assert_eq!(
+        runtime.protocol_version,
+        lean_rs_worker_protocol::protocol::PROTOCOL_VERSION
+    );
     assert_eq!(runtime.lean_version, None);
 
     let mut session = worker

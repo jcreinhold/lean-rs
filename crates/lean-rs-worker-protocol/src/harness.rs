@@ -17,13 +17,14 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
 use serde_json::Value;
 
-use crate::protocol::{Message, Request, Response, read_frame, write_frame};
+use crate::protocol::{MAX_FRAME_BYTES, Message, Request, Response, read_frame, write_frame};
 
 #[derive(Debug)]
 pub struct WorkerProcess {
     child: Child,
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
+    max_frame_bytes: u32,
 }
 
 #[derive(Debug)]
@@ -103,9 +104,26 @@ impl WorkerProcess {
             .map(BufReader::new)
             .ok_or(WorkerHarnessError::MissingPipe("stdout"))?;
 
-        let mut worker = Self { child, stdin, stdout };
+        let mut worker = Self {
+            child,
+            stdin,
+            stdout,
+            max_frame_bytes: MAX_FRAME_BYTES,
+        };
         worker.expect_handshake()?;
+        worker.send_frame_limit()?;
         Ok(worker)
+    }
+
+    fn send_frame_limit(&mut self) -> Result<(), WorkerHarnessError> {
+        write_frame(
+            &mut self.stdin,
+            Message::ConfigureFrameLimit {
+                max_frame_bytes: self.max_frame_bytes,
+            },
+            self.max_frame_bytes,
+        )
+        .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))
     }
 
     /// Send a `health` request and assert a `health_ok` response.
@@ -186,7 +204,7 @@ impl WorkerProcess {
         self.send_request(Request::TriggerLeanPanic {
             fixture_root: path_string(fixture_root),
         })?;
-        match read_frame(&mut self.stdout) {
+        match read_frame(&mut self.stdout, self.max_frame_bytes) {
             Ok(frame) => match frame.message {
                 Message::Response(response) => Err(Self::unexpected_response(&response)),
                 other => Err(WorkerHarnessError::UnexpectedMessage(format!("{other:?}"))),
@@ -238,7 +256,7 @@ impl WorkerProcess {
         self.send_request(Request::EmitTestRowsThenExit)?;
         let mut row_count = 0_u64;
         loop {
-            match read_frame(&mut self.stdout) {
+            match read_frame(&mut self.stdout, self.max_frame_bytes) {
                 Ok(frame) => match frame.message {
                     Message::DataRow(_row) => {
                         row_count = row_count.saturating_add(1);
@@ -279,7 +297,7 @@ impl WorkerProcess {
         self.send_request(Request::EmitTestRowsThenPanic)?;
         let mut row_count = 0_u64;
         loop {
-            match read_frame(&mut self.stdout) {
+            match read_frame(&mut self.stdout, self.max_frame_bytes) {
                 Ok(frame) => match frame.message {
                     Message::DataRow(_row) => {
                         row_count = row_count.saturating_add(1);
@@ -314,7 +332,8 @@ impl WorkerProcess {
     }
 
     fn expect_handshake(&mut self) -> Result<(), WorkerHarnessError> {
-        let frame = read_frame(&mut self.stdout).map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
+        let frame = read_frame(&mut self.stdout, self.max_frame_bytes)
+            .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
         match frame.message {
             Message::Handshake { protocol_version, .. } if protocol_version == crate::protocol::PROTOCOL_VERSION => {
                 Ok(())
@@ -324,12 +343,13 @@ impl WorkerProcess {
     }
 
     fn send_request(&mut self, request: Request) -> Result<(), WorkerHarnessError> {
-        write_frame(&mut self.stdin, Message::Request(request))
+        write_frame(&mut self.stdin, Message::Request(request), self.max_frame_bytes)
             .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))
     }
 
     fn read_response(&mut self) -> Result<Response, WorkerHarnessError> {
-        let frame = read_frame(&mut self.stdout).map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
+        let frame = read_frame(&mut self.stdout, self.max_frame_bytes)
+            .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
         match frame.message {
             Message::Response(Response::Error { code, message }) => {
                 Err(WorkerHarnessError::WorkerError { code, message })
@@ -342,7 +362,8 @@ impl WorkerProcess {
     fn read_rows_until_complete(&mut self) -> Result<Vec<WorkerDataRow>, WorkerHarnessError> {
         let mut rows = Vec::new();
         loop {
-            let frame = read_frame(&mut self.stdout).map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
+            let frame = read_frame(&mut self.stdout, self.max_frame_bytes)
+                .map_err(|err| WorkerHarnessError::Protocol(err.to_string()))?;
             match frame.message {
                 Message::DataRow(row) => rows.push(WorkerDataRow {
                     stream: row.stream,
