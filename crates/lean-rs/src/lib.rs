@@ -131,7 +131,7 @@ pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{
     DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCapabilityPreflight, LeanExported, LeanIo,
     LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport,
-    LeanLoaderSeverity, LeanModule, LeanModuleInitializer,
+    LeanLoaderSeverity, LeanModule, LeanModuleInitializer, LeanRuntimePreflight,
 };
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};

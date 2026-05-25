@@ -61,6 +61,163 @@ impl std::fmt::Display for LeanLoaderDiagnosticCode {
     }
 }
 
+/// Severity of one loader preflight finding.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanLoaderSeverity {
+    /// Informational finding that does not block loading.
+    Info,
+    /// Suspicious state that may still load.
+    Warning,
+    /// The capability should not be opened until this is fixed.
+    Error,
+}
+
+/// Maximum bytes preserved in user-facing loader diagnostic strings.
+///
+/// Matches the workspace error-message bound so diagnostics that flow back
+/// through `LeanError` are not double-truncated.
+pub const LOADER_DIAGNOSTIC_TEXT_LIMIT: usize = 4 * 1024;
+
+/// Truncate `text` to at most [`LOADER_DIAGNOSTIC_TEXT_LIMIT`] bytes on a
+/// UTF-8 char boundary.
+#[must_use]
+pub fn bound_loader_text(mut text: String) -> String {
+    if text.len() <= LOADER_DIAGNOSTIC_TEXT_LIMIT {
+        return text;
+    }
+    let mut cut = LOADER_DIAGNOSTIC_TEXT_LIMIT;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut = cut.saturating_sub(1);
+    }
+    text.truncate(cut);
+    text
+}
+
+/// One bounded preflight finding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanLoaderCheck {
+    code: LeanLoaderDiagnosticCode,
+    severity: LeanLoaderSeverity,
+    subject: String,
+    message: String,
+    repair_hint: String,
+}
+
+impl LeanLoaderCheck {
+    /// Construct an `Error` finding with bounded text fields.
+    #[must_use]
+    pub fn error(
+        code: LeanLoaderDiagnosticCode,
+        subject: impl Into<String>,
+        message: impl Into<String>,
+        repair_hint: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            severity: LeanLoaderSeverity::Error,
+            subject: bound_loader_text(subject.into()),
+            message: bound_loader_text(message.into()),
+            repair_hint: bound_loader_text(repair_hint.into()),
+        }
+    }
+
+    /// Stable loader diagnostic code.
+    #[must_use]
+    pub fn code(&self) -> LeanLoaderDiagnosticCode {
+        self.code
+    }
+
+    /// Whether this finding blocks capability loading.
+    #[must_use]
+    pub fn severity(&self) -> LeanLoaderSeverity {
+        self.severity
+    }
+
+    /// Artifact, symbol, or manifest field this finding is about.
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// Bounded explanation of the failure.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Bounded repair hint for normal users.
+    #[must_use]
+    pub fn repair_hint(&self) -> &str {
+        &self.repair_hint
+    }
+}
+
+impl std::fmt::Display for LeanLoaderCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} [{:?}] {}: {} (repair: {})",
+            self.code.as_str(),
+            self.severity,
+            self.subject,
+            self.message,
+            self.repair_hint
+        )
+    }
+}
+
+/// Structured result of loader preflight for one capability manifest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanLoaderReport {
+    manifest_path: Option<PathBuf>,
+    checks: Vec<LeanLoaderCheck>,
+}
+
+impl LeanLoaderReport {
+    /// Bundle preflight findings with the manifest path they concern.
+    #[must_use]
+    pub fn new(manifest_path: Option<PathBuf>, checks: Vec<LeanLoaderCheck>) -> Self {
+        Self { manifest_path, checks }
+    }
+
+    /// Manifest path checked, if the descriptor resolved one.
+    #[must_use]
+    pub fn manifest_path(&self) -> Option<&Path> {
+        self.manifest_path.as_deref()
+    }
+
+    /// All preflight findings.
+    #[must_use]
+    pub fn checks(&self) -> &[LeanLoaderCheck] {
+        &self.checks
+    }
+
+    /// Blocking findings only.
+    pub fn errors(&self) -> impl Iterator<Item = &LeanLoaderCheck> {
+        self.checks
+            .iter()
+            .filter(|check| check.severity == LeanLoaderSeverity::Error)
+    }
+
+    /// Whether preflight found no blocking findings.
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        self.errors().next().is_none()
+    }
+
+    /// First blocking finding, if any.
+    #[must_use]
+    pub fn first_error(&self) -> Option<&LeanLoaderCheck> {
+        self.errors().next()
+    }
+
+    /// Consume the report and return its findings.
+    #[must_use]
+    pub fn into_checks(self) -> Vec<LeanLoaderCheck> {
+        self.checks
+    }
+}
+
 /// Initializer for a Lean module hosted by a loaded dylib.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanModuleInitializer {

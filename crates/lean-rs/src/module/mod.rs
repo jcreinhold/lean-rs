@@ -47,6 +47,7 @@ pub use library::LeanLibrary;
 pub use loaded::LeanModule;
 pub use preflight::{
     LeanCapabilityPreflight, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity,
+    LeanRuntimePreflight,
 };
 
 // `LeanAbi` lives in `crate::abi::traits` but appears in the public

@@ -5,173 +5,45 @@
 //! does not expose `ldd`, `otool`, `readelf`, `nm`, loader flags, or raw object
 //! parser details. The public contract is a report: what failed, which artifact
 //! it concerned, and what the caller should rebuild or package.
+//!
+//! The cheap, link-free static checks (file/JSON/schema/fingerprint/staleness)
+//! live in [`lean_toolchain::manifest_validation`] so the worker parent crate
+//! can fast-fail bad manifests without re-linking `libleanshared`. This module
+//! layers symbol-table inspection on top using the `object` crate, which is
+//! the half of preflight that genuinely needs the runtime crate.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
 use object::{Object, ObjectSymbol};
 
+use super::LeanBuiltCapability;
 use super::initializer::InitializerName;
-use super::{LeanBuiltCapability, LeanLibraryDependency};
 use crate::error::{LeanError, bound_message};
 
-// `LeanLoaderDiagnosticCode` is the single source of truth shared with the
-// worker wire protocol; it lives in `lean-toolchain` (below `lean-rs` in the
-// dep graph) so the protocol crate can reference it without re-linking
-// `libleanshared`. Re-exported here for callers using the historical path
-// `lean_rs::module::LeanLoaderDiagnosticCode`.
-pub use lean_toolchain::LeanLoaderDiagnosticCode;
+// Loader data types live in `lean-toolchain` (below `lean-rs`) so the worker
+// wire protocol can reference them without re-linking `libleanshared`. The
+// runtime preflight in this module layers on top of the same data types.
+// Re-exported here for callers using the historical paths.
+pub(crate) use lean_toolchain::CapabilityManifest;
+pub use lean_toolchain::{LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity};
 
-/// Severity of one loader preflight finding.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum LeanLoaderSeverity {
-    /// Informational finding that does not block loading.
-    Info,
-    /// Suspicious state that may still load.
-    Warning,
-    /// The capability should not be opened until this is fixed.
-    Error,
-}
-
-/// One bounded preflight finding.
+/// Runtime preflight runner for manifest-backed Lean capabilities.
+///
+/// Layers symbol-table inspection on top of
+/// [`lean_toolchain::manifest_validation::check_static`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanLoaderCheck {
-    code: LeanLoaderDiagnosticCode,
-    severity: LeanLoaderSeverity,
-    subject: String,
-    message: String,
-    repair_hint: String,
-}
-
-impl LeanLoaderCheck {
-    fn error(
-        code: LeanLoaderDiagnosticCode,
-        subject: impl Into<String>,
-        message: impl Into<String>,
-        repair_hint: impl Into<String>,
-    ) -> Self {
-        Self {
-            code,
-            severity: LeanLoaderSeverity::Error,
-            subject: bound_message(subject.into()),
-            message: bound_message(message.into()),
-            repair_hint: bound_message(repair_hint.into()),
-        }
-    }
-
-    /// Stable loader diagnostic code.
-    #[must_use]
-    pub fn code(&self) -> LeanLoaderDiagnosticCode {
-        self.code
-    }
-
-    /// Whether this finding blocks capability loading.
-    #[must_use]
-    pub fn severity(&self) -> LeanLoaderSeverity {
-        self.severity
-    }
-
-    /// Artifact, symbol, or manifest field this finding is about.
-    #[must_use]
-    pub fn subject(&self) -> &str {
-        &self.subject
-    }
-
-    /// Bounded explanation of the failure.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    /// Bounded repair hint for normal users.
-    #[must_use]
-    pub fn repair_hint(&self) -> &str {
-        &self.repair_hint
-    }
-}
-
-impl std::fmt::Display for LeanLoaderCheck {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} [{:?}] {}: {} (repair: {})",
-            self.code.as_str(),
-            self.severity,
-            self.subject,
-            self.message,
-            self.repair_hint
-        )
-    }
-}
-
-/// Structured result of loader preflight for one capability manifest.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanLoaderReport {
-    manifest_path: Option<PathBuf>,
-    checks: Vec<LeanLoaderCheck>,
-}
-
-impl LeanLoaderReport {
-    fn new(manifest_path: Option<PathBuf>, checks: Vec<LeanLoaderCheck>) -> Self {
-        Self { manifest_path, checks }
-    }
-
-    /// Manifest path checked, if the descriptor resolved one.
-    #[must_use]
-    pub fn manifest_path(&self) -> Option<&Path> {
-        self.manifest_path.as_deref()
-    }
-
-    /// All preflight findings.
-    #[must_use]
-    pub fn checks(&self) -> &[LeanLoaderCheck] {
-        &self.checks
-    }
-
-    /// Blocking findings only.
-    pub fn errors(&self) -> impl Iterator<Item = &LeanLoaderCheck> {
-        self.checks
-            .iter()
-            .filter(|check| check.severity == LeanLoaderSeverity::Error)
-    }
-
-    /// Whether preflight found no blocking findings.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.errors().next().is_none()
-    }
-
-    /// First blocking finding, if any.
-    #[must_use]
-    pub fn first_error(&self) -> Option<&LeanLoaderCheck> {
-        self.errors().next()
-    }
-
-    pub(crate) fn into_error(self) -> LeanError {
-        let Some(first) = self
-            .checks
-            .into_iter()
-            .find(|check| check.severity == LeanLoaderSeverity::Error)
-        else {
-            return LeanError::module_init("Lean capability preflight failed without a recorded finding");
-        };
-        LeanError::module_init(format!(
-            "{}: {}. repair: {}",
-            first.code.as_str(),
-            first.message,
-            first.repair_hint
-        ))
-    }
-}
-
-/// Preflight runner for manifest-backed Lean capabilities.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanCapabilityPreflight {
+pub struct LeanRuntimePreflight {
     spec: LeanBuiltCapability,
 }
 
-impl LeanCapabilityPreflight {
-    /// Create a preflight runner for a build-script capability descriptor.
+/// Backwards-compatible alias for [`LeanRuntimePreflight`].
+///
+/// The struct was renamed when the static manifest-validation half moved to
+/// `lean-toolchain`; this alias preserves the historical public path.
+pub type LeanCapabilityPreflight = LeanRuntimePreflight;
+
+impl LeanRuntimePreflight {
+    /// Create a runtime preflight runner for a build-script capability descriptor.
     #[must_use]
     pub fn new(spec: LeanBuiltCapability) -> Self {
         Self { spec }
@@ -201,8 +73,8 @@ impl LeanCapabilityPreflight {
         };
 
         let mut checks = Vec::new();
-        check_fingerprint(&manifest, &mut checks);
-        check_staleness(&manifest_path, &manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_fingerprint(&manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_staleness(&manifest_path, &manifest, &mut checks);
 
         let mut dependency_exports = HashSet::new();
         for dependency in &manifest.dependencies {
@@ -226,73 +98,20 @@ impl LeanCapabilityPreflight {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CapabilityManifest {
-    pub(crate) primary_dylib: PathBuf,
-    pub(crate) package: String,
-    pub(crate) module: String,
-    pub(crate) dependencies: Vec<LeanLibraryDependency>,
-    pub(crate) lean_version: Option<String>,
-    pub(crate) resolved_lean_version: Option<String>,
-    pub(crate) lean_header_sha256: Option<String>,
-}
-
-impl CapabilityManifest {
-    pub(crate) fn read(path: &Path) -> Result<Self, LeanLoaderCheck> {
-        let bytes = std::fs::read(path).map_err(|err| {
-            let code = if err.kind() == std::io::ErrorKind::NotFound {
-                LeanLoaderDiagnosticCode::MissingManifest
-            } else {
-                LeanLoaderDiagnosticCode::MalformedManifest
-            };
-            LeanLoaderCheck::error(
-                code,
-                path.display().to_string(),
-                format!("failed to read Lean capability manifest '{}': {err}", path.display()),
-                "rebuild the Lean capability through CargoLeanCapability and ensure the manifest file is packaged",
-            )
-        })?;
-        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|err| {
-            LeanLoaderCheck::error(
-                LeanLoaderDiagnosticCode::MalformedManifest,
-                path.display().to_string(),
-                format!("Lean capability manifest '{}' is not valid JSON: {err}", path.display()),
-                "rebuild the Lean capability through CargoLeanCapability",
-            )
-        })?;
-        let schema_version = required_u64(&value, "schema_version", path)?;
-        if schema_version != u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION) {
-            return Err(LeanLoaderCheck::error(
-                LeanLoaderDiagnosticCode::UnsupportedManifestSchema,
-                path.display().to_string(),
-                format!(
-                    "unsupported Lean capability manifest schema {schema_version}; supported schema is {}",
-                    lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION
-                ),
-                "rebuild the Lean capability with the same lean-rs version as the runtime crate",
-            ));
-        }
-        let primary_dylib = PathBuf::from(required_string(&value, "primary_dylib", path)?);
-        let package = required_string(&value, "package", path)?;
-        let module = required_string(&value, "module", path)?;
-        let dependencies = dependencies_from_manifest(&value, path)?;
-        let fingerprint = value.get("toolchain_fingerprint").unwrap_or(&serde_json::Value::Null);
-        let lean_version =
-            optional_string(fingerprint, "lean_version").or_else(|| optional_string(&value, "lean_version"));
-        let resolved_lean_version = optional_string(fingerprint, "resolved_version")
-            .or_else(|| optional_string(&value, "resolved_lean_version"));
-        let lean_header_sha256 =
-            optional_string(fingerprint, "header_sha256").or_else(|| optional_string(&value, "lean_header_sha256"));
-        Ok(Self {
-            primary_dylib,
-            package,
-            module,
-            dependencies,
-            lean_version,
-            resolved_lean_version,
-            lean_header_sha256,
-        })
-    }
+pub(crate) fn report_into_error(report: LeanLoaderReport) -> LeanError {
+    let Some(first) = report
+        .into_checks()
+        .into_iter()
+        .find(|check| check.severity() == LeanLoaderSeverity::Error)
+    else {
+        return LeanError::module_init("Lean capability preflight failed without a recorded finding");
+    };
+    LeanError::module_init(bound_message(format!(
+        "{}: {}. repair: {}",
+        first.code().as_str(),
+        first.message(),
+        first.repair_hint()
+    )))
 }
 
 #[derive(Clone, Debug)]
@@ -307,7 +126,7 @@ enum ArtifactRole {
     Dependency,
 }
 
-fn inspect_artifact(path: &Path, role: ArtifactRole) -> Result<ArtifactInfo, LeanLoaderCheck> {
+fn inspect_artifact(path: &std::path::Path, role: ArtifactRole) -> Result<ArtifactInfo, LeanLoaderCheck> {
     let missing_code = match role {
         ArtifactRole::Primary => LeanLoaderDiagnosticCode::MissingPrimaryDylib,
         ArtifactRole::Dependency => LeanLoaderDiagnosticCode::MissingTransitiveDependency,
@@ -438,149 +257,6 @@ fn check_imported_symbols(
     }
 }
 
-fn check_fingerprint(manifest: &CapabilityManifest, checks: &mut Vec<LeanLoaderCheck>) {
-    if let Some(version) = manifest.lean_version.as_deref()
-        && lean_rs_sys::supported_for(version).is_none()
-    {
-        checks.push(LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
-            version,
-            format!("manifest was built with unsupported Lean toolchain {version}"),
-            "rebuild the Lean capability with a Lean version supported by this lean-rs release",
-        ));
-        return;
-    }
-    if let Some(digest) = manifest.lean_header_sha256.as_deref()
-        && digest != lean_rs_sys::LEAN_HEADER_DIGEST
-    {
-        checks.push(LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
-            digest,
-            format!(
-                "manifest Lean header digest {digest} does not match this process digest {}",
-                lean_rs_sys::LEAN_HEADER_DIGEST
-            ),
-            "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
-        ));
-        return;
-    }
-    if let Some(resolved) = manifest.resolved_lean_version.as_deref()
-        && resolved != lean_rs_sys::LEAN_RESOLVED_VERSION
-    {
-        checks.push(LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
-            resolved,
-            format!(
-                "manifest resolved Lean version {resolved} does not match this process resolved version {}",
-                lean_rs_sys::LEAN_RESOLVED_VERSION
-            ),
-            "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
-        ));
-    }
-}
-
-fn check_staleness(manifest_path: &Path, manifest: &CapabilityManifest, checks: &mut Vec<LeanLoaderCheck>) {
-    let Ok(manifest_modified) = std::fs::metadata(manifest_path).and_then(|metadata| metadata.modified()) else {
-        return;
-    };
-    let Ok(primary_modified) = std::fs::metadata(&manifest.primary_dylib).and_then(|metadata| metadata.modified())
-    else {
-        return;
-    };
-    if primary_modified > manifest_modified {
-        checks.push(LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::StaleManifest,
-            manifest_path.display().to_string(),
-            format!(
-                "manifest '{}' is older than primary dylib '{}'",
-                manifest_path.display(),
-                manifest.primary_dylib.display()
-            ),
-            "rebuild the Lean capability through CargoLeanCapability so the manifest matches the dylib",
-        ));
-    }
-}
-
-fn dependencies_from_manifest(
-    value: &serde_json::Value,
-    path: &Path,
-) -> Result<Vec<LeanLibraryDependency>, LeanLoaderCheck> {
-    let Some(raw_dependencies) = value.get("dependencies") else {
-        return Ok(Vec::new());
-    };
-    let dependencies = raw_dependencies.as_array().ok_or_else(|| {
-        LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::MalformedManifest,
-            path.display().to_string(),
-            format!(
-                "Lean capability manifest '{}' field `dependencies` must be an array",
-                path.display()
-            ),
-            "rebuild the Lean capability through CargoLeanCapability",
-        )
-    })?;
-    let mut out = Vec::with_capacity(dependencies.len());
-    for dependency in dependencies {
-        let dylib = required_string(dependency, "dylib_path", path)?;
-        let mut descriptor = LeanLibraryDependency::path(dylib);
-        if dependency
-            .get("export_symbols_for_dependents")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            descriptor = descriptor.export_symbols_for_dependents();
-        }
-        if let Some(initializer) = dependency.get("initializer") {
-            let package = required_string(initializer, "package", path)?;
-            let module = required_string(initializer, "module", path)?;
-            descriptor = descriptor.initializer(package, module);
-        }
-        out.push(descriptor);
-    }
-    Ok(out)
-}
-
-fn required_string(value: &serde_json::Value, field: &str, path: &Path) -> Result<String, LeanLoaderCheck> {
-    value
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            LeanLoaderCheck::error(
-                LeanLoaderDiagnosticCode::MalformedManifest,
-                path.display().to_string(),
-                format!(
-                    "Lean capability manifest '{}' is missing non-empty string field `{field}`",
-                    path.display()
-                ),
-                "rebuild the Lean capability through CargoLeanCapability",
-            )
-        })
-}
-
-fn optional_string(value: &serde_json::Value, field: &str) -> Option<String> {
-    value
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
-fn required_u64(value: &serde_json::Value, field: &str, path: &Path) -> Result<u64, LeanLoaderCheck> {
-    value.get(field).and_then(serde_json::Value::as_u64).ok_or_else(|| {
-        LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::MalformedManifest,
-            path.display().to_string(),
-            format!(
-                "Lean capability manifest '{}' is missing unsigned integer field `{field}`",
-                path.display()
-            ),
-            "rebuild the Lean capability through CargoLeanCapability",
-        )
-    })
-}
-
 fn architecture_matches_host(architecture: object::Architecture) -> bool {
     matches!(
         (std::env::consts::ARCH, architecture),
@@ -604,15 +280,15 @@ fn is_lean_dependency_symbol(symbol: &str) -> bool {
 }
 
 pub(crate) fn manifest_error_to_lean_error(check: LeanLoaderCheck) -> LeanError {
-    LeanLoaderReport::new(None, vec![check]).into_error()
+    report_into_error(LeanLoaderReport::new(None, vec![check]))
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{
-        ArtifactInfo, CapabilityManifest, LeanCapabilityPreflight, LeanLoaderDiagnosticCode, check_imported_symbols,
-        check_staleness, inspect_artifact,
+        ArtifactInfo, CapabilityManifest, LeanLoaderDiagnosticCode, LeanRuntimePreflight, check_imported_symbols,
+        inspect_artifact,
     };
     use crate::{LeanBuiltCapability, LeanCapability, LeanRuntime};
     use std::collections::HashSet;
@@ -623,7 +299,7 @@ mod tests {
     #[test]
     fn missing_manifest_reports_stable_code() {
         let path = temp_dir("missing_manifest").join("missing.json");
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(path)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(path)).check();
 
         assert!(!report.is_ok());
         assert_eq!(
@@ -638,7 +314,7 @@ mod tests {
         let manifest = dir.join("capability.json");
         fs::write(&manifest, "{").expect("write malformed manifest");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(&manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(&manifest)).check();
 
         assert_eq!(
             report.first_error().map(crate::LeanLoaderCheck::code),
@@ -663,7 +339,7 @@ mod tests {
         )
         .expect("write unsupported manifest schema");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
         assert_eq!(
             report.first_error().map(crate::LeanLoaderCheck::code),
@@ -677,7 +353,7 @@ mod tests {
         let missing = dir.join("missing-capability.dylib");
         let manifest = write_manifest(&dir, &missing, "", "");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
         assert!(contains_code(&report, LeanLoaderDiagnosticCode::MissingPrimaryDylib));
     }
@@ -692,7 +368,7 @@ mod tests {
         );
         let manifest = write_manifest(&dir, current_exe(), &dependency, "");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
         assert!(contains_code(
             &report,
@@ -735,7 +411,7 @@ mod tests {
         )
         .expect("write unsupported fingerprint manifest");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
         assert!(contains_code(
             &report,
@@ -754,7 +430,7 @@ mod tests {
         let parsed = CapabilityManifest::read(&manifest).expect("manifest parses");
         let mut checks = Vec::new();
 
-        check_staleness(&manifest, &parsed, &mut checks);
+        lean_toolchain::manifest_validation::check_staleness(&manifest, &parsed, &mut checks);
 
         assert!(
             checks
@@ -768,7 +444,7 @@ mod tests {
         let dir = temp_dir("missing_initializer");
         let manifest = write_manifest(&dir, current_exe(), "", "");
 
-        let report = LeanCapabilityPreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
 
         assert!(contains_code(&report, LeanLoaderDiagnosticCode::MissingInitializer));
     }

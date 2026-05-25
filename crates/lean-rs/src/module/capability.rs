@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::preflight::{CapabilityManifest, LeanCapabilityPreflight, manifest_error_to_lean_error};
+use super::preflight::{CapabilityManifest, LeanRuntimePreflight, manifest_error_to_lean_error, report_into_error};
 use super::{LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
@@ -249,9 +249,9 @@ impl<'lean> LeanCapability<'lean> {
     /// by the manifest cannot be opened.
     #[allow(clippy::needless_pass_by_value)]
     pub fn from_build_manifest(runtime: &'lean LeanRuntime, spec: LeanBuiltCapability) -> LeanResult<Self> {
-        let report = LeanCapabilityPreflight::new(spec.clone()).check();
+        let report = LeanRuntimePreflight::new(spec.clone()).check();
         if !report.is_ok() {
-            return Err(report.into_error());
+            return Err(report_into_error(report));
         }
         let manifest_path = spec.resolved_manifest_path()?;
         let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;

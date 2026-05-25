@@ -27,6 +27,7 @@ mod discover;
 mod fingerprint;
 mod limits;
 mod loader;
+pub mod manifest_validation;
 mod modules;
 
 pub use build_helpers::{
@@ -42,7 +43,11 @@ pub use limits::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,
 };
-pub use loader::{LeanLibraryDependency, LeanLoaderDiagnosticCode, LeanModuleInitializer};
+pub use loader::{
+    LOADER_DIAGNOSTIC_TEXT_LIMIT, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport,
+    LeanLoaderSeverity, LeanModuleInitializer, bound_loader_text,
+};
+pub use manifest_validation::CapabilityManifest;
 pub use modules::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
     LeanModuleSetFingerprint, discover_lake_modules, lake_target_declared,
