@@ -336,7 +336,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lean-rs"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "criterion",
  "dhat",
@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-host"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "criterion",
  "lean-rs",
@@ -364,14 +364,14 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "lean-rs-worker-child"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "ciborium",
  "criterion",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "ciborium",
  "criterion",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "lean-rs-sys",
  "serde_json",

@@ -1,6 +1,8 @@
 pub mod lean_rs_worker_protocol
 pub mod lean_rs_worker_protocol::protocol
 #[non_exhaustive] pub enum lean_rs_worker_protocol::protocol::Message
+pub lean_rs_worker_protocol::protocol::Message::ConfigureFrameLimit
+pub lean_rs_worker_protocol::protocol::Message::ConfigureFrameLimit::max_frame_bytes: u32
 pub lean_rs_worker_protocol::protocol::Message::DataRow(lean_rs_worker_protocol::protocol::DataRow)
 pub lean_rs_worker_protocol::protocol::Message::Diagnostic(lean_rs_worker_protocol::protocol::Diagnostic)
 pub lean_rs_worker_protocol::protocol::Message::FatalExit(lean_rs_worker_protocol::protocol::FatalExit)
@@ -376,9 +378,11 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::protocol::StreamSumm
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::protocol::StreamSummary
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol::StreamSummary
 pub const lean_rs_worker_protocol::protocol::MAX_FRAME_BYTES: u32
+pub const lean_rs_worker_protocol::protocol::MAX_FRAME_BYTES_HARD_CAP: u32
+pub const lean_rs_worker_protocol::protocol::MIN_FRAME_BYTES: u32
 pub const lean_rs_worker_protocol::protocol::PROTOCOL_VERSION: u16
-pub fn lean_rs_worker_protocol::protocol::read_frame(reader: &mut impl std::io::Read) -> core::result::Result<lean_rs_worker_protocol::protocol::Frame, lean_rs_worker_protocol::protocol::ProtocolError>
-pub fn lean_rs_worker_protocol::protocol::write_frame(writer: &mut impl std::io::Write, message: lean_rs_worker_protocol::protocol::Message) -> core::result::Result<(), lean_rs_worker_protocol::protocol::ProtocolError>
+pub fn lean_rs_worker_protocol::protocol::read_frame(reader: &mut impl std::io::Read, max_frame_bytes: u32) -> core::result::Result<lean_rs_worker_protocol::protocol::Frame, lean_rs_worker_protocol::protocol::ProtocolError>
+pub fn lean_rs_worker_protocol::protocol::write_frame(writer: &mut impl std::io::Write, message: lean_rs_worker_protocol::protocol::Message, max_frame_bytes: u32) -> core::result::Result<(), lean_rs_worker_protocol::protocol::ProtocolError>
 pub mod lean_rs_worker_protocol::types
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 pub lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::Error
