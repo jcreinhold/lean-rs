@@ -406,9 +406,6 @@ run_gate "cargo nextest run --workspace --profile ci" \
 run_gate "cargo test --doc --workspace" \
 	cargo test --doc --workspace
 
-run_gate "loader regression suite" \
-	cargo test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
-
 run_rustdoc() {
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 }

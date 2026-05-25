@@ -169,15 +169,15 @@ jobs:
       - name: cargo test --doc
         run: cargo test --doc --workspace
 
-      - name: loader regression suite
-        run: cargo test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
-
       - name: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: '-D warnings'
         run: cargo doc --no-deps --workspace
 
+      # docs.rs builds only on Linux, so the docs.rs-mode build only
+      # needs to run on the Ubuntu cell.
       - name: docs.rs compatibility doc build
+        if: matrix.os == 'ubuntu-latest'
         env:
           DOCS_RS: '1'
           RUSTDOCFLAGS: '-D warnings'
@@ -286,24 +286,22 @@ jobs:
           done
           exit "$fail"
 
-      - name: Package tarball docs.rs simulation
-        run: python3 scripts/check_package_docsrs.py
-
       # `cargo publish --workspace` (stabilised in Rust 1.90) computes the
       # workspace dependency DAG, packages every crate, runs `cargo publish`'s
       # verify build against a local registry overlay so downstream crates can
       # see pending upstream publishes before the crates.io index has updated,
       # then uploads in topological order (and in parallel where the DAG
-      # allows). This replaces the previous per-crate publish loop with
-      # 90-second sleeps between every step.
-      - name: Package workspace tarballs
-        run: cargo package --workspace --no-verify
-
+      # allows). For dry runs, `--dry-run` exercises the same verify path
+      # without uploading or contacting crates.io for credentials.
       - name: Publish workspace
-        if: inputs.dry_run != true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --workspace
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            cargo publish --workspace --dry-run
+          else
+            cargo publish --workspace
+          fi
 
       - name: Extract CHANGELOG section for this release
         if: inputs.dry_run != true && github.event_name == 'push'

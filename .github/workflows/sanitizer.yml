@@ -52,7 +52,7 @@ jobs:
           (cd fixtures/interop-shims && lake build)
 
       - name: Loader regression suite
-        run: cargo +nightly test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
+        run: cargo +nightly test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
 
       - name: ASan Rust-only helper tests
         env:

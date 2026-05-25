@@ -39,7 +39,7 @@ HOST_SHIM_TOOLCHAIN="$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims/lea
 FIXTURE_TOOLCHAIN="$REPO_ROOT/fixtures/lean/lean-toolchain"
 INTEROP_FIXTURE_TOOLCHAIN="$REPO_ROOT/fixtures/interop-shims/lean-toolchain"
 # `templates/shipped-lean-crate/lean/` is the downstream-shipped-crate
-# template exercised by the `lean-rs-worker` loader-regression tests. The
+# template exercised by the `lean-rs-worker-child` loader-regression tests. The
 # tests build the template's Lean code and load the produced olean from a
 # worker child whose `libleanshared` is the swept version; if the template
 # pin lags, the olean header doesn't match and the loader fails.
