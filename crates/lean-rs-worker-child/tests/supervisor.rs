@@ -274,3 +274,45 @@ fn startup_timeout_is_typed() {
         other => panic!("expected startup timeout, got {other:?}"),
     }
 }
+
+/// When a child fails *before* sending its handshake frame (closing stdout
+/// without a valid frame), the supervisor must surface the child's stderr in
+/// `LeanWorkerExit.diagnostics` rather than dropping it. Regression for a
+/// race where the prior implementation called `try_wait` (non-blocking) on
+/// the still-dying child and reported a bare `Handshake { message }` error
+/// with no diagnostic payload.
+#[cfg(unix)]
+#[test]
+fn pre_handshake_child_failure_carries_stderr() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    const MARKER: &str = "pre_handshake_failure_marker_42";
+    let script_path = std::env::temp_dir().join(format!(
+        "lean-rs-worker-pre-handshake-{}-{}.sh",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    ));
+    fs::write(&script_path, format!("#!/bin/sh\necho '{MARKER}' >&2\nexit 1\n")).expect("temp script writes");
+    let mut perms = fs::metadata(&script_path).expect("temp script stat").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).expect("temp script chmod");
+
+    let err = LeanWorker::spawn(&LeanWorkerConfig::new(&script_path))
+        .expect_err("pre-handshake script exits without a handshake; spawn must fail");
+    drop(fs::remove_file(&script_path));
+
+    match err {
+        LeanWorkerError::ChildPanicOrAbort { exit } => {
+            assert!(!exit.success, "child exited non-zero, got exit: {exit:?}");
+            assert!(
+                exit.diagnostics.contains(MARKER),
+                "stderr from a pre-handshake child failure must reach the caller; got diagnostics: {:?}",
+                exit.diagnostics,
+            );
+        }
+        other => panic!("expected ChildPanicOrAbort carrying stderr, got {other:?}"),
+    }
+}

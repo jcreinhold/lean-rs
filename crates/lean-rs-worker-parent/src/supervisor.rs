@@ -633,29 +633,20 @@ impl LeanWorker {
 
         let (stdout, runtime_metadata) = match receiver.recv_timeout(config.startup_timeout) {
             Ok((stdout, Ok(metadata))) => (stdout, metadata),
-            Ok((_stdout, Err(err))) => {
-                let mut worker = Self {
-                    config: config.clone(),
-                    child: Some(child),
-                    stdin: Some(stdin),
-                    stdout: None,
-                    stderr,
-                    last_exit: None,
-                    runtime_metadata: LeanWorkerRuntimeMetadata {
-                        worker_version: String::new(),
-                        protocol_version: lean_rs_worker_protocol::protocol::PROTOCOL_VERSION,
-                        lean_version: None,
-                    },
-                    stats: LeanWorkerStats::default(),
-                    requests_since_restart: 0,
-                    imports_since_restart: 0,
-                    last_activity: Instant::now(),
-                };
-                let exit = worker.try_record_exit();
-                return Err(match exit {
-                    Some(exit) if !exit.success => LeanWorkerError::ChildPanicOrAbort { exit },
-                    Some(exit) => LeanWorkerError::ChildExited { exit },
-                    None => err,
+            Ok((_stdout, Err(_handshake_err))) => {
+                // The handshake-thread observed a protocol-level error reading
+                // the child's first frame. In practice this means the child is
+                // mid-`abort()` and hasn't quite died yet — using `try_wait`
+                // (non-blocking) here loses the race and drops the child's
+                // stderr. Kill if still alive, then go through the canonical
+                // post-mortem path so `LeanWorkerExit.diagnostics` carries the
+                // bootstrap stderr in the same shape as a runtime crash.
+                drop(child.kill());
+                let exit = wait_with_stderr(&mut child, stderr)?;
+                return Err(if exit.success {
+                    LeanWorkerError::ChildExited { exit }
+                } else {
+                    LeanWorkerError::ChildPanicOrAbort { exit }
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -1777,19 +1768,6 @@ impl LeanWorker {
         self.stdout = None;
         self.stats.exits = self.stats.exits.saturating_add(1);
         Ok(exit)
-    }
-
-    fn try_record_exit(&mut self) -> Option<LeanWorkerExit> {
-        let child = self.child.as_mut()?;
-        let status = child.try_wait().ok().flatten()?;
-        let diagnostics = self.read_stderr();
-        let exit = LeanWorkerExit::from_status(status, diagnostics);
-        self.last_exit = Some(exit.clone());
-        self.child = None;
-        self.stdin = None;
-        self.stdout = None;
-        self.stats.exits = self.stats.exits.saturating_add(1);
-        Some(exit)
     }
 
     fn record_exit_error(&mut self) -> LeanWorkerError {
