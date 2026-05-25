@@ -41,7 +41,7 @@ pub(crate) mod loaded;
 pub(crate) mod preflight;
 
 pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
-pub use capability::{LeanBuiltCapability, LeanCapability};
+pub use capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError, LeanCapability};
 pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;

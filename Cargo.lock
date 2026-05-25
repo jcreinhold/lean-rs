@@ -386,6 +386,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean-rs-worker-parent"
+version = "0.1.8"
+dependencies = [
+ "ciborium",
+ "criterion",
+ "dhat",
+ "lean-rs-worker-protocol",
+ "lean-toolchain",
+ "libc",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lean-rs-worker-protocol"
 version = "0.1.8"
 dependencies = [

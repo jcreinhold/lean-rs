@@ -4,230 +4,26 @@
 //! [`lean_toolchain::CargoLeanCapability`]. It lets shipped crates open the
 //! dylib path their `build.rs` embedded without repeating environment-path
 //! lookup and module-initialization names at every call site.
+//!
+//! The [`LeanBuiltCapability`] descriptor itself is link-free and lives in
+//! `lean-toolchain` so the worker parent crate can consume it without
+//! relinking `libleanshared`. It is re-exported here for source compatibility.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::preflight::{CapabilityManifest, LeanRuntimePreflight, manifest_error_to_lean_error, report_into_error};
 use super::{LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 
-/// Runtime descriptor for a Lean capability built by a downstream `build.rs`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanBuiltCapability {
-    dylib_path: Option<PathBuf>,
-    env_var: Option<String>,
-    manifest_path: Option<PathBuf>,
-    manifest_env_var: Option<String>,
-    package: Option<String>,
-    module: Option<String>,
-    dependencies: Vec<LeanLibraryDependency>,
-}
+// Build-script descriptor lives in `lean-toolchain` (below `lean-rs`) so the
+// worker parent crate can construct and consume it without relinking
+// `libleanshared`. Re-exported here for the historical `lean_rs::LeanBuiltCapability`
+// path.
+pub use lean_toolchain::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 
-impl LeanBuiltCapability {
-    /// Build a descriptor from an embedded dylib path.
-    ///
-    /// This remains supported for simple or compatibility cases. Prefer
-    /// [`Self::manifest_path`] for shipped binaries because the manifest also
-    /// carries dependency and loader-order facts:
-    ///
-    /// ```ignore
-    /// let spec = lean_rs::LeanBuiltCapability::path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB"))
-    ///     .package("my_app")
-    ///     .module("MyCapability");
-    /// ```
-    #[must_use]
-    pub fn path(path: impl Into<PathBuf>) -> Self {
-        Self {
-            dylib_path: Some(path.into()),
-            env_var: None,
-            manifest_path: None,
-            manifest_env_var: None,
-            package: None,
-            module: None,
-            dependencies: Vec::new(),
-        }
-    }
-
-    /// Build a descriptor that resolves the dylib path from a runtime
-    /// environment variable.
-    ///
-    /// Prefer [`Self::path`] with Rust's `env!` macro for redistributable
-    /// binaries. Runtime environment lookup is useful for tests, local
-    /// overrides, and launcher-managed deployments.
-    #[must_use]
-    pub fn env(env_var: impl Into<String>) -> Self {
-        Self {
-            dylib_path: None,
-            env_var: Some(env_var.into()),
-            manifest_path: None,
-            manifest_env_var: None,
-            package: None,
-            module: None,
-            dependencies: Vec::new(),
-        }
-    }
-
-    /// Build a descriptor from an embedded artifact manifest path.
-    ///
-    /// This is the canonical form for shipped binaries using
-    /// `CargoLeanCapability`'s manifest output:
-    ///
-    /// ```ignore
-    /// let spec = lean_rs::LeanBuiltCapability::manifest_path(
-    ///     env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
-    /// );
-    /// ```
-    #[must_use]
-    pub fn manifest_path(path: impl Into<PathBuf>) -> Self {
-        Self {
-            dylib_path: None,
-            env_var: None,
-            manifest_path: Some(path.into()),
-            manifest_env_var: None,
-            package: None,
-            module: None,
-            dependencies: Vec::new(),
-        }
-    }
-
-    /// Build a descriptor that resolves the artifact manifest path from a
-    /// runtime environment variable.
-    ///
-    /// Prefer [`Self::manifest_path`] with Rust's `env!` macro for
-    /// redistributable binaries. Runtime environment lookup is useful for
-    /// tests, local overrides, and launcher-managed deployments.
-    #[must_use]
-    pub fn manifest_env(env_var: impl Into<String>) -> Self {
-        Self {
-            dylib_path: None,
-            env_var: None,
-            manifest_path: None,
-            manifest_env_var: Some(env_var.into()),
-            package: None,
-            module: None,
-            dependencies: Vec::new(),
-        }
-    }
-
-    /// Preserve the Cargo environment variable name for diagnostics.
-    #[must_use]
-    pub fn env_var(mut self, env_var: impl Into<String>) -> Self {
-        self.env_var = Some(env_var.into());
-        self
-    }
-
-    /// Preserve the Cargo manifest environment variable name for diagnostics.
-    #[must_use]
-    pub fn manifest_env_var(mut self, env_var: impl Into<String>) -> Self {
-        self.manifest_env_var = Some(env_var.into());
-        self
-    }
-
-    /// Set the Lake package name used by the Lean initializer.
-    #[must_use]
-    pub fn package(mut self, package: impl Into<String>) -> Self {
-        self.package = Some(package.into());
-        self
-    }
-
-    /// Set the root Lean module name initialized by Rust.
-    #[must_use]
-    pub fn module(mut self, module: impl Into<String>) -> Self {
-        self.module = Some(module.into());
-        self
-    }
-
-    /// Add a dependent Lean dylib that must stay alive with this capability.
-    ///
-    /// This is primarily a bridge until `lean-toolchain` emits artifact
-    /// manifests. Manifest-backed opening will feed the same dependency
-    /// descriptors into the bundle loader.
-    #[must_use]
-    pub fn dependency(mut self, dependency: LeanLibraryDependency) -> Self {
-        self.dependencies.push(dependency);
-        self
-    }
-
-    /// Add multiple dependent Lean dylibs that must stay alive with this
-    /// capability.
-    #[must_use]
-    pub fn dependencies(mut self, dependencies: impl IntoIterator<Item = LeanLibraryDependency>) -> Self {
-        self.dependencies.extend(dependencies);
-        self
-    }
-
-    /// Return the configured package name.
-    #[must_use]
-    pub fn package_name(&self) -> Option<&str> {
-        self.package.as_deref()
-    }
-
-    /// Return the configured module name.
-    #[must_use]
-    pub fn module_name(&self) -> Option<&str> {
-        self.module.as_deref()
-    }
-
-    /// Dependency dylibs that will be opened before the primary capability.
-    #[must_use]
-    pub fn dependency_descriptors(&self) -> &[LeanLibraryDependency] {
-        &self.dependencies
-    }
-
-    /// Resolve the capability dylib path.
-    ///
-    /// # Errors
-    ///
-    /// Returns a host module-initialization error if neither a path nor a
-    /// readable environment variable is configured.
-    pub fn dylib_path(&self) -> LeanResult<PathBuf> {
-        if let Some(path) = &self.dylib_path {
-            return Ok(path.clone());
-        }
-        let env_var = self.env_var.as_deref().ok_or_else(|| {
-            LeanError::module_init("LeanBuiltCapability needs either a dylib path or an environment variable")
-        })?;
-        std::env::var_os(env_var).map(PathBuf::from).ok_or_else(|| {
-            LeanError::module_init(format!(
-                "environment variable {env_var} is not set for Lean capability dylib"
-            ))
-        })
-    }
-
-    /// Resolve the build artifact manifest path.
-    ///
-    /// # Errors
-    ///
-    /// Returns a host module-initialization error if neither a path nor a
-    /// readable manifest environment variable is configured.
-    pub fn resolved_manifest_path(&self) -> LeanResult<PathBuf> {
-        if let Some(path) = &self.manifest_path {
-            return Ok(path.clone());
-        }
-        let env_var = self.manifest_env_var.as_deref().ok_or_else(|| {
-            LeanError::module_init("LeanBuiltCapability needs either a manifest path or manifest environment variable")
-        })?;
-        std::env::var_os(env_var).map(PathBuf::from).ok_or_else(|| {
-            LeanError::module_init(format!(
-                "environment variable {env_var} is not set for Lean capability manifest"
-            ))
-        })
-    }
-}
-
-impl From<&lean_toolchain::BuiltLeanCapability> for LeanBuiltCapability {
-    fn from(value: &lean_toolchain::BuiltLeanCapability) -> Self {
-        Self {
-            dylib_path: Some(value.dylib_path().to_path_buf()),
-            env_var: Some(value.env_var().to_owned()),
-            manifest_path: Some(value.manifest_path().to_path_buf()),
-            manifest_env_var: Some(value.manifest_env_var().to_owned()),
-            package: Some(value.package().to_owned()),
-            module: Some(value.module().to_owned()),
-            dependencies: Vec::new(),
-        }
-    }
+fn built_capability_error_to_lean_error(err: &LeanBuiltCapabilityError) -> LeanError {
+    LeanError::module_init(err.to_string())
 }
 
 /// Opened Lean capability whose dylib path and initializer names came from
@@ -253,7 +49,7 @@ impl<'lean> LeanCapability<'lean> {
         if !report.is_ok() {
             return Err(report_into_error(report));
         }
-        let manifest_path = spec.resolved_manifest_path()?;
+        let manifest_path = spec.resolved_manifest_path().map_err(|err| built_capability_error_to_lean_error(&err))?;
         let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;
         Self::open_with_dependencies(
             runtime,
@@ -276,14 +72,15 @@ impl<'lean> LeanCapability<'lean> {
     /// dynamic loader cannot open it, or the configured module initializer
     /// fails.
     pub fn from_build_env(runtime: &'lean LeanRuntime, mut spec: LeanBuiltCapability) -> LeanResult<Self> {
-        let dylib_path = spec.dylib_path()?;
-        let package = spec.package.take().ok_or_else(|| {
+        let dylib_path = spec.dylib_path().map_err(|err| built_capability_error_to_lean_error(&err))?;
+        let package = spec.take_package_name().ok_or_else(|| {
             LeanError::linking("LeanBuiltCapability is missing the Lake package name; call `.package(...)`")
         })?;
-        let module = spec.module.take().ok_or_else(|| {
+        let module = spec.take_module_name().ok_or_else(|| {
             LeanError::linking("LeanBuiltCapability is missing the root Lean module name; call `.module(...)`")
         })?;
-        Self::open_with_dependencies(runtime, dylib_path, package, module, spec.dependencies)
+        let dependencies = spec.take_dependencies();
+        Self::open_with_dependencies(runtime, dylib_path, package, module, dependencies)
     }
 
     /// Open and initialize a capability from an explicit dylib path and
@@ -374,7 +171,7 @@ impl<'lean> LeanCapability<'lean> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{CapabilityManifest, LeanBuiltCapability, LeanLibraryDependency};
+    use super::{BuiltCapabilityArtifact, CapabilityManifest, LeanBuiltCapability, LeanBuiltCapabilityError, LeanLibraryDependency};
     use std::fs;
     use std::path::PathBuf;
 
@@ -403,7 +200,13 @@ mod tests {
             Ok(path) => panic!("expected missing env error, got {}", path.display()),
             Err(err) => err,
         };
-        assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
+        assert!(matches!(
+            err,
+            LeanBuiltCapabilityError::EnvVarNotSet {
+                kind: BuiltCapabilityArtifact::Dylib,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -413,7 +216,13 @@ mod tests {
             Ok(path) => panic!("expected missing manifest env error, got {}", path.display()),
             Err(err) => err,
         };
-        assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
+        assert!(matches!(
+            err,
+            LeanBuiltCapabilityError::EnvVarNotSet {
+                kind: BuiltCapabilityArtifact::Manifest,
+                ..
+            }
+        ));
     }
 
     #[test]

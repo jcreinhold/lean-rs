@@ -29,7 +29,9 @@ mod limits;
 mod loader;
 pub mod manifest_validation;
 mod modules;
+mod built_capability;
 
+pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
     build_lake_target_quiet, capability_env_var, capability_manifest_env_var, emit_lean_link_directives,
