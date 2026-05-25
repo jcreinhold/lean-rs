@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-05-25
+
+Re-tagging of 0.1.9. The tag-push release workflow failed in the public-API
+diff step because the CI's `cargo-public-api` upgraded from v0.51.0 (which
+includes parameter names in function signatures) to v0.52.0 (which omits
+them); locally regenerated baselines were on v0.51.0 and drifted against the
+CI run. No crates were published. This release regenerates every baseline
+with v0.52.0 and bumps the patch per `docs/release.md` step 7. Functionality
+identical to 0.1.9.
+
 ## [0.1.9] — 2026-05-25
 
 ### Worker boundary: configurable per-capability frame cap

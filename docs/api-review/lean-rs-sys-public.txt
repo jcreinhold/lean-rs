@@ -1,48 +1,48 @@
 pub mod lean_rs_sys
 pub mod lean_rs_sys::array
-pub unsafe fn lean_rs_sys::array::lean_alloc_array(size: usize, capacity: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::array::lean_alloc_sarray(elem_size: u32, size: usize, capacity: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::array::lean_array_capacity(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
-pub unsafe fn lean_rs_sys::array::lean_array_cptr(o: *mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::array::lean_array_get_core(o: lean_rs_sys::types::b_lean_obj_arg, i: usize) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::array::lean_array_get_panic(def_val: lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::array::lean_array_mk(l: lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::array::lean_array_push(a: lean_rs_sys::types::lean_obj_arg, v: lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::array::lean_array_set_core(o: *mut lean_rs_sys::types::lean_object, i: usize, v: lean_rs_sys::types::lean_obj_arg)
-pub unsafe c fn lean_rs_sys::array::lean_array_set_panic(a: lean_rs_sys::types::lean_obj_arg, v: lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::array::lean_array_size(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
-pub unsafe c fn lean_rs_sys::array::lean_array_to_list(a: lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::array::lean_mk_array(n: lean_rs_sys::types::lean_obj_arg, v: lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::array::lean_sarray_capacity(o: *mut lean_rs_sys::types::lean_object) -> usize
-pub unsafe fn lean_rs_sys::array::lean_sarray_cptr(o: *mut lean_rs_sys::types::lean_object) -> *mut u8
-pub unsafe fn lean_rs_sys::array::lean_sarray_elem_size(o: *mut lean_rs_sys::types::lean_object) -> u8
-pub unsafe fn lean_rs_sys::array::lean_sarray_size(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe fn lean_rs_sys::array::lean_alloc_array(usize, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::array::lean_alloc_sarray(u32, usize, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::array::lean_array_capacity(lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe fn lean_rs_sys::array::lean_array_cptr(*mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::array::lean_array_get_core(lean_rs_sys::types::b_lean_obj_arg, usize) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::array::lean_array_get_panic(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::array::lean_array_mk(lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::array::lean_array_push(lean_rs_sys::types::lean_obj_arg, lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::array::lean_array_set_core(*mut lean_rs_sys::types::lean_object, usize, lean_rs_sys::types::lean_obj_arg)
+pub unsafe c fn lean_rs_sys::array::lean_array_set_panic(lean_rs_sys::types::lean_obj_arg, lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::array::lean_array_size(lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe c fn lean_rs_sys::array::lean_array_to_list(lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::array::lean_mk_array(lean_rs_sys::types::lean_obj_arg, lean_rs_sys::types::lean_obj_arg) -> *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::array::lean_sarray_capacity(*mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe fn lean_rs_sys::array::lean_sarray_cptr(*mut lean_rs_sys::types::lean_object) -> *mut u8
+pub unsafe fn lean_rs_sys::array::lean_sarray_elem_size(*mut lean_rs_sys::types::lean_object) -> u8
+pub unsafe fn lean_rs_sys::array::lean_sarray_size(lean_rs_sys::types::b_lean_obj_arg) -> usize
 pub mod lean_rs_sys::closure
-pub unsafe fn lean_rs_sys::closure::lean_alloc_closure(fun: *mut core::ffi::c_void, arity: u32, num_fixed: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::closure::lean_apply_1(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_10(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_11(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_12(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object, a12: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_13(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object, a12: *mut lean_rs_sys::types::lean_object, a13: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_14(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object, a12: *mut lean_rs_sys::types::lean_object, a13: *mut lean_rs_sys::types::lean_object, a14: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_15(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object, a12: *mut lean_rs_sys::types::lean_object, a13: *mut lean_rs_sys::types::lean_object, a14: *mut lean_rs_sys::types::lean_object, a15: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_16(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object, a10: *mut lean_rs_sys::types::lean_object, a11: *mut lean_rs_sys::types::lean_object, a12: *mut lean_rs_sys::types::lean_object, a13: *mut lean_rs_sys::types::lean_object, a14: *mut lean_rs_sys::types::lean_object, a15: *mut lean_rs_sys::types::lean_object, a16: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_2(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_3(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_4(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_5(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_6(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_7(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_8(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_9(f: *mut lean_rs_sys::types::lean_object, a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object, a3: *mut lean_rs_sys::types::lean_object, a4: *mut lean_rs_sys::types::lean_object, a5: *mut lean_rs_sys::types::lean_object, a6: *mut lean_rs_sys::types::lean_object, a7: *mut lean_rs_sys::types::lean_object, a8: *mut lean_rs_sys::types::lean_object, a9: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_m(f: *mut lean_rs_sys::types::lean_object, n: u32, args: *mut *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::closure::lean_apply_n(f: *mut lean_rs_sys::types::lean_object, n: u32, args: *mut *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::closure::lean_closure_arg_cptr(o: *mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::closure::lean_closure_arity(o: *mut lean_rs_sys::types::lean_object) -> u16
-pub unsafe fn lean_rs_sys::closure::lean_closure_fun(o: *mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
-pub unsafe fn lean_rs_sys::closure::lean_closure_get(o: lean_rs_sys::types::b_lean_obj_arg, i: u32) -> *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::closure::lean_closure_num_fixed(o: *mut lean_rs_sys::types::lean_object) -> u16
-pub unsafe fn lean_rs_sys::closure::lean_closure_set(o: lean_rs_sys::types::u_lean_obj_arg, i: u32, a: lean_rs_sys::types::lean_obj_arg)
+pub unsafe fn lean_rs_sys::closure::lean_alloc_closure(*mut core::ffi::c_void, u32, u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::closure::lean_apply_1(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_10(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_11(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_12(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_13(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_14(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_15(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_16(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_2(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_3(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_4(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_5(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_6(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_7(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_8(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_9(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_m(*mut lean_rs_sys::types::lean_object, u32, *mut *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::closure::lean_apply_n(*mut lean_rs_sys::types::lean_object, u32, *mut *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::closure::lean_closure_arg_cptr(*mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::closure::lean_closure_arity(*mut lean_rs_sys::types::lean_object) -> u16
+pub unsafe fn lean_rs_sys::closure::lean_closure_fun(*mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
+pub unsafe fn lean_rs_sys::closure::lean_closure_get(lean_rs_sys::types::b_lean_obj_arg, u32) -> *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::closure::lean_closure_num_fixed(*mut lean_rs_sys::types::lean_object) -> u16
+pub unsafe fn lean_rs_sys::closure::lean_closure_set(lean_rs_sys::types::u_lean_obj_arg, u32, lean_rs_sys::types::lean_obj_arg)
 pub mod lean_rs_sys::consts
 pub const lean_rs_sys::consts::LEAN_ARRAY: u8
 pub const lean_rs_sys::consts::LEAN_CLOSURE: u8
@@ -67,178 +67,178 @@ pub const lean_rs_sys::consts::LEAN_TASK: u8
 pub const lean_rs_sys::consts::LEAN_THUNK: u8
 pub const lean_rs_sys::consts::LEAN_VERSION: &str
 pub mod lean_rs_sys::ctor
-pub unsafe fn lean_rs_sys::ctor::lean_alloc_ctor(tag: u8, num_objs: u8, scalar_sz: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::ctor::lean_box_float(v: f64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::ctor::lean_box_uint32(v: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::ctor::lean_box_uint64(v: u64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::ctor::lean_box_usize(v: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_float(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32) -> f64
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint16(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32) -> u16
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint32(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32) -> u32
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint64(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32) -> u64
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint8(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32) -> u8
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_usize(o: lean_rs_sys::types::b_lean_obj_arg, i: u8) -> usize
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_num_objs(o: lean_rs_sys::types::b_lean_obj_arg) -> u8
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_obj_cptr(o: *mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_scalar_cptr(o: *mut lean_rs_sys::types::lean_object) -> *mut u8
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_float(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32, v: f64)
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint16(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32, v: u16)
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint32(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32, v: u32)
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint64(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32, v: u64)
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint8(o: lean_rs_sys::types::b_lean_obj_arg, offset: u32, v: u8)
-pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_usize(o: lean_rs_sys::types::b_lean_obj_arg, i: u8, v: usize)
-pub unsafe fn lean_rs_sys::ctor::lean_unbox_float(o: lean_rs_sys::types::b_lean_obj_arg) -> f64
-pub unsafe fn lean_rs_sys::ctor::lean_unbox_uint32(o: lean_rs_sys::types::b_lean_obj_arg) -> u32
-pub unsafe fn lean_rs_sys::ctor::lean_unbox_uint64(o: lean_rs_sys::types::b_lean_obj_arg) -> u64
-pub unsafe fn lean_rs_sys::ctor::lean_unbox_usize(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe fn lean_rs_sys::ctor::lean_alloc_ctor(u8, u8, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::ctor::lean_box_float(f64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::ctor::lean_box_uint32(u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::ctor::lean_box_uint64(u64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::ctor::lean_box_usize(usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_float(lean_rs_sys::types::b_lean_obj_arg, u32) -> f64
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint16(lean_rs_sys::types::b_lean_obj_arg, u32) -> u16
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint32(lean_rs_sys::types::b_lean_obj_arg, u32) -> u32
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint64(lean_rs_sys::types::b_lean_obj_arg, u32) -> u64
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_uint8(lean_rs_sys::types::b_lean_obj_arg, u32) -> u8
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_get_usize(lean_rs_sys::types::b_lean_obj_arg, u8) -> usize
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_num_objs(lean_rs_sys::types::b_lean_obj_arg) -> u8
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_obj_cptr(*mut lean_rs_sys::types::lean_object) -> *mut *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_scalar_cptr(*mut lean_rs_sys::types::lean_object) -> *mut u8
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_float(lean_rs_sys::types::b_lean_obj_arg, u32, f64)
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint16(lean_rs_sys::types::b_lean_obj_arg, u32, u16)
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint32(lean_rs_sys::types::b_lean_obj_arg, u32, u32)
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint64(lean_rs_sys::types::b_lean_obj_arg, u32, u64)
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_uint8(lean_rs_sys::types::b_lean_obj_arg, u32, u8)
+pub unsafe fn lean_rs_sys::ctor::lean_ctor_set_usize(lean_rs_sys::types::b_lean_obj_arg, u8, usize)
+pub unsafe fn lean_rs_sys::ctor::lean_unbox_float(lean_rs_sys::types::b_lean_obj_arg) -> f64
+pub unsafe fn lean_rs_sys::ctor::lean_unbox_uint32(lean_rs_sys::types::b_lean_obj_arg) -> u32
+pub unsafe fn lean_rs_sys::ctor::lean_unbox_uint64(lean_rs_sys::types::b_lean_obj_arg) -> u64
+pub unsafe fn lean_rs_sys::ctor::lean_unbox_usize(lean_rs_sys::types::b_lean_obj_arg) -> usize
 pub mod lean_rs_sys::external
-pub unsafe fn lean_rs_sys::external::lean_alloc_external(cls: *mut core::ffi::c_void, data: *mut core::ffi::c_void) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::external::lean_get_external_class(o: *mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
-pub unsafe fn lean_rs_sys::external::lean_get_external_data(o: *mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
-pub unsafe c fn lean_rs_sys::external::lean_register_external_class(finalize: lean_rs_sys::external::lean_external_finalize_proc, foreach: lean_rs_sys::external::lean_external_foreach_proc) -> *mut core::ffi::c_void
+pub unsafe fn lean_rs_sys::external::lean_alloc_external(*mut core::ffi::c_void, *mut core::ffi::c_void) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::external::lean_get_external_class(*mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
+pub unsafe fn lean_rs_sys::external::lean_get_external_data(*mut lean_rs_sys::types::lean_object) -> *mut core::ffi::c_void
+pub unsafe c fn lean_rs_sys::external::lean_register_external_class(lean_rs_sys::external::lean_external_finalize_proc, lean_rs_sys::external::lean_external_foreach_proc) -> *mut core::ffi::c_void
 pub type lean_rs_sys::external::lean_external_finalize_proc = fn(*mut core::ffi::c_void)
 pub type lean_rs_sys::external::lean_external_foreach_proc = fn(*mut core::ffi::c_void, *mut lean_rs_sys::types::lean_object)
 pub mod lean_rs_sys::init
 pub unsafe c fn lean_rs_sys::init::lean_finalize_task_manager()
 pub unsafe c fn lean_rs_sys::init::lean_finalize_thread()
 pub unsafe c fn lean_rs_sys::init::lean_init_task_manager()
-pub unsafe c fn lean_rs_sys::init::lean_init_task_manager_using(num_workers: u32)
+pub unsafe c fn lean_rs_sys::init::lean_init_task_manager_using(u32)
 pub unsafe c fn lean_rs_sys::init::lean_initialize()
 pub unsafe c fn lean_rs_sys::init::lean_initialize_runtime_module()
 pub unsafe c fn lean_rs_sys::init::lean_initialize_thread()
-pub unsafe c fn lean_rs_sys::init::lean_setup_args(argc: i32, argv: *mut *mut core::ffi::primitives::c_char)
+pub unsafe c fn lean_rs_sys::init::lean_setup_args(i32, *mut *mut core::ffi::primitives::c_char)
 pub mod lean_rs_sys::io
 pub unsafe c fn lean_rs_sys::io::lean_io_mark_end_initialization()
-pub unsafe fn lean_rs_sys::io::lean_io_result_get_error(r: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::b_lean_obj_res
-pub unsafe fn lean_rs_sys::io::lean_io_result_get_value(r: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::b_lean_obj_res
-pub unsafe fn lean_rs_sys::io::lean_io_result_is_error(r: lean_rs_sys::types::b_lean_obj_arg) -> bool
-pub unsafe fn lean_rs_sys::io::lean_io_result_is_ok(r: lean_rs_sys::types::b_lean_obj_arg) -> bool
-pub unsafe fn lean_rs_sys::io::lean_io_result_take_value(r: lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::io::lean_io_result_get_error(lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::b_lean_obj_res
+pub unsafe fn lean_rs_sys::io::lean_io_result_get_value(lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::b_lean_obj_res
+pub unsafe fn lean_rs_sys::io::lean_io_result_is_error(lean_rs_sys::types::b_lean_obj_arg) -> bool
+pub unsafe fn lean_rs_sys::io::lean_io_result_is_ok(lean_rs_sys::types::b_lean_obj_arg) -> bool
+pub unsafe fn lean_rs_sys::io::lean_io_result_take_value(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
 pub mod lean_rs_sys::nat_int
 pub const lean_rs_sys::nat_int::LEAN_MAX_SMALL_INT: i64
 pub const lean_rs_sys::nat_int::LEAN_MAX_SMALL_NAT: usize
 pub const lean_rs_sys::nat_int::LEAN_MIN_SMALL_INT: i64
-pub unsafe c fn lean_rs_sys::nat_int::lean_big_int64_to_int(n: i64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_big_int_to_int(n: i32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_big_size_t_to_int(n: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_big_uint64_to_nat(n: u64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_big_usize_to_nat(n: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_cstr_to_int(s: *const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_cstr_to_nat(s: *const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_add(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_div(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_div_exact(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_ediv(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_emod(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_eq(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_le(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_lt(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_mod(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_mul(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_neg(a: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_nonneg(a: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_sub(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_add(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_div(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_div_exact(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_eq(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_le(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_lt(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_mod(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_mul(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_sub(a1: *mut lean_rs_sys::types::lean_object, a2: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_succ(a: *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_nat_overflow_mul(a1: usize, a2: usize) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::nat_int::lean_uint8_of_big_nat(a: lean_rs_sys::types::b_lean_obj_arg) -> u8
+pub unsafe c fn lean_rs_sys::nat_int::lean_big_int64_to_int(i64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_big_int_to_int(i32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_big_size_t_to_int(usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_big_uint64_to_nat(u64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_big_usize_to_nat(usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_cstr_to_int(*const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_cstr_to_nat(*const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_add(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_div(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_div_exact(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_ediv(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_emod(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_eq(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_le(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_lt(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_mod(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_mul(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_neg(*mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_nonneg(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_int_big_sub(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_add(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_div(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_div_exact(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_eq(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_le(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_lt(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_mod(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_mul(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_sub(*mut lean_rs_sys::types::lean_object, *mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_big_succ(*mut lean_rs_sys::types::lean_object) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_nat_overflow_mul(usize, usize) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::nat_int::lean_uint8_of_big_nat(lean_rs_sys::types::b_lean_obj_arg) -> u8
 pub mod lean_rs_sys::object
-pub unsafe c fn lean_rs_sys::object::lean_alloc_object(sz: usize) -> *mut lean_rs_sys::types::lean_object
-pub unsafe fn lean_rs_sys::object::lean_box(n: usize) -> *mut lean_rs_sys::types::lean_object
-pub unsafe c fn lean_rs_sys::object::lean_free_object(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe fn lean_rs_sys::object::lean_is_array(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_closure(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_ctor(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_exclusive(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_external(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_mpz(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_mt(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_persistent(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_promise(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_ref(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_sarray(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_scalar(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_shared(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_st(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_string(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_task(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_is_thunk(o: *mut lean_rs_sys::types::lean_object) -> bool
-pub unsafe fn lean_rs_sys::object::lean_obj_tag(o: *mut lean_rs_sys::types::lean_object) -> u32
-pub unsafe c fn lean_rs_sys::object::lean_object_byte_size(o: *mut lean_rs_sys::types::lean_object) -> usize
-pub unsafe c fn lean_rs_sys::object::lean_object_data_byte_size(o: *mut lean_rs_sys::types::lean_object) -> usize
-pub unsafe fn lean_rs_sys::object::lean_ptr_other(o: *mut lean_rs_sys::types::lean_object) -> u8
-pub unsafe fn lean_rs_sys::object::lean_ptr_tag(o: *mut lean_rs_sys::types::lean_object) -> u8
-pub unsafe fn lean_rs_sys::object::lean_unbox(o: *mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe c fn lean_rs_sys::object::lean_alloc_object(usize) -> *mut lean_rs_sys::types::lean_object
+pub unsafe fn lean_rs_sys::object::lean_box(usize) -> *mut lean_rs_sys::types::lean_object
+pub unsafe c fn lean_rs_sys::object::lean_free_object(*mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::object::lean_is_array(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_closure(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_ctor(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_exclusive(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_external(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_mpz(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_mt(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_persistent(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_promise(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_ref(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_sarray(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_scalar(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_shared(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_st(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_string(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_task(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_is_thunk(*mut lean_rs_sys::types::lean_object) -> bool
+pub unsafe fn lean_rs_sys::object::lean_obj_tag(*mut lean_rs_sys::types::lean_object) -> u32
+pub unsafe c fn lean_rs_sys::object::lean_object_byte_size(*mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe c fn lean_rs_sys::object::lean_object_data_byte_size(*mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe fn lean_rs_sys::object::lean_ptr_other(*mut lean_rs_sys::types::lean_object) -> u8
+pub unsafe fn lean_rs_sys::object::lean_ptr_tag(*mut lean_rs_sys::types::lean_object) -> u8
+pub unsafe fn lean_rs_sys::object::lean_unbox(*mut lean_rs_sys::types::lean_object) -> usize
 pub mod lean_rs_sys::refcount
-pub unsafe fn lean_rs_sys::refcount::lean_dec(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe fn lean_rs_sys::refcount::lean_dec_ref(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe c fn lean_rs_sys::refcount::lean_dec_ref_cold(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe fn lean_rs_sys::refcount::lean_inc(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe fn lean_rs_sys::refcount::lean_inc_n(o: *mut lean_rs_sys::types::lean_object, n: usize)
-pub unsafe fn lean_rs_sys::refcount::lean_inc_ref(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe fn lean_rs_sys::refcount::lean_inc_ref_n(o: *mut lean_rs_sys::types::lean_object, n: usize)
-pub unsafe c fn lean_rs_sys::refcount::lean_mark_mt(o: *mut lean_rs_sys::types::lean_object)
-pub unsafe c fn lean_rs_sys::refcount::lean_mark_persistent(o: *mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::refcount::lean_dec(*mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::refcount::lean_dec_ref(*mut lean_rs_sys::types::lean_object)
+pub unsafe c fn lean_rs_sys::refcount::lean_dec_ref_cold(*mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::refcount::lean_inc(*mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::refcount::lean_inc_n(*mut lean_rs_sys::types::lean_object, usize)
+pub unsafe fn lean_rs_sys::refcount::lean_inc_ref(*mut lean_rs_sys::types::lean_object)
+pub unsafe fn lean_rs_sys::refcount::lean_inc_ref_n(*mut lean_rs_sys::types::lean_object, usize)
+pub unsafe c fn lean_rs_sys::refcount::lean_mark_mt(*mut lean_rs_sys::types::lean_object)
+pub unsafe c fn lean_rs_sys::refcount::lean_mark_persistent(*mut lean_rs_sys::types::lean_object)
 pub mod lean_rs_sys::scalar
-pub unsafe fn lean_rs_sys::scalar::lean_int64_to_int(n: i64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_int_to_int(n: i32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_nat_to_int(a: lean_rs_sys::types::lean_obj_res) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_scalar_to_int(a: lean_rs_sys::types::b_lean_obj_arg) -> i32
-pub unsafe fn lean_rs_sys::scalar::lean_scalar_to_int64(a: lean_rs_sys::types::b_lean_obj_arg) -> i64
-pub unsafe fn lean_rs_sys::scalar::lean_uint16_to_nat(a: u16) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_uint32_to_nat(a: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_uint64_to_nat(n: u64) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_uint8_of_nat(a: lean_rs_sys::types::b_lean_obj_arg) -> u8
-pub unsafe fn lean_rs_sys::scalar::lean_uint8_to_nat(a: u8) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_unsigned_to_nat(n: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::scalar::lean_usize_to_nat(n: usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_int64_to_int(i64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_int_to_int(i32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_nat_to_int(lean_rs_sys::types::lean_obj_res) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_scalar_to_int(lean_rs_sys::types::b_lean_obj_arg) -> i32
+pub unsafe fn lean_rs_sys::scalar::lean_scalar_to_int64(lean_rs_sys::types::b_lean_obj_arg) -> i64
+pub unsafe fn lean_rs_sys::scalar::lean_uint16_to_nat(u16) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_uint32_to_nat(u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_uint64_to_nat(u64) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_uint8_of_nat(lean_rs_sys::types::b_lean_obj_arg) -> u8
+pub unsafe fn lean_rs_sys::scalar::lean_uint8_to_nat(u8) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_unsigned_to_nat(u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::scalar::lean_usize_to_nat(usize) -> lean_rs_sys::types::lean_obj_res
 pub mod lean_rs_sys::string
-pub unsafe c fn lean_rs_sys::string::lean_mk_ascii_string_unchecked(s: *const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_mk_string(s: *const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_mk_string_from_bytes(s: *const core::ffi::primitives::c_char, sz: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_mk_string_from_bytes_unchecked(s: *const core::ffi::primitives::c_char, sz: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_mk_string_unchecked(s: *const core::ffi::primitives::c_char, sz: usize, len: usize) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_append(s1: lean_rs_sys::types::lean_obj_arg, s2: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::string::lean_string_byte_size(o: *mut lean_rs_sys::types::lean_object) -> usize
-pub unsafe fn lean_rs_sys::string::lean_string_capacity(o: *mut lean_rs_sys::types::lean_object) -> usize
-pub unsafe fn lean_rs_sys::string::lean_string_cstr(o: lean_rs_sys::types::b_lean_obj_arg) -> *const core::ffi::primitives::c_char
-pub unsafe c fn lean_rs_sys::string::lean_string_data(s: lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_eq_cold(s1: lean_rs_sys::types::b_lean_obj_arg, s2: lean_rs_sys::types::b_lean_obj_arg) -> bool
-pub unsafe c fn lean_rs_sys::string::lean_string_hash(s: lean_rs_sys::types::b_lean_obj_arg) -> u64
-pub unsafe fn lean_rs_sys::string::lean_string_len(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
-pub unsafe c fn lean_rs_sys::string::lean_string_lt(s1: lean_rs_sys::types::b_lean_obj_arg, s2: lean_rs_sys::types::b_lean_obj_arg) -> bool
-pub unsafe c fn lean_rs_sys::string::lean_string_mk(cs: lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_push(s: lean_rs_sys::types::lean_obj_arg, c: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe fn lean_rs_sys::string::lean_string_size(o: lean_rs_sys::types::b_lean_obj_arg) -> usize
-pub unsafe c fn lean_rs_sys::string::lean_string_utf8_extract(s: lean_rs_sys::types::b_lean_obj_arg, b: lean_rs_sys::types::b_lean_obj_arg, e: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_utf8_get(s: lean_rs_sys::types::b_lean_obj_arg, i: lean_rs_sys::types::b_lean_obj_arg) -> u32
-pub unsafe c fn lean_rs_sys::string::lean_string_utf8_next(s: lean_rs_sys::types::b_lean_obj_arg, i: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_utf8_prev(s: lean_rs_sys::types::b_lean_obj_arg, i: lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_utf8_set(s: lean_rs_sys::types::lean_obj_arg, i: lean_rs_sys::types::b_lean_obj_arg, c: u32) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_utf8_n_strlen(s: *const core::ffi::primitives::c_char, n: usize) -> usize
-pub unsafe c fn lean_rs_sys::string::lean_utf8_strlen(s: *const core::ffi::primitives::c_char) -> usize
+pub unsafe c fn lean_rs_sys::string::lean_mk_ascii_string_unchecked(*const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_mk_string(*const core::ffi::primitives::c_char) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_mk_string_from_bytes(*const core::ffi::primitives::c_char, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_mk_string_from_bytes_unchecked(*const core::ffi::primitives::c_char, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_mk_string_unchecked(*const core::ffi::primitives::c_char, usize, usize) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_append(lean_rs_sys::types::lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::string::lean_string_byte_size(*mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe fn lean_rs_sys::string::lean_string_capacity(*mut lean_rs_sys::types::lean_object) -> usize
+pub unsafe fn lean_rs_sys::string::lean_string_cstr(lean_rs_sys::types::b_lean_obj_arg) -> *const core::ffi::primitives::c_char
+pub unsafe c fn lean_rs_sys::string::lean_string_data(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_eq_cold(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> bool
+pub unsafe c fn lean_rs_sys::string::lean_string_hash(lean_rs_sys::types::b_lean_obj_arg) -> u64
+pub unsafe fn lean_rs_sys::string::lean_string_len(lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe c fn lean_rs_sys::string::lean_string_lt(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> bool
+pub unsafe c fn lean_rs_sys::string::lean_string_mk(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_push(lean_rs_sys::types::lean_obj_arg, u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe fn lean_rs_sys::string::lean_string_size(lean_rs_sys::types::b_lean_obj_arg) -> usize
+pub unsafe c fn lean_rs_sys::string::lean_string_utf8_extract(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_utf8_get(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> u32
+pub unsafe c fn lean_rs_sys::string::lean_string_utf8_next(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_utf8_prev(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_string_utf8_set(lean_rs_sys::types::lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg, u32) -> lean_rs_sys::types::lean_obj_res
+pub unsafe c fn lean_rs_sys::string::lean_utf8_n_strlen(*const core::ffi::primitives::c_char, usize) -> usize
+pub unsafe c fn lean_rs_sys::string::lean_utf8_strlen(*const core::ffi::primitives::c_char) -> usize
 pub mod lean_rs_sys::supported
 pub struct lean_rs_sys::supported::SupportedToolchain
 pub lean_rs_sys::supported::SupportedToolchain::header_digest: &'static str
 pub lean_rs_sys::supported::SupportedToolchain::missing_symbols: &'static [&'static str]
 pub lean_rs_sys::supported::SupportedToolchain::versions: &'static [&'static str]
 impl lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, version: &str) -> bool
+pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, &str) -> bool
 impl core::clone::Clone for lean_rs_sys::supported::SupportedToolchain
 pub fn lean_rs_sys::supported::SupportedToolchain::clone(&self) -> lean_rs_sys::supported::SupportedToolchain
 impl core::cmp::Eq for lean_rs_sys::supported::SupportedToolchain
 impl core::cmp::PartialEq for lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, other: &lean_rs_sys::supported::SupportedToolchain) -> bool
+pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, &lean_rs_sys::supported::SupportedToolchain) -> bool
 impl core::fmt::Debug for lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_sys::supported::SupportedToolchain
 impl core::marker::StructuralPartialEq for lean_rs_sys::supported::SupportedToolchain
 impl core::marker::Freeze for lean_rs_sys::supported::SupportedToolchain
@@ -249,9 +249,9 @@ impl core::marker::UnsafeUnpin for lean_rs_sys::supported::SupportedToolchain
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_sys::supported::SupportedToolchain
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_sys::supported::SupportedToolchain
 pub const lean_rs_sys::supported::SUPPORTED_TOOLCHAINS: &[lean_rs_sys::supported::SupportedToolchain]
-pub fn lean_rs_sys::supported::supported_by_digest(digest: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
-pub fn lean_rs_sys::supported::supported_for(version: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
-pub fn lean_rs_sys::supported::symbol_present_in_window(symbol: &str) -> bool
+pub fn lean_rs_sys::supported::supported_by_digest(&str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported::supported_for(&str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported::symbol_present_in_window(&str) -> bool
 pub mod lean_rs_sys::types
 #[repr(C)] pub struct lean_rs_sys::types::lean_object
 impl core::marker::Freeze for lean_rs_sys::types::lean_object
@@ -271,14 +271,14 @@ pub lean_rs_sys::SupportedToolchain::header_digest: &'static str
 pub lean_rs_sys::SupportedToolchain::missing_symbols: &'static [&'static str]
 pub lean_rs_sys::SupportedToolchain::versions: &'static [&'static str]
 impl lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, version: &str) -> bool
+pub fn lean_rs_sys::supported::SupportedToolchain::includes(&self, &str) -> bool
 impl core::clone::Clone for lean_rs_sys::supported::SupportedToolchain
 pub fn lean_rs_sys::supported::SupportedToolchain::clone(&self) -> lean_rs_sys::supported::SupportedToolchain
 impl core::cmp::Eq for lean_rs_sys::supported::SupportedToolchain
 impl core::cmp::PartialEq for lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, other: &lean_rs_sys::supported::SupportedToolchain) -> bool
+pub fn lean_rs_sys::supported::SupportedToolchain::eq(&self, &lean_rs_sys::supported::SupportedToolchain) -> bool
 impl core::fmt::Debug for lean_rs_sys::supported::SupportedToolchain
-pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_sys::supported::SupportedToolchain::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_sys::supported::SupportedToolchain
 impl core::marker::StructuralPartialEq for lean_rs_sys::supported::SupportedToolchain
 impl core::marker::Freeze for lean_rs_sys::supported::SupportedToolchain
@@ -302,10 +302,10 @@ pub const lean_rs_sys::LEAN_RESOLVED_VERSION: &str
 pub const lean_rs_sys::LEAN_VERSION: &str
 pub const lean_rs_sys::REQUIRED_SYMBOLS: &[&str]
 pub const lean_rs_sys::SUPPORTED_TOOLCHAINS: &[lean_rs_sys::supported::SupportedToolchain]
-pub fn lean_rs_sys::supported_by_digest(digest: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
-pub fn lean_rs_sys::supported_for(version: &str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
-pub fn lean_rs_sys::symbol_in_all(symbol: &str) -> bool
-pub fn lean_rs_sys::symbol_present_in_window(symbol: &str) -> bool
+pub fn lean_rs_sys::supported_by_digest(&str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::supported_for(&str) -> core::option::Option<&'static lean_rs_sys::supported::SupportedToolchain>
+pub fn lean_rs_sys::symbol_in_all(&str) -> bool
+pub fn lean_rs_sys::symbol_present_in_window(&str) -> bool
 pub type lean_rs_sys::b_lean_obj_arg = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::b_lean_obj_res = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::lean_obj_arg = *mut lean_rs_sys::types::lean_object

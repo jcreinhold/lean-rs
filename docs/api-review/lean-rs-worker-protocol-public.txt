@@ -16,14 +16,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::protocol::Message
 pub fn lean_rs_worker_protocol::protocol::Message::clone(&self) -> lean_rs_worker_protocol::protocol::Message
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::Message
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::Message
-pub fn lean_rs_worker_protocol::protocol::Message::eq(&self, other: &lean_rs_worker_protocol::protocol::Message) -> bool
+pub fn lean_rs_worker_protocol::protocol::Message::eq(&self, &lean_rs_worker_protocol::protocol::Message) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::Message
-pub fn lean_rs_worker_protocol::protocol::Message::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::Message::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::Message
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::Message
-pub fn lean_rs_worker_protocol::protocol::Message::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::Message::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::Message
-pub fn lean_rs_worker_protocol::protocol::Message::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::Message::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::Message
 impl core::marker::Send for lean_rs_worker_protocol::protocol::Message
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::Message
@@ -43,14 +43,14 @@ pub lean_rs_worker_protocol::protocol::ProtocolError::VersionMismatch::expected:
 impl lean_rs_worker_protocol::protocol::ProtocolError
 pub fn lean_rs_worker_protocol::protocol::ProtocolError::is_eof(&self) -> bool
 impl core::convert::From<serde_json::error::Error> for lean_rs_worker_protocol::protocol::ProtocolError
-pub fn lean_rs_worker_protocol::protocol::ProtocolError::from(value: serde_json::error::Error) -> Self
+pub fn lean_rs_worker_protocol::protocol::ProtocolError::from(serde_json::error::Error) -> Self
 impl core::convert::From<std::io::error::Error> for lean_rs_worker_protocol::protocol::ProtocolError
-pub fn lean_rs_worker_protocol::protocol::ProtocolError::from(value: std::io::error::Error) -> Self
+pub fn lean_rs_worker_protocol::protocol::ProtocolError::from(std::io::error::Error) -> Self
 impl core::error::Error for lean_rs_worker_protocol::protocol::ProtocolError
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::ProtocolError
-pub fn lean_rs_worker_protocol::protocol::ProtocolError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::ProtocolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for lean_rs_worker_protocol::protocol::ProtocolError
-pub fn lean_rs_worker_protocol::protocol::ProtocolError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::ProtocolError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::ProtocolError
 impl core::marker::Send for lean_rs_worker_protocol::protocol::ProtocolError
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::ProtocolError
@@ -133,14 +133,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::protocol::Request
 pub fn lean_rs_worker_protocol::protocol::Request::clone(&self) -> lean_rs_worker_protocol::protocol::Request
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::Request
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::Request
-pub fn lean_rs_worker_protocol::protocol::Request::eq(&self, other: &lean_rs_worker_protocol::protocol::Request) -> bool
+pub fn lean_rs_worker_protocol::protocol::Request::eq(&self, &lean_rs_worker_protocol::protocol::Request) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::Request
-pub fn lean_rs_worker_protocol::protocol::Request::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::Request::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::Request
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::Request
-pub fn lean_rs_worker_protocol::protocol::Request::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::Request::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::Request
-pub fn lean_rs_worker_protocol::protocol::Request::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::Request::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::Request
 impl core::marker::Send for lean_rs_worker_protocol::protocol::Request
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::Request
@@ -201,14 +201,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::protocol::Response
 pub fn lean_rs_worker_protocol::protocol::Response::clone(&self) -> lean_rs_worker_protocol::protocol::Response
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::Response
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::Response
-pub fn lean_rs_worker_protocol::protocol::Response::eq(&self, other: &lean_rs_worker_protocol::protocol::Response) -> bool
+pub fn lean_rs_worker_protocol::protocol::Response::eq(&self, &lean_rs_worker_protocol::protocol::Response) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::Response
-pub fn lean_rs_worker_protocol::protocol::Response::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::Response::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::Response
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::Response
-pub fn lean_rs_worker_protocol::protocol::Response::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::Response::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::Response
-pub fn lean_rs_worker_protocol::protocol::Response::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::Response::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::Response
 impl core::marker::Send for lean_rs_worker_protocol::protocol::Response
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::Response
@@ -224,13 +224,13 @@ impl core::clone::Clone for lean_rs_worker_protocol::protocol::DataRow
 pub fn lean_rs_worker_protocol::protocol::DataRow::clone(&self) -> lean_rs_worker_protocol::protocol::DataRow
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::DataRow
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::DataRow
-pub fn lean_rs_worker_protocol::protocol::DataRow::eq(&self, other: &Self) -> bool
+pub fn lean_rs_worker_protocol::protocol::DataRow::eq(&self, &Self) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::DataRow
-pub fn lean_rs_worker_protocol::protocol::DataRow::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::DataRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::DataRow
-pub fn lean_rs_worker_protocol::protocol::DataRow::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::DataRow::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::DataRow
-pub fn lean_rs_worker_protocol::protocol::DataRow::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::DataRow::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::DataRow
 impl core::marker::Send for lean_rs_worker_protocol::protocol::DataRow
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::DataRow
@@ -241,12 +241,12 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol:
 #[non_exhaustive] pub struct lean_rs_worker_protocol::protocol::DataRowEmitter
 impl lean_rs_worker_protocol::protocol::DataRowEmitter
 pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::count(&self) -> u64
-pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::next(&mut self, stream: impl core::convert::Into<alloc::string::String>, payload: alloc::boxed::Box<serde_json::raw::RawValue>) -> lean_rs_worker_protocol::protocol::DataRow
+pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::next(&mut self, impl core::convert::Into<alloc::string::String>, alloc::boxed::Box<serde_json::raw::RawValue>) -> lean_rs_worker_protocol::protocol::DataRow
 pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::per_stream_counts(&self) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 impl core::default::Default for lean_rs_worker_protocol::protocol::DataRowEmitter
 pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::default() -> lean_rs_worker_protocol::protocol::DataRowEmitter
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::DataRowEmitter
-pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::DataRowEmitter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::DataRowEmitter
 impl core::marker::Send for lean_rs_worker_protocol::protocol::DataRowEmitter
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::DataRowEmitter
@@ -258,19 +258,19 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol:
 pub lean_rs_worker_protocol::protocol::Diagnostic::code: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Diagnostic::message: alloc::string::String
 impl lean_rs_worker_protocol::protocol::Diagnostic
-pub fn lean_rs_worker_protocol::protocol::Diagnostic::new(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs_worker_protocol::protocol::Diagnostic::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::protocol::Diagnostic
 pub fn lean_rs_worker_protocol::protocol::Diagnostic::clone(&self) -> lean_rs_worker_protocol::protocol::Diagnostic
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::Diagnostic
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::Diagnostic
-pub fn lean_rs_worker_protocol::protocol::Diagnostic::eq(&self, other: &lean_rs_worker_protocol::protocol::Diagnostic) -> bool
+pub fn lean_rs_worker_protocol::protocol::Diagnostic::eq(&self, &lean_rs_worker_protocol::protocol::Diagnostic) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::Diagnostic
-pub fn lean_rs_worker_protocol::protocol::Diagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::Diagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::Diagnostic
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::Diagnostic
-pub fn lean_rs_worker_protocol::protocol::Diagnostic::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::Diagnostic::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::Diagnostic
-pub fn lean_rs_worker_protocol::protocol::Diagnostic::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::Diagnostic::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::Diagnostic
 impl core::marker::Send for lean_rs_worker_protocol::protocol::Diagnostic
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::Diagnostic
@@ -282,19 +282,19 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol:
 pub lean_rs_worker_protocol::protocol::FatalExit::status: alloc::string::String
 pub lean_rs_worker_protocol::protocol::FatalExit::stderr: alloc::string::String
 impl lean_rs_worker_protocol::protocol::FatalExit
-pub fn lean_rs_worker_protocol::protocol::FatalExit::new(status: impl core::convert::Into<alloc::string::String>, stderr: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs_worker_protocol::protocol::FatalExit::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::protocol::FatalExit
 pub fn lean_rs_worker_protocol::protocol::FatalExit::clone(&self) -> lean_rs_worker_protocol::protocol::FatalExit
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::FatalExit
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::FatalExit
-pub fn lean_rs_worker_protocol::protocol::FatalExit::eq(&self, other: &lean_rs_worker_protocol::protocol::FatalExit) -> bool
+pub fn lean_rs_worker_protocol::protocol::FatalExit::eq(&self, &lean_rs_worker_protocol::protocol::FatalExit) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::FatalExit
-pub fn lean_rs_worker_protocol::protocol::FatalExit::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::FatalExit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::FatalExit
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::FatalExit
-pub fn lean_rs_worker_protocol::protocol::FatalExit::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::FatalExit::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::FatalExit
-pub fn lean_rs_worker_protocol::protocol::FatalExit::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::FatalExit::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::FatalExit
 impl core::marker::Send for lean_rs_worker_protocol::protocol::FatalExit
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::FatalExit
@@ -306,19 +306,19 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol:
 pub lean_rs_worker_protocol::protocol::Frame::message: lean_rs_worker_protocol::protocol::Message
 pub lean_rs_worker_protocol::protocol::Frame::version: u16
 impl lean_rs_worker_protocol::protocol::Frame
-pub fn lean_rs_worker_protocol::protocol::Frame::new(message: lean_rs_worker_protocol::protocol::Message) -> Self
+pub fn lean_rs_worker_protocol::protocol::Frame::new(lean_rs_worker_protocol::protocol::Message) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::protocol::Frame
 pub fn lean_rs_worker_protocol::protocol::Frame::clone(&self) -> lean_rs_worker_protocol::protocol::Frame
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::Frame
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::Frame
-pub fn lean_rs_worker_protocol::protocol::Frame::eq(&self, other: &lean_rs_worker_protocol::protocol::Frame) -> bool
+pub fn lean_rs_worker_protocol::protocol::Frame::eq(&self, &lean_rs_worker_protocol::protocol::Frame) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::Frame
-pub fn lean_rs_worker_protocol::protocol::Frame::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::Frame::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::Frame
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::Frame
-pub fn lean_rs_worker_protocol::protocol::Frame::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::Frame::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::Frame
-pub fn lean_rs_worker_protocol::protocol::Frame::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::Frame::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::Frame
 impl core::marker::Send for lean_rs_worker_protocol::protocol::Frame
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::Frame
@@ -331,19 +331,19 @@ pub lean_rs_worker_protocol::protocol::ProgressTick::current: u64
 pub lean_rs_worker_protocol::protocol::ProgressTick::phase: alloc::string::String
 pub lean_rs_worker_protocol::protocol::ProgressTick::total: core::option::Option<u64>
 impl lean_rs_worker_protocol::protocol::ProgressTick
-pub fn lean_rs_worker_protocol::protocol::ProgressTick::new(phase: impl core::convert::Into<alloc::string::String>, current: u64, total: core::option::Option<u64>) -> Self
+pub fn lean_rs_worker_protocol::protocol::ProgressTick::new(impl core::convert::Into<alloc::string::String>, u64, core::option::Option<u64>) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::protocol::ProgressTick
 pub fn lean_rs_worker_protocol::protocol::ProgressTick::clone(&self) -> lean_rs_worker_protocol::protocol::ProgressTick
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::ProgressTick
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::ProgressTick
-pub fn lean_rs_worker_protocol::protocol::ProgressTick::eq(&self, other: &lean_rs_worker_protocol::protocol::ProgressTick) -> bool
+pub fn lean_rs_worker_protocol::protocol::ProgressTick::eq(&self, &lean_rs_worker_protocol::protocol::ProgressTick) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::ProgressTick
-pub fn lean_rs_worker_protocol::protocol::ProgressTick::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::ProgressTick::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::ProgressTick
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::ProgressTick
-pub fn lean_rs_worker_protocol::protocol::ProgressTick::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::ProgressTick::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::ProgressTick
-pub fn lean_rs_worker_protocol::protocol::ProgressTick::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::ProgressTick::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::ProgressTick
 impl core::marker::Send for lean_rs_worker_protocol::protocol::ProgressTick
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::ProgressTick
@@ -357,19 +357,19 @@ pub lean_rs_worker_protocol::protocol::StreamSummary::metadata: core::option::Op
 pub lean_rs_worker_protocol::protocol::StreamSummary::per_stream_counts: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>
 pub lean_rs_worker_protocol::protocol::StreamSummary::total_rows: u64
 impl lean_rs_worker_protocol::protocol::StreamSummary
-pub fn lean_rs_worker_protocol::protocol::StreamSummary::new(total_rows: u64, per_stream_counts: alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>, elapsed: core::time::Duration, metadata: core::option::Option<serde_json::value::Value>) -> Self
+pub fn lean_rs_worker_protocol::protocol::StreamSummary::new(u64, alloc::collections::btree::map::BTreeMap<alloc::string::String, u64>, core::time::Duration, core::option::Option<serde_json::value::Value>) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::protocol::StreamSummary
 pub fn lean_rs_worker_protocol::protocol::StreamSummary::clone(&self) -> lean_rs_worker_protocol::protocol::StreamSummary
 impl core::cmp::Eq for lean_rs_worker_protocol::protocol::StreamSummary
 impl core::cmp::PartialEq for lean_rs_worker_protocol::protocol::StreamSummary
-pub fn lean_rs_worker_protocol::protocol::StreamSummary::eq(&self, other: &lean_rs_worker_protocol::protocol::StreamSummary) -> bool
+pub fn lean_rs_worker_protocol::protocol::StreamSummary::eq(&self, &lean_rs_worker_protocol::protocol::StreamSummary) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::protocol::StreamSummary
-pub fn lean_rs_worker_protocol::protocol::StreamSummary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::protocol::StreamSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::protocol::StreamSummary
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::protocol::StreamSummary
-pub fn lean_rs_worker_protocol::protocol::StreamSummary::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::protocol::StreamSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::protocol::StreamSummary
-pub fn lean_rs_worker_protocol::protocol::StreamSummary::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::protocol::StreamSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::protocol::StreamSummary
 impl core::marker::Send for lean_rs_worker_protocol::protocol::StreamSummary
 impl core::marker::Sync for lean_rs_worker_protocol::protocol::StreamSummary
@@ -381,8 +381,8 @@ pub const lean_rs_worker_protocol::protocol::MAX_FRAME_BYTES: u32
 pub const lean_rs_worker_protocol::protocol::MAX_FRAME_BYTES_HARD_CAP: u32
 pub const lean_rs_worker_protocol::protocol::MIN_FRAME_BYTES: u32
 pub const lean_rs_worker_protocol::protocol::PROTOCOL_VERSION: u16
-pub fn lean_rs_worker_protocol::protocol::read_frame(reader: &mut impl std::io::Read, max_frame_bytes: u32) -> core::result::Result<lean_rs_worker_protocol::protocol::Frame, lean_rs_worker_protocol::protocol::ProtocolError>
-pub fn lean_rs_worker_protocol::protocol::write_frame(writer: &mut impl std::io::Write, message: lean_rs_worker_protocol::protocol::Message, max_frame_bytes: u32) -> core::result::Result<(), lean_rs_worker_protocol::protocol::ProtocolError>
+pub fn lean_rs_worker_protocol::protocol::read_frame(&mut impl std::io::Read, u32) -> core::result::Result<lean_rs_worker_protocol::protocol::Frame, lean_rs_worker_protocol::protocol::ProtocolError>
+pub fn lean_rs_worker_protocol::protocol::write_frame(&mut impl std::io::Write, lean_rs_worker_protocol::protocol::Message, u32) -> core::result::Result<(), lean_rs_worker_protocol::protocol::ProtocolError>
 pub mod lean_rs_worker_protocol::types
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 pub lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::Error
@@ -392,15 +392,15 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDoctorSeve
 pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
@@ -417,15 +417,15 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerKernelStat
 pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerKernelStatus) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerKernelStatus) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerKernelStatus
@@ -443,17 +443,17 @@ pub lean_rs_worker_protocol::types::LeanWorkerMetaResult::TimeoutOrHeartbeat::fa
 pub lean_rs_worker_protocol::types::LeanWorkerMetaResult::Unsupported
 pub lean_rs_worker_protocol::types::LeanWorkerMetaResult::Unsupported::failure: lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl<'de, T> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: serde_core::de::Deserialize<'de>
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl<T: core::clone::Clone> core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T: core::cmp::Eq> core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T: core::cmp::PartialEq> core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>) -> bool
 impl<T: core::fmt::Debug> core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<T> core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T> serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: serde_core::ser::Serialize
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<T> core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: core::marker::Freeze
 impl<T> core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: core::marker::Send
 impl<T> core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: core::marker::Sync
@@ -470,17 +470,17 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerMetaTransp
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerMetaTransparency) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerMetaTransparency) -> bool
 impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::default() -> lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
-pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerMetaTransparency::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerMetaTransparency
@@ -496,14 +496,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProcessFil
 pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome
@@ -526,14 +526,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProcessMod
 pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome
@@ -548,15 +548,15 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerRendering
 pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerRendering
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerRendering) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerRendering) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerRendering
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerRendering
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerRendering
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendering::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerRendering
@@ -571,14 +571,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerCapability
 pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerCapabilityFact) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerCapabilityFact) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityFact::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerCapabilityFact
@@ -595,14 +595,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerCapability
 pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata
@@ -620,14 +620,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerCommandInf
 pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerCommandInfo
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerCommandInfo) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerCommandInfo) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandInfo::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerCommandInfo
@@ -642,14 +642,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerCommandMet
 pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerCommandMetadata) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerCommandMetadata) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
-pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerCommandMetadata::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerCommandMetadata
@@ -665,17 +665,17 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclaratio
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter) -> bool
 impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::default() -> Self
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
@@ -692,14 +692,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclaratio
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDeclarationRow) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationRow) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
@@ -719,14 +719,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDiagnostic) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDiagnostic) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDiagnostic::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDiagnostic
@@ -743,14 +743,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDoctorDiag
 pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDoctorDiagnostic
@@ -765,14 +765,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDoctorRepo
 pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDoctorReport
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerDoctorReport) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDoctorReport) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
-pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerDoctorReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDoctorReport
@@ -787,14 +787,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerElabFailur
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerElabFailure
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerElabFailure) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerElabFailure) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerElabFailure
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerElabFailure
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerElabFailure
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabFailure::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerElabFailure
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerElabFailure
@@ -808,25 +808,25 @@ pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::file_label: alloc::st
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::heartbeat_limit: u64
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::namespace_context: alloc::string::String
 impl lean_rs_worker_protocol::types::LeanWorkerElabOptions
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::diagnostic_byte_limit(self, bytes: usize) -> Self
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::file_label(self, label: &str) -> Self
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::heartbeat_limit(self, heartbeats: u64) -> Self
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::namespace_context(self, namespace: &str) -> Self
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::diagnostic_byte_limit(self, usize) -> Self
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::file_label(self, &str) -> Self
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::heartbeat_limit(self, u64) -> Self
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::namespace_context(self, &str) -> Self
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::new() -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerElabOptions
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerElabOptions
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerElabOptions) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerElabOptions) -> bool
 impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::default() -> Self
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerElabOptions
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerElabOptions
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerElabOptions
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerElabOptions
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerElabOptions
@@ -842,14 +842,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerElabResult
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerElabResult
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerElabResult
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerElabResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerElabResult) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerElabResult) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerElabResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerElabResult
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerElabResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerElabResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerElabResult
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerElabResult
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerElabResult
@@ -866,14 +866,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerKernelResu
 pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerKernelResult
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerKernelResult
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerKernelResult) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerKernelResult) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerKernelResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelResult
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerKernelResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerKernelResult
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerKernelResult
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerKernelResult
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerKernelResult
@@ -889,14 +889,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerKernelSumm
 pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerKernelSummary
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerKernelSummary) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerKernelSummary) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerKernelSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerKernelSummary
@@ -915,14 +915,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerNameRef
 pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerNameRef
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerNameRef
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerNameRef
-pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerNameRef) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerNameRef) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerNameRef
-pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerNameRef
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerNameRef
-pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerNameRef
-pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerNameRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerNameRef
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerNameRef
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerNameRef
@@ -940,14 +940,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProcessedF
 pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProcessedFile
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerProcessedFile) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProcessedFile) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
-pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerProcessedFile::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProcessedFile
@@ -962,14 +962,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerRendered
 pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerRendered
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerRendered
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerRendered
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerRendered) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerRendered) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerRendered
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerRendered
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerRendered
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerRendered
-pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerRendered::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerRendered
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerRendered
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerRendered
@@ -987,14 +987,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerSourceRang
 pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerSourceRange
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerSourceRange
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerSourceRange
-pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerSourceRange) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerSourceRange) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerSourceRange
-pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerSourceRange
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerSourceRange
-pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerSourceRange
-pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerSourceRange::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerSourceRange
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerSourceRange
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerSourceRange
@@ -1013,14 +1013,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerTacticInfo) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerTacticInfo) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerTacticInfo::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerTacticInfo
@@ -1040,14 +1040,14 @@ impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerTermInfo
 pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerTermInfo
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerTermInfo
 impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerTermInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::eq(&self, other: &lean_rs_worker_protocol::types::LeanWorkerTermInfo) -> bool
+pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerTermInfo) -> bool
 impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerTermInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerTermInfo
 impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerTermInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::serialize<__S>(&self, __serializer: __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerTermInfo
-pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::deserialize<__D>(__deserializer: __D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn lean_rs_worker_protocol::types::LeanWorkerTermInfo::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerTermInfo
 impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerTermInfo
 impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerTermInfo
