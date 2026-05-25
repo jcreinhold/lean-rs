@@ -52,7 +52,7 @@ pub use loader::{
 pub use manifest_validation::CapabilityManifest;
 pub use modules::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
-    LeanModuleSetFingerprint, discover_lake_modules, lake_target_declared,
+    LeanModuleSetFingerprint, discover_lake_modules,
 };
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.

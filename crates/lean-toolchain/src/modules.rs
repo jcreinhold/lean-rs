@@ -36,6 +36,13 @@ pub struct LeanLakeProjectModules {
     pub requested_root: PathBuf,
     pub project_root: PathBuf,
     pub lakefile: PathBuf,
+    /// Lakefile-declared `lean_lib` target names, in lexicographic order.
+    ///
+    /// Empty when the lakefile declares no `lean_lib` targets. Distinct from
+    /// `module_roots`, which falls back to discovering top-level `*.lean` files
+    /// when no declaration is found. Callers verifying that a build target was
+    /// explicitly declared must consult this field, not `module_roots`.
+    pub declared_lean_libs: Vec<String>,
     pub module_roots: Vec<String>,
     pub selected_roots: Vec<String>,
     pub modules: Vec<LeanModuleDescriptor>,
@@ -175,7 +182,7 @@ pub fn discover_lake_modules(
 
     let requested_root = normalize_existing(&options.requested_root)?;
     let (project_root, lakefile) = lake_root_for(&requested_root)?;
-    let module_roots = discover_module_roots(&project_root, &lakefile)?;
+    let (declared_lean_libs, module_roots) = discover_module_roots(&project_root, &lakefile)?;
     let selected_roots = options.selected_roots.unwrap_or_else(|| module_roots.clone());
     for root in &selected_roots {
         validate_module_name(root)?;
@@ -193,26 +200,12 @@ pub fn discover_lake_modules(
         requested_root,
         project_root,
         lakefile,
+        declared_lean_libs,
         module_roots,
         selected_roots,
         modules,
         fingerprint,
     })
-}
-
-/// Return whether a Lake `lean_lib` target is declared in a project.
-///
-/// # Errors
-///
-/// Returns discovery diagnostics if the Lake root or lakefile cannot be read.
-pub fn lake_target_declared(project_root: &Path, target_name: &str) -> Result<bool, LeanModuleDiscoveryDiagnostic> {
-    let requested_root = normalize_existing(project_root)?;
-    let (_project_root, lakefile) = lake_root_for(&requested_root)?;
-    let contents = read_to_string(&lakefile, "could not read Lake file")?;
-    let quoted = format!("lean_lib «{target_name}»");
-    let bare = format!("lean_lib {target_name}");
-    let string = format!("lean_lib \"{target_name}\"");
-    Ok(contents.contains(&quoted) || contents.contains(&bare) || contents.contains(&string))
 }
 
 fn normalize_existing(path: &Path) -> Result<PathBuf, LeanModuleDiscoveryDiagnostic> {
@@ -270,21 +263,47 @@ fn lakefile_path(root: &Path) -> Option<PathBuf> {
     lean.is_file().then_some(lean)
 }
 
-fn discover_module_roots(project_root: &Path, lakefile: &Path) -> Result<Vec<String>, LeanModuleDiscoveryDiagnostic> {
-    let mut roots = if lakefile.file_name().and_then(|name| name.to_str()) == Some("lakefile.toml") {
+/// Parse the lakefile to learn what targets it declares, then decide what to walk.
+///
+/// Returns `(declared_lean_libs, module_roots)`:
+/// - `declared_lean_libs` is exactly the set of `lean_lib` targets named in the
+///   lakefile (Lean DSL or TOML). Empty when none are declared.
+/// - `module_roots` is the set the source walker uses: it equals
+///   `declared_lean_libs` when non-empty, or falls back to top-level `*.lean`
+///   stems so loose-script projects can still enumerate sources.
+///
+/// The two lists are deliberately distinct: a caller verifying that a build
+/// target was *explicitly* declared must use `declared_lean_libs`, because the
+/// top-level fallback can promote any `Foo.lean` at the project root into
+/// `module_roots` without Lake knowing it exists.
+fn discover_module_roots(
+    project_root: &Path,
+    lakefile: &Path,
+) -> Result<(Vec<String>, Vec<String>), LeanModuleDiscoveryDiagnostic> {
+    let mut declared = if lakefile.file_name().and_then(|name| name.to_str()) == Some("lakefile.toml") {
         discover_toml_lakefile_roots(lakefile)?
     } else {
         discover_lean_lakefile_roots(lakefile)?
     };
-    if roots.is_empty() {
-        roots = discover_top_level_roots(project_root)?;
-    }
-    roots.sort();
-    roots.dedup();
-    for root in &roots {
+    declared.sort();
+    declared.dedup();
+    for root in &declared {
         validate_module_name(root)?;
     }
-    Ok(roots)
+
+    let module_roots = if declared.is_empty() {
+        let mut fallback = discover_top_level_roots(project_root)?;
+        fallback.sort();
+        fallback.dedup();
+        for root in &fallback {
+            validate_module_name(root)?;
+        }
+        fallback
+    } else {
+        declared.clone()
+    };
+
+    Ok((declared, module_roots))
 }
 
 fn discover_toml_lakefile_roots(lakefile: &Path) -> Result<Vec<String>, LeanModuleDiscoveryDiagnostic> {
@@ -590,9 +609,7 @@ fn supported_window() -> String {
     clippy::wildcard_enum_match_arm
 )]
 mod tests {
-    use super::{
-        LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions, discover_lake_modules, lake_target_declared,
-    };
+    use super::{LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions, discover_lake_modules};
     use crate::ToolchainFingerprint;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -684,14 +701,52 @@ name = "Other"
     }
 
     #[test]
-    fn target_declaration_probe_is_typed() {
-        let root = temp_project("target-probe");
+    fn declared_lean_libs_reflects_lakefile() {
+        let root = temp_project("declared-lean-libs");
         write_file(
             &root.join("lakefile.lean"),
             "package demo\nlean_lib Demo where\nlean_lib Extra where\n",
         );
-        assert!(lake_target_declared(&root, "Demo").unwrap());
-        assert!(!lake_target_declared(&root, "Missing").unwrap());
+        write_file(&root.join("Demo.lean"), "#check Nat\n");
+        write_file(&root.join("Extra.lean"), "#check Nat\n");
+
+        let project = discover_lake_modules(LeanModuleDiscoveryOptions::new(&root)).unwrap();
+        assert_eq!(project.declared_lean_libs, vec!["Demo", "Extra"]);
+    }
+
+    #[test]
+    fn declared_lean_libs_reflects_toml_lakefile() {
+        let root = temp_project("declared-toml-libs");
+        write_file(
+            &root.join("lakefile.toml"),
+            r#"
+name = "demo"
+[[lean_lib]]
+name = "KanProofs"
+[[lean_lib]]
+name = "Other"
+"#,
+        );
+        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+        write_file(&root.join("Other.lean"), "#check Nat\n");
+
+        let project = discover_lake_modules(LeanModuleDiscoveryOptions::new(&root)).unwrap();
+        assert_eq!(project.declared_lean_libs, vec!["KanProofs", "Other"]);
+    }
+
+    #[test]
+    fn declared_lean_libs_empty_when_top_level_fallback_active() {
+        // A project with loose top-level `*.lean` files but no `lean_lib`
+        // declaration must report `declared_lean_libs` as empty, so callers
+        // verifying explicit target declaration can reject this case before
+        // attempting a Lake build.
+        let root = temp_project("declared-fallback");
+        write_file(&root.join("lakefile.lean"), "package demo\n");
+        write_file(&root.join("Loose.lean"), "#check Nat\n");
+
+        let project = discover_lake_modules(LeanModuleDiscoveryOptions::new(&root)).unwrap();
+        assert!(project.declared_lean_libs.is_empty());
+        assert!(project.module_roots.iter().any(|root| root == "Loose"));
     }
 
     fn module_names(project: &super::LeanLakeProjectModules) -> Vec<&str> {

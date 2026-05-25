@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use lean_toolchain::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
-    LeanModuleSetFingerprint, ToolchainFingerprint, discover_lake_modules, lake_target_declared,
+    LeanModuleSetFingerprint, ToolchainFingerprint, discover_lake_modules,
 };
 use serde_json::Value;
 
@@ -257,9 +257,11 @@ impl LeanWorkerImportPlanner {
         }
         let discovered = discover_lake_modules(options)
             .map_err(|diagnostic| LeanWorkerImportPlanError::ModuleDiscovery { diagnostic })?;
-        let target_declared = lake_target_declared(&discovered.project_root, &self.config.lib_name)
-            .map_err(|diagnostic| LeanWorkerImportPlanError::ModuleDiscovery { diagnostic })?;
-        if !target_declared {
+        if !discovered
+            .declared_lean_libs
+            .iter()
+            .any(|name| name == &self.config.lib_name)
+        {
             return Err(LeanWorkerImportPlanError::UnresolvedCapabilityTarget {
                 project_root: discovered.project_root,
                 target_name: self.config.lib_name.clone(),
@@ -420,4 +422,87 @@ fn validate_module_name(module: &str) -> Result<(), LeanWorkerImportPlanError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::{LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn plan_lake_project_accepts_toml_declared_target() {
+        let root = temp_project("toml-target-accept");
+        write_file(
+            &root.join("lakefile.toml"),
+            r#"
+name = "demo"
+[[lean_lib]]
+name = "KanProofs"
+"#,
+        );
+        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+
+        let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "KanProofs"));
+        let batches = planner.plan_lake_project().expect("TOML-declared target should plan");
+        assert!(!batches.is_empty());
+    }
+
+    #[test]
+    fn plan_lake_project_rejects_undeclared_toml_target() {
+        let root = temp_project("toml-target-reject");
+        write_file(
+            &root.join("lakefile.toml"),
+            r#"
+name = "demo"
+[[lean_lib]]
+name = "KanProofs"
+"#,
+        );
+        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+
+        let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "Bogus"));
+        match planner.plan_lake_project() {
+            Err(LeanWorkerImportPlanError::UnresolvedCapabilityTarget { target_name, .. }) => {
+                assert_eq!(target_name, "Bogus");
+            }
+            other => panic!("expected UnresolvedCapabilityTarget, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_lake_project_rejects_top_level_fallback_target() {
+        // A lakefile that declares no `lean_lib` falls back to discovering
+        // top-level `*.lean` files for source enumeration. The planner must
+        // still reject any target as "not declared," because the build will
+        // fail when Lake can't find a matching `lean_lib`.
+        let root = temp_project("fallback-target-reject");
+        write_file(&root.join("lakefile.lean"), "package demo\n");
+        write_file(&root.join("Demo.lean"), "#check Nat\n");
+
+        let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "Demo"));
+        match planner.plan_lake_project() {
+            Err(LeanWorkerImportPlanError::UnresolvedCapabilityTarget { target_name, .. }) => {
+                assert_eq!(target_name, "Demo");
+            }
+            other => panic!("expected UnresolvedCapabilityTarget for fallback project, got {other:?}"),
+        }
+    }
+
+    fn temp_project(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("lean-rs-worker-parent-planning-{name}-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, contents).unwrap();
+    }
 }
