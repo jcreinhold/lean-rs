@@ -1,0 +1,692 @@
+//! Length-delimited frame codec and message payload types for the
+//! parent ↔ child worker process boundary.
+//!
+//! ## Additive evolution
+//!
+//! Every public enum here is `#[non_exhaustive]` so the wire format can gain
+//! a new request, response, or message kind without forcing a semver-major
+//! bump on consumers. Most structs are also `#[non_exhaustive]` and expose
+//! `pub fn new(...)` constructors so the shapes can grow fields without
+//! breaking external builders. The exception is [`DataRow`], which is built
+//! so frequently with struct-literal syntax (tests, harnesses, fakes) that
+//! the ergonomic cost of `#[non_exhaustive]` outweighs the additive-evolution
+//! benefit; the wire schema for a data row is also already fixed by the
+//! stream contract.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::io::{self, Read, Write};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_json::value::RawValue;
+
+use crate::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
+};
+
+/// Wire protocol version negotiated between parent and child during the
+/// handshake frame. Bump only on a breaking wire change.
+pub const PROTOCOL_VERSION: u16 = 3;
+
+/// Hard ceiling on one frame's serialised JSON payload in bytes.
+///
+/// Both [`write_frame`] and [`read_frame`] reject frames over this limit so a
+/// runaway producer cannot make the peer allocate without bound.
+pub const MAX_FRAME_BYTES: u32 = 1024 * 1024;
+
+/// Versioned envelope around a single protocol [`Message`].
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct Frame {
+    /// Protocol version the sender used. Receivers reject mismatches.
+    pub version: u16,
+    /// Inner message payload.
+    pub message: Message,
+}
+
+impl Frame {
+    /// Wrap `message` in a frame tagged with the current [`PROTOCOL_VERSION`].
+    #[must_use]
+    pub fn new(message: Message) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            message,
+        }
+    }
+}
+
+/// One protocol message exchanged over the worker boundary.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", content = "body", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Message {
+    /// Sent by the child immediately after spawn to advertise its version and
+    /// supported protocol revision.
+    Handshake {
+        /// `lean-rs-worker-child` package version.
+        worker_version: String,
+        /// Protocol version the child speaks. Parent rejects mismatches.
+        protocol_version: u16,
+    },
+    /// Parent → child request frame.
+    Request(Request),
+    /// Child → parent terminal response for one request.
+    Response(Response),
+    /// Child → parent intermediate diagnostic frame.
+    Diagnostic(Diagnostic),
+    /// Child → parent intermediate progress frame.
+    ProgressTick(ProgressTick),
+    /// Child → parent streaming data row frame.
+    DataRow(DataRow),
+    /// Child → parent fatal exit notification carrying the captured stderr
+    /// just before the child process tears down.
+    FatalExit(FatalExit),
+}
+
+/// Parent-issued worker request body.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Request {
+    Health,
+    LoadFixtureCapability {
+        fixture_root: String,
+    },
+    CallFixtureMul {
+        fixture_root: String,
+        lhs: u64,
+        rhs: u64,
+    },
+    TriggerLeanPanic {
+        fixture_root: String,
+    },
+    OpenHostSession {
+        project_root: String,
+        package: String,
+        lib_name: String,
+        imports: Vec<String>,
+    },
+    Elaborate {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    KernelCheck {
+        source: String,
+        options: LeanWorkerElabOptions,
+        progress: bool,
+    },
+    DeclarationKinds {
+        names: Vec<String>,
+        progress: bool,
+    },
+    DeclarationNames {
+        names: Vec<String>,
+        progress: bool,
+    },
+    RunDataStream {
+        export: String,
+        request_json: String,
+        progress: bool,
+    },
+    CapabilityMetadata {
+        export: String,
+        request_json: String,
+    },
+    CapabilityDoctor {
+        export: String,
+        request_json: String,
+    },
+    JsonCommand {
+        export: String,
+        request_json: String,
+    },
+    InferType {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    Whnf {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    IsDefEq {
+        lhs: String,
+        rhs: String,
+        transparency: LeanWorkerMetaTransparency,
+        options: LeanWorkerElabOptions,
+    },
+    Describe {
+        name: String,
+    },
+    ListDeclarationsStrings {
+        filter: LeanWorkerDeclarationFilter,
+        progress: bool,
+    },
+    DescribeBulk {
+        names: Vec<String>,
+        progress: bool,
+    },
+    ProcessFile {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    ProcessModule {
+        source: String,
+        options: LeanWorkerElabOptions,
+    },
+    // Private harness requests that exercise streaming frame behavior.
+    // Not part of the public row sink API.
+    EmitTestRows {
+        streams: Vec<String>,
+    },
+    EmitTestRowsThenExit,
+    EmitTestRowsThenPanic,
+    Terminate,
+}
+
+/// Child-issued terminal response body for one [`Request`].
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Response {
+    HealthOk,
+    CapabilityLoaded,
+    U64 {
+        value: u64,
+    },
+    HostSessionOpened,
+    Elaboration {
+        outcome: LeanWorkerElabResult,
+    },
+    KernelCheck {
+        outcome: LeanWorkerKernelResult,
+    },
+    Strings {
+        values: Vec<String>,
+    },
+    StreamComplete {
+        summary: StreamSummary,
+    },
+    StreamExportFailed {
+        status_byte: u8,
+    },
+    StreamCallbackFailed {
+        status_byte: u8,
+        description: String,
+    },
+    StreamRowMalformed {
+        message: String,
+    },
+    CapabilityMetadata {
+        metadata: LeanWorkerCapabilityMetadata,
+    },
+    CapabilityDoctor {
+        report: LeanWorkerDoctorReport,
+    },
+    CapabilityMetadataMalformed {
+        message: String,
+    },
+    CapabilityDoctorMalformed {
+        message: String,
+    },
+    JsonCommand {
+        response_json: String,
+    },
+    MetaExpr {
+        result: LeanWorkerMetaResult<LeanWorkerRendered>,
+    },
+    MetaBool {
+        result: LeanWorkerMetaResult<bool>,
+    },
+    Declaration {
+        row: Option<LeanWorkerDeclarationRow>,
+    },
+    DeclarationBulk {
+        rows: Vec<LeanWorkerDeclarationRow>,
+    },
+    ProcessFile {
+        outcome: LeanWorkerProcessFileOutcome,
+    },
+    ProcessModule {
+        outcome: LeanWorkerProcessModuleOutcome,
+    },
+    RowsComplete {
+        count: u64,
+    },
+    Terminating,
+    Error {
+        code: String,
+        message: String,
+    },
+}
+
+/// Intermediate diagnostic frame emitted by the child during a request.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct Diagnostic {
+    /// Stable diagnostic code identifier.
+    pub code: String,
+    /// Bounded human-readable diagnostic message.
+    pub message: String,
+}
+
+impl Diagnostic {
+    /// Build a diagnostic frame payload.
+    #[must_use]
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Intermediate progress frame emitted by the child during a long-running
+/// request.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct ProgressTick {
+    /// Phase name the child is reporting progress for.
+    pub phase: String,
+    /// Items completed so far in this phase.
+    pub current: u64,
+    /// Total expected items in this phase, if known.
+    pub total: Option<u64>,
+}
+
+impl ProgressTick {
+    /// Build a progress-tick frame payload.
+    #[must_use]
+    pub fn new(phase: impl Into<String>, current: u64, total: Option<u64>) -> Self {
+        Self {
+            phase: phase.into(),
+            current,
+            total,
+        }
+    }
+}
+
+/// One row in a streaming response.
+///
+/// Construction goes through [`DataRowEmitter::next`] in the child runtime;
+/// direct struct-literal construction is permitted in tests and harnesses.
+/// This struct intentionally stays exhaustive: see the module-level note on
+/// additive evolution.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DataRow {
+    /// Logical stream this row belongs to.
+    pub stream: String,
+    /// Per-stream monotonically increasing sequence number.
+    pub sequence: u64,
+    /// Opaque JSON payload (deserialised lazily by the parent).
+    pub payload: Box<RawValue>,
+}
+
+impl PartialEq for DataRow {
+    fn eq(&self, other: &Self) -> bool {
+        self.stream == other.stream && self.sequence == other.sequence && self.payload.get() == other.payload.get()
+    }
+}
+
+impl Eq for DataRow {}
+
+/// Terminal stream-completion summary returned alongside a streaming response.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct StreamSummary {
+    /// Total rows emitted across all streams.
+    pub total_rows: u64,
+    /// Per-stream row counts at completion.
+    pub per_stream_counts: BTreeMap<String, u64>,
+    /// Child-side elapsed time in microseconds.
+    pub elapsed_micros: u64,
+    /// Optional downstream-defined terminal metadata.
+    pub metadata: Option<Value>,
+}
+
+impl StreamSummary {
+    /// Build a stream-completion summary, clamping the elapsed duration into
+    /// the `u64` micros field.
+    #[must_use]
+    pub fn new(
+        total_rows: u64,
+        per_stream_counts: BTreeMap<String, u64>,
+        elapsed: Duration,
+        metadata: Option<Value>,
+    ) -> Self {
+        Self {
+            total_rows,
+            per_stream_counts,
+            elapsed_micros: elapsed.as_micros().try_into().unwrap_or(u64::MAX),
+            metadata,
+        }
+    }
+}
+
+/// Stateful emitter that assigns per-stream sequence numbers and tracks the
+/// running row count for the terminal [`StreamSummary`].
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct DataRowEmitter {
+    sequences: BTreeMap<String, u64>,
+    count: u64,
+}
+
+impl DataRowEmitter {
+    /// Allocate the next [`DataRow`] for `stream`, advancing the per-stream
+    /// sequence and the overall count.
+    pub fn next(&mut self, stream: impl Into<String>, payload: Box<RawValue>) -> DataRow {
+        let stream = stream.into();
+        let sequence = self.sequences.entry(stream.clone()).or_insert(0);
+        let row = DataRow {
+            stream,
+            sequence: *sequence,
+            payload,
+        };
+        *sequence = sequence.saturating_add(1);
+        self.count = self.count.saturating_add(1);
+        row
+    }
+
+    #[cfg(test)]
+    fn emit(
+        &mut self,
+        writer: &mut impl Write,
+        stream: impl Into<String>,
+        payload: &Value,
+    ) -> Result<(), ProtocolError> {
+        let row = self.next(stream, serde_json::value::to_raw_value(payload)?);
+        write_frame(writer, Message::DataRow(row))
+    }
+
+    /// Total rows emitted across all streams.
+    #[must_use]
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    /// Snapshot of per-stream row counts.
+    #[must_use]
+    pub fn per_stream_counts(&self) -> BTreeMap<String, u64> {
+        self.sequences.clone()
+    }
+}
+
+/// Final frame the child writes before it tears down on an unrecoverable
+/// failure.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct FatalExit {
+    /// Stringified `ExitStatus` of the child process.
+    pub status: String,
+    /// Captured stderr tail at fatal-exit time.
+    pub stderr: String,
+}
+
+impl FatalExit {
+    /// Build a fatal-exit frame payload.
+    #[must_use]
+    pub fn new(status: impl Into<String>, stderr: impl Into<String>) -> Self {
+        Self {
+            status: status.into(),
+            stderr: stderr.into(),
+        }
+    }
+}
+
+/// Failure modes the codec can produce while reading or writing a frame.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ProtocolError {
+    /// Underlying I/O failure (pipe closed, partial read, etc.).
+    Io(io::Error),
+    /// JSON serialisation or deserialisation failure.
+    Json(serde_json::Error),
+    /// A frame body exceeded [`MAX_FRAME_BYTES`].
+    FrameTooLarge {
+        /// Observed frame size in bytes.
+        len: u32,
+        /// Maximum allowed frame size.
+        max: u32,
+    },
+    /// Peer's frame version did not match this binary's [`PROTOCOL_VERSION`].
+    VersionMismatch {
+        /// Version this binary expected.
+        expected: u16,
+        /// Version the peer used.
+        actual: u16,
+    },
+}
+
+impl ProtocolError {
+    /// Whether the underlying I/O error indicates the peer's pipe was closed
+    /// (`UnexpectedEof`). Used by callers to distinguish a clean fatal exit
+    /// from a true protocol failure.
+    #[must_use]
+    pub fn is_eof(&self) -> bool {
+        matches!(self, Self::Io(err) if err.kind() == io::ErrorKind::UnexpectedEof)
+    }
+}
+
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "worker protocol I/O failed: {err}"),
+            Self::Json(err) => write!(f, "worker protocol JSON decode failed: {err}"),
+            Self::FrameTooLarge { len, max } => {
+                write!(f, "worker protocol frame too large: {len} bytes exceeds {max}")
+            }
+            Self::VersionMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "worker protocol version mismatch: expected {expected}, received {actual}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProtocolError {}
+
+impl From<io::Error> for ProtocolError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+impl From<serde_json::Error> for ProtocolError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
+    }
+}
+
+/// Serialise `message` as a length-delimited JSON frame to `writer`.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::FrameTooLarge`] if the serialised body would
+/// exceed [`MAX_FRAME_BYTES`], or the underlying [`ProtocolError::Io`] /
+/// [`ProtocolError::Json`] for codec failures.
+pub fn write_frame(writer: &mut impl Write, message: Message) -> Result<(), ProtocolError> {
+    let bytes = serde_json::to_vec(&Frame::new(message))?;
+    let len = u32::try_from(bytes.len()).map_err(|_| ProtocolError::FrameTooLarge {
+        len: u32::MAX,
+        max: MAX_FRAME_BYTES,
+    })?;
+    if len > MAX_FRAME_BYTES {
+        return Err(ProtocolError::FrameTooLarge {
+            len,
+            max: MAX_FRAME_BYTES,
+        });
+    }
+    writer.write_all(&len.to_be_bytes())?;
+    writer.write_all(&bytes)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Read one length-delimited JSON frame from `reader`.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::FrameTooLarge`] if the framed length exceeds
+/// [`MAX_FRAME_BYTES`] (rejected before allocation),
+/// [`ProtocolError::VersionMismatch`] if the peer's version does not match
+/// [`PROTOCOL_VERSION`], or the underlying [`ProtocolError::Io`] /
+/// [`ProtocolError::Json`] for codec failures.
+pub fn read_frame(reader: &mut impl Read) -> Result<Frame, ProtocolError> {
+    let mut len_bytes = [0_u8; 4];
+    reader.read_exact(&mut len_bytes)?;
+    let len = u32::from_be_bytes(len_bytes);
+    if len > MAX_FRAME_BYTES {
+        return Err(ProtocolError::FrameTooLarge {
+            len,
+            max: MAX_FRAME_BYTES,
+        });
+    }
+    let mut bytes = vec![0_u8; len as usize];
+    reader.read_exact(&mut bytes)?;
+    let frame: Frame = serde_json::from_slice(&bytes)?;
+    if frame.version != PROTOCOL_VERSION {
+        return Err(ProtocolError::VersionMismatch {
+            expected: PROTOCOL_VERSION,
+            actual: frame.version,
+        });
+    }
+    Ok(frame)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::panic)]
+
+    use std::io::Cursor;
+
+    use serde_json::json;
+    use serde_json::value::RawValue;
+
+    use super::{DataRow, DataRowEmitter, MAX_FRAME_BYTES, Message, ProtocolError, Response, read_frame, write_frame};
+
+    fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
+        serde_json::value::to_raw_value(value).expect("test JSON converts to raw value")
+    }
+
+    #[test]
+    fn data_row_round_trips_through_length_delimited_frame() {
+        let row = DataRow {
+            stream: "rows".to_owned(),
+            sequence: 7,
+            payload: raw_json(&json!({ "name": "Nat.add", "score": 3 })),
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, Message::DataRow(row.clone())).expect("data row writes");
+        let frame = read_frame(&mut Cursor::new(bytes)).expect("data row reads");
+        assert_eq!(frame.message, Message::DataRow(row));
+    }
+
+    #[test]
+    fn data_row_emitter_assigns_per_stream_sequences() {
+        let mut emitter = DataRowEmitter::default();
+        let mut bytes = Vec::new();
+        emitter
+            .emit(&mut bytes, "rows", &json!({ "i": 0 }))
+            .expect("first row writes");
+        emitter
+            .emit(&mut bytes, "warnings", &json!({ "i": 1 }))
+            .expect("second row writes");
+        emitter
+            .emit(&mut bytes, "rows", &json!({ "i": 2 }))
+            .expect("third row writes");
+        assert_eq!(emitter.count(), 3);
+
+        let mut cursor = Cursor::new(bytes);
+        let rows = [
+            read_frame(&mut cursor).expect("first row reads"),
+            read_frame(&mut cursor).expect("second row reads"),
+            read_frame(&mut cursor).expect("third row reads"),
+        ];
+        assert_eq!(
+            rows.map(|frame| frame.message),
+            [
+                Message::DataRow(DataRow {
+                    stream: "rows".to_owned(),
+                    sequence: 0,
+                    payload: raw_json(&json!({ "i": 0 })),
+                }),
+                Message::DataRow(DataRow {
+                    stream: "warnings".to_owned(),
+                    sequence: 0,
+                    payload: raw_json(&json!({ "i": 1 })),
+                }),
+                Message::DataRow(DataRow {
+                    stream: "rows".to_owned(),
+                    sequence: 1,
+                    payload: raw_json(&json!({ "i": 2 })),
+                }),
+            ],
+        );
+    }
+
+    #[test]
+    fn oversized_data_row_is_rejected_before_write() {
+        let row = DataRow {
+            stream: "rows".to_owned(),
+            sequence: 0,
+            payload: raw_json(&json!({ "blob": "x".repeat(MAX_FRAME_BYTES as usize) })),
+        };
+        let mut bytes = Vec::new();
+        let err = write_frame(&mut bytes, Message::DataRow(row)).expect_err("oversized frame is rejected");
+        match err {
+            ProtocolError::FrameTooLarge { len, max } => {
+                assert!(len > max);
+                assert_eq!(max, MAX_FRAME_BYTES);
+            }
+            other @ (ProtocolError::Io(_) | ProtocolError::Json(_) | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected FrameTooLarge, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_data_row_is_rejected_before_read_allocation() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(MAX_FRAME_BYTES.saturating_add(1)).to_be_bytes());
+        let err = read_frame(&mut Cursor::new(bytes)).expect_err("oversized frame is rejected");
+        match err {
+            ProtocolError::FrameTooLarge { len, max } => {
+                assert_eq!(len, MAX_FRAME_BYTES + 1);
+                assert_eq!(max, MAX_FRAME_BYTES);
+            }
+            other @ (ProtocolError::Io(_) | ProtocolError::Json(_) | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected FrameTooLarge, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_frame_payload_is_protocol_error() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1_u32.to_be_bytes());
+        bytes.push(b'{');
+        let err = read_frame(&mut Cursor::new(bytes)).expect_err("malformed JSON is rejected");
+        match err {
+            ProtocolError::Json(_) => {}
+            other @ (ProtocolError::Io(_)
+            | ProtocolError::FrameTooLarge { .. }
+            | ProtocolError::VersionMismatch { .. }) => {
+                panic!("expected Json error, got {other:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rows_complete_response_round_trips() {
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, Message::Response(Response::RowsComplete { count: 2 })).expect("rows complete writes");
+        let frame = read_frame(&mut Cursor::new(bytes)).expect("rows complete reads");
+        assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
+    }
+}

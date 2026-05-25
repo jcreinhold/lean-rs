@@ -1,0 +1,36 @@
+[package]
+authors.workspace = true
+categories = ["api-bindings", "encoding"]
+description = "Wire protocol and shared value types for the lean-rs worker process boundary."
+documentation = "https://docs.rs/lean-rs-worker-protocol"
+edition.workspace = true
+include = ["Cargo.toml", "LICENSE-APACHE", "LICENSE-MIT", "README.md", "build.rs", "src/**/*.rs"]
+keywords = ["lean", "lean4", "protocol", "worker"]
+license.workspace = true
+name = "lean-rs-worker-protocol"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[features]
+# Optional integration-test harness for the wire protocol. Off by default so
+# normal builds do not pull `std::process` plumbing into binaries that only
+# need the wire types. Enable from the parent and child crates' integration
+# tests.
+harness = []
+
+[dependencies]
+lean-toolchain = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []

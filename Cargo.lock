@@ -386,6 +386,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean-rs-worker-protocol"
+version = "0.1.8"
+dependencies = [
+ "lean-toolchain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lean-toolchain"
 version = "0.1.8"
 dependencies = [
