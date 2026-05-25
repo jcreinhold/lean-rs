@@ -100,13 +100,13 @@ handler to call into a Lean-implemented demangler (`@[export] lean_demangle_bt_l
 from `lean_panic_impl` (soft panics), where the Lean runtime is expected to be in a normal execution state.
 
 That invariant holds for the Lean compiler and lake projects, which always load the full compiler stdlib. **It does not
-hold for embedders.** A `lean-rs-worker` child process intentionally embeds a minimal Lean: it loads `libleanshared.so`
+hold for embedders.** A the worker crates child process intentionally embeds a minimal Lean: it loads `libleanshared.so`
 plus a small capability dylib chain, and cannot guarantee that the modules a future Lean panic handler decides to call
 back into are initialized when user code panics. The observed symptom on Linux is that `lean_panic_impl` calls
 `print_backtrace` → `lean_demangle_bt_line_cstr` and hangs before reaching `abort_on_panic()`; the parent's request
 times out instead of observing a fatal exit.
 
-`lean-rs-worker` and the host-stack verification fixture therefore pin a structural boundary: **no Lean code may run
+The worker crates and the host-stack verification fixture therefore pin a structural boundary: **no Lean code may run
 from the C panic handler in a worker child.** The boundary is enforced with `LEAN_BACKTRACE=0`, which `lean_panic_impl`
 checks *before* calling `print_backtrace`:
 
@@ -162,11 +162,11 @@ any subsequent `SIGABRT` terminates the process immediately, closing the IPC pip
 normal IPC timescales. The same call is a Windows no-op (Windows does not use POSIX rlimits or `core_pattern`).
 
 This boundary lives in the child binary rather than in `LeanWorker::spawn` because the policy belongs to "any process
-shipped as a `lean-rs-worker` child," including downstream binaries written using `run_worker_child_stdio`. Spawning the
+shipped as a the worker crates child," including downstream binaries written using `run_worker_child_stdio`. Spawning the
 child from a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still inherits the
 boundary because it is baked into `run_stdio`. No public API change is required.
 
-Regression cover: `crates/lean-rs-worker/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure`
+Regression cover: `crates/lean-rs-worker-child/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure`
 asserts that panic-to-fatal-exit detection completes within 10 seconds. Without the rlimit fix, the same test takes
 30–110 seconds on Linux runners with `apport`.
 

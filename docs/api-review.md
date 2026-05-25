@@ -1,12 +1,13 @@
 # Public-API Review
 
-`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the five published crates. CI diffs the
+`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the published crates. CI diffs the
 live surface against these files on every PR; intentional changes regenerate the matching baseline in the same commit.
 
 ## Regenerate
 
 ```sh
-for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
+for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
+         lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
   cargo public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
 done
 ```
@@ -54,5 +55,7 @@ test -f docs/api-review/lean-rs-sys-public.txt
 test -f docs/api-review/lean-toolchain-public.txt
 test -f docs/api-review/lean-rs-public.txt
 test -f docs/api-review/lean-rs-host-public.txt
-test -f docs/api-review/lean-rs-worker-public.txt
+test -f docs/api-review/lean-rs-worker-protocol-public.txt
+test -f docs/api-review/lean-rs-worker-parent-public.txt
+test -f docs/api-review/lean-rs-worker-child-public.txt
 ```

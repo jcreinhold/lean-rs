@@ -1,6 +1,6 @@
 # Lean-Side Worker Streaming Helpers
 
-Worker capability authors should not repeat the JSON envelope details needed by `lean-rs-worker`, but the helper package
+Worker capability authors should not repeat the JSON envelope details needed by the worker crates, but the helper package
 must not become a downstream command framework. The stable boundary is small Lean-side primitives in
 `LeanRsInterop.Worker.Stream`:
 
@@ -46,9 +46,9 @@ do not choose workers, spawn tasks, or define session keys.
 
 ## Consumer Rule
 
-Use these helpers when authoring a Lean capability that will be run through `lean-rs-worker`. They remove repeated
+Use these helpers when authoring a Lean capability that will be run through the worker crates. They remove repeated
 worker-envelope boilerplate while keeping downstream schemas and algorithms downstream-owned.
 
 Use direct L1 callbacks only for trusted same-process interop. Use `lean-rs-host` for trusted in-process theorem-prover
-sessions. Use `lean-rs-worker` or `LeanWorkerPool` when the caller needs process isolation, timeouts, memory cycling,
+sessions. Use the worker crates or `LeanWorkerPool` when the caller needs process isolation, timeouts, memory cycling,
 row streaming, diagnostics, or pool orchestration.

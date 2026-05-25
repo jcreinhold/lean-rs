@@ -59,7 +59,7 @@ let summary = session.run_streaming_command(
 )?;
 ```
 
-`ShapeRequest`, `ShapeRow`, and `ShapeSummary` are ordinary serde types owned by the downstream crate. `lean-rs-worker`
+`ShapeRequest`, `ShapeRow`, and `ShapeSummary` are ordinary serde types owned by the downstream crate. The worker crates
 owns the transport: child lifecycle, private framing, live bounded row forwarding, typed diagnostics, progress events,
 request timeout, cancellation, terminal completion, and fatal-child classification.
 
@@ -94,7 +94,7 @@ as the parent-enforced watchdog for unresponsive Lean work.
 
 ## What Downstream Projects Own
 
-`lean-rs-worker` does not define business commands or row schemas. A downstream project still owns:
+The worker crates do not define business commands or row schemas. A downstream project still owns:
 
 - semantic command names and export names;
 - request, row, and terminal-summary serde types;
@@ -103,4 +103,4 @@ as the parent-enforced watchdog for unresponsive Lean work.
 - any ranking, indexing, or domain-specific interpretation.
 
 The fixture uses command-like names such as `version`, `doctor`, `extract`, `features`, `index`, and `probe` only to
-exercise the generic worker capability layer. They are examples of shape, not APIs that `lean-rs-worker` reserves.
+exercise the generic worker capability layer. They are examples of shape, not APIs that the worker crates reserve.

@@ -49,22 +49,27 @@ sessions, kernel checks, and `MetaM`.
 If something goes wrong, re-run with `RUST_LOG=lean_rs=debug` for structured spans. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for the code catalogue and the in-process capture API.
 
-## The five published crates
+## The published crates
 
 Choose by job:
 
 | Job | Start with |
 | --- | --- |
-| Ship a Rust crate with Lean source | `lean-toolchain` (build-time) plus `lean-rs` or `lean-rs-worker` (runtime) |
+| Ship a Rust crate with Lean source | `lean-toolchain` (build-time) plus `lean-rs` or `lean-rs-worker-parent` + `lean-rs-worker-child` (runtime) |
 | Call a Lean `@[export]` from Rust in the same process | `lean-rs` |
 | Use imports, elaboration, kernel checks, declaration queries, or `MetaM` | `lean-rs-host` |
-| Run production worker-style tools (process isolation, live rows, timeouts, cycling) | `lean-rs-worker` |
+| Drive a worker child from a parent process (process isolation, live rows, timeouts, cycling) | `lean-rs-worker-parent` |
+| Build the worker binary that hosts a Lean runtime | `lean-rs-worker-child` |
+| Speak the worker wire protocol from another peer (codegen, fuzz, alternate transport) | `lean-rs-worker-protocol` |
 | Bind raw Lean C symbols directly (advanced, `unsafe`) | `lean-rs-sys` |
 
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`; `lean-rs-worker` wraps the host stack in a
-child-process boundary. Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; the safe layers never
-re-export them. Lower layers are escape hatches, not steps every downstream caller should hand-compose. See
-[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the host-stack classification table.
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The worker boundary is three sibling crates:
+`lean-rs-worker-protocol` (wire types only, no Lean dependency), `lean-rs-worker-parent` (parent-side supervisor and
+pool; does not link `libleanshared`), and `lean-rs-worker-child` (child runtime and the `lean-rs-worker-child` binary;
+the only worker crate that links `libleanshared`). Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`;
+the safe layers never re-export them. Lower layers are escape hatches, not steps every downstream caller should
+hand-compose. See [`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the host-stack
+classification table.
 
 ## Call a Lean export from Rust
 
@@ -167,12 +172,12 @@ your Lake package only declares your capability library.
 | `cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker` | Canonical shipped worker template: app-owned worker child plus built Lean capability. |
 | `cargo run -p lean-rs --example interop_callback` | Same-process Lean-to-Rust callback through `LeanCallbackHandle` without `lean-rs-host`. Recipe: [`downstream-interop.md`](docs/recipes/downstream-interop.md). |
 | `cargo run -p lean-rs --example string_streaming` | Advanced same-process Lean-to-Rust string callbacks (`LeanCallbackHandle<LeanStringEvent>`). Recipe: [`string-callback-streaming.md`](docs/recipes/string-callback-streaming.md). |
-| `cargo run -p lean-rs-worker --example worker_capability_runner` | Normal worker-capability path: builder, typed commands, live rows, diagnostics, timeouts, terminal completion, cycling. Recipe: [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md). |
-| `cargo run -p lean-rs-worker --example worker_streaming` | Process-isolated typed streaming command with parent-side watchdog and worker cycling. Recipe: [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md). |
-| `cargo run -p lean-rs-worker --example worker_pool` | Local multi-worker fanout via `LeanWorkerPool` and `LeanWorkerSessionLease`. |
-| `cargo run --release -p lean-rs-worker --example worker_capability_probe` | Performance probe of generic command shapes (`version`, `doctor`, `extract`, `features`, `index`, `probe`). |
-| `cargo run -p lean-rs-worker --example mathlib_scale_probe` | Planner → pool → session lease → typed command scale fixture. Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a real module list as the planning workload. |
-| `cargo run -p lean-rs-worker --example lean_dup_readiness` | End-to-end readiness fixture exercising all command shapes through the import planner, pool, and lease. |
+| `cargo run -p lean-rs-worker-child --example worker_capability_runner` | Normal worker-capability path: builder, typed commands, live rows, diagnostics, timeouts, terminal completion, cycling. Recipe: [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md). |
+| `cargo run -p lean-rs-worker-child --example worker_streaming` | Process-isolated typed streaming command with parent-side watchdog and worker cycling. Recipe: [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md). |
+| `cargo run -p lean-rs-worker-child --example worker_pool` | Local multi-worker fanout via `LeanWorkerPool` and `LeanWorkerSessionLease`. |
+| `cargo run --release -p lean-rs-worker-child --example worker_capability_probe` | Performance probe of generic command shapes (`version`, `doctor`, `extract`, `features`, `index`, `probe`). |
+| `cargo run -p lean-rs-worker-child --example mathlib_scale_probe` | Planner → pool → session lease → typed command scale fixture. Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a real module list as the planning workload. |
+| `cargo run -p lean-rs-worker-child --example lean_dup_readiness` | End-to-end readiness fixture exercising all command shapes through the import planner, pool, and lease. |
 
 The Lean side of a worker capability can use `LeanRsInterop.Worker.Stream` helpers from `lean-rs-interop-shims` for row,
 diagnostic, progress, terminal, and status envelopes. Downstream packages still own request parsing, row schemas,
@@ -224,7 +229,7 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 **Host stack (`lean-rs-host`)**
 - [`03-host-stack.md`](docs/architecture/03-host-stack.md): curated host surface and semver boundary.
 
-**Worker (`lean-rs-worker`)**
+**Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)**
 - [`16-production-boundary.md`](docs/architecture/16-production-boundary.md): process boundary for fatal exits and
   memory reset.
 - [`17-worker-session-adapter.md`](docs/architecture/17-worker-session-adapter.md): process-safe host-session subset.

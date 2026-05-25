@@ -35,7 +35,7 @@ calls, semantic object handles, structured errors, and `LeanCallbackHandle<P>` f
 callbacks. Callback handles carry only opaque ABI values and a crate-owned trampoline; downstream code does not pass
 arbitrary function pointers to Lean. Payloads are a sealed family owned by `lean-rs`; current payloads are
 `LeanProgressTick` and `LeanStringEvent`. This is the mechanism layer. Worker-class interfaces should expose
-`lean-rs-worker` typed commands and row sinks instead of callback handles.
+The worker crates typed commands and row sinks instead of callback handles.
 
 `lean-toolchain` provides the build-script path: link directives for the active Lean toolchain and `build_lake_target`
 for Lake shared-library targets. It owns Lake dylib naming, cache metadata, Cargo rerun directives, and typed link/build
@@ -46,7 +46,7 @@ filtered listing, elaboration, kernel checking, bounded `MetaM`, pooling, cooper
 progress. It ships the host and generic shim sources it needs, builds them on demand, and opens them beside the consumer
 capability dylib.
 
-`lean-rs-worker` provides the process-boundary product interface for worker-style tools: builder-managed capability
+The worker crates provide the process-boundary product interface for worker-style tools: builder-managed capability
 startup, typed commands, live rows, diagnostic sinks, terminal summaries, request timeouts, and worker cycling. It may
 use L1 callbacks inside the child, but the parent-facing API is worker IPC, not cross-process callbacks.
 
@@ -75,16 +75,16 @@ Before a release that changes interop or host progress, run:
 cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example string_streaming
 cargo run -p lean-rs-host --example progress
-cargo run -p lean-rs-worker --example worker_capability_runner
+cargo run -p lean-rs-worker-child --example worker_capability_runner
 cargo test -p lean-rs --test callback_trampoline -- --nocapture
 cargo test -p lean-rs --test callback_registry -- --nocapture
 cargo test -p lean-rs-host --test progress -- --nocapture
-cargo test -p lean-rs-worker --test streaming_runner -- --nocapture
-cargo test -p lean-rs-worker --test typed_command -- --nocapture
+cargo test -p lean-rs-worker-child --test streaming_runner -- --nocapture
+cargo test -p lean-rs-worker-child --test typed_command -- --nocapture
 cargo bench -p lean-rs-host --bench session -- \
   host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline <saved-baseline>
-cargo bench -p lean-rs-worker --bench row_payload -- --baseline <saved-baseline>
-cargo bench -p lean-rs-worker --bench worker_capability -- --sample-size 10
+cargo bench -p lean-rs-worker-child --bench row_payload -- --baseline <saved-baseline>
+cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
 ```
 
 The sanitizer workflow must continue to run the callback trampoline, callback registry, panic containment, host

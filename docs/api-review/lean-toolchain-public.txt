@@ -2,6 +2,54 @@ pub mod lean_toolchain
 pub use lean_toolchain::LEAN_HEADER_DIGEST
 pub use lean_toolchain::LEAN_HEADER_PATH
 pub use lean_toolchain::LEAN_VERSION
+pub mod lean_toolchain::manifest_validation
+pub struct lean_toolchain::manifest_validation::CapabilityManifest
+pub lean_toolchain::manifest_validation::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
+pub lean_toolchain::manifest_validation::CapabilityManifest::lean_header_sha256: core::option::Option<alloc::string::String>
+pub lean_toolchain::manifest_validation::CapabilityManifest::lean_version: core::option::Option<alloc::string::String>
+pub lean_toolchain::manifest_validation::CapabilityManifest::module: alloc::string::String
+pub lean_toolchain::manifest_validation::CapabilityManifest::package: alloc::string::String
+pub lean_toolchain::manifest_validation::CapabilityManifest::primary_dylib: std::path::PathBuf
+pub lean_toolchain::manifest_validation::CapabilityManifest::resolved_lean_version: core::option::Option<alloc::string::String>
+impl lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::read(path: &std::path::Path) -> core::result::Result<Self, lean_toolchain::LeanLoaderCheck>
+impl core::clone::Clone for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::clone(&self) -> lean_toolchain::manifest_validation::CapabilityManifest
+impl core::cmp::Eq for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::cmp::PartialEq for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::eq(&self, other: &lean_toolchain::manifest_validation::CapabilityManifest) -> bool
+impl core::fmt::Debug for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Freeze for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Send for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Sync for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Unpin for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::UnsafeUnpin for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::check_fingerprint(manifest: &lean_toolchain::manifest_validation::CapabilityManifest, checks: &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
+pub fn lean_toolchain::manifest_validation::check_staleness(manifest_path: &std::path::Path, manifest: &lean_toolchain::manifest_validation::CapabilityManifest, checks: &mut alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>)
+pub fn lean_toolchain::manifest_validation::check_static(manifest_path: &std::path::Path) -> lean_toolchain::LeanLoaderReport
+pub enum lean_toolchain::BuiltCapabilityArtifact
+pub lean_toolchain::BuiltCapabilityArtifact::Dylib
+pub lean_toolchain::BuiltCapabilityArtifact::Manifest
+impl core::clone::Clone for lean_toolchain::BuiltCapabilityArtifact
+pub fn lean_toolchain::BuiltCapabilityArtifact::clone(&self) -> lean_toolchain::BuiltCapabilityArtifact
+impl core::cmp::Eq for lean_toolchain::BuiltCapabilityArtifact
+impl core::cmp::PartialEq for lean_toolchain::BuiltCapabilityArtifact
+pub fn lean_toolchain::BuiltCapabilityArtifact::eq(&self, other: &lean_toolchain::BuiltCapabilityArtifact) -> bool
+impl core::fmt::Debug for lean_toolchain::BuiltCapabilityArtifact
+pub fn lean_toolchain::BuiltCapabilityArtifact::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::StructuralPartialEq for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::Freeze for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::Send for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::Sync for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::Unpin for lean_toolchain::BuiltCapabilityArtifact
+impl core::marker::UnsafeUnpin for lean_toolchain::BuiltCapabilityArtifact
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::BuiltCapabilityArtifact
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::BuiltCapabilityArtifact
 pub enum lean_toolchain::DiscoverySource
 pub lean_toolchain::DiscoverySource::ElanHome
 pub lean_toolchain::DiscoverySource::ExplicitSysroot
@@ -24,6 +72,85 @@ impl core::marker::Unpin for lean_toolchain::DiscoverySource
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverySource
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverySource
+pub enum lean_toolchain::LeanBuiltCapabilityError
+pub lean_toolchain::LeanBuiltCapabilityError::EnvVarNotSet
+pub lean_toolchain::LeanBuiltCapabilityError::EnvVarNotSet::env_var: alloc::string::String
+pub lean_toolchain::LeanBuiltCapabilityError::EnvVarNotSet::kind: lean_toolchain::BuiltCapabilityArtifact
+pub lean_toolchain::LeanBuiltCapabilityError::MissingDylibSource
+pub lean_toolchain::LeanBuiltCapabilityError::MissingManifestSource
+impl core::clone::Clone for lean_toolchain::LeanBuiltCapabilityError
+pub fn lean_toolchain::LeanBuiltCapabilityError::clone(&self) -> lean_toolchain::LeanBuiltCapabilityError
+impl core::cmp::Eq for lean_toolchain::LeanBuiltCapabilityError
+impl core::cmp::PartialEq for lean_toolchain::LeanBuiltCapabilityError
+pub fn lean_toolchain::LeanBuiltCapabilityError::eq(&self, other: &lean_toolchain::LeanBuiltCapabilityError) -> bool
+impl core::error::Error for lean_toolchain::LeanBuiltCapabilityError
+impl core::fmt::Debug for lean_toolchain::LeanBuiltCapabilityError
+pub fn lean_toolchain::LeanBuiltCapabilityError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::LeanBuiltCapabilityError
+pub fn lean_toolchain::LeanBuiltCapabilityError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanBuiltCapabilityError
+impl core::marker::Freeze for lean_toolchain::LeanBuiltCapabilityError
+impl core::marker::Send for lean_toolchain::LeanBuiltCapabilityError
+impl core::marker::Sync for lean_toolchain::LeanBuiltCapabilityError
+impl core::marker::Unpin for lean_toolchain::LeanBuiltCapabilityError
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanBuiltCapabilityError
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanBuiltCapabilityError
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanBuiltCapabilityError
+pub enum lean_toolchain::LeanLoaderDiagnosticCode
+pub lean_toolchain::LeanLoaderDiagnosticCode::MalformedManifest
+pub lean_toolchain::LeanLoaderDiagnosticCode::MissingImportedSymbol
+pub lean_toolchain::LeanLoaderDiagnosticCode::MissingInitializer
+pub lean_toolchain::LeanLoaderDiagnosticCode::MissingManifest
+pub lean_toolchain::LeanLoaderDiagnosticCode::MissingPrimaryDylib
+pub lean_toolchain::LeanLoaderDiagnosticCode::MissingTransitiveDependency
+pub lean_toolchain::LeanLoaderDiagnosticCode::StaleManifest
+pub lean_toolchain::LeanLoaderDiagnosticCode::UnsupportedArchitecture
+pub lean_toolchain::LeanLoaderDiagnosticCode::UnsupportedManifestSchema
+pub lean_toolchain::LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint
+impl lean_toolchain::LeanLoaderDiagnosticCode
+pub const fn lean_toolchain::LeanLoaderDiagnosticCode::as_str(self) -> &'static str
+impl core::clone::Clone for lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderDiagnosticCode::clone(&self) -> lean_toolchain::LeanLoaderDiagnosticCode
+impl core::cmp::Eq for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::cmp::PartialEq for lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderDiagnosticCode::eq(&self, other: &lean_toolchain::LeanLoaderDiagnosticCode) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderDiagnosticCode::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::Freeze for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::Send for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::Sync for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::Unpin for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLoaderDiagnosticCode
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLoaderDiagnosticCode
+pub enum lean_toolchain::LeanLoaderSeverity
+pub lean_toolchain::LeanLoaderSeverity::Error
+pub lean_toolchain::LeanLoaderSeverity::Info
+pub lean_toolchain::LeanLoaderSeverity::Warning
+impl core::clone::Clone for lean_toolchain::LeanLoaderSeverity
+pub fn lean_toolchain::LeanLoaderSeverity::clone(&self) -> lean_toolchain::LeanLoaderSeverity
+impl core::cmp::Eq for lean_toolchain::LeanLoaderSeverity
+impl core::cmp::PartialEq for lean_toolchain::LeanLoaderSeverity
+pub fn lean_toolchain::LeanLoaderSeverity::eq(&self, other: &lean_toolchain::LeanLoaderSeverity) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLoaderSeverity
+pub fn lean_toolchain::LeanLoaderSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanLoaderSeverity
+pub fn lean_toolchain::LeanLoaderSeverity::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanLoaderSeverity
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLoaderSeverity
+impl core::marker::Freeze for lean_toolchain::LeanLoaderSeverity
+impl core::marker::Send for lean_toolchain::LeanLoaderSeverity
+impl core::marker::Sync for lean_toolchain::LeanLoaderSeverity
+impl core::marker::Unpin for lean_toolchain::LeanLoaderSeverity
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLoaderSeverity
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLoaderSeverity
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLoaderSeverity
 pub enum lean_toolchain::LeanModuleDiscoveryDiagnostic
 pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName
 pub lean_toolchain::LeanModuleDiscoveryDiagnostic::InvalidModuleName::module: alloc::string::String
@@ -115,6 +242,8 @@ pub fn lean_toolchain::BuiltLeanCapability::clone(&self) -> lean_toolchain::Buil
 impl core::cmp::Eq for lean_toolchain::BuiltLeanCapability
 impl core::cmp::PartialEq for lean_toolchain::BuiltLeanCapability
 pub fn lean_toolchain::BuiltLeanCapability::eq(&self, other: &lean_toolchain::BuiltLeanCapability) -> bool
+impl core::convert::From<&lean_toolchain::BuiltLeanCapability> for lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::from(value: &lean_toolchain::BuiltLeanCapability) -> Self
 impl core::fmt::Debug for lean_toolchain::BuiltLeanCapability
 pub fn lean_toolchain::BuiltLeanCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for lean_toolchain::BuiltLeanCapability
@@ -125,6 +254,31 @@ impl core::marker::Unpin for lean_toolchain::BuiltLeanCapability
 impl core::marker::UnsafeUnpin for lean_toolchain::BuiltLeanCapability
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::BuiltLeanCapability
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::BuiltLeanCapability
+pub struct lean_toolchain::CapabilityManifest
+pub lean_toolchain::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
+pub lean_toolchain::CapabilityManifest::lean_header_sha256: core::option::Option<alloc::string::String>
+pub lean_toolchain::CapabilityManifest::lean_version: core::option::Option<alloc::string::String>
+pub lean_toolchain::CapabilityManifest::module: alloc::string::String
+pub lean_toolchain::CapabilityManifest::package: alloc::string::String
+pub lean_toolchain::CapabilityManifest::primary_dylib: std::path::PathBuf
+pub lean_toolchain::CapabilityManifest::resolved_lean_version: core::option::Option<alloc::string::String>
+impl lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::read(path: &std::path::Path) -> core::result::Result<Self, lean_toolchain::LeanLoaderCheck>
+impl core::clone::Clone for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::clone(&self) -> lean_toolchain::manifest_validation::CapabilityManifest
+impl core::cmp::Eq for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::cmp::PartialEq for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::eq(&self, other: &lean_toolchain::manifest_validation::CapabilityManifest) -> bool
+impl core::fmt::Debug for lean_toolchain::manifest_validation::CapabilityManifest
+pub fn lean_toolchain::manifest_validation::CapabilityManifest::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Freeze for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Send for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Sync for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::Unpin for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::marker::UnsafeUnpin for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::manifest_validation::CapabilityManifest
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::manifest_validation::CapabilityManifest
 pub struct lean_toolchain::CargoLeanCapability
 impl lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
@@ -164,6 +318,43 @@ impl core::marker::Unpin for lean_toolchain::DiscoverOptions
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverOptions
+pub struct lean_toolchain::LeanBuiltCapability
+impl lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::dependencies(self, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::LeanLibraryDependency>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::dependency(self, dependency: lean_toolchain::LeanLibraryDependency) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_toolchain::LeanLibraryDependency]
+pub fn lean_toolchain::LeanBuiltCapability::dylib_path(&self) -> core::result::Result<std::path::PathBuf, lean_toolchain::LeanBuiltCapabilityError>
+pub fn lean_toolchain::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::manifest_env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::manifest_path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
+pub fn lean_toolchain::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
+pub fn lean_toolchain::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LeanBuiltCapability::resolved_manifest_path(&self) -> core::result::Result<std::path::PathBuf, lean_toolchain::LeanBuiltCapabilityError>
+pub fn lean_toolchain::LeanBuiltCapability::take_dependencies(&mut self) -> alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
+pub fn lean_toolchain::LeanBuiltCapability::take_module_name(&mut self) -> core::option::Option<alloc::string::String>
+pub fn lean_toolchain::LeanBuiltCapability::take_package_name(&mut self) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::clone(&self) -> lean_toolchain::LeanBuiltCapability
+impl core::cmp::Eq for lean_toolchain::LeanBuiltCapability
+impl core::cmp::PartialEq for lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::eq(&self, other: &lean_toolchain::LeanBuiltCapability) -> bool
+impl core::convert::From<&lean_toolchain::BuiltLeanCapability> for lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::from(value: &lean_toolchain::BuiltLeanCapability) -> Self
+impl core::fmt::Debug for lean_toolchain::LeanBuiltCapability
+pub fn lean_toolchain::LeanBuiltCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanBuiltCapability
+impl core::marker::Freeze for lean_toolchain::LeanBuiltCapability
+impl core::marker::Send for lean_toolchain::LeanBuiltCapability
+impl core::marker::Sync for lean_toolchain::LeanBuiltCapability
+impl core::marker::Unpin for lean_toolchain::LeanBuiltCapability
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanBuiltCapability
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanBuiltCapability
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanBuiltCapability
 pub struct lean_toolchain::LeanLakeProjectModules
 pub lean_toolchain::LeanLakeProjectModules::fingerprint: lean_toolchain::LeanModuleSetFingerprint
 pub lean_toolchain::LeanLakeProjectModules::lakefile: std::path::PathBuf
@@ -187,6 +378,79 @@ impl core::marker::Unpin for lean_toolchain::LeanLakeProjectModules
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanLakeProjectModules
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLakeProjectModules
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLakeProjectModules
+pub struct lean_toolchain::LeanLibraryDependency
+impl lean_toolchain::LeanLibraryDependency
+pub fn lean_toolchain::LeanLibraryDependency::export_symbols_for_dependents(self) -> Self
+pub fn lean_toolchain::LeanLibraryDependency::exports_symbols_for_dependents(&self) -> bool
+pub fn lean_toolchain::LeanLibraryDependency::initializer(self, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanLibraryDependency::into_module_initializer(self) -> core::option::Option<lean_toolchain::LeanModuleInitializer>
+pub fn lean_toolchain::LeanLibraryDependency::module_initializer(&self) -> core::option::Option<&lean_toolchain::LeanModuleInitializer>
+pub fn lean_toolchain::LeanLibraryDependency::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn lean_toolchain::LeanLibraryDependency::path_ref(&self) -> &std::path::Path
+impl core::clone::Clone for lean_toolchain::LeanLibraryDependency
+pub fn lean_toolchain::LeanLibraryDependency::clone(&self) -> lean_toolchain::LeanLibraryDependency
+impl core::cmp::Eq for lean_toolchain::LeanLibraryDependency
+impl core::cmp::PartialEq for lean_toolchain::LeanLibraryDependency
+pub fn lean_toolchain::LeanLibraryDependency::eq(&self, other: &lean_toolchain::LeanLibraryDependency) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLibraryDependency
+pub fn lean_toolchain::LeanLibraryDependency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLibraryDependency
+impl core::marker::Freeze for lean_toolchain::LeanLibraryDependency
+impl core::marker::Send for lean_toolchain::LeanLibraryDependency
+impl core::marker::Sync for lean_toolchain::LeanLibraryDependency
+impl core::marker::Unpin for lean_toolchain::LeanLibraryDependency
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLibraryDependency
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLibraryDependency
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLibraryDependency
+pub struct lean_toolchain::LeanLoaderCheck
+impl lean_toolchain::LeanLoaderCheck
+pub fn lean_toolchain::LeanLoaderCheck::code(&self) -> lean_toolchain::LeanLoaderDiagnosticCode
+pub fn lean_toolchain::LeanLoaderCheck::error(code: lean_toolchain::LeanLoaderDiagnosticCode, subject: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>, repair_hint: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanLoaderCheck::message(&self) -> &str
+pub fn lean_toolchain::LeanLoaderCheck::repair_hint(&self) -> &str
+pub fn lean_toolchain::LeanLoaderCheck::severity(&self) -> lean_toolchain::LeanLoaderSeverity
+pub fn lean_toolchain::LeanLoaderCheck::subject(&self) -> &str
+impl core::clone::Clone for lean_toolchain::LeanLoaderCheck
+pub fn lean_toolchain::LeanLoaderCheck::clone(&self) -> lean_toolchain::LeanLoaderCheck
+impl core::cmp::Eq for lean_toolchain::LeanLoaderCheck
+impl core::cmp::PartialEq for lean_toolchain::LeanLoaderCheck
+pub fn lean_toolchain::LeanLoaderCheck::eq(&self, other: &lean_toolchain::LeanLoaderCheck) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLoaderCheck
+pub fn lean_toolchain::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::LeanLoaderCheck
+pub fn lean_toolchain::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLoaderCheck
+impl core::marker::Freeze for lean_toolchain::LeanLoaderCheck
+impl core::marker::Send for lean_toolchain::LeanLoaderCheck
+impl core::marker::Sync for lean_toolchain::LeanLoaderCheck
+impl core::marker::Unpin for lean_toolchain::LeanLoaderCheck
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLoaderCheck
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLoaderCheck
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLoaderCheck
+pub struct lean_toolchain::LeanLoaderReport
+impl lean_toolchain::LeanLoaderReport
+pub fn lean_toolchain::LeanLoaderReport::checks(&self) -> &[lean_toolchain::LeanLoaderCheck]
+pub fn lean_toolchain::LeanLoaderReport::errors(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_toolchain::LeanLoaderCheck>
+pub fn lean_toolchain::LeanLoaderReport::first_error(&self) -> core::option::Option<&lean_toolchain::LeanLoaderCheck>
+pub fn lean_toolchain::LeanLoaderReport::into_checks(self) -> alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>
+pub fn lean_toolchain::LeanLoaderReport::is_ok(&self) -> bool
+pub fn lean_toolchain::LeanLoaderReport::manifest_path(&self) -> core::option::Option<&std::path::Path>
+pub fn lean_toolchain::LeanLoaderReport::new(manifest_path: core::option::Option<std::path::PathBuf>, checks: alloc::vec::Vec<lean_toolchain::LeanLoaderCheck>) -> Self
+impl core::clone::Clone for lean_toolchain::LeanLoaderReport
+pub fn lean_toolchain::LeanLoaderReport::clone(&self) -> lean_toolchain::LeanLoaderReport
+impl core::cmp::Eq for lean_toolchain::LeanLoaderReport
+impl core::cmp::PartialEq for lean_toolchain::LeanLoaderReport
+pub fn lean_toolchain::LeanLoaderReport::eq(&self, other: &lean_toolchain::LeanLoaderReport) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanLoaderReport
+pub fn lean_toolchain::LeanLoaderReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanLoaderReport
+impl core::marker::Freeze for lean_toolchain::LeanLoaderReport
+impl core::marker::Send for lean_toolchain::LeanLoaderReport
+impl core::marker::Sync for lean_toolchain::LeanLoaderReport
+impl core::marker::Unpin for lean_toolchain::LeanLoaderReport
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanLoaderReport
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanLoaderReport
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanLoaderReport
 pub struct lean_toolchain::LeanModuleDescriptor
 pub lean_toolchain::LeanModuleDescriptor::module: alloc::string::String
 pub lean_toolchain::LeanModuleDescriptor::path: std::path::PathBuf
@@ -226,6 +490,26 @@ impl core::marker::Unpin for lean_toolchain::LeanModuleDiscoveryOptions
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleDiscoveryOptions
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleDiscoveryOptions
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleDiscoveryOptions
+pub struct lean_toolchain::LeanModuleInitializer
+impl lean_toolchain::LeanModuleInitializer
+pub fn lean_toolchain::LeanModuleInitializer::module_name(&self) -> &str
+pub fn lean_toolchain::LeanModuleInitializer::new(package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::LeanModuleInitializer::package_name(&self) -> &str
+impl core::clone::Clone for lean_toolchain::LeanModuleInitializer
+pub fn lean_toolchain::LeanModuleInitializer::clone(&self) -> lean_toolchain::LeanModuleInitializer
+impl core::cmp::Eq for lean_toolchain::LeanModuleInitializer
+impl core::cmp::PartialEq for lean_toolchain::LeanModuleInitializer
+pub fn lean_toolchain::LeanModuleInitializer::eq(&self, other: &lean_toolchain::LeanModuleInitializer) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanModuleInitializer
+pub fn lean_toolchain::LeanModuleInitializer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanModuleInitializer
+impl core::marker::Freeze for lean_toolchain::LeanModuleInitializer
+impl core::marker::Send for lean_toolchain::LeanModuleInitializer
+impl core::marker::Sync for lean_toolchain::LeanModuleInitializer
+impl core::marker::Unpin for lean_toolchain::LeanModuleInitializer
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleInitializer
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleInitializer
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleInitializer
 pub struct lean_toolchain::LeanModuleSetFingerprint
 pub lean_toolchain::LeanModuleSetFingerprint::lakefile_sha256: alloc::string::String
 pub lean_toolchain::LeanModuleSetFingerprint::manifest_sha256: core::option::Option<alloc::string::String>
@@ -297,7 +581,13 @@ impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::ToolchainInfo
 pub const lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION: u32
 pub const lean_toolchain::HOST_TRIPLE: &str
 pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
+pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
+pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
+pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
+pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_MAX: u64
+pub const lean_toolchain::LOADER_DIAGNOSTIC_TEXT_LIMIT: usize
 pub const lean_toolchain::VERSION: &str
+pub fn lean_toolchain::bound_loader_text(text: alloc::string::String) -> alloc::string::String
 pub fn lean_toolchain::build_lake_target(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::build_lake_target_quiet(project_root: &std::path::Path, target_name: &str) -> core::result::Result<std::path::PathBuf, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::capability_env_var(target_name: &str) -> alloc::string::String

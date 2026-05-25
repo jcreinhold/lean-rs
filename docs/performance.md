@@ -8,8 +8,8 @@ machines and ship with each capture.
 ```sh
 cargo bench -p lean-rs --bench hot_paths
 cargo bench -p lean-rs-host --bench session
-cargo bench -p lean-rs-worker --bench row_payload
-cargo bench -p lean-rs-worker --bench worker_capability
+cargo bench -p lean-rs-worker-child --bench row_payload
+cargo bench -p lean-rs-worker-child --bench worker_capability
 ```
 
 `hot_paths` covers `lean_rs::module` and `lean_rs::abi`: `LeanExported::call` and the `String`/`Vec<String>` round-trip
@@ -40,9 +40,9 @@ bulk shim as before.
 Worker row-performance changes must benchmark the worker row path explicitly:
 
 ```sh
-cargo bench -p lean-rs-worker --bench row_payload -- --save-baseline before
+cargo bench -p lean-rs-worker-child --bench row_payload -- --save-baseline before
 # ... make row transport changes ...
-cargo bench -p lean-rs-worker --bench row_payload -- --baseline before
+cargo bench -p lean-rs-worker-child --bench row_payload -- --baseline before
 ```
 
 Do not add public worker batch sinks or private row-batch protocol frames from a microbenchmark alone. The
@@ -56,7 +56,7 @@ typed decode path stays until an end-to-end worker workload justifies a replacem
 The Lean-side worker envelope helper fixture runs through the typed command path:
 
 ```sh
-cargo test -p lean-rs-worker --test typed_command helper_ -- --nocapture
+cargo test -p lean-rs-worker-child --test typed_command helper_ -- --nocapture
 ```
 
 The focused chunked-stream test prints the named helper workload as `helper_chunked_stream rows=<n> chunks=<n>
@@ -66,22 +66,22 @@ boundary. A safe Lean-side parallel chunk emitter would have to be proved out be
 Capability-layer changes should also run the downstream-shaped scenario bench:
 
 ```sh
-cargo bench -p lean-rs-worker --bench worker_capability -- --sample-size 10
+cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
 ```
 
 Record parent/child RSS alongside throughput with:
 
 ```sh
-cargo run --release -p lean-rs-worker --example worker_capability_probe
-cargo run --release -p lean-rs-worker --example row_perf_probe
+cargo run --release -p lean-rs-worker-child --example worker_capability_probe
+cargo run --release -p lean-rs-worker-child --example row_perf_probe
 ```
 
 The mathlib-scale fixture runs through the planner, pool, session lease, and typed command path:
 
 ```sh
-cargo build -p lean-rs-worker --bin lean-rs-worker-child
-cargo run -p lean-rs-worker --example mathlib_scale_probe
-cargo bench -p lean-rs-worker --bench worker_capability -- mathlib_scale
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+cargo run -p lean-rs-worker-child --example mathlib_scale_probe
+cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
 ```
 
 Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` and `LEAN_RS_MATHLIB_SCALE_LIMIT=<n>` to use a real mathlib module list as
@@ -95,8 +95,8 @@ bytes, stream elapsed time, and backpressure counters. The `slow_sink` line runs
 records parent RSS before/after, child RSS, delivered row count, payload bytes, and backpressure waits/failures:
 
 ```sh
-cargo build -p lean-rs-worker --bin lean-rs-worker-child
-cargo run -p lean-rs-worker --example mathlib_scale_probe
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+cargo run -p lean-rs-worker-child --example mathlib_scale_probe
 ```
 
 Rows are not dropped under backpressure. A delivered row is still tentative until terminal success. Use the snapshot
@@ -105,7 +105,7 @@ counters as operating evidence and terminal summaries as committed row counts.
 The `lean-dup`-class readiness fixture exercises the full path end to end:
 
 ```sh
-cargo run -p lean-rs-worker --example lean_dup_readiness
+cargo run -p lean-rs-worker-child --example lean_dup_readiness
 ```
 
 It drives the planner, pool, session lease, and typed command facade for generic `version`, `doctor`, `extract`,

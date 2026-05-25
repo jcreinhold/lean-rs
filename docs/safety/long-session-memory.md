@@ -158,15 +158,15 @@ stable import set. Drain cadence is policy for the embedding application: drain 
 bound workloads that continuously create fresh import sets. Those still require cycling the worker process at a bounded
 import count or RSS ceiling.
 
-`lean-rs-worker` provides that process-cycling policy. Its restart policy can cycle explicitly, before a configured
+The worker crates provide that process-cycling policy. Its restart policy can cycle explicitly, before a configured
 request count, before a configured import-like request count, after an idle interval, or when a best-effort child RSS
 sample reaches a ceiling. The worker memory reproducer is:
 
 ```sh
-cargo build -p lean-rs-worker --bin lean-rs-worker-child
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
 LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2 \
-cargo run -p lean-rs-worker --example memory_cycling
+cargo run -p lean-rs-worker-child --example memory_cycling
 ```
 
 On a local macOS aarch64 run, the worker cycled after every two import-like fixture requests. Child RSS moved from about
@@ -181,8 +181,8 @@ platform-specific: an unavailable sample is recorded as unavailable, not treated
 The pool memory-scheduling workload is:
 
 ```sh
-cargo build -p lean-rs-worker --bin lean-rs-worker-child
-cargo run -p lean-rs-worker --example pool_memory_scheduling
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 ```
 
 Use the pool knobs to avoid multiplying Lean import RSS across many local children. They do not change the underlying

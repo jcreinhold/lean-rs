@@ -4,7 +4,7 @@ A single worker is the right unit for panic containment and process-global memor
 mathlib-scale or multi-package workloads. Those workloads need parallelism, warm session reuse, memory admission, and
 failure isolation across more than one child process.
 
-The pool boundary keeps that operational machinery inside `lean-rs-worker`. Downstream callers submit capability work
+The pool boundary keeps that operational machinery inside the worker crates. Downstream callers submit capability work
 keyed by session requirements. The pool decides whether to reuse a warm worker, start a new child, cycle a stale child,
 or delay work until policy permits it.
 
@@ -70,7 +70,7 @@ fanout, queueing, and restart policy.
 
 **Caller-managed worker fanout.** Rejected. It would push child counts, restart timing, session reuse, memory ceilings,
 lease invalidation, and failure classification into every downstream tool. That duplicates the same production rules
-that `lean-rs-worker` already owns for one worker.
+that the worker crates already owns for one worker.
 
 **`LeanWorkerPool`.** Chosen. The pool is a deeper module because it hides orchestration decisions that every local
 production consumer would otherwise reimplement. The public surface should describe capability work and policy intent,
@@ -95,7 +95,7 @@ The key is not a downstream cache key. Downstream crates still decide whether a 
 semantically valid. The pool key only answers a worker question: can this already-open child session run the next
 compatible request without repeating setup or violating policy?
 
-The key records capability metadata expectations as opaque generic metadata facts. `lean-rs-worker` can compare the
+The key records capability metadata expectations as opaque generic metadata facts. The worker crates can compare the
 expected and actual metadata envelopes, but it does not interpret downstream command versions or decide cache
 invalidation.
 
@@ -113,7 +113,7 @@ Callers should not learn:
 - which session values are invalidated by a cycle;
 - which warm worker is selected for a request.
 
-Those details are volatile and operational. Keeping them private lets `lean-rs-worker` change scheduling, memory policy,
+Those details are volatile and operational. Keeping them private lets the worker crates change scheduling, memory policy,
 batching, and future backend internals without rewriting downstream tools.
 
 ## What Callers Still Know
@@ -127,9 +127,9 @@ Callers still own the facts that are part of their domain:
 - row commit policy after terminal success;
 - row semantics, cache validity, ranking, reporting, and source provenance.
 
-This is the same boundary as the worker capability layer. `lean-rs-worker` owns process and transport behavior;
+This is the same boundary as the worker capability layer. The worker crates own process and transport behavior;
 downstream crates own semantic commands and schemas. A `lean-dup` integration would map its own commands onto the pool,
-but `lean-rs-worker` should not grow first-party `extract`, `features`, `index`, or `probe` methods.
+but the worker crates should not grow first-party `extract`, `features`, `index`, or `probe` methods.
 
 ## Failure And Memory Model
 

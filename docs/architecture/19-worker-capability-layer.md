@@ -7,7 +7,7 @@ schemas; this is the crate's home for them.
 
 ## Chosen Boundary
 
-`lean-rs-worker` exposes a generic worker capability layer. That layer owns:
+The worker crates expose a generic worker capability layer. That layer owns:
 
 - process lifecycle and restart behavior;
 - private worker framing and live bounded row forwarding;
@@ -29,7 +29,7 @@ Downstream crates own:
 
 This keeps the worker layer somewhat general-purpose. It hides process and IPC mechanics that every production consumer
 would otherwise reimplement, but it does not encode `lean-dup` declarations, features, probes, or cache validity as
-first-party `lean-rs-worker` concepts.
+first-party worker concepts.
 
 ## Rejected Designs
 
@@ -37,7 +37,7 @@ first-party `lean-rs-worker` concepts.
 caller to know export names, request JSON encoding, row sink wiring, session setup, completion policy, and failure
 classification. That is too much worker machinery at the call site.
 
-**`lean-dup`-specific worker APIs.** Rejected for `lean-rs-worker`. Methods such as `extract`, `features`, `index`, or
+**`lean-dup`-specific worker APIs.** Rejected for the worker crates. Methods such as `extract`, `features`, `index`, or
 `probe` would make the worker crate a `lean-dup` adapter. Those commands are valid downstream examples, not generic
 worker responsibilities.
 
@@ -57,11 +57,11 @@ The capability layer fills the gap between row transport and a production worker
    distinct outcomes with distinct typed errors or restart reasons.
 4. **Capability metadata and doctor checks.** Downstream tools can report protocol versions, capability versions,
    supported commands, supported features, Lean version, and health diagnostics without hard-coding one tool's command
-   set into `lean-rs-worker`.
+   set into the worker crates.
 5. **Builder ergonomics.** `LeanWorkerCapabilityBuilder` composes Lake target build, shim resolution, worker child path,
    capability dylib path, imports, restart policy, metadata validation, and session opening without handwritten path
    mangling.
-6. **Typed command facade.** Downstream callers use serde request, row, and summary types while `lean-rs-worker` owns
+6. **Typed command facade.** Downstream callers use serde request, row, and summary types while the worker crates own
    transport, lifecycle, diagnostics, timeout, cancellation, and completion.
 7. **High-throughput row payload path.** Large streams use a private raw-JSON representation so typed commands can
    deserialize directly into downstream row types without first building a `serde_json::Value` tree.
@@ -111,7 +111,7 @@ The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile 
 build. Low-level `LeanWorker` remains available for tests, custom supervision, and focused lifecycle examples.
 
 Use downstream crates for domain schemas. A `lean-dup` integration maps its own request and row types onto the generic
-worker capability layer; it does not require `lean-rs-worker` to know what a declaration row, feature row, index update,
+worker capability layer; it does not require the worker crates to know what a declaration row, feature row, index update,
 or probe result means.
 
 `LeanWorkerJsonCommand<Req, Resp>` and `LeanWorkerStreamingCommand<Req, Row, Summary>` are the preferred downstream
@@ -130,7 +130,7 @@ Private row batching is not implemented. The microbenchmark and the broader 512-
 `DataRowBatch` frames or a public batch sink; row delivery stays live and per-row until a workload proves batching
 improves the full worker path, not just a synthetic frame loop.
 
-`lean-rs-worker` ships a downstream-shaped fixture that combines the pieces above without adding business methods. It
+The worker crates ship a downstream-shaped fixture that combines the pieces above without adding business methods. It
 exports command-like names `version`, `doctor`, `extract`, `features`, `index`, and `probe` only to stress the generic
 capability layer: metadata discovery, doctor diagnostics, typed JSON commands, typed streaming commands, terminal
 summaries, cancellation, request timeouts, fatal child exits, explicit cycling, and RSS/throughput measurement. The row
@@ -145,4 +145,4 @@ command semantics, row schemas, pool scheduling, or session keys.
 The scenario benchmark and `worker_capability_probe` example are the performance envelope for this shape. They measure
 cold startup, first import, import-once streaming, row throughput, cancellation latency, fatal-exit recovery, worker
 cycling, and memory growth. A comparison against an existing subprocess worker is optional and must name the exact
-downstream command and revision; it is not part of the `lean-rs-worker` API.
+downstream command and revision; it is not part of the worker-crates API.

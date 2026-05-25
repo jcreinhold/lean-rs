@@ -1,7 +1,7 @@
 # Lean-Dup Readiness Proof
 
 A boundary check showing that the generic worker foundation can replace the subprocess-worker shape used by a
-`lean-dup`-class tool. The `lean-rs-worker` pool hosts the operational responsibilities; downstream crates keep their
+`lean-dup`-class tool. The worker crates pool hosts the operational responsibilities; downstream crates keep their
 schemas and semantic policy. This is not a `lean-dup` implementation and not a migration guide.
 
 ## What The Proof Covers
@@ -9,7 +9,7 @@ schemas and semantic policy. This is not a `lean-dup` implementation and not a m
 The readiness example runs:
 
 ```sh
-cargo run -p lean-rs-worker --example lean_dup_readiness
+cargo run -p lean-rs-worker-child --example lean_dup_readiness
 ```
 
 The example uses the normal large-scale path:
@@ -32,7 +32,7 @@ rows, feature rows, probe results, cache keys, ranking, report policy, or source
 
 ## Responsibility Map
 
-| Current subprocess responsibility | `lean-rs-worker` primitive |
+| Current subprocess responsibility | worker-crate primitive |
 | --- | --- |
 | Start and supervise a Lean subprocess | `LeanWorkerPool` and worker supervisors |
 | Build/load the worker capability | `LeanWorkerCapabilityBuilder` plus `lean-toolchain` |
@@ -64,7 +64,7 @@ A downstream project still owns:
 - command names and CLI policy;
 - any compatibility decisions based on downstream metadata.
 
-This is the intended split. `lean-rs-worker` carries typed commands, rows, diagnostics, terminal summaries, timeouts,
+This is the intended split. The worker crates carries typed commands, rows, diagnostics, terminal summaries, timeouts,
 cycling, backpressure, and pool state; it does not know what a downstream row means.
 
 ## Comparison Input
@@ -72,7 +72,7 @@ cycling, backpressure, and pool state; it does not know what a downstream row me
 A read-only downstream checkout (e.g., a `lean-dup` clone) can be supplied via the `LEAN_RS_LEAN_DUP_ROOT` environment
 variable. The readiness example records the checkout revision when the path is set and points to a git repository. If
 `LEAN_RS_WORKER_COMPARE_COMMAND` is also set, the example runs that command and prints its status and elapsed time. The
-comparison is optional because `lean-rs-worker` should not depend on a local downstream checkout.
+comparison is optional because the worker crates should not depend on a local downstream checkout.
 
 Any comparison must name the command, revision, workload, and limits. Without that, the readiness proof only claims
 generic coverage and local worker-pool operating behavior.

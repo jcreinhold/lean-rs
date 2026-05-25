@@ -12,7 +12,7 @@ through `LeanCallbackHandle`.
 
 This is the advanced L1 same-process path. Use it when the Lean extension is trusted, lives in the same process, and
 really needs to push data back into Rust before the exported function returns. Worker-style applications should start
-with [`worker-capability-runner.md`](worker-capability-runner.md), where `lean-rs-worker` hides callbacks behind typed
+with [`worker-capability-runner.md`](worker-capability-runner.md), where the worker crates hide callbacks behind typed
 commands, live rows, diagnostics, terminal summaries, timeouts, and worker cycling.
 
 ## Files A Consumer Needs
@@ -116,6 +116,6 @@ expose a stable C API for discovering and invoking arbitrary definitions at runt
 Use `lean-rs-host` only when the application needs theorem-prover host policy: sessions, imports, declaration
 introspection, elaboration, kernel checking, or bounded `MetaM` services.
 
-Use `lean-rs-worker` when the application needs a production worker boundary: process isolation, memory cycling, live
+Use the worker crates when the application needs a production worker boundary: process isolation, memory cycling, live
 rows, diagnostics, terminal completion, timeouts, or worker-level cancellation. The worker parent API does not expose
 callback handles.

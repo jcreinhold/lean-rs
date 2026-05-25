@@ -61,7 +61,7 @@ pub struct LeanWorkerDataRow {
 }
 ```
 
-`stream` is a caller-defined channel name. `sequence` is assigned by `lean-rs-worker` per stream inside one request.
+`stream` is a caller-defined channel name. `sequence` is assigned by the worker crates per stream inside one request.
 `payload` is arbitrary JSON. The worker validates the envelope and ordering mechanics; the downstream crate owns the row
 schema.
 
@@ -198,15 +198,15 @@ For a downstream tool such as `lean-dup`, this replaces ad hoc runtime Lean subp
 
 - Lake build stays build-time and uses `lean-toolchain`.
 - Worker startup replaces hand-written `Command` setup for runtime Lean work.
-- JSONL-like rows are projected from `LeanWorkerDataRow` by the downstream tool; `lean-rs-worker` does not define
+- JSONL-like rows are projected from `LeanWorkerDataRow` by the downstream tool; the worker crates do not define
   `lean-dup` business objects.
 - Progress and diagnostics use typed worker channels, not stdout conventions.
 - Metadata and doctor checks report cache/support facts without baking `lean-dup` command semantics into
-  `lean-rs-worker`.
+  the worker crates.
 - Fatal exits become typed worker failures that the parent can classify.
 - Cancellation and timeout policy are caller decisions layered over worker requests.
 
-The result is a process boundary with structured rows, not a `lean-dup` protocol embedded in `lean-rs-worker`.
+The result is a process boundary with structured rows, not a `lean-dup` protocol embedded in the worker crates.
 
 ## Operational Fixture
 
@@ -239,4 +239,4 @@ LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
 ```
 
 Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the
-`lean-rs-worker` contract.
+The worker crates contract.

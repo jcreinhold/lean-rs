@@ -43,11 +43,11 @@ frames.
 Reproduce with:
 
 ```sh
-cargo bench -p lean-rs-worker --bench row_payload -- \
+cargo bench -p lean-rs-worker-child --bench row_payload -- \
   worker::row_payload::stream/typed_many_512 --quiet
-cargo bench -p lean-rs-worker --bench row_payload -- \
+cargo bench -p lean-rs-worker-child --bench row_payload -- \
   worker::row_payload::protocol_batching --quiet
-cargo test -p lean-rs-worker --test streaming_runner \
+cargo test -p lean-rs-worker-child --test streaming_runner \
   large_stream_records_live_forwarding_throughput_and_rss -- --nocapture
 ```
 

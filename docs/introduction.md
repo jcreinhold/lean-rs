@@ -27,7 +27,8 @@ order it was written, not the order it should be read; use the sidebar groupings
 - **Foundations** — charter, safety model, versioning, raw FFI rationale.
 - **Same-process FFI (`lean-rs`)** — the L1 safe front door: concurrency, panic containment, callbacks, loader.
 - **Host stack (`lean-rs-host`)** — the L2 theorem-prover-host surface and its capability contract.
-- **Worker (`lean-rs-worker`)** — the process-boundary supervisor and its scale and observability story.
+- **Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)** — the process-boundary supervisor and its scale and
+  observability story.
 - **Recipes** — task-oriented walkthroughs for shipping a Lean-backed crate or wiring a worker capability.
 - **Safety audits** — long-session memory bounds and the workspace `unsafe` inventory.
 - **Operations** — testing strategy, performance baselines, diagnostics, release process, toolchain bumps.

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the five published `lean-rs` workspace crates are recorded here. The format follows
+All notable changes to the published `lean-rs` workspace crates are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each crate version is governed by Cargo's `0.x` semver. Items
 inside `pub(crate)` modules are not part of the public API and are excluded from this log.
 
@@ -8,6 +8,81 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
 ## [Unreleased]
+
+## [0.1.8] — 2026-05-25
+
+### Worker boundary: split into three sibling crates
+
+`lean-rs-worker` is replaced by three crates that separate concerns at the link-graph boundary:
+
+- **`lean-rs-worker-protocol`** — wire types and frame codec. Depends only on `serde` / `serde_json`. Does not link
+  `libleanshared`. The `harness` Cargo feature exposes the in-memory frame exerciser and fake-worker test affordances.
+  Every public `enum` and field-bearing `struct` is `#[non_exhaustive]` so additive variants do not require a major bump.
+- **`lean-rs-worker-parent`** — parent-side supervisor, pool, planning, capability, and session. Depends on
+  `lean-rs-worker-protocol` and `lean-toolchain`. **Does not link `libleanshared`.** A parent binary that only depends
+  on `lean-rs-worker-parent` is free to dispatch to per-toolchain worker children at runtime without being rpath-pinned
+  at link time. The crate re-exports the wire types that appear in its public signatures so the common path is a single
+  dependency.
+- **`lean-rs-worker-child`** — child runtime and the `lean-rs-worker-child` binary. Depends on
+  `lean-rs-worker-protocol`, `lean-rs`, `lean-rs-host`, and `lean-toolchain`. The only worker crate that links
+  `libleanshared`. The integration tests, examples, and benchmarks that drive a real Lean runtime live here.
+
+The old `lean-rs-worker` crate is removed. There is no shim and no compile_error stub; consumers swap
+`lean-rs-worker = "0.1.7"` for `lean-rs-worker-parent = "0.1.8"` (parent process) and `lean-rs-worker-child = "0.1.8"`
+(worker binary). Import paths shift from `lean_rs_worker::` to either `lean_rs_worker_parent::` or
+`lean_rs_worker_protocol::` depending on whether the type is part of the parent surface or the wire surface. The wire
+format and protocol version are unchanged; a 0.1.7 child speaks the same frames as a 0.1.8 parent.
+
+The `lean-rs-worker-child` binary name and on-disk layout are unchanged, so existing
+`LeanWorkerChild::sibling("lean-rs-worker-child")` lookups keep working.
+
+### Type promotion to `lean-toolchain`
+
+`LeanBuiltCapability`, `LeanLibraryDependency`, `LeanLoaderDiagnosticCode`, the `LeanCapabilityPreflightReport` /
+`LeanCapabilityPreflightCheck` data shapes, and the `LEAN_HEARTBEAT_LIMIT_DEFAULT` /
+`LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT` constants now live in `lean-toolchain`. `lean-rs` re-exports them at their existing
+paths for workspace source compatibility. This removes the worker boundary's need to mirror host types and the parity
+test that gated drift.
+
+### Preflight split
+
+`LeanCapabilityPreflight::check()` is split into two layers. Static manifest validation (file exists, JSON parses,
+schema and fingerprint checks) now lives in `lean_toolchain::static_manifest_validation` and runs client-side from
+`lean-rs-worker-parent` before any child fork. The heavyweight runtime symbol-table inspection (Mach-O / ELF allowlist
+check) stays in `lean-rs` and runs from the child on first command. The wire-visible
+`LeanCapabilityPreflightReport` shape is unchanged.
+
+### Workspace
+
+- All published crates bump to `0.1.8`.
+- Workspace `Cargo.toml` registers `lean-rs-worker-protocol`, `lean-rs-worker-parent`, and `lean-rs-worker-child`.
+- `docs/api-review/` baselines are added for the three new crates; the old `lean-rs-worker-public.txt` is removed.
+- The release workflow publishes `lean-rs-worker-protocol` → `lean-rs-worker-parent` → `lean-rs-worker-child` in
+  dependency order in place of the old single `lean-rs-worker` publish.
+
+### Migration
+
+```toml
+# Cargo.toml — parent process (the common case)
+- lean-rs-worker = "0.1.7"
++ lean-rs-worker-parent = "0.1.8"
+
+# Cargo.toml — separate worker binary
++ lean-rs-worker-child = "0.1.8"
+```
+
+```rust
+// imports — parent surface
+- use lean_rs_worker::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerPool};
++ use lean_rs_worker_parent::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerPool};
+
+// imports — wire types (only when working with the protocol directly)
+- use lean_rs_worker::{Request, Response, LeanWorkerElabOptions};
++ use lean_rs_worker_protocol::{Request, Response, LeanWorkerElabOptions};
+```
+
+Test-only helpers move from `lean_rs_worker::__test_support` to `lean_rs_worker_protocol::harness` and require the
+`harness` feature on `lean-rs-worker-protocol`.
 
 ## [0.1.7] — 2026-05-24
 

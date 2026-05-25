@@ -3,7 +3,7 @@
 `lean-rs` and `lean-rs-host` project errors to the same stable [`lean_rs::LeanDiagnosticCode`] taxonomy and emit
 structured `tracing` spans against the `lean_rs` target. Long-running host session operations can also report live
 progress through `lean_rs_host::LeanProgressSink`; see
-[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md). `lean-rs-worker` uses its own
+[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md). The worker crates use its own
 `LeanWorkerError` surface for process-boundary outcomes such as child exit, request timeout, cancellation, data-sink
 panic, diagnostic-sink panic, and typed command decode failures. A downstream caller gets:
 
@@ -14,7 +14,7 @@ The taxonomy is unified across `lean-rs` and `lean-rs-host` (every recoverable f
 code); the span catalogue is split by emitting crate so the layer boundary is visible at the log line. Lean internal
 panics are outside this error taxonomy: there is no `SessionPoisoned` code. A Lean runtime panic during a `LeanSession`
 call may terminate the process; see [`architecture/06-panic-containment.md`](architecture/06-panic-containment.md). When
-the same failure happens inside `lean-rs-worker`, the parent observes a typed worker exit instead of an in-process
+the same failure happens inside the worker crates, the parent observes a typed worker exit instead of an in-process
 `LeanDiagnosticCode`.
 
 ## Diagnostic codes
@@ -115,7 +115,7 @@ Progress sink panics are caught at the Rust callback boundary and surfaced as `L
 
 ## Worker process diagnostics and pool snapshots
 
-`lean-rs-worker` deliberately uses a separate worker error surface for process boundary failures. Child panic/abort,
+The worker crates deliberately use a separate worker error surface for process boundary failures. Child panic/abort,
 request timeout, cancellation-triggered cycle, stale lease use, row sink panic, diagnostic sink panic, and typed command
 decode failure are worker outcomes, not `LeanDiagnosticCode` values from the in-process host stack.
 

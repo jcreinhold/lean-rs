@@ -44,7 +44,7 @@ Lake stdout and stderr, so stdout stays limited to Cargo directives and caller-c
 
 `discover_lake_modules` is the runtime discovery companion for higher-level planners. It resolves the Lake root,
 discovers `lean_lib` module roots, enumerates source modules deterministically, and returns source-set fingerprints
-without building a shared library. `lean-rs-worker` uses that general discovery output for import-set planning;
+without building a shared library. The worker crates use that general discovery output for import-set planning;
 downstream crates should not reimplement Lake source-root or module-path conventions.
 
 Human cache diagnostics go to stderr:

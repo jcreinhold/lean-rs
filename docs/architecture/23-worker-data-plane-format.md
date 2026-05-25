@@ -24,7 +24,7 @@ measured encoding changes.
 The benchmark command was:
 
 ```text
-cargo bench -p lean-rs-worker --bench row_payload -- \
+cargo bench -p lean-rs-worker-child-child --bench row_payload -- \
   worker::row_payload::data_plane --quiet
 ```
 
@@ -55,11 +55,11 @@ Median throughput (mid-range estimate, sorted by small-row speed):
 End-to-end remeasurement of the current worker path:
 
 ```sh
-cargo bench -p lean-rs-worker --bench row_payload -- \
+cargo bench -p lean-rs-worker-child-child --bench row_payload -- \
   worker::row_payload::stream/typed_many_512 --quiet
 # typed_many_512 ≈ 2 K rows/s
 
-cargo run --release -p lean-rs-worker --example row_perf_probe
+cargo run --release -p lean-rs-worker-child-child --example row_perf_probe
 # worker_data_stream_many (512 rows): ~2.4 K rows/s, parent RSS ~6 MiB,
 #   child RSS growth ~400 MiB
 # worker_data_stream_large_payload (1 row): ~200 ms,

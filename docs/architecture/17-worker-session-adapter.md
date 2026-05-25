@@ -1,6 +1,6 @@
 # Worker Session Adapter
 
-`lean-rs-worker` exposes a narrow host-session adapter over the process boundary. It is not a remote `LeanSession`. The
+The worker crates expose a narrow host-session adapter over the process boundary. It is not a remote `LeanSession`. The
 in-process session remains the richer API for trusted callers; the worker adapter serves production callers that need
 crash isolation, memory cycling, and typed IPC.
 
@@ -26,7 +26,7 @@ versioned and tested, but it is not the caller-facing API. Callers do not manage
 child stderr parsing, or restart bookkeeping.
 
 Inside the child, the adapter calls `lean-rs-host`. This keeps theorem-prover policy in `lean-rs-host` and process
-policy in `lean-rs-worker`.
+policy in the worker crates.
 
 ## Progress And Cancellation
 

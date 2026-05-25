@@ -1,0 +1,2 @@
+pub mod lean_rs_worker_child
+pub fn lean_rs_worker_child::run_worker_child_stdio() -> std::process::ExitCode

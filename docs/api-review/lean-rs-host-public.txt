@@ -1,6 +1,14 @@
 pub mod lean_rs_host
+pub use lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+pub use lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX
+pub use lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT
+pub use lean_rs_host::LEAN_HEARTBEAT_LIMIT_MAX
 pub mod lean_rs_host::host
 pub mod lean_rs_host::host::elaboration
+pub use lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
+pub use lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX
+pub use lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_DEFAULT
+pub use lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_MAX
 pub enum lean_rs_host::host::elaboration::LeanSeverity
 pub lean_rs_host::host::elaboration::LeanSeverity::Error
 pub lean_rs_host::host::elaboration::LeanSeverity::Info
@@ -105,10 +113,6 @@ impl core::marker::Unpin for lean_rs_host::LeanPosition
 impl core::marker::UnsafeUnpin for lean_rs_host::LeanPosition
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanPosition
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanPosition
-pub const lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
-pub const lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
-pub const lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
-pub const lean_rs_host::host::elaboration::LEAN_HEARTBEAT_LIMIT_MAX: u64
 pub mod lean_rs_host::host::evidence
 pub enum lean_rs_host::host::evidence::EvidenceStatus
 pub lean_rs_host::host::evidence::EvidenceStatus::Checked
@@ -1273,10 +1277,6 @@ impl core::marker::Unpin for lean_rs_host::SessionStats
 impl core::marker::UnsafeUnpin for lean_rs_host::SessionStats
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::SessionStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::SessionStats
-pub const lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
-pub const lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
-pub const lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
-pub const lean_rs_host::LEAN_HEARTBEAT_LIMIT_MAX: u64
 pub const lean_rs_host::LEAN_PROOF_SUMMARY_BYTE_LIMIT: usize
 pub trait lean_rs_host::LeanProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_host::LeanProgressSink::report(&self, event: lean_rs_host::LeanProgressEvent)

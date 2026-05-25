@@ -5,7 +5,7 @@ accepts Lean's process-scoped failure and memory contracts. It is not the contai
 that must survive Lean internal panics, aborts, foreign unwinds, or long-running import sweeps that retain
 process-global memory.
 
-The production boundary is a worker process. `lean-rs-worker` owns child processes, framed IPC, restart policy,
+The production boundary is a worker process. The worker crates own child processes, framed IPC, restart policy,
 fatal-exit diagnostics, request timeouts, live row streaming, typed command facades, and memory cycling. `lean-rs-host`
 remains the in-process API that the worker uses inside the child.
 
@@ -16,11 +16,11 @@ The crate split is:
 - `lean-rs` owns typed Lean object handles, exported calls, and sealed callback payloads.
 - `lean-rs-host` owns in-process sessions, imports, elaboration, kernel checks, declaration introspection, `MetaM`,
   pooling, cancellation, and progress.
-- `lean-rs-worker` owns process supervision, worker protocol framing, restart policy, lifecycle, request watchdogs, row
+- The worker crates own process supervision, worker protocol framing, restart policy, lifecycle, request watchdogs, row
   streaming, typed commands, memory cycling, and fatal-exit reporting.
 
 This boundary keeps each layer at a different abstraction. `lean-rs-host` answers theorem-prover questions in one
-process. `lean-rs-worker` answers an operational question: how to run that host stack when the caller needs process
+process. The worker crates answer an operational question: how to run that host stack when the caller needs process
 isolation or a hard memory reset.
 
 ## Why Process Isolation Is Required
@@ -43,7 +43,7 @@ initialization state, imported environment data, compacted regions, interned nam
 runtime structures.
 
 `SessionPool::drain()` releases cached Rust-owned environment references. It is useful at idle boundaries, but it is not
-an RSS reset. Only exiting the worker process resets Lean's process-global state. `lean-rs-worker` therefore provides
+an RSS reset. Only exiting the worker process resets Lean's process-global state. The worker crates therefore provide
 process-cycling triggers for explicit cycles, request count, import-like request count, idle restart, measured RSS
 ceiling, and in-flight worker-session cancellation. The measurement baseline remains
 [`../safety/long-session-memory.md`](../safety/long-session-memory.md).
@@ -80,14 +80,14 @@ belong below the process supervisor.
 ## Consumer Guidance
 
 Compose at the highest layer that matches the operational requirement. Direct `lean-rs` callbacks are for trusted
-same-process ABI work. `lean-rs-host` is for trusted in-process theorem-prover sessions. `lean-rs-worker` is for
+same-process ABI work. `lean-rs-host` is for trusted in-process theorem-prover sessions. The worker crates are for
 worker-style tools where process lifecycle, IPC, fatal exits, request timeouts, row streaming, and memory reset should
 be owned by the library rather than every downstream caller.
 
 Use `lean-rs-host` directly when the process can trust the Lean workload, when latency is the primary concern, and when
 process-level memory retention is acceptable.
 
-Use the `lean-rs-worker` boundary when the application must continue after Lean exits, must classify fatal child exits,
+Use the worker boundary when the application must continue after Lean exits, must classify fatal child exits,
 or must reset memory after large import sweeps. The worker is not a replacement for `lean-rs-host`; it is a process
 boundary around it. See [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md) for the
 runnable worker-streaming example.

@@ -1,6 +1,6 @@
 # Worker Data Streaming
 
-`lean-rs-worker` needs a row stream for downstream protocols that produce arbitrary user data while a worker request is
+The worker crates needs a row stream for downstream protocols that produce arbitrary user data while a worker request is
 running. The host-session adapter can already return copied theorem-prover values and progress events, but that is not
 enough for tools that need a sequence of downstream-owned rows such as JSONL-like `lean-dup` output.
 
@@ -21,16 +21,16 @@ pub struct LeanWorkerDataRow {
 ```
 
 `stream` is a caller-defined channel name, such as `"rows"`, `"warnings"`, or a tool-specific stream label. `sequence`
-is assigned by `lean-rs-worker` per stream within one request. `payload` is arbitrary JSON owned by the downstream
+is assigned by the worker crates per stream within one request. `payload` is arbitrary JSON owned by the downstream
 protocol.
 
 This type is intentionally generic at the worker boundary and intentionally not schema-free inside downstream tools.
-`lean-rs-worker` carries rows. It does not define `lean-dup` row structs, theorem-search result schemas, or application
+The worker crates carries rows. It does not define `lean-dup` row structs, theorem-search result schemas, or application
 business objects.
 
 ## Chosen Boundary
 
-`lean-rs-worker` owns:
+The worker crates own:
 
 - length-delimited, versioned row frames in the private worker protocol;
 - per-stream row ordering;
@@ -89,7 +89,7 @@ Use direct L1 string callbacks when the Lean extension is trusted, in-process, a
 isolation or memory reset.
 
 Use worker data rows when the application needs the worker process boundary. The row payload can be any JSON value, but
-`lean-rs-worker` treats it as data. Schema ownership remains with the downstream crate.
+The worker crates treats it as data. Schema ownership remains with the downstream crate.
 
 For throughput, private `DataRow` frames carry validated raw JSON payloads. The public schema-less `LeanWorkerDataRow`
 still exposes `serde_json::Value`; that conversion happens only for callers that choose the low-level raw-row API. The

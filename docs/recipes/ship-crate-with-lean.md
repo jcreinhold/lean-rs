@@ -14,7 +14,7 @@ cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example work
 ```
 
 The first command builds the Lean shared library in `build.rs` and calls a Lean export in process. The second builds the
-app-owned worker child binary. The third starts that worker child and opens the same capability behind `lean-rs-worker`.
+app-owned worker child binary. The third starts that worker child and opens the same capability behind the worker crates.
 
 The template uses path dependencies because it lives inside this repository. Published crates use normal version
 dependencies:
@@ -33,7 +33,7 @@ lean-toolchain = "0.1"
 The canonical shape is build-time first:
 
 1. `build.rs` builds the Lake shared-library target.
-2. Rust opens the built dylib through `lean-rs`, or starts it behind `lean-rs-worker`.
+2. Rust opens the built dylib through `lean-rs`, or starts it behind the worker crates.
 3. Worker applications ship their own tiny worker-child binary.
 
 The crate author names the Lake root, package, module, imports, and worker child binary. The helper APIs hide Lean link

@@ -54,8 +54,8 @@ draining does not reset Lean process-global RSS.
 The mathlib-scale probe prints pool snapshot fields during normal typed-command execution and a slow-sink workload:
 
 ```sh
-cargo build -p lean-rs-worker --bin lean-rs-worker-child
-cargo run -p lean-rs-worker --example mathlib_scale_probe
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+cargo run -p lean-rs-worker-child --example mathlib_scale_probe
 ```
 
 The `slow_sink` line records parent RSS before/after, child RSS, delivered rows, payload bytes, and backpressure waits.
@@ -72,5 +72,5 @@ would complicate a future remote or alternate backend.
 success ambiguous for downstream schemas.
 
 **Metrics framework integration.** Rejected for this layer. The pool exposes a cheap snapshot. Applications adapt it to
-logs, tracing, Prometheus, or another metrics backend outside `lean-rs-worker`.
+logs, tracing, Prometheus, or another metrics backend outside the worker crates.
 

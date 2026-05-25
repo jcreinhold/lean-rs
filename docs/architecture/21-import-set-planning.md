@@ -7,12 +7,12 @@ reuse, so downstream tools can avoid repeating Lean imports without learning wor
 
 Two concerns are better apart:
 
-**Planner in `lean-rs-worker`.** Rejected as the only layer. Worker sessions and pool keys matter for batching, but Lake
+**Planner in the worker crates.** Rejected as the only layer. Worker sessions and pool keys matter for batching, but Lake
 module discovery is useful without a worker child process.
 
-**Discovery in `lean-toolchain`, batching in `lean-rs-worker`.** Chosen. `lean-toolchain` owns Lake root detection,
+**Discovery in `lean-toolchain`, batching in the worker crates.** Chosen. `lean-toolchain` owns Lake root detection,
 module-root discovery, module-name validation, source-set fingerprints, and capability-target declaration checks.
-`lean-rs-worker` owns the worker-facing batch plan because the batch key is a `LeanWorkerSessionKey` and feeds
+The worker crates own the worker-facing batch plan because the batch key is a `LeanWorkerSessionKey` and feeds
 `LeanWorkerPool` leases.
 
 This split keeps Lake layout policy in one general-purpose crate and keeps worker session policy in the worker crate.
@@ -56,7 +56,7 @@ can run against the same worker session requirements." It does not say whether a
 result, or report is valid for reuse. That remains downstream policy.
 
 The import planner is therefore deliberately not a `lean-dup` API. A `lean-dup` integration can map its source modules
-into planned batches, then run typed worker commands through pool leases. `lean-rs-worker` still does not define
+into planned batches, then run typed worker commands through pool leases. The worker crates still does not define
 `extract`, `features`, `index`, or `probe` methods.
 
 ## Performance Claim

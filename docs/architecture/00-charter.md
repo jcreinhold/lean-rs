@@ -38,10 +38,11 @@ Five published crates plus one workspace-internal helper:
   `lean_rs_host_*` `@[export]` Lean shim contract it loads alongside consumer capability dylibs. Batch and session-pool
   operations are methods on `LeanSession` rather than a separate `batch` module. Downstreams that want this opinion add
   it on top of `lean-rs`; downstreams that don't aren't paying for it.
-- **`lean-rs-worker`** (published process-boundary layer). The worker crate supervises a child process around the host
-  stack. It owns process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live
-  row streaming, diagnostics, terminal summaries, capability metadata, and typed command facades. It is not a remote
-  `LeanSession` mirror and not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
+- **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
+  process-boundary layer). The parent supervises a child process around the host stack. They own process lifecycle,
+  private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming, diagnostics,
+  terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession` mirror and
+  not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
 
 `lean-rs-test-support` is workspace-internal (`publish = false`).
 
@@ -52,7 +53,7 @@ Compose at the highest layer that fits the workload:
 - use `lean-rs` for custom same-process ABI calls, module loading, and advanced callbacks;
 - use `lean-rs-host` for trusted in-process theorem-prover work such as imports, elaboration, kernel checks, declaration
   queries, progress, cancellation, and pooling;
-- use `lean-rs-worker` when the application needs a process boundary for fatal Lean exits, request watchdogs, worker
+- use the worker crates when the application needs a process boundary for fatal Lean exits, request watchdogs, worker
   cycling, live row streams, diagnostics, or typed downstream commands.
 
 Lower layers are still real APIs. They are escape hatches and implementation substrates, not steps every downstream
@@ -179,5 +180,5 @@ Each was considered before the adopted shape. Recorded so reviewers can recogniz
 
 The adopted shape is deeper than each rejected alternative: fewer caller-facing details, less temporal coupling, a small
 unsafe surface, and a one-line in-process layering invariant (`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`)
-with `lean-rs-worker` wrapping the host stack when callers need a process boundary. It matches the dominant Rust binding
+with the worker crates wrapping the host stack when callers need a process boundary. It matches the dominant Rust binding
 shape, so contributors arrive with correct expectations, and it contains no Rust-side dependent-type imitation.

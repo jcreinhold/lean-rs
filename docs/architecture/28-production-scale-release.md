@@ -1,6 +1,6 @@
 # Production-Scale Worker Release Contract
 
-The release claim for `lean-rs-worker` as a local worker-pool foundation for mathlib-scale worker-class workloads, and
+The release claim for the worker crates as a local worker-pool foundation for mathlib-scale worker-class workloads, and
 the boundaries that must stay true.
 
 ## Release Claim
@@ -23,7 +23,7 @@ requires a cycle before more work is admitted.
 
 ## What Callers Still Own
 
-`lean-rs-worker` does not own downstream semantics. Downstream crates still define:
+The worker crates do not own downstream semantics. Downstream crates still define:
 
 - command names and exported Lean functions;
 - request, row, and terminal-summary serde types;
@@ -80,5 +80,5 @@ status, and caveats.
 Remote workers are future work. The local pool should avoid public APIs that would make a remote backend impossible, but
 this release supports only local child processes.
 
-`lean-rs-worker` does not implement `lean-dup`, define downstream row schemas, add worker pools across machines, or
+The worker crates do not implement `lean-dup`, define downstream row schemas, add worker pools across machines, or
 expose new callback payload types.

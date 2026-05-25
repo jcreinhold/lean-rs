@@ -52,7 +52,7 @@ observability/control signal, not a data row.
 
 `LeanStringEvent` is the next useful L1 payload. It supports downstream same-process line-oriented protocols: Lean can
 emit one encoded line at a time, Rust receives owned strings, and neither side has to tunnel through subprocess stdout.
-Worker-style tools should not expose this handle to parent callers; `lean-rs-worker` turns child-local callbacks into
+Worker-style tools should not expose this handle to parent callers; the worker crates turn child-local callbacks into
 typed worker rows when a process boundary is needed. The runnable L1 proof is
 [`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md).
 

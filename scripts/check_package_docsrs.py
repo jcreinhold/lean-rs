@@ -17,7 +17,9 @@ CRATES = [
     "lean-toolchain",
     "lean-rs",
     "lean-rs-host",
-    "lean-rs-worker",
+    "lean-rs-worker-protocol",
+    "lean-rs-worker-parent",
+    "lean-rs-worker-child",
 ]
 
 
@@ -115,7 +117,20 @@ def package_contents(version: str) -> None:
             "src/host/mod.rs",
             "tests/progress.rs",
         ],
-        "lean-rs-worker": [
+        "lean-rs-worker-protocol": [
+            "Cargo.toml",
+            "README.md",
+            "src/lib.rs",
+            "src/protocol.rs",
+            "src/types.rs",
+        ],
+        "lean-rs-worker-parent": [
+            "Cargo.toml",
+            "README.md",
+            "src/capability.rs",
+            "src/lib.rs",
+        ],
+        "lean-rs-worker-child": [
             "Cargo.toml",
             "README.md",
             "build.rs",
@@ -123,7 +138,8 @@ def package_contents(version: str) -> None:
             "benches/worker_capability.rs",
             "examples/worker_capability_runner.rs",
             "src/bin/lean-rs-worker-child.rs",
-            "src/capability.rs",
+            "src/child.rs",
+            "src/lib.rs",
             "tests/loader_regressions.rs",
             "tests/typed_command.rs",
         ],
@@ -172,7 +188,9 @@ def template_package_contents() -> None:
 def release_docs_exist() -> None:
     for rel in [
         "docs/api-review/lean-rs-public.txt",
-        "docs/api-review/lean-rs-worker-public.txt",
+        "docs/api-review/lean-rs-worker-protocol-public.txt",
+        "docs/api-review/lean-rs-worker-parent-public.txt",
+        "docs/api-review/lean-rs-worker-child-public.txt",
         "docs/recipes/ship-crate-with-lean.md",
         "docs/architecture/29-loader-and-artifact-boundary.md",
     ]:

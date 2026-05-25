@@ -30,7 +30,7 @@
 - [Host-stack surface](architecture/03-host-stack.md)
 - [Capability contract](lean-rs-host-capability-contract.md)
 
-# Worker (`lean-rs-worker`)
+# Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)
 
 - [Production boundary](architecture/16-production-boundary.md)
 - [Worker session adapter](architecture/17-worker-session-adapter.md)

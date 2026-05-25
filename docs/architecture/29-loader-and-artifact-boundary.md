@@ -26,7 +26,7 @@ CargoLeanCapability artifact description
 - `lean-rs` owns runtime loader lifetime and symbol visibility. It opens the capability and any dependent Lean dylibs in
   the required order, keeps those handles alive for the full capability lifetime, preflights the manifest and artifacts
   into stable diagnostics, initializes the requested module, and hides platform loader differences.
-- `lean-rs-worker` owns the process boundary. It locates and starts the app-owned worker child, builds the child
+- The worker crates own the process boundary. It locates and starts the app-owned worker child, builds the child
   environment, opens the capability in the child, reports bootstrap diagnostics, and keeps protocol pipes private.
 
 Callers still know their own Lake package and root module, exported command names, typed request and row schemas, and
@@ -54,7 +54,7 @@ different abstraction and hides a distinct kind of complexity.
 
 Lean runtime initialization, imported modules, interned names, persistent objects, allocator state, and module
 initializers are process-scoped. Dropping a Rust wrapper does not necessarily undo those effects. `lean-rs-host` exposes
-trusted in-process work; `lean-rs-worker` remains the production boundary for panic containment and memory reset.
+trusted in-process work; the worker crates remain the production boundary for panic containment and memory reset.
 
 ### Dynamic-Loader Symbol Visibility
 
@@ -121,9 +121,9 @@ doctor-style surface for checking a manifest-backed capability before opening it
 `LeanLibrary::open_globally` remain public for advanced L1 interop and focused tests, but they are escape hatches: using
 them means the caller has chosen to manage loader details explicitly.
 
-### `lean-rs-worker`
+### the worker crates
 
-`lean-rs-worker` hides:
+The worker crates hide:
 
 - app-owned worker child lookup;
 - child environment construction;
@@ -150,7 +150,7 @@ Use the highest-level surface that matches the job:
 
 ## Regression Gates
 
-`crates/lean-rs-worker/tests/loader_regressions.rs` protects the public packaged-app path. It builds the shipped-crate
+`crates/lean-rs-worker-child/tests/loader_regressions.rs` protects the public packaged-app path. It builds the shipped-crate
 template, then runs the same-process binary and worker example with `LD_LIBRARY_PATH`, `LD_PRELOAD`,
 `DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` removed. The test proves the canonical
 path relies on build artifacts, rpath, and the bundle loader rather than a developer shell's loader environment. The

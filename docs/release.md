@@ -2,7 +2,7 @@
 
 The `lean-rs` workspace publishes via [`.github/workflows/release.yml`](../.github/workflows/release.yml). Pushing a
 `v<semver>` git tag fires the workflow, which runs the pre-flight gate set, the public-API diff, workspace package
-creation, the five-crate live publish in dependency order, and opens a GitHub Release whose body is the matching
+creation, the per-crate live publish in dependency order, and opens a GitHub Release whose body is the matching
 `## [<version>]` section of [`CHANGELOG.md`](../CHANGELOG.md).
 
 This document is the **human checklist** for the steps before the tag push. The steps after the tag push are owned by
@@ -13,8 +13,9 @@ release follows the [bump procedure](bump-toolchain.md); re-confirm against the 
 `crates/lean-rs-sys/src/supported.rs` before any release.
 
 **Crate publish order is load-bearing:** `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host` →
-`lean-rs-worker`. `cargo publish` enforces the dependency direction via the crates.io index—downstream publishes fail
-with "no matching package" until upstream is indexed. The workflow sleeps 90s between each publish step.
+`lean-rs-worker-protocol` → `lean-rs-worker-parent` → `lean-rs-worker-child`. `cargo publish` enforces the dependency
+direction via the crates.io index—downstream publishes fail with "no matching package" until upstream is indexed. The
+workflow sleeps 90s between each publish step.
 
 ## One-time setup
 
@@ -33,7 +34,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo nextest run --workspace --profile ci
 cargo test --doc --workspace
-cargo test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
+cargo test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 python3 scripts/check_package_docsrs.py
@@ -52,7 +53,7 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/
 3. If the public API changed intentionally, regenerate the baselines in the same commit:
 
    ```sh
-   for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
+   for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
      cargo public-api -p "$c" --simplified > "docs/api-review/${c}-public.txt"
    done
    ```
@@ -106,7 +107,7 @@ The workflow:
 6. Runs `python3 scripts/check_package_docsrs.py`, which packages the workspace, checks crate/template package contents,
    unpacks the normalized tarballs, hides Lean/elan/lake from `PATH`, and builds docs with `DOCS_RS=1`.
 7. Runs `cargo package --workspace --no-verify` to create the package tarballs.
-8. Publishes the five crates in order with 90s sleeps between steps.
+8. Publishes the seven crates in dependency order with 90s sleeps between steps.
 9. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
 10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease
     automatically.
@@ -117,8 +118,8 @@ assertion prevents re-tagging against the wrong workspace version.
 
 ## Step 7—Post-publish
 
-- Verify the release on crates.io: `cargo search lean-rs` (all five crates should appear with the new version).
-- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other four)
+- Verify the release on crates.io: `cargo search lean-rs` (all seven crates should appear with the new version).
+- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other six)
   within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 
@@ -134,7 +135,9 @@ cargo publish -p lean-rs-sys
 sleep 90 && cargo publish -p lean-toolchain
 sleep 90 && cargo publish -p lean-rs
 sleep 90 && cargo publish -p lean-rs-host
-sleep 90 && cargo publish -p lean-rs-worker
+sleep 90 && cargo publish -p lean-rs-worker-protocol
+sleep 90 && cargo publish -p lean-rs-worker-parent
+sleep 90 && cargo publish -p lean-rs-worker-child
 
 git tag -s "v${version}" -m "lean-rs v${version}"
 git push origin "v${version}"

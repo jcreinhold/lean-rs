@@ -1,4 +1,11 @@
 pub mod lean_rs
+pub use lean_rs::LeanBuiltCapability
+pub use lean_rs::LeanLibraryDependency
+pub use lean_rs::LeanLoaderCheck
+pub use lean_rs::LeanLoaderDiagnosticCode
+pub use lean_rs::LeanLoaderReport
+pub use lean_rs::LeanLoaderSeverity
+pub use lean_rs::LeanModuleInitializer
 pub mod lean_rs::abi
 pub mod lean_rs::abi::nat
 pub fn lean_rs::abi::nat::from_u64(runtime: &lean_rs::LeanRuntime, n: u64) -> lean_rs::runtime::obj::Obj<'_>
@@ -549,105 +556,25 @@ impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
 pub mod lean_rs::module
-pub enum lean_rs::module::LeanLoaderDiagnosticCode
-pub lean_rs::module::LeanLoaderDiagnosticCode::MalformedManifest
-pub lean_rs::module::LeanLoaderDiagnosticCode::MissingImportedSymbol
-pub lean_rs::module::LeanLoaderDiagnosticCode::MissingInitializer
-pub lean_rs::module::LeanLoaderDiagnosticCode::MissingManifest
-pub lean_rs::module::LeanLoaderDiagnosticCode::MissingPrimaryDylib
-pub lean_rs::module::LeanLoaderDiagnosticCode::MissingTransitiveDependency
-pub lean_rs::module::LeanLoaderDiagnosticCode::StaleManifest
-pub lean_rs::module::LeanLoaderDiagnosticCode::UnsupportedArchitecture
-pub lean_rs::module::LeanLoaderDiagnosticCode::UnsupportedManifestSchema
-pub lean_rs::module::LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint
-impl lean_rs::LeanLoaderDiagnosticCode
-pub const fn lean_rs::LeanLoaderDiagnosticCode::as_str(self) -> &'static str
-impl core::clone::Clone for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::clone(&self) -> lean_rs::LeanLoaderDiagnosticCode
-impl core::cmp::Eq for lean_rs::LeanLoaderDiagnosticCode
-impl core::cmp::PartialEq for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::eq(&self, other: &lean_rs::LeanLoaderDiagnosticCode) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
-impl core::marker::Copy for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Freeze for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Send for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Sync for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Unpin for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderDiagnosticCode
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-pub enum lean_rs::module::LeanLoaderSeverity
-pub lean_rs::module::LeanLoaderSeverity::Error
-pub lean_rs::module::LeanLoaderSeverity::Info
-pub lean_rs::module::LeanLoaderSeverity::Warning
-impl core::clone::Clone for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::clone(&self) -> lean_rs::LeanLoaderSeverity
-impl core::cmp::Eq for lean_rs::LeanLoaderSeverity
-impl core::cmp::PartialEq for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::eq(&self, other: &lean_rs::LeanLoaderSeverity) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
-impl core::marker::Copy for lean_rs::LeanLoaderSeverity
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderSeverity
-impl core::marker::Freeze for lean_rs::LeanLoaderSeverity
-impl core::marker::Send for lean_rs::LeanLoaderSeverity
-impl core::marker::Sync for lean_rs::LeanLoaderSeverity
-impl core::marker::Unpin for lean_rs::LeanLoaderSeverity
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderSeverity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderSeverity
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderSeverity
-pub struct lean_rs::module::LeanBuiltCapability
-impl lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::dependencies(self, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> Self
-pub fn lean_rs::LeanBuiltCapability::dependency(self, dependency: lean_rs::LeanLibraryDependency) -> Self
-pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs::LeanLibraryDependency]
-pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
-pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
-pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
-pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanBuiltCapability::resolved_manifest_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
-impl core::clone::Clone for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
-impl core::cmp::Eq for lean_rs::LeanBuiltCapability
-impl core::cmp::PartialEq for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::eq(&self, other: &lean_rs::LeanBuiltCapability) -> bool
-impl core::convert::From<&lean_toolchain::build_helpers::BuiltLeanCapability> for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::from(value: &lean_toolchain::build_helpers::BuiltLeanCapability) -> Self
-impl core::fmt::Debug for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanBuiltCapability
-impl core::marker::Freeze for lean_rs::LeanBuiltCapability
-impl core::marker::Send for lean_rs::LeanBuiltCapability
-impl core::marker::Sync for lean_rs::LeanBuiltCapability
-impl core::marker::Unpin for lean_rs::LeanBuiltCapability
-impl core::marker::UnsafeUnpin for lean_rs::LeanBuiltCapability
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanBuiltCapability
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanBuiltCapability
+pub use lean_rs::module::BuiltCapabilityArtifact
+pub use lean_rs::module::LeanBuiltCapability
+pub use lean_rs::module::LeanBuiltCapabilityError
+pub use lean_rs::module::LeanLibraryDependency
+pub use lean_rs::module::LeanLoaderCheck
+pub use lean_rs::module::LeanLoaderDiagnosticCode
+pub use lean_rs::module::LeanLoaderReport
+pub use lean_rs::module::LeanLoaderSeverity
+pub use lean_rs::module::LeanModuleInitializer
 pub struct lean_rs::module::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
-pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
 pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::loader::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
 impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
@@ -656,25 +583,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanCapability<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanCapability<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapability<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapability<'lean>
-pub struct lean_rs::module::LeanCapabilityPreflight
-impl lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::check(&self) -> lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanCapabilityPreflight::new(spec: lean_rs::LeanBuiltCapability) -> Self
-impl core::clone::Clone for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::clone(&self) -> lean_rs::LeanCapabilityPreflight
-impl core::cmp::Eq for lean_rs::LeanCapabilityPreflight
-impl core::cmp::PartialEq for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::eq(&self, other: &lean_rs::LeanCapabilityPreflight) -> bool
-impl core::fmt::Debug for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanCapabilityPreflight
-impl core::marker::Freeze for lean_rs::LeanCapabilityPreflight
-impl core::marker::Send for lean_rs::LeanCapabilityPreflight
-impl core::marker::Sync for lean_rs::LeanCapabilityPreflight
-impl core::marker::Unpin for lean_rs::LeanCapabilityPreflight
-impl core::marker::UnsafeUnpin for lean_rs::LeanCapabilityPreflight
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapabilityPreflight
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapabilityPreflight
 pub struct lean_rs::module::LeanExported<'lean, 'lib, Args, R>
 impl<'lean, 'lib, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, R> lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R> where A1: lean_rs::abi::traits::LeanAbi<'lean>, A2: lean_rs::abi::traits::LeanAbi<'lean>, A3: lean_rs::abi::traits::LeanAbi<'lean>, A4: lean_rs::abi::traits::LeanAbi<'lean>, A5: lean_rs::abi::traits::LeanAbi<'lean>, A6: lean_rs::abi::traits::LeanAbi<'lean>, A7: lean_rs::abi::traits::LeanAbi<'lean>, A8: lean_rs::abi::traits::LeanAbi<'lean>, A9: lean_rs::abi::traits::LeanAbi<'lean>, A10: lean_rs::abi::traits::LeanAbi<'lean>, A11: lean_rs::abi::traits::LeanAbi<'lean>, A12: lean_rs::abi::traits::LeanAbi<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanExported<'lean, 'lib, (A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12), R>::call(&self, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7, a8: A8, a9: A9, a10: A10, a11: A11, a12: A12) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
@@ -745,7 +653,7 @@ impl<'lean> lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanLibraryBundle<'lean>::dependency_count(&self) -> usize
 pub fn lean_rs::LeanLibraryBundle<'lean>::initialize_module<'bundle>(&'bundle self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'bundle>>
 pub fn lean_rs::LeanLibraryBundle<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
-pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::loader::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 impl core::fmt::Debug for lean_rs::LeanLibraryBundle<'_>
 pub fn lean_rs::LeanLibraryBundle<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs::LeanLibraryBundle<'lean>
@@ -755,75 +663,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
-pub struct lean_rs::module::LeanLibraryDependency
-impl lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::export_symbols_for_dependents(self) -> Self
-pub fn lean_rs::LeanLibraryDependency::exports_symbols_for_dependents(&self) -> bool
-pub fn lean_rs::LeanLibraryDependency::initializer(self, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanLibraryDependency::module_initializer(&self) -> core::option::Option<&lean_rs::LeanModuleInitializer>
-pub fn lean_rs::LeanLibraryDependency::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanLibraryDependency::path_ref(&self) -> &std::path::Path
-impl core::clone::Clone for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::clone(&self) -> lean_rs::LeanLibraryDependency
-impl core::cmp::Eq for lean_rs::LeanLibraryDependency
-impl core::cmp::PartialEq for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::eq(&self, other: &lean_rs::LeanLibraryDependency) -> bool
-impl core::fmt::Debug for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLibraryDependency
-impl core::marker::Freeze for lean_rs::LeanLibraryDependency
-impl core::marker::Send for lean_rs::LeanLibraryDependency
-impl core::marker::Sync for lean_rs::LeanLibraryDependency
-impl core::marker::Unpin for lean_rs::LeanLibraryDependency
-impl core::marker::UnsafeUnpin for lean_rs::LeanLibraryDependency
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryDependency
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryDependency
-pub struct lean_rs::module::LeanLoaderCheck
-impl lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::code(&self) -> lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderCheck::message(&self) -> &str
-pub fn lean_rs::LeanLoaderCheck::repair_hint(&self) -> &str
-pub fn lean_rs::LeanLoaderCheck::severity(&self) -> lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderCheck::subject(&self) -> &str
-impl core::clone::Clone for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::clone(&self) -> lean_rs::LeanLoaderCheck
-impl core::cmp::Eq for lean_rs::LeanLoaderCheck
-impl core::cmp::PartialEq for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::eq(&self, other: &lean_rs::LeanLoaderCheck) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderCheck
-impl core::marker::Freeze for lean_rs::LeanLoaderCheck
-impl core::marker::Send for lean_rs::LeanLoaderCheck
-impl core::marker::Sync for lean_rs::LeanLoaderCheck
-impl core::marker::Unpin for lean_rs::LeanLoaderCheck
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderCheck
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderCheck
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderCheck
-pub struct lean_rs::module::LeanLoaderReport
-impl lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::checks(&self) -> &[lean_rs::LeanLoaderCheck]
-pub fn lean_rs::LeanLoaderReport::errors(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_rs::LeanLoaderCheck>
-pub fn lean_rs::LeanLoaderReport::first_error(&self) -> core::option::Option<&lean_rs::LeanLoaderCheck>
-pub fn lean_rs::LeanLoaderReport::is_ok(&self) -> bool
-pub fn lean_rs::LeanLoaderReport::manifest_path(&self) -> core::option::Option<&std::path::Path>
-impl core::clone::Clone for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::clone(&self) -> lean_rs::LeanLoaderReport
-impl core::cmp::Eq for lean_rs::LeanLoaderReport
-impl core::cmp::PartialEq for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::eq(&self, other: &lean_rs::LeanLoaderReport) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderReport
-impl core::marker::Freeze for lean_rs::LeanLoaderReport
-impl core::marker::Send for lean_rs::LeanLoaderReport
-impl core::marker::Sync for lean_rs::LeanLoaderReport
-impl core::marker::Unpin for lean_rs::LeanLoaderReport
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderReport
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderReport
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderReport
 pub struct lean_rs::module::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
@@ -838,26 +677,25 @@ impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
-pub struct lean_rs::module::LeanModuleInitializer
-impl lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::module_name(&self) -> &str
-pub fn lean_rs::LeanModuleInitializer::new(package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanModuleInitializer::package_name(&self) -> &str
-impl core::clone::Clone for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::clone(&self) -> lean_rs::LeanModuleInitializer
-impl core::cmp::Eq for lean_rs::LeanModuleInitializer
-impl core::cmp::PartialEq for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::eq(&self, other: &lean_rs::LeanModuleInitializer) -> bool
-impl core::fmt::Debug for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanModuleInitializer
-impl core::marker::Freeze for lean_rs::LeanModuleInitializer
-impl core::marker::Send for lean_rs::LeanModuleInitializer
-impl core::marker::Sync for lean_rs::LeanModuleInitializer
-impl core::marker::Unpin for lean_rs::LeanModuleInitializer
-impl core::marker::UnsafeUnpin for lean_rs::LeanModuleInitializer
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModuleInitializer
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModuleInitializer
+pub struct lean_rs::module::LeanRuntimePreflight
+impl lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::check(&self) -> lean_toolchain::loader::LeanLoaderReport
+pub fn lean_rs::LeanRuntimePreflight::new(spec: lean_toolchain::built_capability::LeanBuiltCapability) -> Self
+impl core::clone::Clone for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::clone(&self) -> lean_rs::LeanRuntimePreflight
+impl core::cmp::Eq for lean_rs::LeanRuntimePreflight
+impl core::cmp::PartialEq for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::eq(&self, other: &lean_rs::LeanRuntimePreflight) -> bool
+impl core::fmt::Debug for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanRuntimePreflight
+impl core::marker::Freeze for lean_rs::LeanRuntimePreflight
+impl core::marker::Send for lean_rs::LeanRuntimePreflight
+impl core::marker::Sync for lean_rs::LeanRuntimePreflight
+impl core::marker::Unpin for lean_rs::LeanRuntimePreflight
+impl core::marker::UnsafeUnpin for lean_rs::LeanRuntimePreflight
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntimePreflight
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntimePreflight
 pub trait lean_rs::module::DecodeCallResult<'lean>: core::marker::Sized + lean_rs::module::exported::sealed::SealedResult
 pub type lean_rs::module::DecodeCallResult::CRepr: core::marker::Copy
 pub type lean_rs::module::DecodeCallResult::Output
@@ -949,6 +787,7 @@ impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits
 pub const (A1)::ARITY: usize
 impl<'lean> lean_rs::LeanArgs<'lean> for ()
 pub const ()::ARITY: usize
+pub type lean_rs::module::LeanCapabilityPreflight = lean_rs::LeanRuntimePreflight
 pub mod lean_rs::runtime
 pub mod lean_rs::runtime::obj
 pub struct lean_rs::runtime::obj::Obj<'lean>
@@ -1170,61 +1009,6 @@ impl core::marker::Unpin for lean_rs::error::LeanExceptionKind
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanExceptionKind
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanExceptionKind
-pub enum lean_rs::LeanLoaderDiagnosticCode
-pub lean_rs::LeanLoaderDiagnosticCode::MalformedManifest
-pub lean_rs::LeanLoaderDiagnosticCode::MissingImportedSymbol
-pub lean_rs::LeanLoaderDiagnosticCode::MissingInitializer
-pub lean_rs::LeanLoaderDiagnosticCode::MissingManifest
-pub lean_rs::LeanLoaderDiagnosticCode::MissingPrimaryDylib
-pub lean_rs::LeanLoaderDiagnosticCode::MissingTransitiveDependency
-pub lean_rs::LeanLoaderDiagnosticCode::StaleManifest
-pub lean_rs::LeanLoaderDiagnosticCode::UnsupportedArchitecture
-pub lean_rs::LeanLoaderDiagnosticCode::UnsupportedManifestSchema
-pub lean_rs::LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint
-impl lean_rs::LeanLoaderDiagnosticCode
-pub const fn lean_rs::LeanLoaderDiagnosticCode::as_str(self) -> &'static str
-impl core::clone::Clone for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::clone(&self) -> lean_rs::LeanLoaderDiagnosticCode
-impl core::cmp::Eq for lean_rs::LeanLoaderDiagnosticCode
-impl core::cmp::PartialEq for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::eq(&self, other: &lean_rs::LeanLoaderDiagnosticCode) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderDiagnosticCode::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
-impl core::marker::Copy for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Freeze for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Send for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Sync for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::Unpin for lean_rs::LeanLoaderDiagnosticCode
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderDiagnosticCode
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderDiagnosticCode
-pub enum lean_rs::LeanLoaderSeverity
-pub lean_rs::LeanLoaderSeverity::Error
-pub lean_rs::LeanLoaderSeverity::Info
-pub lean_rs::LeanLoaderSeverity::Warning
-impl core::clone::Clone for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::clone(&self) -> lean_rs::LeanLoaderSeverity
-impl core::cmp::Eq for lean_rs::LeanLoaderSeverity
-impl core::cmp::PartialEq for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::eq(&self, other: &lean_rs::LeanLoaderSeverity) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderSeverity::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
-impl core::marker::Copy for lean_rs::LeanLoaderSeverity
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderSeverity
-impl core::marker::Freeze for lean_rs::LeanLoaderSeverity
-impl core::marker::Send for lean_rs::LeanLoaderSeverity
-impl core::marker::Sync for lean_rs::LeanLoaderSeverity
-impl core::marker::Unpin for lean_rs::LeanLoaderSeverity
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderSeverity
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderSeverity
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderSeverity
 pub struct lean_rs::CapturedEvent
 pub lean_rs::CapturedEvent::code: core::option::Option<lean_rs::error::LeanDiagnosticCode>
 pub lean_rs::CapturedEvent::fields: alloc::vec::Vec<(&'static str, alloc::string::String)>
@@ -1282,40 +1066,6 @@ impl core::marker::Unpin for lean_rs::error::HostFailure
 impl core::marker::UnsafeUnpin for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::HostFailure
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::HostFailure
-pub struct lean_rs::LeanBuiltCapability
-impl lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::dependencies(self, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> Self
-pub fn lean_rs::LeanBuiltCapability::dependency(self, dependency: lean_rs::LeanLibraryDependency) -> Self
-pub fn lean_rs::LeanBuiltCapability::dependency_descriptors(&self) -> &[lean_rs::LeanLibraryDependency]
-pub fn lean_rs::LeanBuiltCapability::dylib_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
-pub fn lean_rs::LeanBuiltCapability::env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_env(env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_env_var(self, env_var: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::manifest_path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanBuiltCapability::module(self, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::module_name(&self) -> core::option::Option<&str>
-pub fn lean_rs::LeanBuiltCapability::package(self, package: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanBuiltCapability::package_name(&self) -> core::option::Option<&str>
-pub fn lean_rs::LeanBuiltCapability::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanBuiltCapability::resolved_manifest_path(&self) -> lean_rs::error::LeanResult<std::path::PathBuf>
-impl core::clone::Clone for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::clone(&self) -> lean_rs::LeanBuiltCapability
-impl core::cmp::Eq for lean_rs::LeanBuiltCapability
-impl core::cmp::PartialEq for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::eq(&self, other: &lean_rs::LeanBuiltCapability) -> bool
-impl core::convert::From<&lean_toolchain::build_helpers::BuiltLeanCapability> for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::from(value: &lean_toolchain::build_helpers::BuiltLeanCapability) -> Self
-impl core::fmt::Debug for lean_rs::LeanBuiltCapability
-pub fn lean_rs::LeanBuiltCapability::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanBuiltCapability
-impl core::marker::Freeze for lean_rs::LeanBuiltCapability
-impl core::marker::Send for lean_rs::LeanBuiltCapability
-impl core::marker::Sync for lean_rs::LeanBuiltCapability
-impl core::marker::Unpin for lean_rs::LeanBuiltCapability
-impl core::marker::UnsafeUnpin for lean_rs::LeanBuiltCapability
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanBuiltCapability
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanBuiltCapability
 pub struct lean_rs::LeanCallbackHandle<P: lean_rs::callback::LeanCallbackPayload>
 impl lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>
 pub fn lean_rs::callback::LeanCallbackHandle<lean_rs::callback::LeanProgressTick>::register<F>(callback: F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'static
@@ -1356,13 +1106,13 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
 pub struct lean_rs::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
-pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_rs::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_env(runtime: &'lean lean_rs::LeanRuntime, spec: lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(runtime: &'lean lean_rs::LeanRuntime, spec: lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
 pub fn lean_rs::LeanCapability<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::open_with_dependencies(runtime: &'lean lean_rs::LeanRuntime, dylib_path: impl core::convert::AsRef<std::path::Path>, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::loader::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::package_name(&self) -> &str
 impl<'lean> core::marker::Freeze for lean_rs::LeanCapability<'lean>
 impl<'lean> !core::marker::Send for lean_rs::LeanCapability<'lean>
@@ -1371,25 +1121,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanCapability<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanCapability<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapability<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapability<'lean>
-pub struct lean_rs::LeanCapabilityPreflight
-impl lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::check(&self) -> lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanCapabilityPreflight::new(spec: lean_rs::LeanBuiltCapability) -> Self
-impl core::clone::Clone for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::clone(&self) -> lean_rs::LeanCapabilityPreflight
-impl core::cmp::Eq for lean_rs::LeanCapabilityPreflight
-impl core::cmp::PartialEq for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::eq(&self, other: &lean_rs::LeanCapabilityPreflight) -> bool
-impl core::fmt::Debug for lean_rs::LeanCapabilityPreflight
-pub fn lean_rs::LeanCapabilityPreflight::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanCapabilityPreflight
-impl core::marker::Freeze for lean_rs::LeanCapabilityPreflight
-impl core::marker::Send for lean_rs::LeanCapabilityPreflight
-impl core::marker::Sync for lean_rs::LeanCapabilityPreflight
-impl core::marker::Unpin for lean_rs::LeanCapabilityPreflight
-impl core::marker::UnsafeUnpin for lean_rs::LeanCapabilityPreflight
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCapabilityPreflight
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCapabilityPreflight
 pub struct lean_rs::LeanDeclaration<'lean>
 impl core::clone::Clone for lean_rs::LeanDeclaration<'_>
 pub fn lean_rs::LeanDeclaration<'_>::clone(&self) -> Self
@@ -1527,7 +1258,7 @@ impl<'lean> lean_rs::LeanLibraryBundle<'lean>
 pub fn lean_rs::LeanLibraryBundle<'lean>::dependency_count(&self) -> usize
 pub fn lean_rs::LeanLibraryBundle<'lean>::initialize_module<'bundle>(&'bundle self, package: &str, module: &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'bundle>>
 pub fn lean_rs::LeanLibraryBundle<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
-pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_rs::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanLibraryBundle<'lean>::open(runtime: &'lean lean_rs::LeanRuntime, primary_path: impl core::convert::AsRef<std::path::Path>, dependencies: impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::loader::LeanLibraryDependency>) -> lean_rs::error::LeanResult<Self>
 impl core::fmt::Debug for lean_rs::LeanLibraryBundle<'_>
 pub fn lean_rs::LeanLibraryBundle<'_>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs::LeanLibraryBundle<'lean>
@@ -1537,75 +1268,6 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBundle<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
-pub struct lean_rs::LeanLibraryDependency
-impl lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::export_symbols_for_dependents(self) -> Self
-pub fn lean_rs::LeanLibraryDependency::exports_symbols_for_dependents(&self) -> bool
-pub fn lean_rs::LeanLibraryDependency::initializer(self, package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanLibraryDependency::module_initializer(&self) -> core::option::Option<&lean_rs::LeanModuleInitializer>
-pub fn lean_rs::LeanLibraryDependency::path(path: impl core::convert::Into<std::path::PathBuf>) -> Self
-pub fn lean_rs::LeanLibraryDependency::path_ref(&self) -> &std::path::Path
-impl core::clone::Clone for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::clone(&self) -> lean_rs::LeanLibraryDependency
-impl core::cmp::Eq for lean_rs::LeanLibraryDependency
-impl core::cmp::PartialEq for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::eq(&self, other: &lean_rs::LeanLibraryDependency) -> bool
-impl core::fmt::Debug for lean_rs::LeanLibraryDependency
-pub fn lean_rs::LeanLibraryDependency::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLibraryDependency
-impl core::marker::Freeze for lean_rs::LeanLibraryDependency
-impl core::marker::Send for lean_rs::LeanLibraryDependency
-impl core::marker::Sync for lean_rs::LeanLibraryDependency
-impl core::marker::Unpin for lean_rs::LeanLibraryDependency
-impl core::marker::UnsafeUnpin for lean_rs::LeanLibraryDependency
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryDependency
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryDependency
-pub struct lean_rs::LeanLoaderCheck
-impl lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::code(&self) -> lean_rs::LeanLoaderDiagnosticCode
-pub fn lean_rs::LeanLoaderCheck::message(&self) -> &str
-pub fn lean_rs::LeanLoaderCheck::repair_hint(&self) -> &str
-pub fn lean_rs::LeanLoaderCheck::severity(&self) -> lean_rs::LeanLoaderSeverity
-pub fn lean_rs::LeanLoaderCheck::subject(&self) -> &str
-impl core::clone::Clone for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::clone(&self) -> lean_rs::LeanLoaderCheck
-impl core::cmp::Eq for lean_rs::LeanLoaderCheck
-impl core::cmp::PartialEq for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::eq(&self, other: &lean_rs::LeanLoaderCheck) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for lean_rs::LeanLoaderCheck
-pub fn lean_rs::LeanLoaderCheck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderCheck
-impl core::marker::Freeze for lean_rs::LeanLoaderCheck
-impl core::marker::Send for lean_rs::LeanLoaderCheck
-impl core::marker::Sync for lean_rs::LeanLoaderCheck
-impl core::marker::Unpin for lean_rs::LeanLoaderCheck
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderCheck
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderCheck
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderCheck
-pub struct lean_rs::LeanLoaderReport
-impl lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::checks(&self) -> &[lean_rs::LeanLoaderCheck]
-pub fn lean_rs::LeanLoaderReport::errors(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_rs::LeanLoaderCheck>
-pub fn lean_rs::LeanLoaderReport::first_error(&self) -> core::option::Option<&lean_rs::LeanLoaderCheck>
-pub fn lean_rs::LeanLoaderReport::is_ok(&self) -> bool
-pub fn lean_rs::LeanLoaderReport::manifest_path(&self) -> core::option::Option<&std::path::Path>
-impl core::clone::Clone for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::clone(&self) -> lean_rs::LeanLoaderReport
-impl core::cmp::Eq for lean_rs::LeanLoaderReport
-impl core::cmp::PartialEq for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::eq(&self, other: &lean_rs::LeanLoaderReport) -> bool
-impl core::fmt::Debug for lean_rs::LeanLoaderReport
-pub fn lean_rs::LeanLoaderReport::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanLoaderReport
-impl core::marker::Freeze for lean_rs::LeanLoaderReport
-impl core::marker::Send for lean_rs::LeanLoaderReport
-impl core::marker::Sync for lean_rs::LeanLoaderReport
-impl core::marker::Unpin for lean_rs::LeanLoaderReport
-impl core::marker::UnsafeUnpin for lean_rs::LeanLoaderReport
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLoaderReport
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLoaderReport
 pub struct lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, name: &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
@@ -1620,26 +1282,6 @@ impl<'lean, 'lib> core::marker::Unpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::marker::UnsafeUnpin for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModule<'lean, 'lib>
-pub struct lean_rs::LeanModuleInitializer
-impl lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::module_name(&self) -> &str
-pub fn lean_rs::LeanModuleInitializer::new(package: impl core::convert::Into<alloc::string::String>, module: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn lean_rs::LeanModuleInitializer::package_name(&self) -> &str
-impl core::clone::Clone for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::clone(&self) -> lean_rs::LeanModuleInitializer
-impl core::cmp::Eq for lean_rs::LeanModuleInitializer
-impl core::cmp::PartialEq for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::eq(&self, other: &lean_rs::LeanModuleInitializer) -> bool
-impl core::fmt::Debug for lean_rs::LeanModuleInitializer
-pub fn lean_rs::LeanModuleInitializer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs::LeanModuleInitializer
-impl core::marker::Freeze for lean_rs::LeanModuleInitializer
-impl core::marker::Send for lean_rs::LeanModuleInitializer
-impl core::marker::Sync for lean_rs::LeanModuleInitializer
-impl core::marker::Unpin for lean_rs::LeanModuleInitializer
-impl core::marker::UnsafeUnpin for lean_rs::LeanModuleInitializer
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanModuleInitializer
-impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanModuleInitializer
 pub struct lean_rs::LeanName<'lean>
 impl core::clone::Clone for lean_rs::LeanName<'_>
 pub fn lean_rs::LeanName<'_>::clone(&self) -> Self
@@ -1690,6 +1332,25 @@ impl core::marker::Unpin for lean_rs::LeanRuntime
 impl core::marker::UnsafeUnpin for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntime
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntime
+pub struct lean_rs::LeanRuntimePreflight
+impl lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::check(&self) -> lean_toolchain::loader::LeanLoaderReport
+pub fn lean_rs::LeanRuntimePreflight::new(spec: lean_toolchain::built_capability::LeanBuiltCapability) -> Self
+impl core::clone::Clone for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::clone(&self) -> lean_rs::LeanRuntimePreflight
+impl core::cmp::Eq for lean_rs::LeanRuntimePreflight
+impl core::cmp::PartialEq for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::eq(&self, other: &lean_rs::LeanRuntimePreflight) -> bool
+impl core::fmt::Debug for lean_rs::LeanRuntimePreflight
+pub fn lean_rs::LeanRuntimePreflight::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::LeanRuntimePreflight
+impl core::marker::Freeze for lean_rs::LeanRuntimePreflight
+impl core::marker::Send for lean_rs::LeanRuntimePreflight
+impl core::marker::Sync for lean_rs::LeanRuntimePreflight
+impl core::marker::Unpin for lean_rs::LeanRuntimePreflight
+impl core::marker::UnsafeUnpin for lean_rs::LeanRuntimePreflight
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanRuntimePreflight
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanRuntimePreflight
 pub struct lean_rs::LeanStringEvent
 pub lean_rs::LeanStringEvent::value: alloc::string::String
 impl core::clone::Clone for lean_rs::callback::LeanStringEvent
@@ -1853,4 +1514,5 @@ pub const ()::ARITY: usize
 pub trait lean_rs::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent
+pub type lean_rs::LeanCapabilityPreflight = lean_rs::LeanRuntimePreflight
 pub type lean_rs::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
