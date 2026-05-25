@@ -12,10 +12,10 @@ the workflow.
 release follows the [bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
 `crates/lean-rs-sys/src/supported.rs` before any release.
 
-**Crate publish order is load-bearing:** `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host` →
-`lean-rs-worker-protocol` → `lean-rs-worker-parent` → `lean-rs-worker-child`. `cargo publish` enforces the dependency
-direction via the crates.io index—downstream publishes fail with "no matching package" until upstream is indexed. The
-workflow sleeps 90s between each publish step.
+**Publishing is `cargo publish --workspace` (stable since Rust 1.90).** Cargo computes the workspace dependency DAG,
+verifies every crate against a local registry overlay so downstream crates can see pending upstream publishes before
+crates.io indexes them, then uploads in topological order—in parallel where the DAG allows. The previous per-crate
+loop with 90-second sleeps is gone.
 
 ## One-time setup
 
@@ -74,11 +74,9 @@ workflow" → check **dry_run**). Runs every gate including workspace package cr
 the live publish and the GitHub Release. Useful when CHANGELOG section extraction or the public-API diff needs a sanity
 check that doesn't show up in the regular CI run.
 
-The workflow intentionally does **not** run `cargo publish --workspace --dry-run` before the live publish. Cargo
-verifies each downstream package against the crates.io index, so a new interdependent workspace version fails dry-run
-until the upstream crates have actually been published and indexed. The live workflow publishes in dependency order and
-sleeps between crates so each later `cargo publish` performs the real verification against the just-published upstream
-version.
+The live workflow runs `cargo publish --workspace`, which verifies every package against a local registry overlay that
+serves the pending upstream tarballs—so the dry-run-style "no matching package" failures of the older per-crate flow do
+not arise.
 
 ## Step 5—Cut the tag
 
@@ -107,7 +105,7 @@ The workflow:
 6. Runs `python3 scripts/check_package_docsrs.py`, which packages the workspace, checks crate/template package contents,
    unpacks the normalized tarballs, hides Lean/elan/lake from `PATH`, and builds docs with `DOCS_RS=1`.
 7. Runs `cargo package --workspace --no-verify` to create the package tarballs.
-8. Publishes the seven crates in dependency order with 90s sleeps between steps.
+8. Publishes the workspace with `cargo publish --workspace` (one step, topological order, no fixed sleeps).
 9. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
 10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease
     automatically.
@@ -131,13 +129,7 @@ Use only when CI is genuinely blocked (account suspension, runner outage, secret
 version=$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
 
-cargo publish -p lean-rs-sys
-sleep 90 && cargo publish -p lean-toolchain
-sleep 90 && cargo publish -p lean-rs
-sleep 90 && cargo publish -p lean-rs-host
-sleep 90 && cargo publish -p lean-rs-worker-protocol
-sleep 90 && cargo publish -p lean-rs-worker-parent
-sleep 90 && cargo publish -p lean-rs-worker-child
+cargo publish --workspace
 
 git tag -s "v${version}" -m "lean-rs v${version}"
 git push origin "v${version}"

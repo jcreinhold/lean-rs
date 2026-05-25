@@ -407,7 +407,7 @@ run_gate "cargo test --doc --workspace" \
 	cargo test --doc --workspace
 
 run_gate "loader regression suite" \
-	cargo test -p lean-rs-worker --test loader_regressions -- --nocapture --test-threads=1
+	cargo test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
 
 run_rustdoc() {
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
@@ -437,7 +437,8 @@ if [[ "$RUN_PUBLIC_API" == 1 ]]; then
 	else
 		run_public_api_diff() {
 			local fail=0
-			for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker; do
+			for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
+				lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
 				local baseline="$REPO_ROOT/docs/api-review/${crate}-public.txt"
 				if [[ ! -f "$baseline" ]]; then
 					log_err "Missing baseline: $baseline"

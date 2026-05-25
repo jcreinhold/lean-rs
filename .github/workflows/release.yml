@@ -289,80 +289,21 @@ jobs:
       - name: Package tarball docs.rs simulation
         run: python3 scripts/check_package_docsrs.py
 
-      # `cargo publish --workspace --dry-run` verifies downstream crates against
-      # the crates.io index before this workflow has published the new internal
-      # dependency versions. That rejects valid staged releases such as
-      # lean-rs-sys 0.1.1 -> lean-toolchain 0.1.1 -> lean-rs 0.1.1. The live
-      # publish steps below do the real verification in dependency order after
-      # each upstream crate has reached the index.
+      # `cargo publish --workspace` (stabilised in Rust 1.90) computes the
+      # workspace dependency DAG, packages every crate, runs `cargo publish`'s
+      # verify build against a local registry overlay so downstream crates can
+      # see pending upstream publishes before the crates.io index has updated,
+      # then uploads in topological order (and in parallel where the DAG
+      # allows). This replaces the previous per-crate publish loop with
+      # 90-second sleeps between every step.
       - name: Package workspace tarballs
         run: cargo package --workspace --no-verify
 
-      - name: Publish lean-rs-sys
+      - name: Publish workspace
         if: inputs.dry_run != true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs-sys
-
-      - name: Wait for crates.io index (lean-rs-sys)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-toolchain
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-toolchain
-
-      - name: Wait for crates.io index (lean-toolchain)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-rs
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs
-
-      - name: Wait for crates.io index (lean-rs)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-rs-host
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs-host
-
-      - name: Wait for crates.io index (lean-rs-host)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-rs-worker-protocol
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs-worker-protocol
-
-      - name: Wait for crates.io index (lean-rs-worker-protocol)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-rs-worker-parent
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs-worker-parent
-
-      - name: Wait for crates.io index (lean-rs-worker-parent)
-        if: inputs.dry_run != true
-        run: sleep 90
-
-      - name: Publish lean-rs-worker-child
-        if: inputs.dry_run != true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p lean-rs-worker-child
+        run: cargo publish --workspace
 
       - name: Extract CHANGELOG section for this release
         if: inputs.dry_run != true && github.event_name == 'push'
