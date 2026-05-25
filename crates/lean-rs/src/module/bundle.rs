@@ -6,100 +6,17 @@
 //! Lean dylib needs it, initializes dependency modules when requested, and keeps
 //! every handle alive until the primary capability is dropped.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{LeanLibrary, LeanModule};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 
-/// Initializer for a Lean module hosted by a loaded dylib.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanModuleInitializer {
-    package: String,
-    module: String,
-}
-
-impl LeanModuleInitializer {
-    /// Create an initializer descriptor from Lake package and root module names.
-    #[must_use]
-    pub fn new(package: impl Into<String>, module: impl Into<String>) -> Self {
-        Self {
-            package: package.into(),
-            module: module.into(),
-        }
-    }
-
-    /// Lake package name used by the initializer.
-    #[must_use]
-    pub fn package_name(&self) -> &str {
-        &self.package
-    }
-
-    /// Root Lean module name used by the initializer.
-    #[must_use]
-    pub fn module_name(&self) -> &str {
-        &self.module
-    }
-}
-
-/// Dependency dylib that must stay alive while a capability is loaded.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LeanLibraryDependency {
-    path: PathBuf,
-    exports_symbols_for_dependents: bool,
-    initializer: Option<LeanModuleInitializer>,
-}
-
-impl LeanLibraryDependency {
-    /// Add a dependency dylib to the bundle.
-    #[must_use]
-    pub fn path(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-            exports_symbols_for_dependents: false,
-            initializer: None,
-        }
-    }
-
-    /// Make this dependency's Lean symbols available to later dylibs in the
-    /// same bundle.
-    ///
-    /// This is a capability-level requirement, not a platform-loader flag in
-    /// the public contract. On ELF platforms it maps to global symbol
-    /// visibility; other platforms use the equivalent behavior provided by the
-    /// native loader.
-    #[must_use]
-    pub fn export_symbols_for_dependents(mut self) -> Self {
-        self.exports_symbols_for_dependents = true;
-        self
-    }
-
-    /// Initialize a module from this dependency after it is opened.
-    #[must_use]
-    pub fn initializer(mut self, package: impl Into<String>, module: impl Into<String>) -> Self {
-        self.initializer = Some(LeanModuleInitializer::new(package, module));
-        self
-    }
-
-    /// On-disk path to the dependency dylib.
-    #[must_use]
-    pub fn path_ref(&self) -> &Path {
-        &self.path
-    }
-
-    /// Whether symbols from this dependency are exported to later bundle
-    /// members.
-    #[must_use]
-    pub fn exports_symbols_for_dependents(&self) -> bool {
-        self.exports_symbols_for_dependents
-    }
-
-    /// Optional module initializer for this dependency.
-    #[must_use]
-    pub fn module_initializer(&self) -> Option<&LeanModuleInitializer> {
-        self.initializer.as_ref()
-    }
-}
+// `LeanLibraryDependency` and `LeanModuleInitializer` are pure data shared
+// with the worker wire protocol; they live in `lean-toolchain` (below
+// `lean-rs`) so the protocol crate can reference them without re-linking
+// `libleanshared`. Re-exported here for callers using the historical paths.
+pub use lean_toolchain::{LeanLibraryDependency, LeanModuleInitializer};
 
 /// A primary Lean capability plus its dependent Lean dylibs.
 ///
@@ -130,13 +47,13 @@ impl<'lean> LeanLibraryBundle<'lean> {
     ) -> LeanResult<Self> {
         let mut opened_dependencies = Vec::new();
         for dependency in dependencies {
-            let library = if dependency.exports_symbols_for_dependents {
-                LeanLibrary::open_globally(runtime, &dependency.path)?
+            let library = if dependency.exports_symbols_for_dependents() {
+                LeanLibrary::open_globally(runtime, dependency.path_ref())?
             } else {
-                LeanLibrary::open(runtime, &dependency.path)?
+                LeanLibrary::open(runtime, dependency.path_ref())?
             };
-            if let Some(initializer) = dependency.initializer {
-                let _module = library.initialize_module(&initializer.package, &initializer.module)?;
+            if let Some(initializer) = dependency.into_module_initializer() {
+                let _module = library.initialize_module(initializer.package_name(), initializer.module_name())?;
             }
             opened_dependencies.push(library);
         }

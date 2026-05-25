@@ -15,55 +15,12 @@ use super::initializer::InitializerName;
 use super::{LeanBuiltCapability, LeanLibraryDependency};
 use crate::error::{LeanError, bound_message};
 
-/// Stable preflight diagnostic codes for manifest-backed capability loading.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum LeanLoaderDiagnosticCode {
-    /// The manifest path was absent, unreadable, or pointed at a missing file.
-    MissingManifest,
-    /// The manifest was not valid JSON or missed required fields.
-    MalformedManifest,
-    /// The manifest schema version is newer or otherwise unsupported.
-    UnsupportedManifestSchema,
-    /// The manifest's primary capability dylib is missing.
-    MissingPrimaryDylib,
-    /// A dependency dylib named by the manifest is missing.
-    MissingTransitiveDependency,
-    /// A dylib could not be parsed as a native object for this platform.
-    UnsupportedArchitecture,
-    /// The manifest was produced by an unsupported or mismatched Lean toolchain.
-    UnsupportedToolchainFingerprint,
-    /// A manifest appears older than the build artifact it describes.
-    StaleManifest,
-    /// The root module initializer named by the manifest is not exported.
-    MissingInitializer,
-    /// A Lean/imported symbol is not supplied by the manifest dependency set.
-    MissingImportedSymbol,
-}
-
-impl LeanLoaderDiagnosticCode {
-    /// Stable string identifier suitable for logs and support reports.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::MissingManifest => "lean_rs.loader.missing_manifest",
-            Self::MalformedManifest => "lean_rs.loader.malformed_manifest",
-            Self::UnsupportedManifestSchema => "lean_rs.loader.unsupported_manifest_schema",
-            Self::MissingPrimaryDylib => "lean_rs.loader.missing_primary_dylib",
-            Self::MissingTransitiveDependency => "lean_rs.loader.missing_transitive_dependency",
-            Self::UnsupportedArchitecture => "lean_rs.loader.unsupported_architecture",
-            Self::UnsupportedToolchainFingerprint => "lean_rs.loader.unsupported_toolchain_fingerprint",
-            Self::StaleManifest => "lean_rs.loader.stale_manifest",
-            Self::MissingInitializer => "lean_rs.loader.missing_initializer",
-            Self::MissingImportedSymbol => "lean_rs.loader.missing_imported_symbol",
-        }
-    }
-}
-
-impl std::fmt::Display for LeanLoaderDiagnosticCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// `LeanLoaderDiagnosticCode` is the single source of truth shared with the
+// worker wire protocol; it lives in `lean-toolchain` (below `lean-rs` in the
+// dep graph) so the protocol crate can reference it without re-linking
+// `libleanshared`. Re-exported here for callers using the historical path
+// `lean_rs::module::LeanLoaderDiagnosticCode`.
+pub use lean_toolchain::LeanLoaderDiagnosticCode;
 
 /// Severity of one loader preflight finding.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

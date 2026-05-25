@@ -71,8 +71,8 @@ impl Default for LeanWorkerElabOptions {
         Self {
             namespace_context: String::new(),
             file_label: "<elaborate>".to_owned(),
-            heartbeat_limit: lean_rs_host::LEAN_HEARTBEAT_LIMIT_DEFAULT,
-            diagnostic_byte_limit: lean_rs_host::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
+            heartbeat_limit: lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT,
+            diagnostic_byte_limit: lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
         }
     }
 }

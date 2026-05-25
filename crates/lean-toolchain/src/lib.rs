@@ -25,6 +25,8 @@ mod build_helpers;
 mod diagnostics;
 mod discover;
 mod fingerprint;
+mod limits;
+mod loader;
 mod modules;
 
 pub use build_helpers::{
@@ -36,6 +38,11 @@ pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};
 pub use lean_rs_sys::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
+pub use limits::{
+    LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
+    LEAN_HEARTBEAT_LIMIT_MAX,
+};
+pub use loader::{LeanLibraryDependency, LeanLoaderDiagnosticCode, LeanModuleInitializer};
 pub use modules::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
     LeanModuleSetFingerprint, discover_lake_modules, lake_target_declared,
