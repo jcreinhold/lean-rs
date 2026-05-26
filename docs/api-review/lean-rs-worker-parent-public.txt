@@ -529,6 +529,47 @@ impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerExit
 impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerExit
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerExit
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerExit
+pub struct lean_rs_worker_parent::LeanWorkerHostHandle
+impl lean_rs_worker_parent::LeanWorkerHostHandle
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::open_session(&mut self, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::open_session_with_imports(&mut self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::runtime_metadata(&self) -> lean_rs_worker_parent::LeanWorkerRuntimeMetadata
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::session_config(&self) -> &lean_rs_worker_parent::LeanWorkerSessionConfig
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::terminate(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerExit, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::worker(&self) -> &lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::worker_mut(&mut self) -> &mut lean_rs_worker_parent::LeanWorker
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerHostHandle
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerHostHandle
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerHostHandle
+pub struct lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::check(&self) -> lean_rs_worker_parent::LeanWorkerBootstrapReport
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::long_running_requests(self) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::max_frame_bytes(self, u32) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerHostHandle, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::request_timeout(self, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::shims_only(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::startup_timeout(self, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::worker_child(self, lean_rs_worker_parent::LeanWorkerChild) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::worker_executable(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::clone(&self) -> lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 pub struct lean_rs_worker_parent::LeanWorkerImportPlanConfig
 impl lean_rs_worker_parent::LeanWorkerImportPlanConfig
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::base_imports(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
@@ -841,6 +882,7 @@ impl<'worker> !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::L
 pub struct lean_rs_worker_parent::LeanWorkerSessionConfig
 impl lean_rs_worker_parent::LeanWorkerSessionConfig
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::shims_only(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerSessionConfig
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::clone(&self) -> lean_rs_worker_parent::LeanWorkerSessionConfig
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerSessionConfig

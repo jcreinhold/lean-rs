@@ -581,6 +581,7 @@ pub struct lean_rs_host::host::LeanHost<'lean>
 impl<'lean> lean_rs_host::LeanHost<'lean>
 pub fn lean_rs_host::LeanHost<'lean>::from_lake_project(&'lean lean_rs::runtime::init::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanHost<'lean>::load_capabilities<'h>(&'h self, &str, &str) -> lean_rs::error::LeanResult<lean_rs_host::LeanCapabilities<'lean, 'h>>
+pub fn lean_rs_host::LeanHost<'lean>::load_shims_only<'h>(&'h self) -> lean_rs::error::LeanResult<lean_rs_host::LeanCapabilities<'lean, 'h>>
 impl core::fmt::Debug for lean_rs_host::LeanHost<'_>
 pub fn lean_rs_host::LeanHost<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs_host::LeanHost<'lean>
@@ -1065,6 +1066,7 @@ pub struct lean_rs_host::LeanHost<'lean>
 impl<'lean> lean_rs_host::LeanHost<'lean>
 pub fn lean_rs_host::LeanHost<'lean>::from_lake_project(&'lean lean_rs::runtime::init::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanHost<'lean>::load_capabilities<'h>(&'h self, &str, &str) -> lean_rs::error::LeanResult<lean_rs_host::LeanCapabilities<'lean, 'h>>
+pub fn lean_rs_host::LeanHost<'lean>::load_shims_only<'h>(&'h self) -> lean_rs::error::LeanResult<lean_rs_host::LeanCapabilities<'lean, 'h>>
 impl core::fmt::Debug for lean_rs_host::LeanHost<'_>
 pub fn lean_rs_host::LeanHost<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs_host::LeanHost<'lean>

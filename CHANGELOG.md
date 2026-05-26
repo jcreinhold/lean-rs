@@ -9,6 +9,24 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.12] — 2026-05-26
+
+### Shims-only host sessions
+
+`lean-rs-host` now exposes `LeanHost::load_shims_only()`, a public bootstrap path for hosts that only need the bundled
+Meta, elaboration, kernel, declaration, source-range, and info-tree services. It loads the bundled interop and
+`LeanRsHostShims` dylibs, resolves the existing session symbols from the shim library, and deliberately skips opening
+the user's `:shared` dylib. Sessions still import modules from the project's `.olean` search path; ad-hoc
+`LeanSession::call_capability` calls return `lean_rs.unsupported` because no user library is attached.
+
+### Worker boundary: shims-only host handle
+
+`lean-rs-worker-parent` now has `LeanWorkerHostHandleBuilder::shims_only(...)` and `LeanWorkerHostHandle` for worker
+sessions backed only by bundled host shims. This keeps the existing `LeanWorkerCapabilityBuilder` contract strict for
+user `@[export]` dylibs while giving downstream tools a path that does not run `lake build <lib>:shared` before opening
+a session. The worker protocol adds `HostSessionMode::{Capability, ShimsOnly}` so the child can route shims-only opens
+to `LeanHost::load_shims_only()`.
+
 ## [0.1.11] — 2026-05-25
 
 ### `lean-toolchain`: worker bootstrap accepts `lakefile.toml`
