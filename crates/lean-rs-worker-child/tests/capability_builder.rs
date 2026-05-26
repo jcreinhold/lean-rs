@@ -1,13 +1,15 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lean_rs::LeanBuiltCapability;
 use lean_rs_worker_parent::{
     LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
-    LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerError, LeanWorkerRestartPolicy,
+    LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
+    LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerRestartPolicy,
 };
 use serde_json::json;
 
@@ -99,6 +101,75 @@ fn builder() -> LeanWorkerCapabilityBuilder {
     .worker_executable(worker_binary())
 }
 
+struct TempLakeProject {
+    root: PathBuf,
+}
+
+impl TempLakeProject {
+    fn new(name: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("lean-rs-worker-{name}-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).expect("create temporary Lake project");
+        fs::write(
+            root.join("lean-toolchain"),
+            fs::read_to_string(workspace_root().join("lean-toolchain")).expect("read workspace Lean toolchain"),
+        )
+        .expect("write temporary Lean toolchain pin");
+        Self { root }
+    }
+
+    fn path(&self) -> &Path {
+        &self.root
+    }
+
+    fn write(&self, relative: &str, content: &str) {
+        let path = self.root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent directory");
+        }
+        fs::write(path, content).expect("write temporary Lake project file");
+    }
+
+    fn lake_build_ok(&self, target: &str) {
+        let output = Command::new("lake")
+            .arg("build")
+            .arg(target)
+            .current_dir(&self.root)
+            .output()
+            .expect("lake command starts");
+        assert!(
+            output.status.success(),
+            "`lake build {target}` failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    fn lake_build_err(&self, target: &str) {
+        let output = Command::new("lake")
+            .arg("build")
+            .arg(target)
+            .current_dir(&self.root)
+            .output()
+            .expect("lake command starts");
+        assert!(
+            !output.status.success(),
+            "`lake build {target}` unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+impl Drop for TempLakeProject {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.root));
+    }
+}
+
 #[test]
 fn built_capability_builder_infers_lake_root_from_dylib_path() {
     let dylib = interop_root()
@@ -188,6 +259,37 @@ fn builder_opens_worker_capability_and_validates_metadata() {
         )
         .expect("metadata call succeeds through reopened session");
     assert_eq!(metadata.commands.len(), 2);
+}
+
+#[test]
+fn shims_only_host_handle_skips_user_shared_build() {
+    let project = TempLakeProject::new("host-handle-shims-only");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage worker_host_handle\nlean_lib Demo\n",
+    );
+    project.write("Demo.lean", "import Demo.Good\nimport Demo.Broken\n");
+    project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
+    project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
+    project.lake_build_ok("Demo.Good");
+    project.lake_build_err("Demo:shared");
+
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Demo.Good"])
+        .worker_executable(worker_binary())
+        .open()
+        .expect("shims-only host handle opens without building Demo:shared");
+
+    let mut session = handle
+        .open_session_with_imports(["Demo.Good"], None, None)
+        .expect("shims-only host handle imports a prebuilt user module");
+    let declarations = session
+        .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
+        .expect("standard declaration service works through shims-only handle");
+
+    assert!(
+        declarations.iter().any(|name| name == "goodValue"),
+        "shims-only host handle should see declarations from prebuilt user oleans"
+    );
 }
 
 #[test]

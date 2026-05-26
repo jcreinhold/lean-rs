@@ -1,8 +1,9 @@
-//! Builder for worker-backed downstream capabilities.
+//! Builders for worker-backed downstream capabilities and host sessions.
 //!
-//! This module composes Lake target building, worker child resolution, worker
-//! startup, session opening, and optional metadata validation. It deliberately
-//! does not know downstream command names or row schemas.
+//! This module composes worker child resolution, worker startup, and session
+//! opening. User-export capabilities additionally build a Lake shared-library
+//! target and may validate downstream metadata. Shim-backed host sessions skip
+//! that user dylib path entirely and use only the bundled host services.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,11 @@ const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
 /// and imports because those are the downstream capability's identity. Worker
 /// framing, child lifecycle, path probing, timeouts, and restart policy stay
 /// behind the builder.
+///
+/// Use [`LeanWorkerHostHandleBuilder::shims_only`] for tools that only need
+/// the bundled Meta, elaboration, kernel, declaration, and info-tree services.
+/// That path does not build or load the user's `:shared` facet and therefore
+/// keeps working when unrelated user modules break the shared library build.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerCapabilityBuilder {
     project_root: PathBuf,
@@ -269,18 +275,7 @@ impl LeanWorkerCapabilityBuilder {
 
     fn bootstrap_static_checks(&self) -> Vec<LeanWorkerBootstrapCheck> {
         let mut checks = Vec::new();
-        match self
-            .worker_child
-            .as_ref()
-            .map_or_else(resolve_default_worker_executable, LeanWorkerChild::resolve)
-        {
-            Ok(path) => {
-                if let Err(err) = validate_worker_child_path(&path) {
-                    checks.push(check_from_open_error(&err));
-                }
-            }
-            Err(err) => checks.push(check_from_open_error(&err)),
-        }
+        checks.extend(worker_child_static_checks(self.worker_child.as_ref()));
 
         if let Some(spec) = &self.built_capability
             && let Ok(manifest_path) = spec.resolved_manifest_path()
@@ -326,27 +321,13 @@ impl LeanWorkerCapabilityBuilder {
             None => lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
                 .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?,
         };
-        let worker_child = self.worker_child.unwrap_or_default();
-        let worker_executable = worker_child.resolve()?;
-        validate_worker_child_path(&worker_executable)?;
-        let lean_sysroot = worker_child.resolve_lean_sysroot()?;
-
-        let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
-        if let Some(timeout) = self.startup_timeout {
-            config = config.startup_timeout(timeout);
-        }
-        if let Some(timeout) = self.request_timeout {
-            config = config.request_timeout(timeout);
-        }
-        if let Some(policy) = self.restart_policy {
-            config = config.restart_policy(policy);
-        }
-        if let Some(cap) = self.max_frame_bytes {
-            config = config.max_frame_bytes(cap);
-        }
-
-        let mut worker = LeanWorker::spawn(&config)?;
-        worker.health()?;
+        let mut worker = spawn_checked_worker(
+            self.worker_child,
+            self.startup_timeout,
+            self.request_timeout,
+            self.restart_policy,
+            self.max_frame_bytes,
+        )?;
 
         let session_config = LeanWorkerSessionConfig::new(
             self.project_root.clone(),
@@ -381,6 +362,154 @@ impl LeanWorkerCapabilityBuilder {
             dylib_path,
             validated_metadata,
         })
+    }
+}
+
+/// Builder for a worker-backed host session that loads only bundled shims.
+///
+/// This is the bootstrap path for tools that use the standard host services
+/// exposed through `lean-rs-host`: Meta queries, elaboration, kernel checking,
+/// declaration listing, source ranges, and info trees. It deliberately has no
+/// package/library fields and no metadata validation hook because no user
+/// `@[export]` dylib is built or opened.
+#[derive(Clone, Debug)]
+pub struct LeanWorkerHostHandleBuilder {
+    project_root: PathBuf,
+    imports: Vec<String>,
+    worker_child: Option<LeanWorkerChild>,
+    startup_timeout: Option<Duration>,
+    request_timeout: Option<Duration>,
+    restart_policy: Option<LeanWorkerRestartPolicy>,
+    max_frame_bytes: Option<u32>,
+}
+
+impl LeanWorkerHostHandleBuilder {
+    /// Create a shims-only worker host-session builder for a Lake project.
+    ///
+    /// `project_root` is the directory containing `lakefile.lean`. `imports`
+    /// are the modules to import when the builder performs its initial session
+    /// open. The builder does not build a Lake `:shared` target.
+    #[must_use]
+    pub fn shims_only(project_root: impl Into<PathBuf>, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            project_root: project_root.into(),
+            imports: imports.into_iter().map(Into::into).collect(),
+            worker_child: None,
+            startup_timeout: None,
+            request_timeout: None,
+            restart_policy: None,
+            max_frame_bytes: None,
+        }
+    }
+
+    /// Use an explicit `lean-rs-worker-child` executable.
+    #[must_use]
+    pub fn worker_executable(mut self, path: impl Into<PathBuf>) -> Self {
+        self.worker_child = Some(LeanWorkerChild::path(path));
+        self
+    }
+
+    /// Resolve the worker executable with a packaged worker-child locator.
+    #[must_use]
+    pub fn worker_child(mut self, child: LeanWorkerChild) -> Self {
+        self.worker_child = Some(child);
+        self
+    }
+
+    /// Set the maximum time to wait for worker startup.
+    #[must_use]
+    pub fn startup_timeout(mut self, timeout: Duration) -> Self {
+        self.startup_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the maximum time to wait for one worker request.
+    #[must_use]
+    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Use the documented long-running request timeout profile.
+    #[must_use]
+    pub fn long_running_requests(mut self) -> Self {
+        self.request_timeout = Some(LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING);
+        self
+    }
+
+    /// Set the worker restart policy used after startup.
+    #[must_use]
+    pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
+        self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Set the per-frame byte cap negotiated with the worker child at handshake.
+    #[must_use]
+    pub fn max_frame_bytes(mut self, max_frame_bytes: u32) -> Self {
+        self.max_frame_bytes = Some(max_frame_bytes);
+        self
+    }
+
+    /// Check worker bootstrap facts before running a real command.
+    ///
+    /// The report validates the worker child locator, protocol handshake, and
+    /// shims-only session opening. It never builds a user shared-library target.
+    #[must_use]
+    pub fn check(&self) -> LeanWorkerBootstrapReport {
+        let mut checks = self.bootstrap_static_checks();
+        if checks.iter().any(LeanWorkerBootstrapCheck::is_error) {
+            return LeanWorkerBootstrapReport::new(checks);
+        }
+
+        match self.clone().open_unchecked() {
+            Ok(handle) => {
+                drop(handle.terminate());
+            }
+            Err(err) => checks.push(check_from_open_error(&err)),
+        }
+        LeanWorkerBootstrapReport::new(checks)
+    }
+
+    /// Start the worker, open a shims-only host session once, and return a ready handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker child cannot be resolved or
+    /// spawned, startup/health fails, or the shims-only session cannot open.
+    /// This method does not build a user Lake shared-library target.
+    pub fn open(self) -> Result<LeanWorkerHostHandle, LeanWorkerError> {
+        let report = self.bootstrap_static_report();
+        if let Some(check) = report.first_error() {
+            return Err(LeanWorkerError::Bootstrap {
+                code: check.code(),
+                message: check.message().to_owned(),
+            });
+        }
+        self.open_unchecked()
+    }
+
+    fn bootstrap_static_report(&self) -> LeanWorkerBootstrapReport {
+        LeanWorkerBootstrapReport::new(self.bootstrap_static_checks())
+    }
+
+    fn bootstrap_static_checks(&self) -> Vec<LeanWorkerBootstrapCheck> {
+        worker_child_static_checks(self.worker_child.as_ref())
+    }
+
+    fn open_unchecked(self) -> Result<LeanWorkerHostHandle, LeanWorkerError> {
+        let mut worker = spawn_checked_worker(
+            self.worker_child,
+            self.startup_timeout,
+            self.request_timeout,
+            self.restart_policy,
+            self.max_frame_bytes,
+        )?;
+        let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports);
+        {
+            let _session = worker.open_session(&session_config, None, None)?;
+        }
+        Ok(LeanWorkerHostHandle { worker, session_config })
     }
 }
 
@@ -631,6 +760,92 @@ impl LeanWorkerCapability {
     }
 }
 
+/// A worker-backed host session handle that is backed only by bundled shims.
+///
+/// Unlike [`LeanWorkerCapability`], this type has no user dylib path and no
+/// metadata exports. It owns the worker supervisor and a shims-only session
+/// configuration; each opened session can import project `.olean` files and
+/// call the standard worker services.
+#[derive(Debug)]
+pub struct LeanWorkerHostHandle {
+    worker: LeanWorker,
+    session_config: LeanWorkerSessionConfig,
+}
+
+impl LeanWorkerHostHandle {
+    /// Open a worker session for this host handle.
+    ///
+    /// The builder has already proved that the session can open. This method
+    /// is still fallible because worker cycling, cancellation, or a child
+    /// failure may require a fresh session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child cannot open
+    /// the configured imports, cancellation is already requested, a progress
+    /// sink panics, or protocol communication fails.
+    pub fn open_session(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
+        self.worker.open_session(&self.session_config, cancellation, progress)
+    }
+
+    /// Open a worker session with a caller-supplied import set, overriding the
+    /// imports the builder was constructed with.
+    ///
+    /// Lifecycle is identical to [`open_session`](Self::open_session): the
+    /// returned session borrows from `&mut self` and dies when dropped.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`open_session`](Self::open_session).
+    pub fn open_session_with_imports(
+        &mut self,
+        imports: impl IntoIterator<Item = impl Into<String>>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
+        let config = self.session_config.with_imports(imports);
+        self.worker.open_session(&config, cancellation, progress)
+    }
+
+    /// Return the session configuration used by this host handle.
+    #[must_use]
+    pub fn session_config(&self) -> &LeanWorkerSessionConfig {
+        &self.session_config
+    }
+
+    /// Return protocol/runtime facts captured from the worker handshake.
+    #[must_use]
+    pub fn runtime_metadata(&self) -> LeanWorkerRuntimeMetadata {
+        self.worker.runtime_metadata()
+    }
+
+    /// Borrow the underlying worker for lifecycle operations such as cycling.
+    #[must_use]
+    pub fn worker(&self) -> &LeanWorker {
+        &self.worker
+    }
+
+    /// Mutably borrow the underlying worker for lifecycle operations such as cycling.
+    #[must_use]
+    pub fn worker_mut(&mut self) -> &mut LeanWorker {
+        &mut self.worker
+    }
+
+    /// Terminate the worker child and return its exit status.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is already dead, the terminate
+    /// request fails, or waiting for the child fails.
+    pub fn terminate(self) -> Result<crate::supervisor::LeanWorkerExit, LeanWorkerError> {
+        self.worker.terminate()
+    }
+}
+
 #[derive(Clone, Debug)]
 struct CapabilityMetadataCheck {
     export: String,
@@ -713,6 +928,50 @@ struct WorkerCapabilityManifest {
     primary_dylib: PathBuf,
     package: String,
     module: String,
+}
+
+fn worker_child_static_checks(worker_child: Option<&LeanWorkerChild>) -> Vec<LeanWorkerBootstrapCheck> {
+    let mut checks = Vec::new();
+    match worker_child.map_or_else(resolve_default_worker_executable, LeanWorkerChild::resolve) {
+        Ok(path) => {
+            if let Err(err) = validate_worker_child_path(&path) {
+                checks.push(check_from_open_error(&err));
+            }
+        }
+        Err(err) => checks.push(check_from_open_error(&err)),
+    }
+    checks
+}
+
+fn spawn_checked_worker(
+    worker_child: Option<LeanWorkerChild>,
+    startup_timeout: Option<Duration>,
+    request_timeout: Option<Duration>,
+    restart_policy: Option<LeanWorkerRestartPolicy>,
+    max_frame_bytes: Option<u32>,
+) -> Result<LeanWorker, LeanWorkerError> {
+    let worker_child = worker_child.unwrap_or_default();
+    let worker_executable = worker_child.resolve()?;
+    validate_worker_child_path(&worker_executable)?;
+    let lean_sysroot = worker_child.resolve_lean_sysroot()?;
+
+    let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
+    if let Some(timeout) = startup_timeout {
+        config = config.startup_timeout(timeout);
+    }
+    if let Some(timeout) = request_timeout {
+        config = config.request_timeout(timeout);
+    }
+    if let Some(policy) = restart_policy {
+        config = config.restart_policy(policy);
+    }
+    if let Some(cap) = max_frame_bytes {
+        config = config.max_frame_bytes(cap);
+    }
+
+    let mut worker = LeanWorker::spawn(&config)?;
+    worker.health()?;
+    Ok(worker)
 }
 
 /// Locator for an app-owned worker child executable.
