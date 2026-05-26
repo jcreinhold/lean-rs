@@ -1,11 +1,12 @@
 //! `LeanHost` — entry point for the host-side capability API.
 //!
 //! A [`LeanHost`] binds a [`lean_rs::LeanRuntime`] borrow to a Lake project
-//! on disk. From it, [`LeanHost::load_capabilities`] opens a compiled
-//! capability dylib (e.g. `liblean__rs__fixture_LeanRsFixture.dylib`),
-//! pre-resolves the capability's session symbol addresses, and returns
-//! a [`LeanCapabilities`] that subsequent calls dispatch through without
-//! per-call `dlsym`.
+//! on disk. From it, [`LeanHost::load_capabilities`] opens a compiled user
+//! capability dylib for ad-hoc `@[export]` calls, while
+//! [`LeanHost::load_shims_only`] opens only the bundled host shims for the
+//! standard session services. Both paths pre-resolve the session symbol
+//! addresses and return a [`LeanCapabilities`] that subsequent calls dispatch
+//! through without per-call `dlsym`.
 //!
 //! See `docs/architecture/03-host-stack.md` for the full classification
 //! and the host → capabilities → session lifetime cascade.
@@ -75,6 +76,27 @@ impl<'lean> LeanHost<'lean> {
         let dylib_path = self.project.capability_dylib(package, lib_name);
         let library = LeanLibrary::open(self.runtime, &dylib_path)?;
         LeanCapabilities::new(self, library, package, lib_name)
+    }
+
+    /// Load the bundled host-shim and interop dylibs without opening a user
+    /// capability dylib.
+    ///
+    /// Sessions opened from the returned capabilities can import modules from
+    /// this Lake project's `.olean` search path and use the standard
+    /// shim-backed Meta, elaboration, kernel, info-tree, declaration, and
+    /// source-range services. [`crate::LeanSession::call_capability`] returns
+    /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because there is no user
+    /// library to dispatch arbitrary `@[export]` symbols through.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Host`] with stage
+    /// [`lean_rs::HostStage::Load`] / [`lean_rs::LeanDiagnosticCode::ModuleInit`]
+    /// if the bundled shim or interop dylibs cannot be built or located.
+    /// Returns [`lean_rs::HostStage::Link`] if any mandatory shim symbol is
+    /// missing.
+    pub fn load_shims_only<'h>(&'h self) -> LeanResult<LeanCapabilities<'lean, 'h>> {
+        LeanCapabilities::new_shims_only(self)
     }
 
     /// The runtime borrow this host was constructed with.

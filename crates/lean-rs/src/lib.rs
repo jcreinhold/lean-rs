@@ -113,6 +113,7 @@ pub mod __host_internals {
     pub use crate::error::host_cancelled;
     pub use crate::error::host_internal;
     pub use crate::error::host_module_init;
+    pub use crate::error::host_unsupported;
 }
 
 #[cfg(feature = "fuzzing")]

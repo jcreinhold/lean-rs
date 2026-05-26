@@ -545,6 +545,12 @@ pub fn host_module_init(message: impl Into<String>) -> LeanError {
     LeanError::module_init(message)
 }
 
+/// Construct an `Unsupported` host failure.
+#[doc(hidden)]
+pub fn host_unsupported(message: impl Into<String>) -> LeanError {
+    LeanError::host(HostStage::Link, LeanDiagnosticCode::Unsupported, message)
+}
+
 /// Construct a cooperative cancellation report. See [`LeanError::cancelled`].
 #[doc(hidden)]
 pub fn host_cancelled() -> LeanError {

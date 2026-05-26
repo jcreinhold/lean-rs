@@ -8,10 +8,11 @@
 //!   [`lean_rs::handle::LeanDeclaration`]) ship in the FFI primitive
 //!   crate `lean-rs`; the session methods here take and return them.
 //! - [`LeanHost`], [`LeanCapabilities`], [`LeanSession`] — Lake-project
-//!   entry point, capability loading (with pre-resolved session symbol
-//!   addresses cached at load time), and a long-lived session that owns
-//!   the imported `Lean.Environment` and dispatches every typed query,
-//!   elaboration, kernel check, bulk operation, and meta call.
+//!   entry point, capability loading (either user-dylib-backed or
+//!   shims-only, with pre-resolved session symbol addresses cached at load
+//!   time), and a long-lived session that owns the imported
+//!   `Lean.Environment` and dispatches every typed query, elaboration,
+//!   kernel check, bulk operation, and meta call.
 //! - [`elaboration`] — bounded [`elaboration::LeanElabOptions`], typed
 //!   [`elaboration::LeanDiagnostic`] / [`elaboration::LeanElabFailure`],
 //!   and the published byte / heartbeat ceilings consumed by
@@ -38,6 +39,10 @@
 //! let mut sess = caps.session(&["MyLib.SomeModule"], None, None)?;
 //! let decl     = sess.query_declaration("MyLib.SomeModule.myDef", None)?;
 //! ```
+//!
+//! Use [`LeanHost::load_shims_only`] instead of
+//! [`LeanHost::load_capabilities`] when the host only needs the bundled
+//! session services and will not call ad-hoc user `@[export]` symbols.
 //!
 //! Construction or inspection of the handle types in [`lean_rs::handle`]
 //! outside of a session goes through Lean fixture exports reached via

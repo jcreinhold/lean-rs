@@ -30,7 +30,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -129,8 +129,7 @@ pub enum Request {
     },
     OpenHostSession {
         project_root: String,
-        package: String,
-        lib_name: String,
+        mode: HostSessionMode,
         imports: Vec<String>,
     },
     Elaborate {
@@ -208,6 +207,17 @@ pub enum Request {
     EmitTestRowsThenExit,
     EmitTestRowsThenPanic,
     Terminate,
+}
+
+/// How the worker child should load host-session capabilities.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum HostSessionMode {
+    /// Open a user capability dylib and the bundled host shims.
+    Capability { package: String, lib_name: String },
+    /// Open only the bundled host shims.
+    ShimsOnly,
 }
 
 /// Child-issued terminal response body for one [`Request`].

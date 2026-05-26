@@ -580,12 +580,7 @@ impl LeanWorkerCapability {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
-        let config = LeanWorkerSessionConfig::new(
-            self.session_config.project_root_string(),
-            self.session_config.package().to_owned(),
-            self.session_config.lib_name().to_owned(),
-            imports,
-        );
+        let config = self.session_config.with_imports(imports);
         self.worker.open_session(&config, cancellation, progress)
     }
 

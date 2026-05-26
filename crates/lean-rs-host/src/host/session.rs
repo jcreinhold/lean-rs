@@ -2051,7 +2051,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.library().resolve_function_symbol(name)?;
+        let Some(library) = self.capabilities.user_library() else {
+            return Err(lean_rs::__host_internals::host_unsupported(format!(
+                "call_capability('{name}') requires a user capability dylib; this LeanCapabilities was loaded with load_shims_only",
+            )));
+        };
+        let address = library.resolve_function_symbol(name)?;
         check_cancellation(cancellation)?;
         // SAFETY: `resolve_function_symbol` resolved an address inside
         // the capability's `LeanLibrary<'lean>` (the dylib outlives the

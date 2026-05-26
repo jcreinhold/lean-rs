@@ -9,8 +9,11 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::host::meta::{
     LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
@@ -20,8 +23,8 @@ use crate::{
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
     LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
-use lean_rs::LeanRuntime;
 use lean_rs::error::{HostStage, LeanError};
+use lean_rs::{LeanDiagnosticCode, LeanIo, LeanRuntime};
 
 // -- fixture setup -------------------------------------------------------
 
@@ -40,6 +43,64 @@ fn runtime() -> &'static LeanRuntime {
 
 fn fixture_host() -> LeanHost<'static> {
     LeanHost::from_lake_project(runtime(), fixture_lake_root()).expect("host opens cleanly")
+}
+
+struct TempLakeProject {
+    root: PathBuf,
+}
+
+impl TempLakeProject {
+    fn new(name: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("lean-rs-{name}-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).expect("create temporary Lake project");
+        fs::write(
+            root.join("lean-toolchain"),
+            format!("leanprover/lean4:v{}\n", lean_rs_sys::LEAN_VERSION),
+        )
+        .expect("write temporary Lean toolchain pin");
+        Self { root }
+    }
+
+    fn path(&self) -> &Path {
+        &self.root
+    }
+
+    fn write(&self, relative: &str, content: &str) {
+        let path = self.root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent directory");
+        }
+        fs::write(path, content).expect("write temporary Lake project file");
+    }
+
+    fn lake_build(&self, target: &str) -> std::process::Output {
+        Command::new("lake")
+            .arg("build")
+            .arg(target)
+            .current_dir(&self.root)
+            .output()
+            .expect("lake command starts")
+    }
+
+    fn lake_build_ok(&self, target: &str) {
+        let output = self.lake_build(target);
+        assert!(
+            output.status.success(),
+            "`lake build {target}` failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+impl Drop for TempLakeProject {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.root));
+    }
 }
 
 // -- from_lake_project ---------------------------------------------------
@@ -93,6 +154,89 @@ fn load_capabilities_missing_dylib_is_load_error() {
         }
         LeanError::LeanException(exc) => panic!("expected Host(Load) failure, got LeanException {exc:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected Host(Load) failure, got cancellation {cancelled:?}"),
+    }
+}
+
+#[test]
+fn load_shims_only_opens_session_against_user_oleans() {
+    let project = TempLakeProject::new("shims-only-good");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage demo_shims\nlean_lib Good\n",
+    );
+    project.write("Good.lean", "def goodValue : Nat := 41\n");
+    project.lake_build_ok("Good");
+
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut session = caps
+        .session(&["Good", "LeanRsHostShims.Meta"], None, None)
+        .expect("session imports user and shim oleans");
+
+    let declarations = session
+        .list_declarations_strings(&LeanDeclarationFilter::default(), None, None)
+        .expect("list declarations works");
+    assert!(
+        declarations.iter().any(|name| name == "goodValue"),
+        "user declaration should be visible in shim-only session"
+    );
+
+    let expr = session
+        .declaration_type("goodValue", None)
+        .expect("type query succeeds")
+        .expect("goodValue has a type");
+    let inferred = session
+        .run_meta(&infer_type(), expr, &LeanMetaOptions::new(), None)
+        .expect("infer_type dispatch succeeds");
+    assert_eq!(inferred.status(), MetaCallStatus::Ok);
+
+    let checked = session
+        .kernel_check(
+            "theorem good_kernel_check : 1 + 1 = 2 := rfl",
+            &LeanElabOptions::new(),
+            None,
+            None,
+        )
+        .expect("kernel_check dispatch succeeds");
+    assert_eq!(checked.status(), EvidenceStatus::Checked);
+
+    let err = session
+        .call_capability::<(), LeanIo<()>>("demo_shims_no_user_export", (), None)
+        .expect_err("shims-only capabilities do not dispatch user exports");
+    assert_eq!(err.code(), LeanDiagnosticCode::Unsupported);
+}
+
+#[test]
+fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() {
+    let project = TempLakeProject::new("shims-only-broken");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage demo_broken\nlean_lib Good\nlean_lib Broken\n",
+    );
+    project.write("Good.lean", "def goodValue : Nat := 41\n");
+    project.write("Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
+    project.lake_build_ok("Good");
+    let broken_build = project.lake_build("Broken:shared");
+    assert!(
+        !broken_build.status.success(),
+        "`lake build Broken:shared` should fail for the broken fixture"
+    );
+
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut good_session = caps.session(&["Good"], None, None).expect("unrelated module imports");
+    let kind = good_session
+        .declaration_kind("goodValue", None)
+        .expect("declaration query works in unrelated module");
+    assert_eq!(kind, "definition");
+
+    let Err(broken_err) = caps.session(&["Broken"], None, None) else {
+        panic!("broken module import unexpectedly succeeded");
+    };
+    match broken_err {
+        LeanError::LeanException(_) => {}
+        LeanError::Host(failure) => panic!("expected LeanException for broken import, got Host {failure:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected LeanException for broken import, got {cancelled:?}"),
     }
 }
 

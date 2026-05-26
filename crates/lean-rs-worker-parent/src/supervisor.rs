@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use std::sync::Mutex;
 
 use lean_rs_worker_protocol::protocol::{
-    MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, Request, Response, read_frame, write_frame,
+    HostSessionMode, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, Request, Response,
+    read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
@@ -23,8 +24,8 @@ use crate::session::LeanWorkerDataSinkTarget;
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerDataSink, LeanWorkerDiagnosticSink, LeanWorkerProgressSink,
     LeanWorkerRawDataRow, LeanWorkerRawDataSink, LeanWorkerRuntimeMetadata, LeanWorkerSessionConfig,
-    LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row, report_parent_diagnostic,
-    report_parent_progress,
+    LeanWorkerSessionMode, LeanWorkerStreamSummary, check_cancelled, elapsed_event, report_parent_data_row,
+    report_parent_diagnostic, report_parent_progress,
 };
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -976,10 +977,16 @@ impl LeanWorker {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(true)?;
+        let mode = match config.mode() {
+            LeanWorkerSessionMode::Capability { package, lib_name } => HostSessionMode::Capability {
+                package: package.clone(),
+                lib_name: lib_name.clone(),
+            },
+            LeanWorkerSessionMode::ShimsOnly => HostSessionMode::ShimsOnly,
+        };
         self.send_request(Request::OpenHostSession {
             project_root: config.project_root_string(),
-            package: config.package().to_owned(),
-            lib_name: config.lib_name().to_owned(),
+            mode,
             imports: config.imports().to_vec(),
         })?;
         self.record_request(true);

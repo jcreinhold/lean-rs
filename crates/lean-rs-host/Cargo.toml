@@ -38,7 +38,11 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-tracing-subscriber = { workspace = true }
+# Examples under `examples/` install a `tracing_subscriber::fmt` sink so
+# `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces host spans. The
+# workspace dependency stays lean for production builds; this dev override
+# enables the example-only formatter/filter layers.
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 trybuild = "1"
 
 [[bench]]

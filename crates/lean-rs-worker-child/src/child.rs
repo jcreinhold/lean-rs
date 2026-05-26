@@ -21,8 +21,8 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use lean_rs_worker_protocol::protocol::{
-    DataRowEmitter, Diagnostic, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request, Response,
-    StreamSummary, read_frame, write_frame,
+    DataRowEmitter, Diagnostic, HostSessionMode, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request,
+    Response, StreamSummary, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow,
@@ -234,11 +234,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             }
             Request::OpenHostSession {
                 project_root,
-                package,
-                lib_name,
+                mode,
                 imports,
             } => {
-                let response = match HostSessionState::open(runtime, &project_root, &package, &lib_name, &imports) {
+                let response = match HostSessionState::open(runtime, &project_root, &mode, &imports) {
                     Ok(state) => {
                         host_session = Some(state);
                         Response::HostSessionOpened
@@ -508,12 +507,21 @@ impl HostSessionState {
     fn open(
         runtime: &'static LeanRuntime,
         project_root: &str,
-        package: &str,
-        lib_name: &str,
+        mode: &HostSessionMode,
         imports: &[String],
     ) -> LeanResult<Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let capabilities = Box::leak(Box::new(host.load_capabilities(package, lib_name)?));
+        let capabilities = match mode {
+            HostSessionMode::Capability { package, lib_name } => {
+                Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
+            }
+            HostSessionMode::ShimsOnly => Box::leak(Box::new(host.load_shims_only()?)),
+            _ => {
+                return Err(host_internal(
+                    "worker child received an unsupported host session loading mode".to_owned(),
+                ));
+            }
+        };
         let import_refs: Vec<&str> = imports.iter().map(String::as_str).collect();
         let session = capabilities.session(&import_refs, None, None)?;
         Ok(Self {

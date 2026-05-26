@@ -1,13 +1,16 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs::LeanRuntime;
 use lean_rs_host::{EvidenceStatus, LeanElabOptions, LeanHost};
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerElabOptions, LeanWorkerError,
-    LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSessionConfig,
+    LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions,
+    LeanWorkerError, LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -52,6 +55,56 @@ fn elaboration_session_config() -> LeanWorkerSessionConfig {
         "LeanRsFixture",
         ["LeanRsHostShims.Elaboration"],
     )
+}
+
+struct TempLakeProject {
+    root: PathBuf,
+}
+
+impl TempLakeProject {
+    fn new(name: &str) -> Self {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("lean-rs-worker-{name}-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).expect("create temporary Lake project");
+        fs::write(
+            root.join("lean-toolchain"),
+            fs::read_to_string(workspace_root().join("lean-toolchain")).expect("read workspace Lean toolchain"),
+        )
+        .expect("write temporary Lean toolchain pin");
+        Self { root }
+    }
+
+    fn path(&self) -> &Path {
+        &self.root
+    }
+
+    fn write(&self, relative: &str, content: &str) {
+        fs::write(self.root.join(relative), content).expect("write temporary Lake project file");
+    }
+
+    fn lake_build_ok(&self, target: &str) {
+        let output = Command::new("lake")
+            .arg("build")
+            .arg(target)
+            .current_dir(&self.root)
+            .output()
+            .expect("lake command starts");
+        assert!(
+            output.status.success(),
+            "`lake build {target}` failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+}
+
+impl Drop for TempLakeProject {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.root));
+    }
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -128,6 +181,34 @@ fn declaration_bulk_adapter_matches_in_process_session() {
 
     assert_eq!(worker_kinds, direct_kinds);
     assert_eq!(worker_names, direct_names);
+}
+
+#[test]
+fn shims_only_session_opens_without_user_dylib() {
+    let project = TempLakeProject::new("shims-only");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage worker_shims\nlean_lib Good\n",
+    );
+    project.write("Good.lean", "def goodValue : Nat := 41\n");
+    project.lake_build_ok("Good");
+
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(
+            &LeanWorkerSessionConfig::shims_only(project.path(), ["Good"]),
+            None,
+            None,
+        )
+        .expect("shims-only worker session opens");
+    let declarations = session
+        .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
+        .expect("list declarations works through shims-only worker session");
+
+    assert!(
+        declarations.iter().any(|name| name == "goodValue"),
+        "worker shims-only session should see user oleans"
+    );
 }
 
 #[test]

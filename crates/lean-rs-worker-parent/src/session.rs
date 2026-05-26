@@ -31,9 +31,14 @@ use crate::supervisor::{LeanWorker, LeanWorkerError};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerSessionConfig {
     project_root: PathBuf,
-    package: String,
-    lib_name: String,
+    mode: LeanWorkerSessionMode,
     imports: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum LeanWorkerSessionMode {
+    Capability { package: String, lib_name: String },
+    ShimsOnly,
 }
 
 impl LeanWorkerSessionConfig {
@@ -46,8 +51,20 @@ impl LeanWorkerSessionConfig {
     ) -> Self {
         Self {
             project_root: project_root.into(),
-            package: package.into(),
-            lib_name: lib_name.into(),
+            mode: LeanWorkerSessionMode::Capability {
+                package: package.into(),
+                lib_name: lib_name.into(),
+            },
+            imports: imports.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Create a session configuration backed only by the bundled host shims.
+    #[must_use]
+    pub fn shims_only(project_root: impl Into<PathBuf>, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            project_root: project_root.into(),
+            mode: LeanWorkerSessionMode::ShimsOnly,
             imports: imports.into_iter().map(Into::into).collect(),
         }
     }
@@ -56,16 +73,20 @@ impl LeanWorkerSessionConfig {
         self.project_root.to_string_lossy().into_owned()
     }
 
-    pub(crate) fn package(&self) -> &str {
-        &self.package
-    }
-
-    pub(crate) fn lib_name(&self) -> &str {
-        &self.lib_name
+    pub(crate) fn mode(&self) -> &LeanWorkerSessionMode {
+        &self.mode
     }
 
     pub(crate) fn imports(&self) -> &[String] {
         &self.imports
+    }
+
+    pub(crate) fn with_imports(&self, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            project_root: self.project_root.clone(),
+            mode: self.mode.clone(),
+            imports: imports.into_iter().map(Into::into).collect(),
+        }
     }
 }
 

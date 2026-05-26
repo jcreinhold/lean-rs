@@ -1,15 +1,15 @@
-//! `LeanCapabilities` — loaded user, generic interop, and host shim
+//! `LeanCapabilities` — loaded generic interop, host shim, and optional user
 //! dylibs with session symbol addresses pre-resolved.
 //!
-//! [`LeanCapabilities`] owns three [`lean_rs::module::LeanLibrary`]
-//! handles and caches the session symbol addresses that
+//! [`LeanCapabilities`] owns the [`lean_rs::module::LeanLibrary`] handles and
+//! caches the session symbol addresses that
 //! [`crate::host::LeanSession`] dispatches through:
 //!
-//! - The **user's capability dylib** is the artefact the consumer
-//!   built with `lake build` and named in
-//!   [`crate::host::LeanHost::load_capabilities`]. It contains the
-//!   user's own `@[export]` symbols ([`crate::LeanSession::call_capability`]
-//!   dispatches here).
+//! - The **user's capability dylib**, when present, is the artefact the
+//!   consumer built with `lake build` and named in
+//!   [`crate::host::LeanHost::load_capabilities`]. It contains the user's own
+//!   `@[export]` symbols ([`crate::LeanSession::call_capability`] dispatches
+//!   here).
 //! - The **generic interop dylib** is
 //!   `liblean__rs__interop__shims_LeanRsInterop.dylib`; it carries
 //!   reusable callback helpers imported by the host progress shims.
@@ -31,9 +31,10 @@
 //! construction means each later query is one struct-field read and
 //! one FFI call — no per-query `dlsym`.
 //!
-//! Construction goes through [`crate::host::LeanHost::load_capabilities`];
-//! [`LeanCapabilities::session`] then imports a module list and returns
-//! the long-lived [`crate::host::LeanSession`] handle.
+//! Construction goes through either [`crate::host::LeanHost::load_capabilities`]
+//! or [`crate::host::LeanHost::load_shims_only`]; [`LeanCapabilities::session`]
+//! then imports a module list and returns the long-lived
+//! [`crate::host::LeanSession`] handle.
 
 use core::fmt;
 
@@ -44,7 +45,7 @@ use crate::host::session::{LeanSession, SessionSymbols};
 use lean_rs::error::LeanResult;
 use lean_rs::module::LeanLibrary;
 
-/// Loaded capability, generic interop, and host shim dylibs with session
+/// Loaded generic interop, host shim, and optional user dylibs with session
 /// symbol addresses pre-resolved.
 ///
 /// Owns the [`LeanLibrary`] handles so callers do not have to track
@@ -53,11 +54,12 @@ use lean_rs::module::LeanLibrary;
 /// [`Sync`]: inherited from the contained `LeanLibrary` handles.
 pub struct LeanCapabilities<'lean, 'h> {
     host: &'h LeanHost<'lean>,
-    /// User's capability dylib — the one named in `load_capabilities`.
+    /// User's capability dylib — the one named in `load_capabilities`, absent
+    /// for `load_shims_only`.
     /// `pub(crate)` accessor below exposes it to
     /// [`crate::LeanSession::call_capability`] for ad-hoc dispatch on
     /// user-authored `@[export]` symbols.
-    user_library: LeanLibrary<'lean>,
+    user_library: Option<LeanLibrary<'lean>>,
     /// Generic interop shim dylib carrying reusable callback helpers used by
     /// host progress shims. Loaded globally before the host shim dylib so
     /// generated `LeanRsInterop.*` initializer references resolve.
@@ -108,38 +110,41 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         package: &str,
         lib_name: &str,
     ) -> LeanResult<Self> {
-        // Load order matters. The host shim imports LeanRsInterop.Callback,
-        // so the generic interop dylib must be global before the host shim
-        // initializer runs. Consumers no longer require host shims in their
-        // Lake package; the host stack opens and initializes both bundled shim
-        // dylibs explicitly before the user dylib initializes.
-        let interop_dylib_path = crate::host::lake::LakeProject::interop_dylib()?;
-        let interop_library = LeanLibrary::open_globally(host.runtime(), &interop_dylib_path)?;
-        let _interop_module = interop_library.initialize_module(
-            crate::host::lake::INTEROP_PACKAGE_NAME,
-            crate::host::lake::INTEROP_LIB_NAME,
-        )?;
-
-        let shim_dylib_path = crate::host::lake::LakeProject::shim_dylib()?;
-        let shim_library = LeanLibrary::open_globally(host.runtime(), &shim_dylib_path)?;
-        // Explicitly initialize the shim's root module too, so the
-        // shim's @[export] functions are live regardless of whether
-        // the user's chain reaches them transitively.
-        let _shim_module =
-            shim_library.initialize_module(crate::host::lake::SHIM_PACKAGE_NAME, crate::host::lake::SHIM_LIB_NAME)?;
+        let ShimLibraries {
+            interop_library,
+            shim_library,
+            symbols,
+        } = load_shim_libraries(host)?;
 
         // Now the user dylib. It does not need to depend on the host shims;
         // ad-hoc user exports still resolve from this library.
         let _user_module = user_library.initialize_module(package, lib_name)?;
 
-        // The 28 mandatory + 6 optional `lean_rs_host_*` symbols live
-        // in the shim dylib; resolve them there.
-        // `LeanSession::call_capability` (separately) routes ad-hoc
-        // user-authored `@[export]` symbols through `user_library`.
-        let symbols = SessionSymbols::resolve(&shim_library)?;
         Ok(Self {
             host,
-            user_library,
+            user_library: Some(user_library),
+            interop_library,
+            shim_library,
+            symbols,
+        })
+    }
+
+    /// Build a [`LeanCapabilities`] backed only by the bundled interop and
+    /// host shim dylibs.
+    ///
+    /// Sessions opened from this value can use every shim-backed session
+    /// operation. [`crate::LeanSession::call_capability`] returns
+    /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because no user dylib is
+    /// attached.
+    pub(crate) fn new_shims_only(host: &'h LeanHost<'lean>) -> LeanResult<Self> {
+        let ShimLibraries {
+            interop_library,
+            shim_library,
+            symbols,
+        } = load_shim_libraries(host)?;
+        Ok(Self {
+            host,
+            user_library: None,
             interop_library,
             shim_library,
             symbols,
@@ -181,7 +186,8 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         &self.symbols
     }
 
-    /// The user's owned capability [`LeanLibrary`].
+    /// The user's owned capability [`LeanLibrary`], if this capability was
+    /// loaded with a user dylib.
     ///
     /// `pub(crate)` so [`crate::LeanSession::call_capability`] can
     /// resolve ad-hoc function symbols on the user's dylib without
@@ -190,7 +196,39 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// fixed contract (the 28+6 `lean_rs_host_*` symbols pre-resolved
     /// in `symbols`); arbitrary user `@[export]` symbols live in the
     /// user's dylib.
-    pub(crate) fn library(&self) -> &LeanLibrary<'lean> {
-        &self.user_library
+    pub(crate) fn user_library(&self) -> Option<&LeanLibrary<'lean>> {
+        self.user_library.as_ref()
     }
+}
+
+struct ShimLibraries<'lean> {
+    interop_library: LeanLibrary<'lean>,
+    shim_library: LeanLibrary<'lean>,
+    symbols: SessionSymbols,
+}
+
+fn load_shim_libraries<'lean>(host: &LeanHost<'lean>) -> LeanResult<ShimLibraries<'lean>> {
+    // Load order matters. The host shim imports LeanRsInterop.Callback, so
+    // the generic interop dylib must be global before the host shim
+    // initializer runs.
+    let interop_dylib_path = crate::host::lake::LakeProject::interop_dylib()?;
+    let interop_library = LeanLibrary::open_globally(host.runtime(), &interop_dylib_path)?;
+    let _interop_module = interop_library.initialize_module(
+        crate::host::lake::INTEROP_PACKAGE_NAME,
+        crate::host::lake::INTEROP_LIB_NAME,
+    )?;
+
+    let shim_dylib_path = crate::host::lake::LakeProject::shim_dylib()?;
+    let shim_library = LeanLibrary::open_globally(host.runtime(), &shim_dylib_path)?;
+    let _shim_module =
+        shim_library.initialize_module(crate::host::lake::SHIM_PACKAGE_NAME, crate::host::lake::SHIM_LIB_NAME)?;
+
+    // The 28 mandatory + 6 optional `lean_rs_host_*` symbols live in the
+    // shim dylib; resolve them there in both capability-loading modes.
+    let symbols = SessionSymbols::resolve(&shim_library)?;
+    Ok(ShimLibraries {
+        interop_library,
+        shim_library,
+        symbols,
+    })
 }

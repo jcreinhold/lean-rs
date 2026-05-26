@@ -19,12 +19,12 @@ The three central types nest:
 
 ```text
 LeanHost            opened once per Lean runtime
-  └─ LeanCapabilities   loaded once per (consumer dylib + shim dylib) pair
+  └─ LeanCapabilities   loaded once per user capability, or shims-only
        └─ LeanSession   one per call, returned from caps.session(...)
 ```
 
-Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into the same capability, and open a
-fresh `LeanSession` for each unit of work.
+Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across calls into the same loading mode, and open
+a fresh `LeanSession` for each unit of work.
 
 Supports the same Lean toolchain window as [`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.26.0 through
 4.29.1 plus the 4.30.0-rc2 release candidate**; see
@@ -127,6 +127,11 @@ cargo run
 `CargoLeanCapability` runs `lake build MyCapability:shared`, emits Cargo rerun and link directives, and exposes the
 built dylib path at compile time. `load_capabilities` also builds and opens the crate-bundled `LeanRsInterop` and
 `LeanRsHostShims` dylibs, sharing one Lean runtime; per-module `initialize_*` functions are idempotent.
+
+Hosts that only need the standard shim-backed session services can use `host.load_shims_only()?` instead. That path
+builds and opens only the bundled interop and host shim dylibs; it can import any `.olean` files on the Lake project's
+search path and run Meta, elaboration, kernel, info-tree, and declaration services, but
+`LeanSession::call_capability` returns `lean_rs::LeanDiagnosticCode::Unsupported` because no user dylib is attached.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed `LeanProgressSink`
 for live in-thread progress events. Passing `None` keeps the no-progress fast path.
