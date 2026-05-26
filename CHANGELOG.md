@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.14] — 2026-05-26
+
+### Module-system headers in info-tree processing
+
+`process_module_with_info_tree` now handles Lean 4's module-system headers: the `module` keyword, `public import`,
+ordinary private-scope imports, and `import all`. Files using `import all` now resolve the named module instead of
+surfacing `unknown module prefix 'all'`, and `userImports` / `missingImports` report the bare module names just as the
+legacy header path does.
+
 ## [0.1.13] — 2026-05-26
 
 ### Lake-manifest transitive search paths in shims-only sessions

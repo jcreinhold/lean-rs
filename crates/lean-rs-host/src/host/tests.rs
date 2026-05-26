@@ -140,6 +140,19 @@ fn write_transitive_dependency_fixture(project: &TempLakeProject) {
     project.lake_build_ok("Consumer");
 }
 
+fn write_module_syntax_fixture(project: &TempLakeProject) {
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage module_syntax_fixture\nlean_lib Fixture\n",
+    );
+    project.write("Fixture/Imported.lean", "module\n\npublic def imported : Nat := 2\n");
+    project.write("Fixture/Internal.lean", "module\n\ndef internalSecret : Nat := 40\n");
+    project.write("Fixture/PrivateScope.lean", "module\n\ndef privateOnly : Nat := 7\n");
+    project.lake_build_ok("Fixture.Imported");
+    project.lake_build_ok("Fixture.Internal");
+    project.lake_build_ok("Fixture.PrivateScope");
+}
+
 // -- from_lake_project ---------------------------------------------------
 
 #[test]
@@ -1615,5 +1628,130 @@ theorem t : True := by trivial
     assert_eq!(
         first.start_line, 7,
         "first tactic must be at original file's line 7, got {first:?}",
+    );
+}
+
+#[test]
+fn session_process_module_with_info_tree_handles_module_system_header() {
+    use crate::host::process::ProcessModuleOutcome;
+
+    let project = TempLakeProject::new("module-system-header-host");
+    write_module_syntax_fixture(&project);
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut session = caps
+        .session(
+            &["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"],
+            None,
+            None,
+        )
+        .expect("session imports module-system fixture dependencies");
+
+    let src = "\
+module
+
+public import Fixture.Imported
+import all Fixture.Internal
+import Fixture.PrivateScope
+
+def moduleSyntaxFoo : Nat := imported + internalSecret
+#check privateOnly
+";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::Ok { file, imports } = outcome else {
+        panic!("expected Ok, got {outcome:?}");
+    };
+
+    assert_eq!(
+        imports,
+        vec![
+            "Fixture.Imported".to_string(),
+            "Fixture.Internal".to_string(),
+            "Fixture.PrivateScope".to_string(),
+        ],
+        "imports must be bare module names, without `public` or `all` modifiers",
+    );
+    assert!(
+        !file.terms.is_empty(),
+        "module-system body must produce term info nodes, got {:?}",
+        file.terms
+    );
+    let diagnostics = file.diagnostics.diagnostics();
+    let messages: Vec<&str> = diagnostics.iter().map(|diagnostic| diagnostic.message()).collect();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error && d.message().contains("privateOnly")),
+        "ordinary imports under `module` must not expose private declarations, got {diagnostics:?}",
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error && d.message().contains("internalSecret")),
+        "`import all` under `module` must expose private declarations from the imported module, got {diagnostics:?}",
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("unknown module prefix 'all'")),
+        "`import all` must resolve the named module, got {messages:?}",
+    );
+}
+
+#[test]
+fn session_process_module_with_info_tree_reports_module_system_missing_imports() {
+    use crate::host::process::ProcessModuleOutcome;
+
+    let project = TempLakeProject::new("module-system-missing-host");
+    write_module_syntax_fixture(&project);
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut session = caps
+        .session(&["Fixture.Imported"], None, None)
+        .expect("session imports available fixture module");
+
+    let src = "\
+module
+
+public import Fixture.Missing
+
+def moduleSyntaxFoo : Nat := 1
+";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::MissingImports { imports, missing, .. } = outcome else {
+        panic!("expected MissingImports, got {outcome:?}");
+    };
+
+    assert_eq!(imports, vec!["Fixture.Missing".to_string()]);
+    assert_eq!(missing, vec!["Fixture.Missing".to_string()]);
+}
+
+#[test]
+fn session_process_module_with_info_tree_reports_module_system_header_parse_error() {
+    use crate::host::process::ProcessModuleOutcome;
+
+    let host = fixture_host();
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut session = caps
+        .session(&["LeanRsHostShims.Elaboration"], None, None)
+        .expect("session imports shims");
+
+    let src = "module\n\npublic import 123\n\ndef moduleSyntaxFoo : Nat := 1\n";
+    let outcome = session
+        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ProcessModuleOutcome::HeaderParseFailed { diagnostics } = outcome else {
+        panic!("expected HeaderParseFailed, got {outcome:?}");
+    };
+
+    assert!(
+        diagnostics
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error),
+        "malformed module-system header must record an error diagnostic, got {:?}",
+        diagnostics.diagnostics(),
     );
 }

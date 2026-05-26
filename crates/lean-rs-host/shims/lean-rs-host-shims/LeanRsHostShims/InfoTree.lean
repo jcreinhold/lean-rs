@@ -289,17 +289,30 @@ def processModuleWithInfoTree
   let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
   let loadedModules := env.header.moduleNames.map (·.toString)
   let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
-  let mut commandState : Command.State := Command.mkState env {} opts
-  commandState := { commandState with infoState.enabled := true }
-  if !namespaceContext.isEmpty then
-    let head := commandState.scopes.headD { header := "", opts }
-    commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
   let buildFile (acc : WalkAcc) (failure : LeanRsFixture.Elaboration.ElabFailure) : ProcessedFile :=
     { commands := acc.commands, terms := acc.terms, tactics := acc.tactics
       names := acc.names, diagnostics := failure }
   let wrapOutcome (file : ProcessedFile) : ProcessModuleOutcome :=
     if missing.isEmpty then .ok file userImports
     else .missingImports file userImports missing
+  let (commandEnv, initialMessages) ←
+    if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
+      -- Module-system files need the same header-elaborated environment
+      -- Lean's frontend uses: `import all` visibility and public/private
+      -- current-file checks depend on `env.header.isModule`.
+      unsafe Lean.enableInitializersExecution
+      Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+    else
+      pure (env, headerMessages)
+  if initialMessages.hasErrors && missing.isEmpty then
+    let (diags, trunc) ←
+      LeanRsFixture.Elaboration.serializeMessages initialMessages diagBytes fileLabel
+    return wrapOutcome (buildFile {} { diagnostics := diags, truncated := trunc })
+  let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
+  commandState := { commandState with infoState.enabled := true }
+  if !namespaceContext.isEmpty then
+    let head := commandState.scopes.headD { header := "", opts }
+    commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
   try
     let st ← Lean.Elab.IO.processCommands inputCtx parserState commandState
     let finalCmdState := st.commandState
