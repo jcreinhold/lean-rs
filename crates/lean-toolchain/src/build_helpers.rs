@@ -38,6 +38,7 @@ use sha2::{Digest, Sha256};
 use crate::diagnostics::LinkDiagnostics;
 use crate::discover::{DiscoverOptions, ToolchainInfo, discover_toolchain};
 use crate::fingerprint::ToolchainFingerprint;
+use crate::lakefile_toml::parse_lakefile_toml;
 
 /// Current JSON schema version for `CargoLeanCapability` artifact manifests.
 pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -109,7 +110,8 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 
 /// Build a Lake `lean_lib` shared-library target and return the produced dylib path.
 ///
-/// `project_root` must be the directory containing `lakefile.lean`. `target_name` is the
+/// `project_root` must be the directory containing the project's lakefile —
+/// either `lakefile.lean` (Lean DSL) or `lakefile.toml`. `target_name` is the
 /// Lake target name to build; the helper invokes `lake build <target_name>:shared` on a
 /// cache miss and returns the supported-window dylib path under
 /// `<project_root>/.lake/build/lib/`.
@@ -131,7 +133,8 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 /// # Errors
 ///
 /// Returns [`LinkDiagnostics::LakeTargetMissing`] if `target_name` is not declared as a
-/// `lean_lib` in `lakefile.lean`, [`LinkDiagnostics::LakeBuildFailed`] if Lake exits
+/// `lean_lib` in the project's lakefile (`lakefile.lean` or `lakefile.toml`),
+/// [`LinkDiagnostics::LakeBuildFailed`] if Lake exits
 /// unsuccessfully, and [`LinkDiagnostics::LakeOutputUnresolved`] for unreadable manifests,
 /// source-set traversal failures, cache write failures, or missing built dylibs.
 pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
@@ -197,7 +200,8 @@ impl CargoLeanCapability {
     /// Set the Lake package name used by the module initializer.
     ///
     /// If omitted, the helper infers the package from `lake-manifest.json` or
-    /// `lakefile.lean`, matching [`build_lake_target`].
+    /// the project's lakefile (`lakefile.lean` or `lakefile.toml`), matching
+    /// [`build_lake_target`].
     #[must_use]
     pub fn package(mut self, package: impl Into<String>) -> Self {
         self.package = Some(package.into());
@@ -473,8 +477,8 @@ fn build_lake_target_with_runner(
         target_name: target_name.to_owned(),
         reason: format!("could not canonicalize project root {} ({err})", project_root.display()),
     })?;
-    let lakefile = project_root.join("lakefile.lean");
-    cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile.display()));
+    let lakefile_lean = project_root.join("lakefile.lean");
+    cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_lean.display()));
     let lakefile_toml = project_root.join("lakefile.toml");
     if lakefile_toml.is_file() {
         cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_toml.display()));
@@ -483,6 +487,16 @@ fn build_lake_target_with_runner(
     if toolchain_file.is_file() {
         cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", toolchain_file.display()));
     }
+
+    let lakefile = existing_lakefile(&project_root).ok_or_else(|| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.clone(),
+        target_name: target_name.to_owned(),
+        reason: format!(
+            "no Lake lakefile found at {} or {}",
+            lakefile_lean.display(),
+            lakefile_toml.display()
+        ),
+    })?;
 
     if !target_declared_in_lakefile(&lakefile, target_name)? {
         return Err(LinkDiagnostics::LakeTargetMissing {
@@ -587,10 +601,31 @@ fn target_declared_in_lakefile(lakefile: &Path, target_name: &str) -> Result<boo
         target_name: target_name.to_owned(),
         reason: format!("could not read {} ({err})", lakefile.display()),
     })?;
+    if lakefile_is_toml(lakefile) {
+        let parsed = parse_lakefile_toml(&contents).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+            project_root: lakefile.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("lakefile {} is not valid TOML ({err})", lakefile.display()),
+        })?;
+        return Ok(parsed.lean_libs.iter().any(|name| name == target_name));
+    }
     let quoted = format!("lean_lib «{target_name}»");
     let bare = format!("lean_lib {target_name}");
     let string = format!("lean_lib \"{target_name}\"");
     Ok(contents.contains(&quoted) || contents.contains(&bare) || contents.contains(&string))
+}
+
+fn lakefile_is_toml(lakefile: &Path) -> bool {
+    lakefile.file_name().and_then(|name| name.to_str()) == Some("lakefile.toml")
+}
+
+fn existing_lakefile(project_root: &Path) -> Option<PathBuf> {
+    let toml = project_root.join("lakefile.toml");
+    if toml.is_file() {
+        return Some(toml);
+    }
+    let lean = project_root.join("lakefile.lean");
+    lean.is_file().then_some(lean)
 }
 
 fn package_name_from_manifest(
@@ -627,6 +662,20 @@ fn package_name_from_lakefile(
         target_name: target_name.to_owned(),
         reason: format!("could not read {} ({err})", lakefile.display()),
     })?;
+    if lakefile_is_toml(lakefile) {
+        let parsed = parse_lakefile_toml(&contents).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("lakefile {} is not valid TOML ({err})", lakefile.display()),
+        })?;
+        return parsed
+            .package_name
+            .ok_or_else(|| LinkDiagnostics::LakeOutputUnresolved {
+                project_root: project_root.to_path_buf(),
+                target_name: target_name.to_owned(),
+                reason: format!("{} has no top-level `name` field", lakefile.display()),
+            });
+    }
     for line in contents.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("package ") {
@@ -645,7 +694,16 @@ fn infer_package_name(project_root: &Path, target_name: &str) -> Result<String, 
     match fs::read(&manifest_path) {
         Ok(manifest_bytes) => package_name_from_manifest(project_root, target_name, &manifest_path, &manifest_bytes),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            package_name_from_lakefile(project_root, target_name, &project_root.join("lakefile.lean"))
+            let lakefile = existing_lakefile(project_root).ok_or_else(|| LinkDiagnostics::LakeOutputUnresolved {
+                project_root: project_root.to_path_buf(),
+                target_name: target_name.to_owned(),
+                reason: format!(
+                    "no Lake lakefile found at {} or {}",
+                    project_root.join("lakefile.lean").display(),
+                    project_root.join("lakefile.toml").display()
+                ),
+            })?;
+            package_name_from_lakefile(project_root, target_name, &lakefile)
         }
         Err(err) => Err(LinkDiagnostics::LakeOutputUnresolved {
             project_root: project_root.to_path_buf(),
@@ -1090,6 +1148,23 @@ mod tests {
         root
     }
 
+    fn make_toml_project(name: &str, target: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("lean-toolchain-lake-{}-{}", std::process::id(), name));
+        drop(fs::remove_dir_all(&root));
+        fs::create_dir_all(&root).expect("create temp project");
+        write_file(
+            &root.join("lakefile.toml"),
+            &format!("name = \"my_pkg\"\ndefaultTargets = [\"{target}\"]\n\n[[lean_lib]]\nname = \"{target}\"\n"),
+        );
+        write_file(
+            &root.join("lake-manifest.json"),
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"my_pkg","lakeDir":".lake"}"#,
+        );
+        write_file(&root.join("lean-toolchain"), "leanprover/lean4:v4.29.1\n");
+        write_file(&root.join(format!("{target}.lean")), "def hello : Nat := 1\n");
+        root
+    }
+
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create parent");
@@ -1144,6 +1219,43 @@ mod tests {
             other => panic!("expected LakeTargetMissing, got {other:?}"),
         }
         assert_eq!(runner.calls(), 0);
+    }
+
+    #[test]
+    fn toml_lakefile_build_succeeds() {
+        let root = make_toml_project("toml-success", "KanProofs");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let path = build_lake_target_with_runner(&root, "KanProofs", &mut runner, CargoMetadata::Emit)
+            .expect("TOML lakefile build");
+
+        assert!(path.ends_with(format!("libmy__pkg_KanProofs.{}", dylib_ext())));
+        assert_eq!(runner.calls(), 1);
+    }
+
+    #[test]
+    fn toml_lakefile_missing_target_is_typed() {
+        let root = make_toml_project("toml-missing", "KanProofs");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let err = build_lake_target_with_runner(&root, "OtherTarget", &mut runner, CargoMetadata::Emit)
+            .expect_err("missing TOML target");
+
+        match err {
+            LinkDiagnostics::LakeTargetMissing { target_name, .. } => assert_eq!(target_name, "OtherTarget"),
+            other => panic!("expected LakeTargetMissing, got {other:?}"),
+        }
+        assert_eq!(runner.calls(), 0);
+    }
+
+    #[test]
+    fn toml_lakefile_missing_manifest_resolves_package() {
+        let root = make_toml_project("toml-no-manifest", "KanProofs");
+        fs::remove_file(root.join("lake-manifest.json")).expect("remove manifest");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let path = build_lake_target_with_runner(&root, "KanProofs", &mut runner, CargoMetadata::Emit)
+            .expect("TOML build without manifest");
+
+        assert!(path.ends_with(format!("libmy__pkg_KanProofs.{}", dylib_ext())));
+        assert_eq!(runner.calls(), 1);
     }
 
     #[test]

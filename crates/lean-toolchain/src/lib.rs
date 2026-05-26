@@ -26,6 +26,7 @@ mod built_capability;
 mod diagnostics;
 mod discover;
 mod fingerprint;
+mod lakefile_toml;
 mod limits;
 mod loader;
 pub mod manifest_validation;

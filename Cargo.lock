@@ -418,6 +418,7 @@ dependencies = [
  "lean-rs-sys",
  "serde_json",
  "sha2",
+ "toml",
 ]
 
 [[package]]

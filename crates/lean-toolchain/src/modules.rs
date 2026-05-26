@@ -11,6 +11,7 @@ use std::time::UNIX_EPOCH;
 use sha2::{Digest, Sha256};
 
 use crate::ToolchainFingerprint;
+use crate::lakefile_toml::parse_lakefile_toml;
 
 /// A discovered Lean source module in a Lake project.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -308,29 +309,12 @@ fn discover_module_roots(
 
 fn discover_toml_lakefile_roots(lakefile: &Path) -> Result<Vec<String>, LeanModuleDiscoveryDiagnostic> {
     let text = read_to_string(lakefile, "could not read Lake TOML file")?;
-    let mut roots = Vec::new();
-    let mut in_lean_lib = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[[lean_lib]]" {
-            in_lean_lib = true;
-            continue;
-        }
-        if trimmed.starts_with("[[") || trimmed.starts_with('[') {
-            in_lean_lib = false;
-            continue;
-        }
-        if in_lean_lib
-            && let Some(raw) = trimmed.strip_prefix("name")
-            && let Some((_eq, value)) = raw.split_once('=')
-        {
-            let root = normalize_lake_identifier(value);
-            if !root.is_empty() {
-                roots.push(root);
-            }
-        }
-    }
-    Ok(roots)
+    let parsed = parse_lakefile_toml(&text).map_err(|err| LeanModuleDiscoveryDiagnostic::Io {
+        path: lakefile.to_path_buf(),
+        message: "could not parse Lake TOML file",
+        source: std::io::Error::other(err.to_string()),
+    })?;
+    Ok(parsed.lean_libs)
 }
 
 fn discover_lean_lakefile_roots(lakefile: &Path) -> Result<Vec<String>, LeanModuleDiscoveryDiagnostic> {
