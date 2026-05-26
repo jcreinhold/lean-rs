@@ -9,16 +9,16 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jcreinhold/lean-rs"
 rust-version = "1.91"
-version = "0.1.10"
+version = "0.1.11"
 
 [workspace.dependencies]
-lean-rs = { path = "crates/lean-rs", version = "0.1.10" }
-lean-rs-host = { path = "crates/lean-rs-host", version = "0.1.10" }
-lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.1.10" }
-lean-rs-worker-child = { path = "crates/lean-rs-worker-child", version = "0.1.10" }
-lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.1.10" }
-lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.1.10" }
-lean-toolchain = { path = "crates/lean-toolchain", version = "0.1.10" }
+lean-rs = { path = "crates/lean-rs", version = "0.1.11" }
+lean-rs-host = { path = "crates/lean-rs-host", version = "0.1.11" }
+lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.1.11" }
+lean-rs-worker-child = { path = "crates/lean-rs-worker-child", version = "0.1.11" }
+lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.1.11" }
+lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.1.11" }
+lean-toolchain = { path = "crates/lean-toolchain", version = "0.1.11" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 serde_json = { version = "1", features = ["raw_value"] }

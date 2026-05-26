@@ -469,10 +469,8 @@ impl fmt::Display for LeanWorkerError {
             Self::Handshake { message } => write!(f, "worker handshake failed: {message}"),
             Self::Protocol { message } => write!(f, "worker protocol failed: {message}"),
             Self::Worker { code, message } => write!(f, "worker returned {code}: {message}"),
-            Self::ChildExited { exit } => write!(f, "worker exited with {}", exit.status),
-            Self::ChildPanicOrAbort { exit } => {
-                write!(f, "worker exited fatally with {}", exit.status)
-            }
+            Self::ChildExited { exit } => write_exit(f, "worker exited", exit),
+            Self::ChildPanicOrAbort { exit } => write_exit(f, "worker exited fatally", exit),
             Self::Timeout { operation, duration } => {
                 write!(f, "worker operation {operation} timed out after {duration:?}")
             }
@@ -2009,6 +2007,68 @@ fn wait_with_stderr(child: &mut Child, stderr: Option<ChildStderr>) -> Result<Le
     Ok(LeanWorkerExit::from_status(status, diagnostics))
 }
 
+/// Cap so a single `Display` line cannot blow up downstream log/telemetry
+/// pipelines that capture `err.to_string()` (`tracing::error!("{err}")`,
+/// JSON log shippers). The full `exit.diagnostics` text is still available on
+/// the field; this only limits what crosses the `Display` surface.
+const DISPLAY_DIAGNOSTICS_MAX_BYTES: usize = 4 * 1024;
+
+fn write_exit(f: &mut fmt::Formatter<'_>, prefix: &str, exit: &LeanWorkerExit) -> fmt::Result {
+    let tail = exit.diagnostics.trim();
+    if tail.is_empty() {
+        write!(f, "{prefix} with {}", exit.status)
+    } else {
+        let truncated = truncate_for_display(tail, DISPLAY_DIAGNOSTICS_MAX_BYTES);
+        write!(f, "{prefix} with {}: {truncated}", exit.status)
+    }
+}
+
+/// Truncate `text` to at most `max_bytes` bytes for human display, appending
+/// `… (N bytes truncated)` when bytes are dropped.
+///
+/// The cut respects two invariants that matter for the actual log streams we
+/// surface (Lake/`elan` stderr): the cut lands on a UTF-8 char boundary, and
+/// it never lands inside an unterminated ANSI CSI escape (`ESC '[' …
+/// 0x40..=0x7e`). If the naive cut would bisect a CSI, we back up to the byte
+/// immediately before the `ESC`. Half-open escapes corrupt downstream terminals
+/// and log viewers; the byte cost of backing up is negligible compared to the
+/// 4 KiB cap.
+fn truncate_for_display(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+
+    let mut cut = max_bytes;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut = cut.saturating_sub(1);
+    }
+
+    let bytes = text.as_bytes();
+    if let Some(esc_off) = bytes
+        .get(..cut)
+        .and_then(|prefix| prefix.iter().rposition(|&b| b == 0x1b))
+    {
+        // CSI is `ESC '[' params terminator-in-0x40..=0x7e`, with `[` excluded
+        // from the terminator range. Earlier escape sequences must already be
+        // terminated to have reached the parser state for this one.
+        let scan_start = esc_off.saturating_add(2).min(cut);
+        let terminated = bytes
+            .get(scan_start..cut)
+            .is_some_and(|tail| tail.iter().any(|&b| matches!(b, 0x40..=0x5a | 0x5c..=0x7e)));
+        if !terminated {
+            cut = esc_off;
+        }
+    }
+
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut = cut.saturating_sub(1);
+    }
+
+    let truncated_bytes = text.len().saturating_sub(cut);
+    let kept = text.get(..cut).unwrap_or("");
+    format!("{kept}… ({truncated_bytes} bytes truncated)")
+}
+
 fn unexpected_response(operation: &'static str, response: &Response) -> LeanWorkerError {
     LeanWorkerError::Protocol {
         message: format!("worker sent unexpected {operation} response: {response:?}"),
@@ -2082,11 +2142,28 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{LeanWorkerConfig, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES};
+    use super::{
+        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, MAX_FRAME_BYTES,
+        MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, truncate_for_display,
+    };
     use std::path::PathBuf;
 
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
+    }
+
+    fn exit_with(diagnostics: &str, success: bool) -> LeanWorkerExit {
+        let (code, status) = if success {
+            (0_i32, "exit status: 0".to_owned())
+        } else {
+            (1_i32, "exit status: 1".to_owned())
+        };
+        LeanWorkerExit {
+            success,
+            code: Some(code),
+            status,
+            diagnostics: diagnostics.to_owned(),
+        }
     }
 
     #[test]
@@ -2111,5 +2188,106 @@ mod tests {
     fn max_frame_bytes_passes_through_in_range() {
         let config = dummy_config().max_frame_bytes(8 * 1024 * 1024);
         assert_eq!(config.max_frame_bytes, 8 * 1024 * 1024);
+    }
+
+    #[test]
+    fn display_child_panic_or_abort_includes_stderr_tail() {
+        let exit = exit_with("could not dlopen X.dylib: image not found", false);
+        let err = LeanWorkerError::ChildPanicOrAbort { exit };
+        let rendered = err.to_string();
+        assert!(rendered.contains("exit status"), "{rendered}");
+        assert!(
+            rendered.contains("could not dlopen X.dylib: image not found"),
+            "{rendered}"
+        );
+        assert!(rendered.starts_with("worker exited fatally with "), "{rendered}");
+    }
+
+    #[test]
+    fn display_child_exited_includes_stderr_tail() {
+        let exit = exit_with("warning: lean-rs-worker exiting cleanly\n", true);
+        let err = LeanWorkerError::ChildExited { exit };
+        let rendered = err.to_string();
+        assert!(rendered.starts_with("worker exited with "), "{rendered}");
+        assert!(
+            rendered.contains("warning: lean-rs-worker exiting cleanly"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn display_keeps_terse_format_when_diagnostics_empty() {
+        let exit = exit_with("", false);
+        let err = LeanWorkerError::ChildPanicOrAbort { exit };
+        assert_eq!(err.to_string(), "worker exited fatally with exit status: 1");
+
+        let exit = exit_with("   \n\t  ", true);
+        let err = LeanWorkerError::ChildExited { exit };
+        assert_eq!(err.to_string(), "worker exited with exit status: 0");
+    }
+
+    #[test]
+    fn display_truncates_oversized_diagnostics_with_annotation() {
+        let large: String = "x".repeat(DISPLAY_DIAGNOSTICS_MAX_BYTES * 2);
+        let exit = exit_with(&large, false);
+        let err = LeanWorkerError::ChildPanicOrAbort { exit };
+        let rendered = err.to_string();
+        assert!(rendered.contains("bytes truncated"), "{rendered}");
+        assert!(
+            rendered.len() < large.len() + 128,
+            "rendered length {} unexpectedly large for original {}",
+            rendered.len(),
+            large.len()
+        );
+    }
+
+    #[test]
+    fn truncate_for_display_returns_input_when_under_cap() {
+        let s = "short message";
+        assert_eq!(truncate_for_display(s, 1024), s);
+    }
+
+    #[test]
+    fn truncate_for_display_cuts_at_char_boundary() {
+        // 4 copies of `é` (2 bytes each) → 8 bytes total. Capping at 5 must
+        // not slice the multi-byte sequence in half.
+        let s = "ééééé";
+        let out = truncate_for_display(s, 5);
+        let before_marker = out.split('…').next().unwrap_or("");
+        assert!(before_marker.is_char_boundary(before_marker.len()));
+        assert!(out.contains("bytes truncated"), "{out}");
+    }
+
+    #[test]
+    fn truncate_for_display_does_not_split_ansi_csi() {
+        // Construct: leading text, then ESC '[' '3' '1' 'm' (red), then more text.
+        // Place the CSI so a naive cap lands inside it.
+        let mut s = String::from("hello ");
+        s.push('\x1b');
+        s.push('[');
+        s.push('3');
+        s.push('1');
+        s.push('m');
+        s.push_str("RED");
+        // Cap chosen to fall between ESC and the terminator `m`.
+        let cap = s.find('1').expect("test fixture invariant: '1' present");
+        let out = truncate_for_display(&s, cap);
+        // The kept prefix must not contain a bare ESC.
+        let before_marker = out.split('…').next().unwrap_or("");
+        assert!(
+            !before_marker.contains('\x1b'),
+            "truncated prefix still contains ESC: {before_marker:?}"
+        );
+        assert!(out.contains("bytes truncated"), "{out}");
+    }
+
+    #[test]
+    fn truncate_for_display_keeps_terminated_ansi_csi() {
+        // A terminated CSI before the cap should survive truncation intact.
+        let mut s = String::from("\x1b[31mRED\x1b[0m ");
+        s.push_str(&"x".repeat(64));
+        let out = truncate_for_display(&s, 20);
+        assert!(out.contains("\x1b[31m"), "{out}");
+        assert!(out.contains("bytes truncated"), "{out}");
     }
 }

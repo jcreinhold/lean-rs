@@ -9,6 +9,45 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.11] — 2026-05-25
+
+### `lean-toolchain`: worker bootstrap accepts `lakefile.toml`
+
+`build_lake_target_with_runner` and its companion helpers
+(`target_declared_in_lakefile`, `package_name_from_lakefile`) hardcoded
+`lakefile.lean`, so any TOML-only Lake project failed worker bootstrap with
+`could not read .../lakefile.lean (No such file or directory)`. The bootstrap
+path now picks the existing lakefile up front and dispatches declaration and
+package-name checks on the file extension, so both `lakefile.lean` and
+`lakefile.toml` projects bootstrap. TOML parsing consolidates onto the `toml`
+crate via a new `lean_toolchain::lakefile_toml` module; the hand-rolled
+state-machine TOML parser in `modules.rs` is gone.
+
+### `lean-rs-worker-parent`: `Display` now surfaces child stderr on fatal exits
+
+`impl Display for LeanWorkerError` previously rendered
+`ChildExited` / `ChildPanicOrAbort` as the exit status alone
+(`"worker exited fatally with exit status: 1"`). The captured child stderr on
+`LeanWorkerExit.diagnostics` — populated by `wait_with_stderr` for exactly
+this purpose since 0.1.10 — was unreachable through the `Display` surface,
+forcing every downstream that logs `tracing::error!("{err}")` or stores
+`err.to_string()` to pattern-match the variants and read the field by hand.
+
+The `Display` rendering now appends the trimmed stderr tail when non-empty:
+
+```text
+worker exited fatally with exit status: 1: could not dlopen X.dylib: image not found
+```
+
+Capped at 4 KiB so a runaway Lake / `elan` trace cannot blow up the formatted
+string; the full text is still available on `LeanWorkerExit.diagnostics`. The
+cut respects UTF-8 char boundaries and never lands inside an unterminated ANSI
+CSI escape (Lake colourises its trace output). When `diagnostics` is empty,
+the format collapses back to the original terse string.
+
+No public-API change: the new helpers are private and the `Display` trait
+signature is unchanged.
+
 ## [0.1.10] — 2026-05-25
 
 Re-tagging of 0.1.9. The tag-push release workflow failed in the public-API
