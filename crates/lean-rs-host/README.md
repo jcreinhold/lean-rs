@@ -130,7 +130,8 @@ built dylib path at compile time. `load_capabilities` also builds and opens the 
 
 Hosts that only need the standard shim-backed session services can use `host.load_shims_only()?` instead. That path
 builds and opens only the bundled interop and host shim dylibs; it can import any `.olean` files on the Lake project's
-search path and run Meta, elaboration, kernel, info-tree, and declaration services, but
+manifest-derived search path, including transitive Lake package dependencies, and run Meta, elaboration, kernel,
+info-tree, and declaration services, but
 `LeanSession::call_capability` returns `lean_rs::LeanDiagnosticCode::Unsupported` because no user dylib is attached.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed `LeanProgressSink`

@@ -103,6 +103,43 @@ impl Drop for TempLakeProject {
     }
 }
 
+fn write_transitive_dependency_fixture(project: &TempLakeProject) {
+    let toolchain = fs::read_to_string(project.path().join("lean-toolchain")).expect("read temp project toolchain");
+    project.write(".lake/packages/dep/lean-toolchain", &toolchain);
+    project.write(
+        ".lake/packages/dep/lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage dep\nlean_lib Dep\n",
+    );
+    project.write(".lake/packages/dep/Dep/Hello.lean", "def Dep.hello : Nat := 41\n");
+    let dep_root = project.path().join(".lake").join("packages").join("dep");
+    let output = Command::new("lake")
+        .arg("build")
+        .arg("Dep.Hello")
+        .current_dir(&dep_root)
+        .output()
+        .expect("lake command starts for dependency");
+    assert!(
+        output.status.success(),
+        "`lake build Dep.Hello` failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage consumer\nrequire dep from \"./.lake/packages/dep\"\nlean_lib Consumer\n",
+    );
+    project.write(
+        "Consumer.lean",
+        "import Dep.Hello\ndef Consumer.value : Nat := Dep.hello + 1\n",
+    );
+    project.write(
+        "lake-manifest.json",
+        r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+    );
+    project.lake_build_ok("Consumer");
+}
+
 // -- from_lake_project ---------------------------------------------------
 
 #[test]
@@ -237,6 +274,40 @@ fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() {
         LeanError::LeanException(_) => {}
         LeanError::Host(failure) => panic!("expected LeanException for broken import, got Host {failure:?}"),
         LeanError::Cancelled(cancelled) => panic!("expected LeanException for broken import, got {cancelled:?}"),
+    }
+}
+
+#[test]
+fn import_finds_transitive_lake_package_oleans() {
+    let project = TempLakeProject::new("transitive-oleans");
+    write_transitive_dependency_fixture(&project);
+
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let mut session = caps
+        .session(&["Consumer"], None, None)
+        .expect("consumer imports dependency");
+    let declarations = session
+        .list_declarations_strings(&LeanDeclarationFilter::default(), None, None)
+        .expect("list declarations works");
+    assert!(
+        declarations.iter().any(|name| name.starts_with("Dep.")),
+        "dependency declaration should be visible when transitive oleans are on the search path"
+    );
+
+    let Err(missing_err) = caps.session(&["Dep.NonExistent"], None, None) else {
+        panic!("missing dependency module unexpectedly imported");
+    };
+    match missing_err {
+        LeanError::LeanException(exc) => {
+            assert!(
+                exc.message().contains("Dep.NonExistent"),
+                "missing module should be reported by Lean import, got: {}",
+                exc.message(),
+            );
+        }
+        LeanError::Host(failure) => panic!("expected LeanException for missing import, got Host {failure:?}"),
+        LeanError::Cancelled(cancelled) => panic!("expected LeanException for missing import, got {cancelled:?}"),
     }
 }
 

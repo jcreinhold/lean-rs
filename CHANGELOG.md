@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.13] — 2026-05-26
+
+### Lake-manifest transitive search paths in shims-only sessions
+
+`lean-rs-host` session imports now add `.olean` search paths for packages listed in the project's
+`lake-manifest.json`. Shims-only sessions opened with `LeanHost::load_shims_only()` can import modules from
+mathlib, batteries, aesop, and other transitive Lake dependencies without requiring a user `:shared` dylib.
+
 ## [0.1.12] — 2026-05-26
 
 ### Shims-only host sessions

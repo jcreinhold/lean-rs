@@ -170,6 +170,43 @@ impl Drop for TempLakeProject {
     }
 }
 
+fn write_transitive_dependency_fixture(project: &TempLakeProject) {
+    let toolchain = fs::read_to_string(project.path().join("lean-toolchain")).expect("read temp project toolchain");
+    project.write(".lake/packages/dep/lean-toolchain", &toolchain);
+    project.write(
+        ".lake/packages/dep/lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage dep\nlean_lib Dep\n",
+    );
+    project.write(".lake/packages/dep/Dep/Hello.lean", "def Dep.hello : Nat := 41\n");
+    let dep_root = project.path().join(".lake").join("packages").join("dep");
+    let output = Command::new("lake")
+        .arg("build")
+        .arg("Dep.Hello")
+        .current_dir(&dep_root)
+        .output()
+        .expect("lake command starts for dependency");
+    assert!(
+        output.status.success(),
+        "`lake build Dep.Hello` failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage consumer\nrequire dep from \"./.lake/packages/dep\"\nlean_lib Consumer\n",
+    );
+    project.write(
+        "Consumer.lean",
+        "import Dep.Hello\ndef Consumer.value : Nat := Dep.hello + 1\n",
+    );
+    project.write(
+        "lake-manifest.json",
+        r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"dep","manifestFile":"lake-manifest.json","inherited":false,"dir":"./.lake/packages/dep","configFile":"lakefile.lean"}],"name":"consumer","lakeDir":".lake"}"#,
+    );
+    project.lake_build_ok("Consumer");
+}
+
 #[test]
 fn built_capability_builder_infers_lake_root_from_dylib_path() {
     let dylib = interop_root()
@@ -297,6 +334,40 @@ fn shims_only_host_handle_skips_user_shared_build() {
             assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
         }
         Err(other) => panic!("expected LeanException worker error for broken import, got {other:?}"),
+    }
+}
+
+#[test]
+fn shims_only_host_handle_imports_transitive_lake_package_oleans() {
+    let project = TempLakeProject::new("host-handle-transitive-oleans");
+    write_transitive_dependency_fixture(&project);
+
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Consumer"])
+        .worker_executable(worker_binary())
+        .open()
+        .expect("shims-only host handle opens over consumer");
+
+    let mut session = handle
+        .open_session_with_imports(["Consumer"], None, None)
+        .expect("consumer imports dependency through worker");
+    let declarations = session
+        .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
+        .expect("standard declaration service works through shims-only handle");
+    assert!(
+        declarations.iter().any(|name| name.starts_with("Dep.")),
+        "dependency declaration should be visible through the worker shims-only handle"
+    );
+
+    match handle.open_session_with_imports(["Dep.NonExistent"], None, None) {
+        Ok(_) => panic!("missing dependency module unexpectedly imported"),
+        Err(LeanWorkerError::Worker { code, message }) => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+            assert!(
+                message.contains("Dep.NonExistent"),
+                "missing module should be reported by Lean import, got: {message}"
+            );
+        }
+        Err(other) => panic!("expected LeanException worker error for missing import, got {other:?}"),
     }
 }
 

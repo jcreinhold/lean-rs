@@ -479,15 +479,21 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let runtime = capabilities.host().runtime();
         let project = capabilities.host().project();
-        let search_paths: Vec<String> = vec![
-            project.olean_search_path().to_string_lossy().into_owned(),
+        let mut search_paths: Vec<String> = project
+            .olean_search_paths()
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        search_paths.push(
             crate::host::lake::LakeProject::interop_olean_search_path()?
                 .to_string_lossy()
                 .into_owned(),
+        );
+        search_paths.push(
             crate::host::lake::LakeProject::shim_olean_search_path()?
                 .to_string_lossy()
                 .into_owned(),
-        ];
+        );
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
         // Lean 4.30 strictly enforces `enableInitializersExecution` before
         // `importModules (loadExts := true)`. The flag is process-global,

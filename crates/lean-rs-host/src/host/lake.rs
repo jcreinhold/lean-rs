@@ -13,10 +13,12 @@
 //! The type is `pub(crate)` — `LeanHost` exposes the only operations
 //! callers actually want (open the project, load a capability dylib).
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use lean_rs::error::LeanResult;
+use serde_json::Value;
 
 /// Lake package name the host shim contract ships under.
 pub(crate) const SHIM_PACKAGE_NAME: &str = "lean_rs_host_shims";
@@ -100,7 +102,38 @@ impl LakeProject {
     /// `Lean.importModules` can locate the `.olean` files Lake built for
     /// this project.
     pub(crate) fn olean_search_path(&self) -> PathBuf {
-        self.root.join(".lake").join("build").join("lib").join("lean")
+        project_olean_search_path(&self.root)
+    }
+
+    /// Search paths the Lean side passes to `Lean.initSearchPath` so
+    /// `Lean.importModules` can locate the `.olean` files Lake built for
+    /// this project and every package recorded in `lake-manifest.json`.
+    ///
+    /// Missing or malformed manifest data degrades to the project-local
+    /// entry, matching the layout used by dependency-free Lake projects.
+    pub(crate) fn olean_search_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![self.olean_search_path()];
+        let manifest_path = self.root.join("lake-manifest.json");
+        let Ok(manifest_bytes) = fs::read(manifest_path) else {
+            return paths;
+        };
+        let Ok(manifest) = serde_json::from_slice::<Value>(&manifest_bytes) else {
+            return paths;
+        };
+        let packages_dir = manifest
+            .get("packagesDir")
+            .and_then(Value::as_str)
+            .unwrap_or(".lake/packages");
+        let Some(packages) = manifest.get("packages").and_then(Value::as_array) else {
+            return paths;
+        };
+
+        for package in packages {
+            if let Some(package_root) = manifest_package_root(&self.root, packages_dir, package) {
+                paths.push(project_olean_search_path(&package_root));
+            }
+        }
+        paths
     }
 
     /// Search path for the bundled `lean-rs-host-shims` package's `.olean`
@@ -157,6 +190,33 @@ impl LakeProject {
     }
 }
 
+fn project_olean_search_path(project_root: &Path) -> PathBuf {
+    project_root.join(".lake").join("build").join("lib").join("lean")
+}
+
+fn manifest_package_root(project_root: &Path, packages_dir: &str, package: &Value) -> Option<PathBuf> {
+    let package_name = package
+        .get("name")
+        .and_then(Value::as_str)
+        .map(normalize_lake_identifier)?;
+    if package.get("type").and_then(Value::as_str) == Some("path")
+        && let Some(dir) = package.get("dir").and_then(Value::as_str)
+    {
+        return Some(project_root.join(dir));
+    }
+    Some(project_root.join(packages_dir).join(package_name))
+}
+
+fn normalize_lake_identifier(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('`')
+        .trim_matches('«')
+        .trim_matches('»')
+        .trim_matches('"')
+        .trim()
+        .to_owned()
+}
+
 fn bundled_host_shims_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(BUNDLED_SHIMS_DIR)
@@ -179,4 +239,109 @@ fn build_bundled_target(project_root: &Path, target_name: &str) -> LeanResult<Pa
             project_root.display()
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    struct TempProject {
+        root: PathBuf,
+    }
+
+    impl TempProject {
+        fn new(name: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock is after Unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("lean-rs-lake-{name}-{}-{nonce}", std::process::id()));
+            fs::create_dir_all(&root).expect("create temp Lake root");
+            Self { root }
+        }
+
+        fn project(&self) -> LakeProject {
+            LakeProject::new(&self.root).expect("temp project opens")
+        }
+
+        fn write_manifest(&self, contents: &str) {
+            fs::write(self.root.join("lake-manifest.json"), contents).expect("write manifest");
+        }
+
+        fn own_olean_path(&self) -> PathBuf {
+            self.root.join(".lake").join("build").join("lib").join("lean")
+        }
+    }
+
+    impl Drop for TempProject {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.root));
+        }
+    }
+
+    #[test]
+    fn olean_search_paths_degrades_without_manifest() {
+        let project = TempProject::new("no-manifest");
+
+        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+    }
+
+    #[test]
+    fn olean_search_paths_accepts_empty_package_manifest() {
+        let project = TempProject::new("empty-manifest");
+        project.write_manifest(r#"{"version":"1.2.0","packagesDir":".lake/packages","packages":[]}"#);
+
+        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+    }
+
+    #[test]
+    fn olean_search_paths_uses_manifest_package_entries() {
+        let project = TempProject::new("packages");
+        project.write_manifest(
+            r#"{
+                "version":"1.2.0",
+                "packagesDir":"custom-packages",
+                "packages":[
+                    {"type":"git","name":"«doc-gen4»"},
+                    {"type":"path","name":"dep","dir":"../dep"},
+                    {"type":"git"},
+                    "not a package"
+                ]
+            }"#,
+        );
+
+        assert_eq!(
+            project.project().olean_search_paths(),
+            vec![
+                project.own_olean_path(),
+                project
+                    .root
+                    .join("custom-packages")
+                    .join("doc-gen4")
+                    .join(".lake")
+                    .join("build")
+                    .join("lib")
+                    .join("lean"),
+                project
+                    .root
+                    .join("../dep")
+                    .join(".lake")
+                    .join("build")
+                    .join("lib")
+                    .join("lean"),
+            ]
+        );
+    }
+
+    #[test]
+    fn olean_search_paths_degrades_on_malformed_manifest() {
+        let project = TempProject::new("malformed-manifest");
+        project.write_manifest("{not json");
+
+        assert_eq!(project.project().olean_search_paths(), vec![project.own_olean_path()]);
+    }
 }
