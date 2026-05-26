@@ -290,6 +290,14 @@ fn shims_only_host_handle_skips_user_shared_build() {
         declarations.iter().any(|name| name == "goodValue"),
         "shims-only host handle should see declarations from prebuilt user oleans"
     );
+
+    match handle.open_session_with_imports(["Demo.Broken"], None, None) {
+        Ok(_) => panic!("broken module import unexpectedly succeeded"),
+        Err(LeanWorkerError::Worker { code, message }) => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+        }
+        Err(other) => panic!("expected LeanException worker error for broken import, got {other:?}"),
+    }
 }
 
 #[test]
