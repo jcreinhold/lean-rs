@@ -162,13 +162,14 @@ any subsequent `SIGABRT` terminates the process immediately, closing the IPC pip
 normal IPC timescales. The same call is a Windows no-op (Windows does not use POSIX rlimits or `core_pattern`).
 
 This boundary lives in the child binary rather than in `LeanWorker::spawn` because the policy belongs to "any process
-shipped as a the worker crates child," including downstream binaries written using `run_worker_child_stdio`. Spawning the
-child from a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still inherits the
-boundary because it is baked into `run_stdio`. No public API change is required.
+shipped as a the worker crates child," including downstream binaries written using `run_worker_child_stdio`. Spawning
+the child from a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still inherits
+the boundary because it is baked into `run_stdio`. No public API change is required.
 
-Regression cover: `crates/lean-rs-worker-child/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure`
-asserts that panic-to-fatal-exit detection completes within 10 seconds. Without the rlimit fix, the same test takes
-30–110 seconds on Linux runners with `apport`.
+Regression cover:
+`crates/lean-rs-worker-child/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure` asserts
+that panic-to-fatal-exit detection completes within 10 seconds. Without the rlimit fix, the same test takes 30–110
+seconds on Linux runners with `apport`.
 
 ## References
 

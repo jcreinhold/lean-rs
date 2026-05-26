@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: 'Git ref to build documentation from.'
+        description: "Git ref to build documentation from."
         type: string
         default: main
         required: true

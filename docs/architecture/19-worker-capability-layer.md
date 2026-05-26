@@ -111,8 +111,8 @@ The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile 
 build. Low-level `LeanWorker` remains available for tests, custom supervision, and focused lifecycle examples.
 
 Use downstream crates for domain schemas. A `lean-dup` integration maps its own request and row types onto the generic
-worker capability layer; it does not require the worker crates to know what a declaration row, feature row, index update,
-or probe result means.
+worker capability layer; it does not require the worker crates to know what a declaration row, feature row, index
+update, or probe result means.
 
 `LeanWorkerJsonCommand<Req, Resp>` and `LeanWorkerStreamingCommand<Req, Row, Summary>` are the preferred downstream
 interfaces over capability exports. They name an export while keeping request, row, and terminal-summary schemas in

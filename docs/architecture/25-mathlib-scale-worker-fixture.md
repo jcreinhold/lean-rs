@@ -10,8 +10,8 @@ import planner -> LeanWorkerPool -> session lease -> typed command
 ## Boundary
 
 The fixture may simulate `version`, `doctor`, `index`, `extract`, `features`, and `probe` command shapes, but the row
-schemas remain small test data owned by the worker fixtures. It does not copy `lean-dup` declaration rows, feature
-rows, cache rules, ranking, reporting, or source-provenance policy.
+schemas remain small test data owned by the worker fixtures. It does not copy `lean-dup` declaration rows, feature rows,
+cache rules, ranking, reporting, or source-provenance policy.
 
 The normal path is the pool path:
 

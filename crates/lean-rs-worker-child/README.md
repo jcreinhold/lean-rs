@@ -5,9 +5,8 @@ Child-process runtime for the `lean-rs` worker boundary.
 This crate ships the `lean-rs-worker-child` binary that hosts a `lean-rs` runtime and serves typed requests over
 stdin/stdout from a parent supervisor. It is the only crate in the worker stack that links `libleanshared`.
 
-Parent supervisors should depend on
-[`lean-rs-worker-parent`](https://docs.rs/lean-rs-worker-parent). The wire types both peers exchange live in
-[`lean-rs-worker-protocol`](https://docs.rs/lean-rs-worker-protocol).
+Parent supervisors should depend on [`lean-rs-worker-parent`](https://docs.rs/lean-rs-worker-parent). The wire types
+both peers exchange live in [`lean-rs-worker-protocol`](https://docs.rs/lean-rs-worker-protocol).
 
 ## Layering
 

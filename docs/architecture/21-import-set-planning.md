@@ -7,12 +7,12 @@ reuse, so downstream tools can avoid repeating Lean imports without learning wor
 
 Two concerns are better apart:
 
-**Planner in the worker crates.** Rejected as the only layer. Worker sessions and pool keys matter for batching, but Lake
-module discovery is useful without a worker child process.
+**Planner in the worker crates.** Rejected as the only layer. Worker sessions and pool keys matter for batching, but
+Lake module discovery is useful without a worker child process.
 
 **Discovery in `lean-toolchain`, batching in the worker crates.** Chosen. `lean-toolchain` owns Lake root detection,
-module-root discovery, module-name validation, source-set fingerprints, and capability-target declaration checks.
-The worker crates own the worker-facing batch plan because the batch key is a `LeanWorkerSessionKey` and feeds
+module-root discovery, module-name validation, source-set fingerprints, and capability-target declaration checks. The
+worker crates own the worker-facing batch plan because the batch key is a `LeanWorkerSessionKey` and feeds
 `LeanWorkerPool` leases.
 
 This split keeps Lake layout policy in one general-purpose crate and keeps worker session policy in the worker crate.

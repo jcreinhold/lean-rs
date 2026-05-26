@@ -34,8 +34,8 @@ documents above are the release contract consumers should follow.
 calls, semantic object handles, structured errors, and `LeanCallbackHandle<P>` for synchronous same-process Lean-to-Rust
 callbacks. Callback handles carry only opaque ABI values and a crate-owned trampoline; downstream code does not pass
 arbitrary function pointers to Lean. Payloads are a sealed family owned by `lean-rs`; current payloads are
-`LeanProgressTick` and `LeanStringEvent`. This is the mechanism layer. Worker-class interfaces should expose
-The worker crates typed commands and row sinks instead of callback handles.
+`LeanProgressTick` and `LeanStringEvent`. This is the mechanism layer. Worker-class interfaces should expose The worker
+crates typed commands and row sinks instead of callback handles.
 
 `lean-toolchain` provides the build-script path: link directives for the active Lean toolchain and `build_lake_target`
 for Lake shared-library targets. It owns Lake dylib naming, cache metadata, Cargo rerun directives, and typed link/build

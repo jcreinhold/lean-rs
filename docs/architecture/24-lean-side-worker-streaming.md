@@ -1,7 +1,7 @@
 # Lean-Side Worker Streaming Helpers
 
-Worker capability authors should not repeat the JSON envelope details needed by the worker crates, but the helper package
-must not become a downstream command framework. The stable boundary is small Lean-side primitives in
+Worker capability authors should not repeat the JSON envelope details needed by the worker crates, but the helper
+package must not become a downstream command framework. The stable boundary is small Lean-side primitives in
 `LeanRsInterop.Worker.Stream`:
 
 - `jsonString` escapes a Lean `String` as JSON text.

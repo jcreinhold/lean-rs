@@ -14,7 +14,8 @@ cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example work
 ```
 
 The first command builds the Lean shared library in `build.rs` and calls a Lean export in process. The second builds the
-app-owned worker child binary. The third starts that worker child and opens the same capability behind the worker crates.
+app-owned worker child binary. The third starts that worker child and opens the same capability behind the worker
+crates.
 
 The template uses path dependencies because it lives inside this repository. Published crates use normal version
 dependencies:

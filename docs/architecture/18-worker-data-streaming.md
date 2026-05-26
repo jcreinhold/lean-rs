@@ -24,8 +24,8 @@ pub struct LeanWorkerDataRow {
 is assigned by the worker crates per stream within one request. `payload` is arbitrary JSON owned by the downstream
 protocol.
 
-This type is intentionally generic at the worker boundary and intentionally not schema-free inside downstream tools.
-The worker crates carries rows. It does not define `lean-dup` row structs, theorem-search result schemas, or application
+This type is intentionally generic at the worker boundary and intentionally not schema-free inside downstream tools. The
+worker crates carries rows. It does not define `lean-dup` row structs, theorem-search result schemas, or application
 business objects.
 
 ## Chosen Boundary

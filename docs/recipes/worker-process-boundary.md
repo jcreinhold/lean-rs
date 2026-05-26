@@ -201,8 +201,8 @@ For a downstream tool such as `lean-dup`, this replaces ad hoc runtime Lean subp
 - JSONL-like rows are projected from `LeanWorkerDataRow` by the downstream tool; the worker crates do not define
   `lean-dup` business objects.
 - Progress and diagnostics use typed worker channels, not stdout conventions.
-- Metadata and doctor checks report cache/support facts without baking `lean-dup` command semantics into
-  the worker crates.
+- Metadata and doctor checks report cache/support facts without baking `lean-dup` command semantics into the worker
+  crates.
 - Fatal exits become typed worker failures that the parent can classify.
 - Cancellation and timeout policy are caller decisions layered over worker requests.
 
@@ -238,5 +238,5 @@ LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
   cargo run --release -p lean-rs-worker --example worker_capability_probe
 ```
 
-Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the
-The worker crates contract.
+Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the The
+worker crates contract.

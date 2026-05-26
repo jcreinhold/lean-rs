@@ -150,8 +150,8 @@ Use the highest-level surface that matches the job:
 
 ## Regression Gates
 
-`crates/lean-rs-worker-child/tests/loader_regressions.rs` protects the public packaged-app path. It builds the shipped-crate
-template, then runs the same-process binary and worker example with `LD_LIBRARY_PATH`, `LD_PRELOAD`,
+`crates/lean-rs-worker-child/tests/loader_regressions.rs` protects the public packaged-app path. It builds the
+shipped-crate template, then runs the same-process binary and worker example with `LD_LIBRARY_PATH`, `LD_PRELOAD`,
 `DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` removed. The test proves the canonical
 path relies on build artifacts, rpath, and the bundle loader rather than a developer shell's loader environment. The
 same file also checks the template package list and proves a public `LeanCapability` bundle keeps a transitive Lean

@@ -14,8 +14,8 @@ release follows the [bump procedure](bump-toolchain.md); re-confirm against the 
 
 **Publishing is `cargo publish --workspace` (stable since Rust 1.90).** Cargo computes the workspace dependency DAG,
 verifies every crate against a local registry overlay so downstream crates can see pending upstream publishes before
-crates.io indexes them, then uploads in topological order—in parallel where the DAG allows. The previous per-crate
-loop with 90-second sleeps is gone.
+crates.io indexes them, then uploads in topological order—in parallel where the DAG allows. The previous per-crate loop
+with 90-second sleeps is gone.
 
 ## One-time setup
 

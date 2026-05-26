@@ -1,7 +1,7 @@
 # Public-API Review
 
-`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the published crates. CI diffs the
-live surface against these files on every PR; intentional changes regenerate the matching baseline in the same commit.
+`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the published crates. CI diffs the live
+surface against these files on every PR; intentional changes regenerate the matching baseline in the same commit.
 
 ## Regenerate
 

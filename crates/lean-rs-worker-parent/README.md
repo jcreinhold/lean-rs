@@ -7,8 +7,8 @@ sessions and pools, and surfaces structured diagnostics — without itself linki
 recommended dependency for parent binaries (e.g. servers, dispatchers, host applications) that need to talk to one or
 more worker children at runtime without pinning the parent's link graph to a specific Lean toolchain.
 
-Wire types are re-exported from [`lean-rs-worker-protocol`](https://docs.rs/lean-rs-worker-protocol). Application binaries
-that host a Lean runtime in the worker child depend on
+Wire types are re-exported from [`lean-rs-worker-protocol`](https://docs.rs/lean-rs-worker-protocol). Application
+binaries that host a Lean runtime in the worker child depend on
 [`lean-rs-worker-child`](https://docs.rs/lean-rs-worker-child).
 
 ## Layering

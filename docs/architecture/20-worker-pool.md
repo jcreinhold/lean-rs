@@ -113,8 +113,8 @@ Callers should not learn:
 - which session values are invalidated by a cycle;
 - which warm worker is selected for a request.
 
-Those details are volatile and operational. Keeping them private lets the worker crates change scheduling, memory policy,
-batching, and future backend internals without rewriting downstream tools.
+Those details are volatile and operational. Keeping them private lets the worker crates change scheduling, memory
+policy, batching, and future backend internals without rewriting downstream tools.
 
 ## What Callers Still Know
 

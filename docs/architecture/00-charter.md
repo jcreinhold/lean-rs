@@ -41,8 +41,8 @@ Five published crates plus one workspace-internal helper:
 - **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
   process-boundary layer). The parent supervises a child process around the host stack. They own process lifecycle,
   private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming, diagnostics,
-  terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession` mirror and
-  not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
+  terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession` mirror and not
+  a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
 
 `lean-rs-test-support` is workspace-internal (`publish = false`).
 
@@ -180,5 +180,5 @@ Each was considered before the adopted shape. Recorded so reviewers can recogniz
 
 The adopted shape is deeper than each rejected alternative: fewer caller-facing details, less temporal coupling, a small
 unsafe surface, and a one-line in-process layering invariant (`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`)
-with the worker crates wrapping the host stack when callers need a process boundary. It matches the dominant Rust binding
-shape, so contributors arrive with correct expectations, and it contains no Rust-side dependent-type imitation.
+with the worker crates wrapping the host stack when callers need a process boundary. It matches the dominant Rust
+binding shape, so contributors arrive with correct expectations, and it contains no Rust-side dependent-type imitation.

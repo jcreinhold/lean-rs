@@ -87,7 +87,7 @@ be owned by the library rather than every downstream caller.
 Use `lean-rs-host` directly when the process can trust the Lean workload, when latency is the primary concern, and when
 process-level memory retention is acceptable.
 
-Use the worker boundary when the application must continue after Lean exits, must classify fatal child exits,
-or must reset memory after large import sweeps. The worker is not a replacement for `lean-rs-host`; it is a process
-boundary around it. See [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md) for the
-runnable worker-streaming example.
+Use the worker boundary when the application must continue after Lean exits, must classify fatal child exits, or must
+reset memory after large import sweeps. The worker is not a replacement for `lean-rs-host`; it is a process boundary
+around it. See [`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md) for the runnable
+worker-streaming example.

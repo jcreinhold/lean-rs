@@ -13,25 +13,20 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ### `lean-toolchain`: worker bootstrap accepts `lakefile.toml`
 
-`build_lake_target_with_runner` and its companion helpers
-(`target_declared_in_lakefile`, `package_name_from_lakefile`) hardcoded
-`lakefile.lean`, so any TOML-only Lake project failed worker bootstrap with
-`could not read .../lakefile.lean (No such file or directory)`. The bootstrap
-path now picks the existing lakefile up front and dispatches declaration and
-package-name checks on the file extension, so both `lakefile.lean` and
-`lakefile.toml` projects bootstrap. TOML parsing consolidates onto the `toml`
-crate via a new `lean_toolchain::lakefile_toml` module; the hand-rolled
-state-machine TOML parser in `modules.rs` is gone.
+`build_lake_target_with_runner` and its companion helpers (`target_declared_in_lakefile`, `package_name_from_lakefile`)
+hardcoded `lakefile.lean`, so any TOML-only Lake project failed worker bootstrap with
+`could not read .../lakefile.lean (No such file or directory)`. The bootstrap path now picks the existing lakefile up
+front and dispatches declaration and package-name checks on the file extension, so both `lakefile.lean` and
+`lakefile.toml` projects bootstrap. TOML parsing consolidates onto the `toml` crate via a new
+`lean_toolchain::lakefile_toml` module; the hand-rolled state-machine TOML parser in `modules.rs` is gone.
 
 ### `lean-rs-worker-parent`: `Display` now surfaces child stderr on fatal exits
 
-`impl Display for LeanWorkerError` previously rendered
-`ChildExited` / `ChildPanicOrAbort` as the exit status alone
-(`"worker exited fatally with exit status: 1"`). The captured child stderr on
-`LeanWorkerExit.diagnostics` — populated by `wait_with_stderr` for exactly
-this purpose since 0.1.10 — was unreachable through the `Display` surface,
-forcing every downstream that logs `tracing::error!("{err}")` or stores
-`err.to_string()` to pattern-match the variants and read the field by hand.
+`impl Display for LeanWorkerError` previously rendered `ChildExited` / `ChildPanicOrAbort` as the exit status alone
+(`"worker exited fatally with exit status: 1"`). The captured child stderr on `LeanWorkerExit.diagnostics` — populated
+by `wait_with_stderr` for exactly this purpose since 0.1.10 — was unreachable through the `Display` surface, forcing
+every downstream that logs `tracing::error!("{err}")` or stores `err.to_string()` to pattern-match the variants and read
+the field by hand.
 
 The `Display` rendering now appends the trimmed stderr tail when non-empty:
 
@@ -39,111 +34,83 @@ The `Display` rendering now appends the trimmed stderr tail when non-empty:
 worker exited fatally with exit status: 1: could not dlopen X.dylib: image not found
 ```
 
-Capped at 4 KiB so a runaway Lake / `elan` trace cannot blow up the formatted
-string; the full text is still available on `LeanWorkerExit.diagnostics`. The
-cut respects UTF-8 char boundaries and never lands inside an unterminated ANSI
-CSI escape (Lake colourises its trace output). When `diagnostics` is empty,
-the format collapses back to the original terse string.
+Capped at 4 KiB so a runaway Lake / `elan` trace cannot blow up the formatted string; the full text is still available
+on `LeanWorkerExit.diagnostics`. The cut respects UTF-8 char boundaries and never lands inside an unterminated ANSI CSI
+escape (Lake colourises its trace output). When `diagnostics` is empty, the format collapses back to the original terse
+string.
 
-No public-API change: the new helpers are private and the `Display` trait
-signature is unchanged.
+No public-API change: the new helpers are private and the `Display` trait signature is unchanged.
 
 ## [0.1.10] — 2026-05-25
 
-Re-tagging of 0.1.9. The tag-push release workflow failed in the public-API
-diff step because the CI's `cargo-public-api` upgraded from v0.51.0 (which
-includes parameter names in function signatures) to v0.52.0 (which omits
-them); locally regenerated baselines were on v0.51.0 and drifted against the
-CI run. No crates were published. This release regenerates every baseline
-with v0.52.0 and bumps the patch per `docs/release.md` step 7. Functionality
+Re-tagging of 0.1.9. The tag-push release workflow failed in the public-API diff step because the CI's
+`cargo-public-api` upgraded from v0.51.0 (which includes parameter names in function signatures) to v0.52.0 (which omits
+them); locally regenerated baselines were on v0.51.0 and drifted against the CI run. No crates were published. This
+release regenerates every baseline with v0.52.0 and bumps the patch per `docs/release.md` step 7. Functionality
 identical to 0.1.9.
 
 ## [0.1.9] — 2026-05-25
 
 ### Worker boundary: configurable per-capability frame cap
 
-`MAX_FRAME_BYTES` is no longer a hard-coded codec ceiling. The parent
-negotiates a per-connection cap with the child at handshake time, immediately
-after the existing `Handshake` frame:
+`MAX_FRAME_BYTES` is no longer a hard-coded codec ceiling. The parent negotiates a per-connection cap with the child at
+handshake time, immediately after the existing `Handshake` frame:
 
-- `Message::ConfigureFrameLimit { max_frame_bytes: u32 }` — new wire variant
-  the parent sends after reading the child's `Handshake`; the child installs
-  it on its codec state for the lifetime of the connection.
-- `LeanWorkerConfig::max_frame_bytes(n: u32)` and the parallel
-  `LeanWorkerCapabilityBuilder::max_frame_bytes(n: u32)` — the supervisor and
-  capability-builder setters. Values are clamped at the public boundary into
-  `[MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP]` (64 KiB / 256 MiB), so the
-  child only ever sees a sanitised value.
-- `MIN_FRAME_BYTES` and `MAX_FRAME_BYTES_HARD_CAP` — new public constants
-  describing the clamp bounds. `MAX_FRAME_BYTES` (1 MiB) keeps its name and
-  value, role changes from "hard limit baked into the codec" to "default cap
-  the supervisor applies when no caller overrides".
-- `protocol::write_frame` / `protocol::read_frame` gain a `max_frame_bytes:
-  u32` parameter; the codec trusts whatever cap the caller (supervisor or
-  child) passes. There is no caller-facing change for callers who do not
-  override the cap.
-- `PROTOCOL_VERSION` bumps from 3 to 4 — the existing handshake mismatch
-  check is the structural guard against an old↔new pairing slipping into
-  the `ConfigureFrameLimit` step.
+- `Message::ConfigureFrameLimit { max_frame_bytes: u32 }` — new wire variant the parent sends after reading the child's
+  `Handshake`; the child installs it on its codec state for the lifetime of the connection.
+- `LeanWorkerConfig::max_frame_bytes(n: u32)` and the parallel `LeanWorkerCapabilityBuilder::max_frame_bytes(n: u32)` —
+  the supervisor and capability-builder setters. Values are clamped at the public boundary into
+  `[MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP]` (64 KiB / 256 MiB), so the child only ever sees a sanitised value.
+- `MIN_FRAME_BYTES` and `MAX_FRAME_BYTES_HARD_CAP` — new public constants describing the clamp bounds. `MAX_FRAME_BYTES`
+  (1 MiB) keeps its name and value, role changes from "hard limit baked into the codec" to "default cap the supervisor
+  applies when no caller overrides".
+- `protocol::write_frame` / `protocol::read_frame` gain a `max_frame_bytes: u32` parameter; the codec trusts whatever
+  cap the caller (supervisor or child) passes. There is no caller-facing change for callers who do not override the cap.
+- `PROTOCOL_VERSION` bumps from 3 to 4 — the existing handshake mismatch check is the structural guard against an
+  old↔new pairing slipping into the `ConfigureFrameLimit` step.
 
-This makes tools whose single logical result is a frame — outlines of large
-modules, full-file diagnostics, future "render the whole info tree" cap
-shapes — opt into a larger envelope without forking the protocol crate.
-Existing tools see the same 1 MiB default.
+This makes tools whose single logical result is a frame — outlines of large modules, full-file diagnostics, future
+"render the whole info tree" cap shapes — opt into a larger envelope without forking the protocol crate. Existing tools
+see the same 1 MiB default.
 
 ### `lean-toolchain`: delete `lake_target_declared`, expose `declared_lean_libs`
 
-`lake_target_declared` did a substring scan that only recognised
-`lakefile.lean` syntax and returned `Ok(false)` for every `lakefile.toml`
-project. Its single caller in `lean-rs-worker-parent` already had the answer
-because `discover_lake_modules` parses both lakefile formats. The format-aware
-helper was a parallel implementation of a check the surrounding code could
-satisfy from existing state, so it is removed and the planner inlines the
-lookup against a new `LeanLakeProjectModules::declared_lean_libs: Vec<String>`
-field. The field preserves the "explicitly declared by the lakefile" semantics
-that motivated the old helper — top-level-fallback projects produce an empty
-`declared_lean_libs`, so a loose `Demo.lean` at project root without a
-matching `lean_lib` is still rejected by the worker bootstrap.
+`lake_target_declared` did a substring scan that only recognised `lakefile.lean` syntax and returned `Ok(false)` for
+every `lakefile.toml` project. Its single caller in `lean-rs-worker-parent` already had the answer because
+`discover_lake_modules` parses both lakefile formats. The format-aware helper was a parallel implementation of a check
+the surrounding code could satisfy from existing state, so it is removed and the planner inlines the lookup against a
+new `LeanLakeProjectModules::declared_lean_libs: Vec<String>` field. The field preserves the "explicitly declared by the
+lakefile" semantics that motivated the old helper — top-level-fallback projects produce an empty `declared_lean_libs`,
+so a loose `Demo.lean` at project root without a matching `lean_lib` is still rejected by the worker bootstrap.
 
 - Added: `LeanLakeProjectModules::declared_lean_libs: Vec<String>`.
 - Removed: `lean_toolchain::lake_target_declared` and its unit test.
 
 ### `lean-rs-worker-parent`: bind toolchain identity to `LeanWorkerChild`
 
-A worker child binary is built against one Lean toolchain — its rpath points
-at one `libleanshared`, and `LEAN_SYSROOT` at spawn time must point at the
-matching stdlib oleans. The locator now carries both:
+A worker child binary is built against one Lean toolchain — its rpath points at one `libleanshared`, and `LEAN_SYSROOT`
+at spawn time must point at the matching stdlib oleans. The locator now carries both:
 
-- `LeanWorkerChild::for_toolchain(path, sysroot)` — name-and-toolchain
-  constructor.
-- `LeanWorkerChild::lean_sysroot(sysroot)` — explicit sysroot setter on an
-  existing locator.
+- `LeanWorkerChild::for_toolchain(path, sysroot)` — name-and-toolchain constructor.
+- `LeanWorkerChild::lean_sysroot(sysroot)` — explicit sysroot setter on an existing locator.
 
-The supervisor sets `LEAN_SYSROOT` from the locator (falling back to
-`lean_toolchain::discover_toolchain` when no explicit sysroot is bound) before
-`Command::spawn`. A single parent process can now host workers for multiple
-toolchains by giving each `LeanWorkerCapability` its own
-`LeanWorkerChild::for_toolchain` locator; downstream consumers
+The supervisor sets `LEAN_SYSROOT` from the locator (falling back to `lean_toolchain::discover_toolchain` when no
+explicit sysroot is bound) before `Command::spawn`. A single parent process can now host workers for multiple toolchains
+by giving each `LeanWorkerCapability` its own `LeanWorkerChild::for_toolchain` locator; downstream consumers
 (`lean-host-mcp`) drop their "one server per toolchain" workaround.
 
-`LeanWorkerCapabilityBuilder` deliberately does **not** grow a general
-`env(key, value)` passthrough — each env var the worker child needs gets a
-typed builder method whose name describes the invariant it enforces. The
-rustdoc on `LeanWorkerChild` documents this discipline as a load-bearing API
-contract.
+`LeanWorkerCapabilityBuilder` deliberately does **not** grow a general `env(key, value)` passthrough — each env var the
+worker child needs gets a typed builder method whose name describes the invariant it enforces. The rustdoc on
+`LeanWorkerChild` documents this discipline as a load-bearing API contract.
 
 ### `lean-rs-worker-parent`: route handshake-error path through `wait_with_stderr`
 
-`LeanWorkerError::Handshake { message }` used to drop the worker child's
-stderr when the child died mid-bootstrap (e.g. a bad `LEAN_SYSROOT` aborted
-the loader before the handshake frame landed). The supervisor's existing
-`wait_with_stderr` helper already populates `LeanWorkerExit.diagnostics` with
-the captured stderr for any post-handshake child crash; the handshake error
-path now goes through the same helper. Bootstrap failures surface as
-`ChildPanicOrAbort { exit }` whose `exit.diagnostics` carries the underlying
-loader message, in the same shape as runtime crashes. `Handshake { message }`
-survives for the legitimate case where the child completes the handshake but
-sends a malformed or wrong-version frame.
+`LeanWorkerError::Handshake { message }` used to drop the worker child's stderr when the child died mid-bootstrap (e.g.
+a bad `LEAN_SYSROOT` aborted the loader before the handshake frame landed). The supervisor's existing `wait_with_stderr`
+helper already populates `LeanWorkerExit.diagnostics` with the captured stderr for any post-handshake child crash; the
+handshake error path now goes through the same helper. Bootstrap failures surface as `ChildPanicOrAbort { exit }` whose
+`exit.diagnostics` carries the underlying loader message, in the same shape as runtime crashes. `Handshake { message }`
+survives for the legitimate case where the child completes the handshake but sends a malformed or wrong-version frame.
 
 ## [0.1.8] — 2026-05-25
 
@@ -153,7 +120,8 @@ sends a malformed or wrong-version frame.
 
 - **`lean-rs-worker-protocol`** — wire types and frame codec. Depends only on `serde` / `serde_json`. Does not link
   `libleanshared`. The `harness` Cargo feature exposes the in-memory frame exerciser and fake-worker test affordances.
-  Every public `enum` and field-bearing `struct` is `#[non_exhaustive]` so additive variants do not require a major bump.
+  Every public `enum` and field-bearing `struct` is `#[non_exhaustive]` so additive variants do not require a major
+  bump.
 - **`lean-rs-worker-parent`** — parent-side supervisor, pool, planning, capability, and session. Depends on
   `lean-rs-worker-protocol` and `lean-toolchain`. **Does not link `libleanshared`.** A parent binary that only depends
   on `lean-rs-worker-parent` is free to dispatch to per-toolchain worker children at runtime without being rpath-pinned
@@ -185,8 +153,8 @@ test that gated drift.
 `LeanCapabilityPreflight::check()` is split into two layers. Static manifest validation (file exists, JSON parses,
 schema and fingerprint checks) now lives in `lean_toolchain::static_manifest_validation` and runs client-side from
 `lean-rs-worker-parent` before any child fork. The heavyweight runtime symbol-table inspection (Mach-O / ELF allowlist
-check) stays in `lean-rs` and runs from the child on first command. The wire-visible
-`LeanCapabilityPreflightReport` shape is unchanged.
+check) stays in `lean-rs` and runs from the child on first command. The wire-visible `LeanCapabilityPreflightReport`
+shape is unchanged.
 
 ### Workspace
 

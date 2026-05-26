@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: '24 8 * * 1'
+    - cron: "24 8 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -14,8 +14,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  LEAN_VERSION_HEAD: '4.30.0-rc2'
-  RUST_BACKTRACE: '0'
+  LEAN_VERSION_HEAD: "4.30.0-rc2"
+  RUST_BACKTRACE: "0"
 
 jobs:
   asan:
@@ -56,8 +56,8 @@ jobs:
 
       - name: ASan Rust-only helper tests
         env:
-          RUSTFLAGS: '-Z sanitizer=address -Cdebug-assertions=on'
-          RUSTDOCFLAGS: '-Z sanitizer=address'
+          RUSTFLAGS: "-Z sanitizer=address -Cdebug-assertions=on"
+          RUSTDOCFLAGS: "-Z sanitizer=address"
         run: |
           cargo +nightly test -p lean-toolchain --target x86_64-unknown-linux-gnu \
             -- --test-threads=1
