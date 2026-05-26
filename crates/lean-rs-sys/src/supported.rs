@@ -80,8 +80,8 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         missing_symbols: &[],
     },
     SupportedToolchain {
-        versions: &["4.30.0-rc2"],
-        header_digest: "790b121ce52942086a360a91f6db5f0f738043bc87b669daffa3fb8bc01e6dd3",
+        versions: &["4.30.0"],
+        header_digest: "5a25125970f4f1dcf85a4c403463b387a8ff93535cd4a3054cafdee1759017d7",
         missing_symbols: &[],
     },
 ];

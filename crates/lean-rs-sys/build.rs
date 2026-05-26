@@ -128,8 +128,8 @@ fn pick_resolved_version<'a>(entry: &'a SupportedToolchain, discovered: &'a str)
 }
 
 /// Convert a version string to a valid `cfg` token. Examples: `"4.29.1"` →
-/// `"4_29_1"` (downstream uses `#[cfg(lean_v_4_29_1)]`); `"4.30.0-rc2"` →
-/// `"4_30_0_rc2"`. Any byte outside `[A-Za-z0-9_]` collapses to `_` so
+/// `"4_29_1"` (downstream uses `#[cfg(lean_v_4_29_1)]`); `"4.30.0"` →
+/// `"4_30_0"`. Any byte outside `[A-Za-z0-9_]` collapses to `_` so
 /// release-candidate suffixes do not produce invalid `--cfg` arguments.
 fn cfg_token(version: &str) -> String {
     version

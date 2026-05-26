@@ -14,7 +14,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  LEAN_VERSION_HEAD: "4.30.0-rc2"
+  LEAN_VERSION_HEAD: "4.30.0"
   RUST_BACKTRACE: "0"
 
 jobs:
