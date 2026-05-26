@@ -266,40 +266,6 @@ pub struct LeanWorkerDeclarationRow {
     pub source: Option<LeanWorkerSourceRange>,
 }
 
-/// One top-level command projection. Mirrors
-/// `lean_rs_host::process::CommandInfoNode`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerCommandInfo {
-    pub start_line: u32,
-    pub start_column: u32,
-    pub end_line: u32,
-    pub end_column: u32,
-    pub decl_name: Option<String>,
-}
-
-/// One term projection. Mirrors `lean_rs_host::process::TermInfoNode`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerTermInfo {
-    pub start_line: u32,
-    pub start_column: u32,
-    pub end_line: u32,
-    pub end_column: u32,
-    pub expr_str: String,
-    pub type_str: String,
-    pub expected_type_str: Option<String>,
-}
-
-/// One tactic projection. Mirrors `lean_rs_host::process::TacticInfoNode`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerTacticInfo {
-    pub start_line: u32,
-    pub start_column: u32,
-    pub end_line: u32,
-    pub end_column: u32,
-    pub goals_before: Vec<String>,
-    pub goals_after: Vec<String>,
-}
-
 /// One identifier occurrence the elaborator recorded. `is_binder` distinguishes
 /// binding sites from use sites.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -312,46 +278,94 @@ pub struct LeanWorkerNameRef {
     pub is_binder: bool,
 }
 
-/// FFI-safe `Elab.InfoTree` projection. Mirrors
-/// `lean_rs_host::process::ProcessedFile`.
+/// Query shape for one header-aware Lean module processing request.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerProcessedFile {
-    pub commands: Vec<LeanWorkerCommandInfo>,
-    pub terms: Vec<LeanWorkerTermInfo>,
-    pub tactics: Vec<LeanWorkerTacticInfo>,
-    pub names: Vec<LeanWorkerNameRef>,
-    pub diagnostics: LeanWorkerElabFailure,
+#[serde(tag = "query", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQuery {
+    Diagnostics,
+    TypeAt { line: u32, column: u32 },
+    GoalAt { line: u32, column: u32 },
+    References { name: String },
 }
 
-/// Outcome of `LeanWorkerSession::process_file`. Mirrors
-/// `lean_rs_host::process::ProcessFileOutcome`.
+/// Source span in the original file. Positions are 1-based.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerModuleSourceSpan {
+    pub start_line: u32,
+    pub start_column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+}
+
+/// Bounded rendered Lean text.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerRenderedInfo {
+    pub value: String,
+    pub truncated: bool,
+}
+
+/// Result for `LeanWorkerModuleQuery::TypeAt`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum LeanWorkerProcessFileOutcome {
-    /// The elaborator ran and produced an info-tree projection.
-    Processed { file: LeanWorkerProcessedFile },
-    /// The capability dylib does not export
-    /// `lean_rs_host_process_with_info_tree`.
-    Unsupported,
+pub enum LeanWorkerTypeAtResult {
+    Term {
+        span: LeanWorkerModuleSourceSpan,
+        expr: LeanWorkerRenderedInfo,
+        type_str: LeanWorkerRenderedInfo,
+        expected_type: Option<LeanWorkerRenderedInfo>,
+    },
+    NoTerm,
 }
 
-/// Outcome of `LeanWorkerSession::process_module`. Mirrors
-/// `lean_rs_host::process::ProcessModuleOutcome`.
+/// Result for `LeanWorkerModuleQuery::GoalAt`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum LeanWorkerProcessModuleOutcome {
+pub enum LeanWorkerGoalAtResult {
+    Goal {
+        span: LeanWorkerModuleSourceSpan,
+        goals_before: Vec<String>,
+        goals_after: Vec<String>,
+        truncated: bool,
+    },
+    NoTacticContext,
+}
+
+/// Result for `LeanWorkerModuleQuery::References`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerReferencesResult {
+    pub references: Vec<LeanWorkerNameRef>,
+    pub truncated: bool,
+}
+
+/// Typed payload returned by a successful module query.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "result", content = "body", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQueryResult {
+    Diagnostics(LeanWorkerElabFailure),
+    TypeAt(LeanWorkerTypeAtResult),
+    GoalAt(LeanWorkerGoalAtResult),
+    References(LeanWorkerReferencesResult),
+}
+
+/// Outcome of `LeanWorkerSession::process_module_query`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQueryOutcome {
     /// Header parsed; every parsed import is present in the session's open
-    /// env; the body was processed.
+    /// env; the query result is populated.
     Ok {
-        file: LeanWorkerProcessedFile,
+        result: LeanWorkerModuleQueryResult,
         imports: Vec<String>,
     },
     /// Header parsed but some imports name modules the session's open env
-    /// does not have. The body was still processed against the available env.
+    /// does not have. The body was still queried against the available env.
     MissingImports {
-        file: LeanWorkerProcessedFile,
+        result: LeanWorkerModuleQueryResult,
         imports: Vec<String>,
         missing: Vec<String>,
     },
@@ -359,7 +373,7 @@ pub enum LeanWorkerProcessModuleOutcome {
     /// was never elaborated.
     HeaderParseFailed { diagnostics: LeanWorkerElabFailure },
     /// The capability dylib does not export
-    /// `lean_rs_host_process_module_with_info_tree`.
+    /// `lean_rs_host_process_module_query`.
     Unsupported,
 }
 

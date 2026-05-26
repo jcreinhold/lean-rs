@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-05-26
+
+### Bounded module-query projections
+
+Breaking pre-1.0 change: worker module-processing projections are now bounded by query shape. Diagnostics, cursor type
+lookup, cursor goal lookup, and name-reference lookup no longer serialize whole-file raw expression/type strings. Large
+module-syntax files that previously killed the worker with `worker protocol frame too large` now return bounded
+structured results or explicit truncation.
+
 ## [0.1.14] — 2026-05-26
 
 ### Module-system headers in info-tree processing

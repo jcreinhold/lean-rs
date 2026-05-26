@@ -56,10 +56,10 @@ optional** capabilities so the layer difference is visible at the import site: d
   `LeanMetaTransparency`, `MetaCallStatus`, and the five factories at the crate root would pollute the namespace of
   every caller for the benefit of the subset that opts into `MetaM`. Meta callers write `use lean_rs_host::meta::{...}`;
   everyone else is undisturbed.
-- **`lean_rs_host::process`**—the optional info-tree projection capability. One additional `SessionSymbols` slot
-  (`process_with_info_tree`) and a value-typed [`ProcessedFile`](crate::host::process::ProcessedFile) projection; only
-  [`LeanSession::process_with_info_tree`](crate::LeanSession::process_with_info_tree) touches the module, so the four
-  node types and the outcome enum live under `process` rather than at the crate root.
+- **`lean_rs_host::process`**—the optional module-query projection capability. One additional `SessionSymbols` slot
+  (`process_module_query`) and the query/result types for diagnostics, cursor type lookup, cursor goal lookup, and name
+  references live under `process` rather than at the crate root. The public boundary is one query-shaped operation, so
+  callers do not pay for whole-file raw info-tree rendering when they only need one bounded projection.
 
 ## Mandatory entry points
 

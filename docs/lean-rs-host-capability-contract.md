@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 28 mandatory + 7 optional `@[export] lean_rs_host_*` symbols [`lean-rs-host`](https://docs.rs/lean-rs-host)'s
+The 28 mandatory + 6 optional `@[export] lean_rs_host_*` symbols [`lean-rs-host`](https://docs.rs/lean-rs-host)'s
 `LeanCapabilities::load_capabilities` resolves at runtime. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
 `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a `lean_rs_host_shims` require line to
@@ -82,13 +82,12 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (7 symbols)
+## Optional contract (6 symbols)
 
 If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for that slot; the dispatching
 call site degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta
-services, `LeanSession::process_with_info_tree` returns `ProcessFileOutcome::Unsupported` for the body-only info-tree
-projection, and `LeanSession::process_module_with_info_tree` returns `ProcessModuleOutcome::Unsupported` for the
-header-aware projection.
+services, and `LeanSession::process_module_query` returns `ModuleQueryOutcome::Unsupported` for the bounded module-query
+projection.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -97,8 +96,7 @@ header-aware projection.
 | `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
 | `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
 | `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
-| `lean_rs_host_process_with_info_tree` | `(env) (src : String) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ProcessedFile` | `process_with_info_tree(source, options, cancellation)` |
-| `lean_rs_host_process_module_with_info_tree` | `(env) (src : String) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ProcessModuleOutcome` | `process_module_with_info_tree(source, options, cancellation)` |
+| `lean_rs_host_process_module_query` | `(env) (src : String) (query : ModuleQuery) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryOutcome` | `process_module_query(source, query, options, cancellation)` |
 
 ## Forking the shim package
 
@@ -109,9 +107,8 @@ policy, extra logging on the kernel-check path) must keep:
   initialize the module and interpret symbol names consistently.
 - Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed
   shapes).
-- The 7 optional symbols are truly optional; omitting any collapses the corresponding session method to its
-  `Unsupported` arm (`run_meta` for the five meta services, `process_with_info_tree` for the body-only info-tree
-  projection, `process_module_with_info_tree` for the header-aware projection).
+- The 6 optional symbols are truly optional; omitting any collapses the corresponding session method to its
+  `Unsupported` arm (`run_meta` for the five meta services, `process_module_query` for bounded module projections).
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this is why the shim package isn't
 framed as "compatibility shims" but as the **implementation** of the wire contract.

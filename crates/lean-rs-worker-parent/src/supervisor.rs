@@ -16,7 +16,7 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
@@ -1287,51 +1287,26 @@ impl LeanWorker {
         clippy::wildcard_enum_match_arm,
         reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
     )]
-    pub(crate) fn worker_process_file(
+    pub(crate) fn worker_process_module_query(
         &mut self,
         source: &str,
+        query: LeanWorkerModuleQuery,
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
+    ) -> Result<LeanWorkerModuleQueryOutcome, LeanWorkerError> {
         self.round_trip(
-            "worker_process_file",
-            Request::ProcessFile {
+            "worker_process_module_query",
+            Request::ProcessModuleQuery {
                 source: source.to_owned(),
+                query,
                 options: options.clone(),
             },
             false,
             cancellation,
             progress,
             |response, operation| match response {
-                Response::ProcessFile { outcome } => Ok(outcome),
-                other => Err(unexpected_response(operation, &other)),
-            },
-        )
-    }
-
-    #[expect(
-        clippy::wildcard_enum_match_arm,
-        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
-    )]
-    pub(crate) fn worker_process_module(
-        &mut self,
-        source: &str,
-        options: &LeanWorkerElabOptions,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
-        self.round_trip(
-            "worker_process_module",
-            Request::ProcessModule {
-                source: source.to_owned(),
-                options: options.clone(),
-            },
-            false,
-            cancellation,
-            progress,
-            |response, operation| match response {
-                Response::ProcessModule { outcome } => Ok(outcome),
+                Response::ProcessModuleQuery { outcome } => Ok(outcome),
                 other => Err(unexpected_response(operation, &other)),
             },
         )

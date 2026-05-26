@@ -10,7 +10,8 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    CommandInfoNode, NameRefNode, ProcessFileOutcome, ProcessModuleOutcome, ProcessedFile, TacticInfoNode, TermInfoNode,
+    GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, ModuleSourceSpan, NameRefNode, ReferencesResult,
+    RenderedInfo, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -25,12 +26,12 @@ use lean_rs_worker_protocol::protocol::{
     Response, StreamSummary, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow,
-    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDiagnostic,
+    LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult,
     LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome,
-    LeanWorkerProcessedFile, LeanWorkerRendered, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTacticInfo,
-    LeanWorkerTermInfo,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+    LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerReferencesResult, LeanWorkerRendered,
+    LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
 };
 
 #[derive(Clone)]
@@ -411,20 +412,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 writer.write(Message::Response(response))?;
             }
-            Request::ProcessFile { source, options } => {
+            Request::ProcessModuleQuery { source, query, options } => {
                 let response = match host_session.as_mut() {
-                    Some(state) => match state.process_file(&source, &options) {
-                        Ok(outcome) => Response::ProcessFile { outcome },
-                        Err(err) => error_response(&err),
-                    },
-                    None => missing_session_response(),
-                };
-                writer.write(Message::Response(response))?;
-            }
-            Request::ProcessModule { source, options } => {
-                let response = match host_session.as_mut() {
-                    Some(state) => match state.process_module(&source, &options) {
-                        Ok(outcome) => Response::ProcessModule { outcome },
+                    Some(state) => match state.process_module_query(&source, query, &options) {
+                        Ok(outcome) => Response::ProcessModuleQuery { outcome },
                         Err(err) => error_response(&err),
                     },
                     None => missing_session_response(),
@@ -964,45 +955,35 @@ impl HostSessionState {
         Ok(rows)
     }
 
-    fn process_file(
+    fn process_module_query(
         &mut self,
         source: &str,
+        query: LeanWorkerModuleQuery,
         options: &LeanWorkerElabOptions,
-    ) -> LeanResult<LeanWorkerProcessFileOutcome> {
+    ) -> LeanResult<LeanWorkerModuleQueryOutcome> {
         let options = elab_options_to_host(options);
-        Ok(match self.session.process_with_info_tree(source, &options, None)? {
-            ProcessFileOutcome::Processed(file) => LeanWorkerProcessFileOutcome::Processed {
-                file: processed_file_wire(file),
-            },
-            ProcessFileOutcome::Unsupported => LeanWorkerProcessFileOutcome::Unsupported,
-        })
-    }
-
-    fn process_module(
-        &mut self,
-        source: &str,
-        options: &LeanWorkerElabOptions,
-    ) -> LeanResult<LeanWorkerProcessModuleOutcome> {
-        let options = elab_options_to_host(options);
+        let query = module_query_host(query)?;
         Ok(
-            match self.session.process_module_with_info_tree(source, &options, None)? {
-                ProcessModuleOutcome::Ok { file, imports } => LeanWorkerProcessModuleOutcome::Ok {
-                    file: processed_file_wire(file),
+            match self.session.process_module_query(source, &query, &options, None)? {
+                ModuleQueryOutcome::Ok { result, imports } => LeanWorkerModuleQueryOutcome::Ok {
+                    result: module_query_result_wire(result),
                     imports,
                 },
-                ProcessModuleOutcome::MissingImports { file, imports, missing } => {
-                    LeanWorkerProcessModuleOutcome::MissingImports {
-                        file: processed_file_wire(file),
-                        imports,
-                        missing,
-                    }
-                }
-                ProcessModuleOutcome::HeaderParseFailed { diagnostics } => {
-                    LeanWorkerProcessModuleOutcome::HeaderParseFailed {
+                ModuleQueryOutcome::MissingImports {
+                    result,
+                    imports,
+                    missing,
+                } => LeanWorkerModuleQueryOutcome::MissingImports {
+                    result: module_query_result_wire(result),
+                    imports,
+                    missing,
+                },
+                ModuleQueryOutcome::HeaderParseFailed { diagnostics } => {
+                    LeanWorkerModuleQueryOutcome::HeaderParseFailed {
                         diagnostics: elab_failure_wire(&diagnostics),
                     }
                 }
-                ProcessModuleOutcome::Unsupported => LeanWorkerProcessModuleOutcome::Unsupported,
+                ModuleQueryOutcome::Unsupported => LeanWorkerModuleQueryOutcome::Unsupported,
             },
         )
     }
@@ -1253,36 +1234,83 @@ fn source_range_wire(range: LeanSourceRange) -> LeanWorkerSourceRange {
     }
 }
 
-fn command_info_wire(node: CommandInfoNode) -> LeanWorkerCommandInfo {
-    LeanWorkerCommandInfo {
-        start_line: node.start_line,
-        start_column: node.start_column,
-        end_line: node.end_line,
-        end_column: node.end_column,
-        decl_name: node.decl_name,
+fn module_query_host(query: LeanWorkerModuleQuery) -> LeanResult<ModuleQuery> {
+    Ok(match query {
+        LeanWorkerModuleQuery::Diagnostics => ModuleQuery::Diagnostics,
+        LeanWorkerModuleQuery::TypeAt { line, column } => ModuleQuery::TypeAt { line, column },
+        LeanWorkerModuleQuery::GoalAt { line, column } => ModuleQuery::GoalAt { line, column },
+        LeanWorkerModuleQuery::References { name } => ModuleQuery::References { name },
+        _ => return Err(host_internal("unsupported module query variant")),
+    })
+}
+
+fn module_source_span_wire(span: &ModuleSourceSpan) -> LeanWorkerModuleSourceSpan {
+    LeanWorkerModuleSourceSpan {
+        start_line: span.start_line,
+        start_column: span.start_column,
+        end_line: span.end_line,
+        end_column: span.end_column,
     }
 }
 
-fn term_info_wire(node: TermInfoNode) -> LeanWorkerTermInfo {
-    LeanWorkerTermInfo {
-        start_line: node.start_line,
-        start_column: node.start_column,
-        end_line: node.end_line,
-        end_column: node.end_column,
-        expr_str: node.expr_str,
-        type_str: node.type_str,
-        expected_type_str: node.expected_type_str,
+fn rendered_info_wire(info: RenderedInfo) -> LeanWorkerRenderedInfo {
+    LeanWorkerRenderedInfo {
+        value: info.value,
+        truncated: info.truncated,
     }
 }
 
-fn tactic_info_wire(node: TacticInfoNode) -> LeanWorkerTacticInfo {
-    LeanWorkerTacticInfo {
-        start_line: node.start_line,
-        start_column: node.start_column,
-        end_line: node.end_line,
-        end_column: node.end_column,
-        goals_before: node.goals_before,
-        goals_after: node.goals_after,
+fn type_at_result_wire(result: TypeAtResult) -> LeanWorkerTypeAtResult {
+    match result {
+        TypeAtResult::Term {
+            span,
+            expr,
+            type_str,
+            expected_type,
+        } => LeanWorkerTypeAtResult::Term {
+            span: module_source_span_wire(&span),
+            expr: rendered_info_wire(expr),
+            type_str: rendered_info_wire(type_str),
+            expected_type: expected_type.map(rendered_info_wire),
+        },
+        TypeAtResult::NoTerm => LeanWorkerTypeAtResult::NoTerm,
+    }
+}
+
+fn goal_at_result_wire(result: GoalAtResult) -> LeanWorkerGoalAtResult {
+    match result {
+        GoalAtResult::Goal {
+            span,
+            goals_before,
+            goals_after,
+            truncated,
+        } => LeanWorkerGoalAtResult::Goal {
+            span: module_source_span_wire(&span),
+            goals_before,
+            goals_after,
+            truncated,
+        },
+        GoalAtResult::NoTacticContext => LeanWorkerGoalAtResult::NoTacticContext,
+    }
+}
+
+fn references_result_wire(result: ReferencesResult) -> LeanWorkerReferencesResult {
+    LeanWorkerReferencesResult {
+        references: result.references.into_iter().map(name_ref_wire).collect(),
+        truncated: result.truncated,
+    }
+}
+
+fn module_query_result_wire(result: ModuleQueryResult) -> LeanWorkerModuleQueryResult {
+    match result {
+        ModuleQueryResult::Diagnostics(failure) => {
+            LeanWorkerModuleQueryResult::Diagnostics(elab_failure_wire(&failure))
+        }
+        ModuleQueryResult::TypeAt(result) => LeanWorkerModuleQueryResult::TypeAt(type_at_result_wire(result)),
+        ModuleQueryResult::GoalAt(result) => LeanWorkerModuleQueryResult::GoalAt(goal_at_result_wire(result)),
+        ModuleQueryResult::References(result) => {
+            LeanWorkerModuleQueryResult::References(references_result_wire(result))
+        }
     }
 }
 
@@ -1294,16 +1322,6 @@ fn name_ref_wire(node: NameRefNode) -> LeanWorkerNameRef {
         end_column: node.end_column,
         name: node.name,
         is_binder: node.is_binder,
-    }
-}
-
-fn processed_file_wire(file: ProcessedFile) -> LeanWorkerProcessedFile {
-    LeanWorkerProcessedFile {
-        commands: file.commands.into_iter().map(command_info_wire).collect(),
-        terms: file.terms.into_iter().map(term_info_wire).collect(),
-        tactics: file.tactics.into_iter().map(tactic_info_wire).collect(),
-        names: file.names.into_iter().map(name_ref_wire).collect(),
-        diagnostics: elab_failure_wire(&file.diagnostics),
     }
 }
 

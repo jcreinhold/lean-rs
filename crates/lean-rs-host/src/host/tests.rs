@@ -1372,270 +1372,233 @@ fn meta_missing_optional_symbol_returns_unsupported() {
     );
 }
 
-// -- process_with_info_tree (optional info-tree projection) -------------
-//
-// `lean_rs_host_process_with_info_tree` is bundled in the shim dylib, so
-// `SessionSymbols::resolve` finds it and dispatch returns `Processed`.
-// The unsupported branch is asserted indirectly by the meta-Unsupported
-// tests above — the same lookup pattern (`Option<*mut c_void>` from
-// `resolve_optional_function_symbol`) covers both. A bespoke
-// "synthesise None to confirm Unsupported" test would require a
-// reflection-style hook into `SessionSymbols`; not load-bearing for v1.
+// -- process_module_query (bounded module projections) -------------------
 
 #[test]
-fn session_process_with_info_tree_projects_small_file() {
-    use crate::host::process::ProcessFileOutcome;
+fn session_process_module_query_returns_diagnostics_without_info_tree_payload() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+
     let host = fixture_host();
     let caps = host
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let src = "def x := 1\ntheorem t : x = 1 := rfl\n#check x";
+    let src = "import Lean\n\ntheorem bad : True := 0\n";
     let outcome = session
-        .process_with_info_tree(src, &LeanElabOptions::new(), None)
+        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
-    let ProcessFileOutcome::Processed(processed) = outcome else {
-        panic!("expected Processed, got {outcome:?}");
-    };
-    assert!(
-        processed.commands.len() >= 3,
-        "three top-level commands expected, got {}",
-        processed.commands.len()
-    );
-    let t_node = processed.commands.iter().find(|c| c.decl_name.as_deref() == Some("t"));
-    assert!(
-        t_node.is_some(),
-        "the `theorem t` command must surface declName=`t`, got commands {:?}",
-        processed.commands
-    );
-    assert!(
-        processed.names.iter().any(|n| n.name.ends_with('x')),
-        "name references must include a use site for `x`, got {:?}",
-        processed.names
-    );
-    assert!(
-        processed
-            .terms
-            .iter()
-            .any(|t| t.expr_str.contains('x') || t.type_str.contains('x')),
-        "at least one term node must mention `x`, got {:?}",
-        processed.terms
-    );
-}
 
-#[test]
-fn session_process_with_info_tree_position_helpers() {
-    use crate::host::process::ProcessFileOutcome;
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-
-    // Tactic-mode body so the elaborator records a TacticInfo node for
-    // `rfl`. Without `by`, `rfl` is a term and there is no TacticInfo.
-    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n";
-    let outcome = session
-        .process_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessFileOutcome::Processed(processed) = outcome else {
-        panic!("expected Processed, got {outcome:?}");
-    };
-    // `rfl` sits at line 2 around column 24 (after "by "). The
-    // innermost tactic node covering that column should be the `rfl`
-    // tactic itself.
-    let tac = processed.tactic_at(2, 24).unwrap_or_else(|| {
-        panic!(
-            "tactic_at(2, 24) must find the `rfl` tactic, got tactics {:?}",
-            processed.tactics
-        )
-    });
-    assert!(
-        !tac.goals_before.is_empty(),
-        "tactic node must record goals_before, got {tac:?}",
-    );
-    // Names of `x` should include the def site and the reference in `t`.
-    let xs = processed.references_of("x");
-    assert!(!xs.is_empty(), "references_of(\"x\") must find ≥1 entry, got {xs:?}");
-    // term_at within `x = 1` body should find a term.
-    let term = processed.term_at(2, 13);
-    assert!(
-        term.is_some(),
-        "term_at(2, 13) inside the theorem body must find a term, got terms {:?}",
-        processed.terms
-    );
-}
-
-#[test]
-fn session_process_with_info_tree_records_diagnostics_for_failure() {
-    use crate::host::process::ProcessFileOutcome;
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-
-    // Type-mismatched body — elaborator emits an error diagnostic but
-    // the projection still returns Processed (diagnostics carry the
-    // failure context; no separate timeout/failed wire arm).
-    let src = "theorem bad : True := 0\n";
-    let outcome = session
-        .process_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessFileOutcome::Processed(processed) = outcome else {
-        panic!("expected Processed, got {outcome:?}");
-    };
-    let diags = processed.diagnostics.diagnostics();
-    assert!(
-        diags.iter().any(|d| d.severity() == LeanSeverity::Error),
-        "type-mismatched body must record at least one error diagnostic, got {diags:?}",
-    );
-}
-
-// -- process_module_with_info_tree (header-aware info-tree projection) -------
-//
-// The dispatch shape is structurally identical to `process_with_info_tree`:
-// a single `let Some(addr) = self.capabilities.symbols().process_module_with_info_tree
-// else { return Unsupported; }`. The optional-symbol Unsupported branch is
-// exercised by `meta_missing_optional_symbol_returns_unsupported` above,
-// which fakes a missing symbol via the name-keyed meta dispatcher — the
-// same `resolve_optional_function_symbol` shape covers both. A bespoke
-// "synthesise None to confirm Unsupported" test for this field would need
-// a test-only mutation API on `SessionSymbols`; the marginal coverage does
-// not justify the surface growth (matches the precedent above).
-
-#[test]
-fn session_process_module_with_info_tree_roundtrips_real_file() {
-    use crate::host::process::ProcessModuleOutcome;
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-
-    // Line 1: import; line 2: blank; line 3: theorem.
-    let src = "import Lean\n\ntheorem t : True := by trivial\n";
-    let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessModuleOutcome::Ok { file, imports } = outcome else {
-        panic!("expected Ok, got {outcome:?}");
-    };
-    assert_eq!(
+    let ModuleQueryOutcome::Ok {
+        result: ModuleQueryResult::Diagnostics(diagnostics),
         imports,
-        vec!["Lean".to_string()],
-        "imports must list the user-written modules only (no auto Init)",
-    );
-    let first = file.tactics.first().unwrap_or_else(|| {
-        panic!(
-            "the `by trivial` body must record ≥1 tactic node, got {:?}",
-            file.tactics
-        )
-    });
-    assert_eq!(
-        first.start_line, 3,
-        "first tactic must land on the original file's line 3 (theorem line), got {first:?}",
-    );
-}
-
-#[test]
-fn session_process_module_with_info_tree_reports_missing_imports() {
-    use crate::host::process::ProcessModuleOutcome;
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_elaboration(&caps);
-
-    // Foo.Bar.Baz is not in the session's open env; the body still
-    // parses but per-command elaboration may fail. The outcome should
-    // be MissingImports with the absent module listed exactly once.
-    let src = "import Foo.Bar.Baz\n\ndef x := 1\n";
-    let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessModuleOutcome::MissingImports {
-        imports,
-        missing,
-        file: _,
     } = outcome
     else {
-        panic!("expected MissingImports, got {outcome:?}");
+        panic!("expected diagnostics Ok outcome, got {outcome:?}");
+    };
+    assert_eq!(imports, vec!["Lean".to_string()]);
+    assert!(
+        diagnostics
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error),
+        "type-mismatched body must record at least one error diagnostic, got {:?}",
+        diagnostics.diagnostics(),
+    );
+}
+
+#[test]
+fn session_process_module_query_type_at_returns_one_selected_term() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n";
+    let outcome = session
+        .process_module_query(
+            src,
+            &ModuleQuery::TypeAt { line: 2, column: 13 },
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+
+    let ModuleQueryOutcome::Ok {
+        result:
+            ModuleQueryResult::TypeAt(TypeAtResult::Term {
+                span,
+                expr,
+                type_str,
+                expected_type: _,
+            }),
+        imports,
+    } = outcome
+    else {
+        panic!("expected selected term, got {outcome:?}");
+    };
+    assert!(
+        imports.is_empty(),
+        "body-only input should have no imports, got {imports:?}"
+    );
+    assert_eq!(span.start_line, 2);
+    assert!(!expr.value.is_empty(), "selected term must render its expression");
+    assert!(
+        !type_str.value.is_empty(),
+        "selected term must render its inferred type"
+    );
+    assert!(
+        expr.value.len() <= 64 * 1024 && type_str.value.len() <= 64 * 1024,
+        "type query fields must be bounded, got expr={} type={}",
+        expr.value.len(),
+        type_str.value.len(),
+    );
+}
+
+#[test]
+fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
+    use crate::host::process::{GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "theorem t : True := by\n  trivial\n";
+    let outcome = session
+        .process_module_query(
+            src,
+            &ModuleQuery::GoalAt { line: 2, column: 4 },
+            &LeanElabOptions::new().diagnostic_byte_limit(256),
+            None,
+        )
+        .expect("host stack reports no exception");
+
+    let ModuleQueryOutcome::Ok {
+        result:
+            ModuleQueryResult::GoalAt(GoalAtResult::Goal {
+                span,
+                goals_before,
+                goals_after: _,
+                truncated: _,
+            }),
+        imports,
+    } = outcome
+    else {
+        panic!("expected selected tactic goals, got {outcome:?}");
+    };
+    assert!(
+        imports.is_empty(),
+        "body-only input should have no imports, got {imports:?}"
+    );
+    assert_eq!(span.start_line, 2);
+    assert!(
+        goals_before.iter().any(|goal| goal.contains("True")),
+        "goal before `trivial` should mention True, got {goals_before:?}",
+    );
+}
+
+#[test]
+fn session_process_module_query_references_returns_name_locations_only() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "def x := 1\ntheorem t : x = 1 := by rfl\n#check x\n";
+    let outcome = session
+        .process_module_query(
+            src,
+            &ModuleQuery::References { name: "x".to_string() },
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+
+    let ModuleQueryOutcome::Ok {
+        result: ModuleQueryResult::References(result),
+        imports,
+    } = outcome
+    else {
+        panic!("expected references result, got {outcome:?}");
+    };
+    assert!(
+        imports.is_empty(),
+        "body-only input should have no imports, got {imports:?}"
+    );
+    assert!(!result.references.is_empty(), "expected at least one `x` reference");
+    assert!(
+        result.references.iter().all(|r| r.name.ends_with('x')),
+        "references query should return only matching names, got {:?}",
+        result.references,
+    );
+}
+
+#[test]
+fn session_process_module_query_reports_missing_imports_with_result() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "import Foo.Bar.Baz\n\ndef x := 1\n";
+    let outcome = session
+        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let ModuleQueryOutcome::MissingImports {
+        result: ModuleQueryResult::Diagnostics(_),
+        imports,
+        missing,
+    } = outcome
+    else {
+        panic!("expected MissingImports with diagnostics, got {outcome:?}");
     };
     assert_eq!(imports, vec!["Foo.Bar.Baz".to_string()]);
     assert_eq!(missing, vec!["Foo.Bar.Baz".to_string()]);
 }
 
 #[test]
-fn session_process_module_with_info_tree_surfaces_header_parse_error() {
-    use crate::host::process::ProcessModuleOutcome;
+fn session_process_module_query_surfaces_header_parse_error() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome};
+
     let host = fixture_host();
     let caps = host
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    // `import 123` is a malformed header — the module-name slot
-    // requires an identifier. Confirmed via lean_run_code probe that
-    // `headerMessages.hasErrors == true` for this exact input.
     let src = "import 123\n\ntheorem t : True := by trivial\n";
     let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
-    let ProcessModuleOutcome::HeaderParseFailed { diagnostics } = outcome else {
+    let ModuleQueryOutcome::HeaderParseFailed { diagnostics } = outcome else {
         panic!("expected HeaderParseFailed, got {outcome:?}");
     };
-    let diags = diagnostics.diagnostics();
     assert!(
-        diags.iter().any(|d| d.severity() == LeanSeverity::Error),
-        "malformed header must record at least one error diagnostic, got {diags:?}",
+        diagnostics
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error),
+        "malformed header must record at least one error diagnostic, got {:?}",
+        diagnostics.diagnostics(),
     );
 }
 
 #[test]
-fn session_process_module_with_info_tree_uses_original_file_line_numbers() {
-    use crate::host::process::ProcessModuleOutcome;
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_elaboration(&caps);
+fn session_process_module_query_handles_module_system_header() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
-    // Five header lines + one blank, then the theorem on line 7. The
-    // returned tactic node must report start_line == 7 — not 1 (no
-    // header-aware processing) and not 6 (off-by-one from a naive
-    // header-line-count offset).
-    let src = "\
-import Lean
-import Lean
-import Lean
-import Lean
-import Lean
-
-theorem t : True := by trivial
-";
-    let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessModuleOutcome::Ok { file, .. } = outcome else {
-        panic!("expected Ok, got {outcome:?}");
-    };
-    let first = file
-        .tactics
-        .first()
-        .unwrap_or_else(|| panic!("expected ≥1 tactic, got {:?}", file.tactics));
-    assert_eq!(
-        first.start_line, 7,
-        "first tactic must be at original file's line 7, got {first:?}",
-    );
-}
-
-#[test]
-fn session_process_module_with_info_tree_handles_module_system_header() {
-    use crate::host::process::ProcessModuleOutcome;
-
-    let project = TempLakeProject::new("module-system-header-host");
+    let project = TempLakeProject::new("module-query-header-host");
     write_module_syntax_fixture(&project);
     let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
     let caps = host.load_shims_only().expect("shim-only capabilities load");
@@ -1658,10 +1621,14 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
 #check privateOnly
 ";
     let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
+        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
-    let ProcessModuleOutcome::Ok { file, imports } = outcome else {
-        panic!("expected Ok, got {outcome:?}");
+    let ModuleQueryOutcome::Ok {
+        result: ModuleQueryResult::Diagnostics(diagnostics),
+        imports,
+    } = outcome
+    else {
+        panic!("expected Ok diagnostics, got {outcome:?}");
     };
 
     assert_eq!(
@@ -1673,12 +1640,7 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
         ],
         "imports must be bare module names, without `public` or `all` modifiers",
     );
-    assert!(
-        !file.terms.is_empty(),
-        "module-system body must produce term info nodes, got {:?}",
-        file.terms
-    );
-    let diagnostics = file.diagnostics.diagnostics();
+    let diagnostics = diagnostics.diagnostics();
     let messages: Vec<&str> = diagnostics.iter().map(|diagnostic| diagnostic.message()).collect();
     assert!(
         diagnostics
@@ -1695,63 +1657,5 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
     assert!(
         !messages.iter().any(|m| m.contains("unknown module prefix 'all'")),
         "`import all` must resolve the named module, got {messages:?}",
-    );
-}
-
-#[test]
-fn session_process_module_with_info_tree_reports_module_system_missing_imports() {
-    use crate::host::process::ProcessModuleOutcome;
-
-    let project = TempLakeProject::new("module-system-missing-host");
-    write_module_syntax_fixture(&project);
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
-    let mut session = caps
-        .session(&["Fixture.Imported"], None, None)
-        .expect("session imports available fixture module");
-
-    let src = "\
-module
-
-public import Fixture.Missing
-
-def moduleSyntaxFoo : Nat := 1
-";
-    let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessModuleOutcome::MissingImports { imports, missing, .. } = outcome else {
-        panic!("expected MissingImports, got {outcome:?}");
-    };
-
-    assert_eq!(imports, vec!["Fixture.Missing".to_string()]);
-    assert_eq!(missing, vec!["Fixture.Missing".to_string()]);
-}
-
-#[test]
-fn session_process_module_with_info_tree_reports_module_system_header_parse_error() {
-    use crate::host::process::ProcessModuleOutcome;
-
-    let host = fixture_host();
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
-    let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"], None, None)
-        .expect("session imports shims");
-
-    let src = "module\n\npublic import 123\n\ndef moduleSyntaxFoo : Nat := 1\n";
-    let outcome = session
-        .process_module_with_info_tree(src, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
-    let ProcessModuleOutcome::HeaderParseFailed { diagnostics } = outcome else {
-        panic!("expected HeaderParseFailed, got {outcome:?}");
-    };
-
-    assert!(
-        diagnostics
-            .diagnostics()
-            .iter()
-            .any(|d| d.severity() == LeanSeverity::Error),
-        "malformed module-system header must record an error diagnostic, got {:?}",
-        diagnostics.diagnostics(),
     );
 }

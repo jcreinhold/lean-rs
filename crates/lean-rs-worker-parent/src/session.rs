@@ -22,7 +22,7 @@ use lean_rs_worker_protocol::protocol::{DataRow, Diagnostic, StreamSummary};
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -646,46 +646,25 @@ impl LeanWorkerSession<'_> {
         self.with_session(|worker| worker.worker_describe_bulk(names, cancellation, progress))
     }
 
-    /// Parse, elaborate, and project a Lean source string into an
-    /// `Elab.InfoTree` projection. The session's open environment supplies
-    /// the imports; the source must not declare its own header.
+    /// Parse and elaborate a Lean module, returning only the requested
+    /// bounded projection.
     ///
     /// # Errors
     ///
     /// Returns `LeanWorkerError` if the worker is dead, the child reports a
     /// host error, cancellation is observed, a progress sink panics, or
-    /// protocol communication fails. Per-command elaboration failures appear
-    /// inside `LeanWorkerProcessedFile::diagnostics`; the
-    /// `LeanWorkerProcessFileOutcome::Unsupported` arm surfaces missing
-    /// capability shims.
-    pub fn process_file(
+    /// protocol communication fails. Header-parse failures, missing imports,
+    /// and missing capability shims surface as variants of
+    /// [`LeanWorkerModuleQueryOutcome`].
+    pub fn process_module_query(
         &mut self,
         source: &str,
+        query: LeanWorkerModuleQuery,
         options: &LeanWorkerElabOptions,
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerProcessFileOutcome, LeanWorkerError> {
-        self.with_session(|worker| worker.worker_process_file(source, options, cancellation, progress))
-    }
-
-    /// Parse a Lean module header (`import` declarations and prelude) and
-    /// elaborate the body; project both into an `Elab.InfoTree` projection
-    /// plus the parsed import list.
-    ///
-    /// # Errors
-    ///
-    /// Returns `LeanWorkerError` under the same conditions as
-    /// [`Self::process_file`]. Header-parse failures, missing imports, and
-    /// missing capability shims surface as variants of
-    /// [`LeanWorkerProcessModuleOutcome`].
-    pub fn process_module(
-        &mut self,
-        source: &str,
-        options: &LeanWorkerElabOptions,
-        cancellation: Option<&LeanWorkerCancellationToken>,
-        progress: Option<&dyn LeanWorkerProgressSink>,
-    ) -> Result<LeanWorkerProcessModuleOutcome, LeanWorkerError> {
-        self.with_session(|worker| worker.worker_process_module(source, options, cancellation, progress))
+    ) -> Result<LeanWorkerModuleQueryOutcome, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_process_module_query(source, query, options, cancellation, progress))
     }
 
     /// Run a downstream streaming export and deliver JSON rows to `rows`.

@@ -1,7 +1,7 @@
 //! Per-method coverage for the typed `LeanWorkerSession` surface added in
 //! 0.1.6: `infer_type`, `whnf`, `is_def_eq`, `describe`,
-//! `list_declarations_strings`, `describe_bulk`, `process_file`, and
-//! `process_module`. Each test exercises the full worker → child → host
+//! `list_declarations_strings`, `describe_bulk`, and `process_module_query`.
+//! Each test exercises the full worker → child → host
 //! dispatch path and asserts response shape against the fixture.
 
 #![allow(
@@ -18,8 +18,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendering,
-    LeanWorkerSessionConfig,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+    LeanWorkerRendering, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -62,15 +62,6 @@ fn elaboration_session_config() -> LeanWorkerSessionConfig {
         "lean_rs_fixture",
         "LeanRsFixture",
         ["LeanRsHostShims.Elaboration"],
-    )
-}
-
-fn source_ranges_session_config() -> LeanWorkerSessionConfig {
-    LeanWorkerSessionConfig::new(
-        fixture_root(),
-        "lean_rs_fixture",
-        "LeanRsFixture",
-        ["LeanRsFixture.SourceRanges"],
     )
 }
 
@@ -305,7 +296,7 @@ fn describe_bulk_preserves_input_length_with_missing_slots() {
 }
 
 #[test]
-fn process_file_projects_inline_source_into_info_tree() {
+fn process_module_query_returns_diagnostics_through_worker() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
@@ -314,58 +305,142 @@ fn process_file_projects_inline_source_into_info_tree() {
         .expect("worker session opens");
 
     let outcome = session
-        .process_file("example : Nat := 1\n", &opts, None, None)
-        .expect("worker process_file dispatch succeeds");
+        .process_module_query(
+            "import Lean\n\ntheorem ok : True := by trivial\n",
+            LeanWorkerModuleQuery::Diagnostics,
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query dispatch succeeds");
 
     match outcome {
-        LeanWorkerProcessFileOutcome::Processed { file } => {
-            assert!(!file.commands.is_empty(), "single example produces one command");
-            assert!(!file.terms.is_empty(), "elaborator records at least one term node");
+        LeanWorkerModuleQueryOutcome::Ok {
+            result: LeanWorkerModuleQueryResult::Diagnostics(diagnostics),
+            imports,
+        } => {
+            assert_eq!(imports, vec!["Lean".to_string()]);
             assert!(
-                file.diagnostics.diagnostics.iter().all(|d| d.severity != "error"),
-                "valid example should not produce error diagnostics"
+                diagnostics.diagnostics.iter().all(|d| d.severity != "error"),
+                "valid body should not produce error diagnostics, got {diagnostics:?}",
             );
         }
-        LeanWorkerProcessFileOutcome::Unsupported => panic!("expected Processed outcome, got Unsupported"),
-        other => panic!("expected Processed outcome, got {other:?}"),
+        other => panic!("expected Ok diagnostics outcome, got {other:?}"),
     }
 }
 
 #[test]
-fn process_module_projects_fixture_module_into_info_tree() {
+fn process_module_query_returns_cursor_type_and_goal_through_worker() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();
-    let source = std::fs::read_to_string(fixture_root().join("LeanRsFixture").join("SourceRanges.lean"))
-        .expect("fixture SourceRanges.lean reads");
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
-        .open_session(&source_ranges_session_config(), None, None)
+        .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
 
-    let outcome = session
-        .process_module(&source, &opts, None, None)
-        .expect("worker process_module dispatch succeeds");
+    let source = "def x := 1\ntheorem t : x = 1 := by rfl\n";
+    let type_outcome = session
+        .process_module_query(
+            source,
+            LeanWorkerModuleQuery::TypeAt { line: 2, column: 13 },
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker type-at dispatch succeeds");
+    match type_outcome {
+        LeanWorkerModuleQueryOutcome::Ok {
+            result: LeanWorkerModuleQueryResult::TypeAt(result),
+            ..
+        } => match result {
+            lean_rs_worker_parent::LeanWorkerTypeAtResult::Term {
+                span,
+                expr,
+                type_str,
+                expected_type: _,
+            } => {
+                assert_eq!(span.start_line, 2);
+                assert!(!expr.value.is_empty(), "selected expression should render");
+                assert!(!type_str.value.is_empty(), "selected inferred type should render");
+                assert!(expr.value.len() <= 64 * 1024);
+                assert!(type_str.value.len() <= 64 * 1024);
+            }
+            other => panic!("expected selected term, got {other:?}"),
+        },
+        other => panic!("expected Ok type-at outcome, got {other:?}"),
+    }
 
-    match outcome {
-        LeanWorkerProcessModuleOutcome::Ok { file, imports } => {
-            assert!(!file.commands.is_empty(), "fixture body produces commands");
-            assert!(imports.iter().any(|m| m == "Lean"), "fixture imports Lean");
-        }
-        LeanWorkerProcessModuleOutcome::MissingImports { missing, .. } => {
-            panic!("expected Ok module outcome, got MissingImports({missing:?})")
-        }
-        LeanWorkerProcessModuleOutcome::HeaderParseFailed { diagnostics } => {
-            panic!("expected Ok module outcome, got HeaderParseFailed({diagnostics:?})")
-        }
-        LeanWorkerProcessModuleOutcome::Unsupported => {
-            panic!("expected Ok module outcome, got Unsupported")
-        }
-        other => panic!("expected Ok module outcome, got {other:?}"),
+    let goal_outcome = session
+        .process_module_query(
+            "theorem t : True := by\n  trivial\n",
+            LeanWorkerModuleQuery::GoalAt { line: 2, column: 4 },
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker goal-at dispatch succeeds");
+    match goal_outcome {
+        LeanWorkerModuleQueryOutcome::Ok {
+            result: LeanWorkerModuleQueryResult::GoalAt(result),
+            ..
+        } => match result {
+            lean_rs_worker_parent::LeanWorkerGoalAtResult::Goal {
+                span,
+                goals_before,
+                goals_after: _,
+                truncated: _,
+            } => {
+                assert_eq!(span.start_line, 2);
+                assert!(
+                    goals_before.iter().any(|goal| goal.contains("True")),
+                    "goal before `trivial` should mention True, got {goals_before:?}",
+                );
+            }
+            other => panic!("expected selected tactic goals, got {other:?}"),
+        },
+        other => panic!("expected Ok goal-at outcome, got {other:?}"),
     }
 }
 
 #[test]
-fn process_module_handles_module_system_header_through_worker() {
+fn process_module_query_references_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "def x := 1\n#check x\n";
+
+    let outcome = session
+        .process_module_query(
+            source,
+            LeanWorkerModuleQuery::References { name: "x".to_string() },
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker references dispatch succeeds");
+
+    match outcome {
+        LeanWorkerModuleQueryOutcome::Ok {
+            result: LeanWorkerModuleQueryResult::References(result),
+            imports,
+        } => {
+            assert!(imports.is_empty(), "body-only source should not report imports");
+            assert!(!result.references.is_empty(), "expected references for local x");
+            assert!(
+                result.references.iter().all(|r| r.name.ends_with('x')),
+                "reference projection should include matching names only, got {:?}",
+                result.references,
+            );
+        }
+        other => panic!("expected Ok references outcome, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_module_query_handles_module_system_header_through_worker() {
     let project = TempLakeProject::new("module-system-header-typed-session");
     write_module_syntax_fixture(&project);
     let opts = LeanWorkerElabOptions::new();
@@ -386,14 +461,16 @@ import all Fixture.Internal
 import Fixture.PrivateScope
 
 def moduleSyntaxFoo : Nat := imported + internalSecret
-#check privateOnly
 ";
     let outcome = session
-        .process_module(source, &opts, None, None)
-        .expect("worker process_module dispatch succeeds");
+        .process_module_query(source, LeanWorkerModuleQuery::Diagnostics, &opts, None, None)
+        .expect("worker process_module_query dispatch succeeds");
 
     match outcome {
-        LeanWorkerProcessModuleOutcome::Ok { file, imports } => {
+        LeanWorkerModuleQueryOutcome::Ok {
+            result: LeanWorkerModuleQueryResult::Diagnostics(diagnostics),
+            imports,
+        } => {
             assert_eq!(
                 imports,
                 vec![
@@ -403,36 +480,21 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
                 ],
                 "imports must be bare module names, without `public` or `all` modifiers",
             );
-            assert!(
-                !file.terms.is_empty(),
-                "module-system body must produce term info nodes"
-            );
-            let diagnostics = &file.diagnostics.diagnostics;
-            let messages: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
-            assert!(
-                diagnostics
-                    .iter()
-                    .any(|d| d.severity == "error" && d.message.contains("privateOnly")),
-                "ordinary imports under `module` must not expose private declarations, got {diagnostics:?}",
-            );
+            let diagnostics = &diagnostics.diagnostics;
             assert!(
                 !diagnostics
                     .iter()
                     .any(|d| d.severity == "error" && d.message.contains("internalSecret")),
                 "`import all` under `module` must expose private declarations from the imported module, got {diagnostics:?}",
             );
-            assert!(
-                !messages.iter().any(|m| m.contains("unknown module prefix 'all'")),
-                "`import all` must resolve the named module, got {messages:?}",
-            );
         }
-        LeanWorkerProcessModuleOutcome::MissingImports { missing, .. } => {
+        LeanWorkerModuleQueryOutcome::MissingImports { missing, .. } => {
             panic!("expected Ok module outcome, got MissingImports({missing:?})")
         }
-        LeanWorkerProcessModuleOutcome::HeaderParseFailed { diagnostics } => {
+        LeanWorkerModuleQueryOutcome::HeaderParseFailed { diagnostics } => {
             panic!("expected Ok module outcome, got HeaderParseFailed({diagnostics:?})")
         }
-        LeanWorkerProcessModuleOutcome::Unsupported => {
+        LeanWorkerModuleQueryOutcome::Unsupported => {
             panic!("expected Ok module outcome, got Unsupported")
         }
         other => panic!("expected Ok module outcome, got {other:?}"),

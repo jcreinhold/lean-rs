@@ -25,12 +25,12 @@ use serde_json::value::RawValue;
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
     LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerProcessFileOutcome, LeanWorkerProcessModuleOutcome, LeanWorkerRendered,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -191,12 +191,9 @@ pub enum Request {
         names: Vec<String>,
         progress: bool,
     },
-    ProcessFile {
+    ProcessModuleQuery {
         source: String,
-        options: LeanWorkerElabOptions,
-    },
-    ProcessModule {
-        source: String,
+        query: LeanWorkerModuleQuery,
         options: LeanWorkerElabOptions,
     },
     // Private harness requests that exercise streaming frame behavior.
@@ -280,11 +277,8 @@ pub enum Response {
     DeclarationBulk {
         rows: Vec<LeanWorkerDeclarationRow>,
     },
-    ProcessFile {
-        outcome: LeanWorkerProcessFileOutcome,
-    },
-    ProcessModule {
-        outcome: LeanWorkerProcessModuleOutcome,
+    ProcessModuleQuery {
+        outcome: LeanWorkerModuleQueryOutcome,
     },
     RowsComplete {
         count: u64,
@@ -611,7 +605,11 @@ mod tests {
 
     use super::{
         DataRow, DataRowEmitter, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, ProtocolError,
-        Response, read_frame, write_frame,
+        Request, Response, read_frame, write_frame,
+    };
+    use crate::types::{
+        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome,
+        LeanWorkerModuleQueryResult, LeanWorkerModuleSourceSpan, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -761,5 +759,65 @@ mod tests {
         .expect("rows complete writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("rows complete reads");
         assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
+    }
+
+    #[test]
+    fn module_query_request_and_response_round_trip() {
+        let request = Message::Request(Request::ProcessModuleQuery {
+            source: "def x := 1\n#check x\n".to_owned(),
+            query: LeanWorkerModuleQuery::TypeAt { line: 2, column: 8 },
+            options: LeanWorkerElabOptions::default(),
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("module query request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::ProcessModuleQuery {
+            outcome: LeanWorkerModuleQueryOutcome::Ok {
+                imports: Vec::new(),
+                result: LeanWorkerModuleQueryResult::TypeAt(LeanWorkerTypeAtResult::Term {
+                    span: LeanWorkerModuleSourceSpan {
+                        start_line: 2,
+                        start_column: 8,
+                        end_line: 2,
+                        end_column: 9,
+                    },
+                    expr: LeanWorkerRenderedInfo {
+                        value: "x".to_owned(),
+                        truncated: false,
+                    },
+                    type_str: LeanWorkerRenderedInfo {
+                        value: "Nat".to_owned(),
+                        truncated: false,
+                    },
+                    expected_type: None,
+                }),
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("module query response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query response reads");
+        assert_eq!(frame.message, response);
+
+        let unsupported = LeanWorkerModuleQueryOutcome::Unsupported;
+        let json = serde_json::to_value(&unsupported).expect("unsupported serializes");
+        assert_eq!(json, json!({ "status": "unsupported" }));
+
+        let diagnostics = LeanWorkerModuleQueryResult::Diagnostics(LeanWorkerElabFailure {
+            diagnostics: Vec::new(),
+            truncated: false,
+        });
+        let json = serde_json::to_value(&diagnostics).expect("diagnostics serializes");
+        assert_eq!(
+            json,
+            json!({
+                "result": "diagnostics",
+                "body": {
+                    "diagnostics": [],
+                    "truncated": false
+                }
+            })
+        );
     }
 }

@@ -1,7 +1,6 @@
 pub mod lean_rs_worker_parent
 pub use lean_rs_worker_parent::LeanWorkerCapabilityFact
 pub use lean_rs_worker_parent::LeanWorkerCapabilityMetadata
-pub use lean_rs_worker_parent::LeanWorkerCommandInfo
 pub use lean_rs_worker_parent::LeanWorkerCommandMetadata
 pub use lean_rs_worker_parent::LeanWorkerDeclarationFilter
 pub use lean_rs_worker_parent::LeanWorkerDeclarationRow
@@ -12,20 +11,23 @@ pub use lean_rs_worker_parent::LeanWorkerDoctorSeverity
 pub use lean_rs_worker_parent::LeanWorkerElabFailure
 pub use lean_rs_worker_parent::LeanWorkerElabOptions
 pub use lean_rs_worker_parent::LeanWorkerElabResult
+pub use lean_rs_worker_parent::LeanWorkerGoalAtResult
 pub use lean_rs_worker_parent::LeanWorkerKernelResult
 pub use lean_rs_worker_parent::LeanWorkerKernelStatus
 pub use lean_rs_worker_parent::LeanWorkerKernelSummary
 pub use lean_rs_worker_parent::LeanWorkerMetaResult
 pub use lean_rs_worker_parent::LeanWorkerMetaTransparency
+pub use lean_rs_worker_parent::LeanWorkerModuleQuery
+pub use lean_rs_worker_parent::LeanWorkerModuleQueryOutcome
+pub use lean_rs_worker_parent::LeanWorkerModuleQueryResult
+pub use lean_rs_worker_parent::LeanWorkerModuleSourceSpan
 pub use lean_rs_worker_parent::LeanWorkerNameRef
-pub use lean_rs_worker_parent::LeanWorkerProcessFileOutcome
-pub use lean_rs_worker_parent::LeanWorkerProcessModuleOutcome
-pub use lean_rs_worker_parent::LeanWorkerProcessedFile
+pub use lean_rs_worker_parent::LeanWorkerReferencesResult
 pub use lean_rs_worker_parent::LeanWorkerRendered
+pub use lean_rs_worker_parent::LeanWorkerRenderedInfo
 pub use lean_rs_worker_parent::LeanWorkerRendering
 pub use lean_rs_worker_parent::LeanWorkerSourceRange
-pub use lean_rs_worker_parent::LeanWorkerTacticInfo
-pub use lean_rs_worker_parent::LeanWorkerTermInfo
+pub use lean_rs_worker_parent::LeanWorkerTypeAtResult
 pub enum lean_rs_worker_parent::LeanWorkerBootstrapDiagnosticCode
 pub lean_rs_worker_parent::LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch
 pub lean_rs_worker_parent::LeanWorkerBootstrapDiagnosticCode::CapabilityPreflight
@@ -864,8 +866,7 @@ pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::infer_type(&mut self, &str,
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::is_def_eq(&mut self, &str, &str, lean_rs_worker_protocol::types::LeanWorkerMetaTransparency, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerMetaResult<bool>, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::kernel_check(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerKernelResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::list_declarations_strings(&mut self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::process_file(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerProcessFileOutcome, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::process_module(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerProcessModuleOutcome, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::process_module_query(&mut self, &str, lean_rs_worker_protocol::types::LeanWorkerModuleQuery, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerModuleQueryOutcome, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::request_timeout(&self) -> core::time::Duration
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::run_data_stream(&mut self, &str, &serde_json::value::Value, &dyn lean_rs_worker_parent::LeanWorkerDataSink, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerDiagnosticSink>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerStreamSummary, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::run_json_command<Req, Resp>(&mut self, &lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>, &Req, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<Resp, lean_rs_worker_parent::LeanWorkerError> where Req: serde_core::ser::Serialize, Resp: serde_core::de::DeserializeOwned

@@ -49,11 +49,11 @@ pub use supervisor::{
 // recorders).
 #[doc(inline)]
 pub use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandInfo, LeanWorkerCommandMetadata,
-    LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic,
-    LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
-    LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerNameRef, LeanWorkerProcessFileOutcome,
-    LeanWorkerProcessModuleOutcome, LeanWorkerProcessedFile, LeanWorkerRendered, LeanWorkerRendering,
-    LeanWorkerSourceRange, LeanWorkerTacticInfo, LeanWorkerTermInfo,
+    LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
+    LeanWorkerDeclarationRow, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport,
+    LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
+    LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQueryResult, LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerReferencesResult,
+    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
 };
