@@ -94,6 +94,13 @@ child pids, pipe handles, protocol frames, loader flags, or `std::process` confi
 | `CapabilityMetadataMismatch` | `lean_rs.worker.bootstrap.metadata_mismatch` | The capability metadata export did not match the caller's expectation. | Select or rebuild the intended capability package. |
 | `WorkerStartupFailed` | `lean_rs.worker.bootstrap.startup_failed` | Startup failed outside a more specific bootstrap class. | Run the bootstrap check in the deployment environment and inspect the bounded message. |
 
+Worker capability commands also use `lean_rs.worker.checked_binding` when a child session cannot resolve a requested
+worker export through the manifest-backed closed operation table. The diagnostic names the requested export and the
+operation shape, such as metadata `String -> IO String`, JSON command `String -> IO String`, or streaming command
+`String, USize, USize -> IO UInt8`. Missing manifest identity, missing export metadata, and signature mismatch all fail
+before invoking the Lean export. Rebuild through `CargoLeanCapability::export_signature(...)` or the worker builder's
+metadata/doctor/command helpers so the artifact manifest carries the trusted worker signature.
+
 `Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not mean a Lean
 kernel/runtime panic was contained. Those failures require a worker-process boundary.
 

@@ -53,16 +53,33 @@ Use the high-level helper in `build.rs`:
 
 ```rust,ignore
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_toolchain::{
+        LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+        LeanExportSignature,
+    };
+
     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
         .package("my_app")
         .module("MyCapability")
+        .export_signature(LeanExportSignature::function(
+            "my_app_add",
+            vec![
+                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
+                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
+            ],
+            LeanExportReturnAbi::new(
+                LeanExportAbiRepr::U64,
+                LeanExportOwnership::None,
+                LeanExportResultConvention::Pure,
+            ),
+        ))
         .build()?;
     Ok(())
 }
 ```
 
 This emits Lean link directives, Cargo rerun triggers, runs `lake build MyCapability:shared`, resolves Lake's supported
-dylib naming conventions, writes a JSON artifact manifest, and emits:
+dylib naming conventions, writes a JSON artifact manifest with trusted export signature metadata, and emits:
 
 ```text
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
@@ -87,18 +104,16 @@ let capability = lean_rs::LeanCapability::from_build_manifest(
     ),
 )?;
 
-let module = capability.module()?;
-// SAFETY: `my_app_add` is compiled from a Lean export with C ABI
-// matching `(UInt64, UInt64) -> UInt64`.
-let add = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_app_add") }?;
+let add = capability.exported::<(u64, u64), u64>("my_app_add")?;
 let answer = add.call(40, 2)?;
 ```
 
 `LeanCapability` is a convenience layer over `LeanLibrary`: it reads the manifest, opens the primary dylib and
-dependency bundle, initializes the configured module, and keeps the initializer names with the opened library. For
-doctor commands or installer checks, run `LeanCapabilityPreflight` against the same manifest descriptor first; it
-reports missing package files, unsupported toolchain fingerprints, stale manifests, and missing initializers with stable
-loader codes and repair hints.
+dependency bundle, initializes the configured module, and keeps the initializer names and trusted export signatures with
+the opened library. `LeanCapability::exported` fails before dispatch when the manifest lacks `my_app_add` or records a
+different ABI shape. For doctor commands or installer checks, run `LeanCapabilityPreflight` against the same manifest
+descriptor first; it reports missing package files, unsupported toolchain fingerprints, stale manifests, and missing
+initializers with stable loader codes and repair hints.
 
 ## Run The Capability In A Worker
 

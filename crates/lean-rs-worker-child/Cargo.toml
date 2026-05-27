@@ -37,8 +37,7 @@ sha2 = { workspace = true }
 # Used only to call `setrlimit(RLIMIT_CORE, 0)` and install an immediate
 # `SIGABRT` handler in the worker child so abort-triggered termination does
 # not block on the kernel's core-dump pipe handler (e.g. apport,
-# systemd-coredump). See `child::disable_core_dumps` /
-# `child::install_immediate_abort_exit` and
+# systemd-coredump). See `child::install_immediate_abort_exit` and
 # `docs/architecture/06-panic-containment.md`.
 libc = "0.2"
 

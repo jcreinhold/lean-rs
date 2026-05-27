@@ -100,9 +100,9 @@ handler to call into a Lean-implemented demangler (`@[export] lean_demangle_bt_l
 from `lean_panic_impl` (soft panics), where the Lean runtime is expected to be in a normal execution state.
 
 That invariant holds for the Lean compiler and lake projects, which always load the full compiler stdlib. **It does not
-hold for embedders.** A the worker crates child process intentionally embeds a minimal Lean: it loads `libleanshared.so`
-plus a small capability dylib chain, and cannot guarantee that the modules a future Lean panic handler decides to call
-back into are initialized when user code panics. The observed symptom on Linux is that `lean_panic_impl` calls
+hold for embedders.** A worker child process intentionally embeds a minimal Lean: it loads `libleanshared.so` plus a
+small capability dylib chain, and cannot guarantee that the modules a future Lean panic handler decides to call back
+into are initialized when user code panics. The observed symptom on Linux is that `lean_panic_impl` calls
 `print_backtrace` → `lean_demangle_bt_line_cstr` and hangs before reaching `abort_on_panic()`; the parent's request
 times out instead of observing a fatal exit.
 
@@ -157,14 +157,15 @@ and the parent reports `Timeout { operation, duration }` instead of the typed fa
 
 The contained workloads have no use for a core file: typed errors (`ChildPanicOrAbort`, `Worker { code, message }`) and
 the captured child stderr already cover the supported diagnostic surface. The fix is to suppress core dumps in every
-worker child: `child::disable_core_dumps` calls `setrlimit(RLIMIT_CORE, {0, 0})` at the top of the child entry point so
-any subsequent `SIGABRT` terminates the process immediately, closing the IPC pipes and letting the parent observe EOF on
-normal IPC timescales. The same call is a Windows no-op (Windows does not use POSIX rlimits or `core_pattern`).
+worker child. `run_worker_child_stdio` installs a Unix `SIGABRT` handler that writes a short marker and calls
+`_exit(134)`, and also sets `RLIMIT_CORE = 0` plus Linux `PR_SET_DUMPABLE = 0` as defence in depth. A subsequent Lean
+abort therefore closes the IPC pipes on normal IPC timescales instead of waiting for the kernel's core-dump pipe
+handler. The setup is a no-op on non-Unix platforms.
 
-This boundary lives in the child binary rather than in `LeanWorker::spawn` because the policy belongs to "any process
-shipped as a the worker crates child," including downstream binaries written using `run_worker_child_stdio`. Spawning
-the child from a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still inherits
-the boundary because it is baked into `run_stdio`. No public API change is required.
+This boundary lives in the child binary rather than in `LeanWorker::spawn` because the policy belongs to any process
+shipped as a worker child, including downstream binaries written using `run_worker_child_stdio`. Spawning the child from
+a different supervisor (the private `__test_support::WorkerProcess`, a downstream service) still inherits the boundary
+because it is baked into `run_stdio`. No public API change is required.
 
 Regression cover:
 `crates/lean-rs-worker-child/tests/protocol.rs::fatal_exit_after_partial_rows_is_reported_as_worker_failure` asserts

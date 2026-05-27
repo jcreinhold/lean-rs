@@ -43,6 +43,10 @@ fn capability_builder() -> LeanWorkerCapabilityBuilder {
         "lean_rs_interop_consumer_worker_shape_metadata",
         serde_json::json!({"source": "worker-capability-bench"}),
     )
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_extract")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
 }
 
 #[derive(Clone, Debug, Serialize)]

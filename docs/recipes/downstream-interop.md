@@ -15,6 +15,11 @@ really needs to push data back into Rust before the exported function returns. W
 with [`worker-capability-runner.md`](worker-capability-runner.md), where the worker crates hide callbacks behind typed
 commands, live rows, diagnostics, terminal summaries, timeouts, and worker cycling.
 
+The snippets below intentionally use `LeanModule::exported_unchecked`: this recipe demonstrates the lower-level escape
+hatch for trusted same-process callback interop. A shipped crate that only needs ordinary Rust-to-Lean calls should
+prefer `CargoLeanCapability::export_signature(...)` plus `LeanCapability::exported(...)`, as shown in
+[`ship-crate-with-lean.md`](ship-crate-with-lean.md), so manifest metadata checks the ABI before dispatch.
+
 ## Files A Consumer Needs
 
 A downstream package needs the same pieces as [`fixtures/interop-shims/`](../../fixtures/interop-shims/):
