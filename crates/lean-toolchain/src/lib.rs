@@ -21,6 +21,8 @@
 //! crate's public surface — they remain in `lean-rs-sys` and reach the safe layers through
 //! `lean-rs`'s `pub(crate)` modules.
 
+#![forbid(unsafe_code)]
+
 mod build_helpers;
 mod built_capability;
 mod diagnostics;

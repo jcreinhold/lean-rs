@@ -1,5 +1,12 @@
 pub mod lean_rs
 pub use lean_rs::LeanBuiltCapability
+pub use lean_rs::LeanExportAbiRepr
+pub use lean_rs::LeanExportArgAbi
+pub use lean_rs::LeanExportOwnership
+pub use lean_rs::LeanExportResultConvention
+pub use lean_rs::LeanExportReturnAbi
+pub use lean_rs::LeanExportSignature
+pub use lean_rs::LeanExportSymbolKind
 pub use lean_rs::LeanLibraryDependency
 pub use lean_rs::LeanLoaderCheck
 pub use lean_rs::LeanLoaderDiagnosticCode
@@ -95,7 +102,7 @@ pub fn u8::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for usize
 pub fn usize::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 pub trait lean_rs::abi::traits::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
-pub type lean_rs::abi::traits::LeanAbi::CRepr: core::marker::Copy
+pub type lean_rs::abi::traits::LeanAbi::CRepr: lean_rs::abi::traits::LeanCReprAbi
 impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
@@ -148,6 +155,32 @@ impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for u8
 pub type u8::CRepr = u8
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for usize
 pub type usize::CRepr = usize
+pub trait lean_rs::abi::traits::LeanCReprAbi: core::marker::Copy + 'static
+pub const lean_rs::abi::traits::LeanCReprAbi::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for *mut lean_rs_sys::types::lean_object
+pub const *mut lean_rs_sys::types::lean_object::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for f64
+pub const f64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i16
+pub const i16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i32
+pub const i32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i64
+pub const i64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i8
+pub const i8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for isize
+pub const isize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u16
+pub const u16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u32
+pub const u32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u64
+pub const u64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u8
+pub const u8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for usize
+pub const usize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
 pub trait lean_rs::abi::traits::TryFromLean<'lean>: core::marker::Sized
 pub fn lean_rs::abi::traits::TryFromLean::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean, A, B, C> lean_rs::abi::traits::TryFromLean<'lean> for (A, B, C) where A: lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::TryFromLean<'lean>
@@ -602,15 +635,52 @@ pub mod lean_rs::module
 pub use lean_rs::module::BuiltCapabilityArtifact
 pub use lean_rs::module::LeanBuiltCapability
 pub use lean_rs::module::LeanBuiltCapabilityError
+pub use lean_rs::module::LeanExportAbiRepr
+pub use lean_rs::module::LeanExportArgAbi
+pub use lean_rs::module::LeanExportOwnership
+pub use lean_rs::module::LeanExportResultConvention
+pub use lean_rs::module::LeanExportReturnAbi
+pub use lean_rs::module::LeanExportSignature
+pub use lean_rs::module::LeanExportSymbolKind
 pub use lean_rs::module::LeanLibraryDependency
 pub use lean_rs::module::LeanLoaderCheck
 pub use lean_rs::module::LeanLoaderDiagnosticCode
 pub use lean_rs::module::LeanLoaderReport
 pub use lean_rs::module::LeanLoaderSeverity
 pub use lean_rs::module::LeanModuleInitializer
+pub enum lean_rs::module::LeanCheckedExportError
+pub lean_rs::module::LeanCheckedExportError::MissingSignatureMetadata
+pub lean_rs::module::LeanCheckedExportError::MissingSignatureMetadata::symbol: alloc::string::String
+pub lean_rs::module::LeanCheckedExportError::MissingSymbol
+pub lean_rs::module::LeanCheckedExportError::MissingSymbol::source: lean_rs::error::LeanError
+pub lean_rs::module::LeanCheckedExportError::MissingSymbol::symbol: alloc::string::String
+pub lean_rs::module::LeanCheckedExportError::Module(lean_rs::error::LeanError)
+pub lean_rs::module::LeanCheckedExportError::SignatureMismatch
+pub lean_rs::module::LeanCheckedExportError::SignatureMismatch::expected: alloc::boxed::Box<lean_toolchain::loader::LeanExportSignature>
+pub lean_rs::module::LeanCheckedExportError::SignatureMismatch::manifest: alloc::boxed::Box<lean_toolchain::loader::LeanExportSignature>
+pub lean_rs::module::LeanCheckedExportError::SignatureMismatch::symbol: alloc::string::String
+pub lean_rs::module::LeanCheckedExportError::SymbolKindMismatch
+pub lean_rs::module::LeanCheckedExportError::SymbolKindMismatch::actual: lean_toolchain::loader::LeanExportSymbolKind
+pub lean_rs::module::LeanCheckedExportError::SymbolKindMismatch::manifest: lean_toolchain::loader::LeanExportSymbolKind
+pub lean_rs::module::LeanCheckedExportError::SymbolKindMismatch::symbol: alloc::string::String
+impl core::error::Error for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs::LeanCheckedExportError
+impl core::marker::Send for lean_rs::LeanCheckedExportError
+impl core::marker::Sync for lean_rs::LeanCheckedExportError
+impl core::marker::Unpin for lean_rs::LeanCheckedExportError
+impl core::marker::UnsafeUnpin for lean_rs::LeanCheckedExportError
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCheckedExportError
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCheckedExportError
 pub struct lean_rs::module::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
+pub fn lean_rs::LeanCapability<'lean>::export_signatures(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_toolchain::loader::LeanExportSignature>
+pub fn lean_rs::LeanCapability<'lean>::exported<Args, R>(&self, &str) -> core::result::Result<lean_rs::LeanExported<'lean, '_, Args, R>, lean_rs::LeanCheckedExportError> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
@@ -653,8 +723,6 @@ impl<'lean, 'lib, A1, R> lean_rs::LeanExported<'lean, 'lib, (A1), R> where A1: l
 pub fn lean_rs::LeanExported<'lean, 'lib, (A1), R>::call(&self, A1) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
 impl<'lean, 'lib, R> lean_rs::LeanExported<'lean, 'lib, (), R> where R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanExported<'lean, 'lib, (), R>::call(&self) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
-impl<'lean, Args, R> lean_rs::LeanExported<'lean, '_, Args, R>
-pub unsafe fn lean_rs::LeanExported<'lean, '_, Args, R>::from_function_address(&'lean lean_rs::LeanRuntime, *mut core::ffi::c_void) -> Self
 impl<Args, R> core::fmt::Debug for lean_rs::LeanExported<'_, '_, Args, R>
 pub fn lean_rs::LeanExported<'_, '_, Args, R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'lib, Args, R> core::marker::Freeze for lean_rs::LeanExported<'lean, 'lib, Args, R>
@@ -680,8 +748,6 @@ impl<'lean> lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, &str, &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
 pub fn lean_rs::LeanLibrary<'lean>::open(&'lean lean_rs::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanLibrary<'lean>::open_globally(&'lean lean_rs::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
-pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, &str) -> core::option::Option<*mut core::ffi::c_void>
 impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
 pub fn lean_rs::LeanLibrary<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs::LeanLibrary<'lean>
@@ -749,7 +815,7 @@ impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: 
 pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
 pub trait lean_rs::module::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
-pub type lean_rs::module::LeanAbi::CRepr: core::marker::Copy
+pub type lean_rs::module::LeanAbi::CRepr: lean_rs::abi::traits::LeanCReprAbi
 impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
@@ -830,6 +896,32 @@ impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits
 pub const (A1)::ARITY: usize
 impl<'lean> lean_rs::LeanArgs<'lean> for ()
 pub const ()::ARITY: usize
+pub trait lean_rs::module::LeanCReprAbi: core::marker::Copy + 'static
+pub const lean_rs::module::LeanCReprAbi::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for *mut lean_rs_sys::types::lean_object
+pub const *mut lean_rs_sys::types::lean_object::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for f64
+pub const f64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i16
+pub const i16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i32
+pub const i32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i64
+pub const i64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i8
+pub const i8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for isize
+pub const isize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u16
+pub const u16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u32
+pub const u32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u64
+pub const u64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u8
+pub const u8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for usize
+pub const usize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
 pub type lean_rs::module::LeanCapabilityPreflight = lean_rs::LeanRuntimePreflight
 pub mod lean_rs::runtime
 pub mod lean_rs::runtime::obj
@@ -961,6 +1053,34 @@ impl core::marker::Unpin for lean_rs::callback::LeanCallbackStatus
 impl core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackStatus
+pub enum lean_rs::LeanCheckedExportError
+pub lean_rs::LeanCheckedExportError::MissingSignatureMetadata
+pub lean_rs::LeanCheckedExportError::MissingSignatureMetadata::symbol: alloc::string::String
+pub lean_rs::LeanCheckedExportError::MissingSymbol
+pub lean_rs::LeanCheckedExportError::MissingSymbol::source: lean_rs::error::LeanError
+pub lean_rs::LeanCheckedExportError::MissingSymbol::symbol: alloc::string::String
+pub lean_rs::LeanCheckedExportError::Module(lean_rs::error::LeanError)
+pub lean_rs::LeanCheckedExportError::SignatureMismatch
+pub lean_rs::LeanCheckedExportError::SignatureMismatch::expected: alloc::boxed::Box<lean_toolchain::loader::LeanExportSignature>
+pub lean_rs::LeanCheckedExportError::SignatureMismatch::manifest: alloc::boxed::Box<lean_toolchain::loader::LeanExportSignature>
+pub lean_rs::LeanCheckedExportError::SignatureMismatch::symbol: alloc::string::String
+pub lean_rs::LeanCheckedExportError::SymbolKindMismatch
+pub lean_rs::LeanCheckedExportError::SymbolKindMismatch::actual: lean_toolchain::loader::LeanExportSymbolKind
+pub lean_rs::LeanCheckedExportError::SymbolKindMismatch::manifest: lean_toolchain::loader::LeanExportSymbolKind
+pub lean_rs::LeanCheckedExportError::SymbolKindMismatch::symbol: alloc::string::String
+impl core::error::Error for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_rs::LeanCheckedExportError
+pub fn lean_rs::LeanCheckedExportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs::LeanCheckedExportError
+impl core::marker::Send for lean_rs::LeanCheckedExportError
+impl core::marker::Sync for lean_rs::LeanCheckedExportError
+impl core::marker::Unpin for lean_rs::LeanCheckedExportError
+impl core::marker::UnsafeUnpin for lean_rs::LeanCheckedExportError
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanCheckedExportError
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::LeanCheckedExportError
 pub enum lean_rs::LeanDiagnosticCode
 pub lean_rs::LeanDiagnosticCode::AbiConversion
 pub lean_rs::LeanDiagnosticCode::Cancelled
@@ -1149,6 +1269,8 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanCancelled
 pub struct lean_rs::LeanCapability<'lean>
 impl<'lean> lean_rs::LeanCapability<'lean>
 pub fn lean_rs::LeanCapability<'lean>::bundle(&self) -> &lean_rs::LeanLibraryBundle<'lean>
+pub fn lean_rs::LeanCapability<'lean>::export_signatures(&self) -> impl core::iter::traits::iterator::Iterator<Item = &lean_toolchain::loader::LeanExportSignature>
+pub fn lean_rs::LeanCapability<'lean>::exported<Args, R>(&self, &str) -> core::result::Result<lean_rs::LeanExported<'lean, '_, Args, R>, lean_rs::LeanCheckedExportError> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
@@ -1224,8 +1346,6 @@ impl<'lean, 'lib, A1, R> lean_rs::LeanExported<'lean, 'lib, (A1), R> where A1: l
 pub fn lean_rs::LeanExported<'lean, 'lib, (A1), R>::call(&self, A1) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
 impl<'lean, 'lib, R> lean_rs::LeanExported<'lean, 'lib, (), R> where R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanExported<'lean, 'lib, (), R>::call(&self) -> lean_rs::error::LeanResult<<R as lean_rs::DecodeCallResult>::Output>
-impl<'lean, Args, R> lean_rs::LeanExported<'lean, '_, Args, R>
-pub unsafe fn lean_rs::LeanExported<'lean, '_, Args, R>::from_function_address(&'lean lean_rs::LeanRuntime, *mut core::ffi::c_void) -> Self
 impl<Args, R> core::fmt::Debug for lean_rs::LeanExported<'_, '_, Args, R>
 pub fn lean_rs::LeanExported<'_, '_, Args, R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'lib, Args, R> core::marker::Freeze for lean_rs::LeanExported<'lean, 'lib, Args, R>
@@ -1285,8 +1405,6 @@ impl<'lean> lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanLibrary<'lean>::initialize_module<'lib>(&'lib self, &str, &str) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, 'lib>>
 pub fn lean_rs::LeanLibrary<'lean>::open(&'lean lean_rs::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanLibrary<'lean>::open_globally(&'lean lean_rs::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
-pub fn lean_rs::LeanLibrary<'lean>::resolve_function_symbol(&self, &str) -> lean_rs::error::LeanResult<*mut core::ffi::c_void>
-pub fn lean_rs::LeanLibrary<'lean>::resolve_optional_function_symbol(&self, &str) -> core::option::Option<*mut core::ffi::c_void>
 impl core::fmt::Debug for lean_rs::LeanLibrary<'_>
 pub fn lean_rs::LeanLibrary<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> core::marker::Freeze for lean_rs::LeanLibrary<'lean>
@@ -1485,7 +1603,7 @@ impl<'lean, T> lean_rs::DecodeCallResult<'lean> for lean_rs::LeanIo<T> where T: 
 pub type lean_rs::LeanIo<T>::CRepr = *mut lean_rs_sys::types::lean_object
 pub type lean_rs::LeanIo<T>::Output = T
 pub trait lean_rs::LeanAbi<'lean>: core::marker::Sized + sealed::SealedAbi
-pub type lean_rs::LeanAbi::CRepr: core::marker::Copy
+pub type lean_rs::LeanAbi::CRepr: lean_rs::abi::traits::LeanCReprAbi
 impl<'lean, A, B, C> lean_rs::abi::traits::LeanAbi<'lean> for (A, B, C) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, C: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
 pub type (A, B, C)::CRepr = *mut lean_rs_sys::types::lean_object
 impl<'lean, A, B> lean_rs::abi::traits::LeanAbi<'lean> for (A, B) where A: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>, B: lean_rs::abi::traits::IntoLean<'lean> + lean_rs::abi::traits::TryFromLean<'lean>
@@ -1566,6 +1684,32 @@ impl<'lean, A1> lean_rs::LeanArgs<'lean> for (A1) where A1: lean_rs::abi::traits
 pub const (A1)::ARITY: usize
 impl<'lean> lean_rs::LeanArgs<'lean> for ()
 pub const ()::ARITY: usize
+pub trait lean_rs::LeanCReprAbi: core::marker::Copy + 'static
+pub const lean_rs::LeanCReprAbi::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for *mut lean_rs_sys::types::lean_object
+pub const *mut lean_rs_sys::types::lean_object::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for f64
+pub const f64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i16
+pub const i16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i32
+pub const i32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i64
+pub const i64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for i8
+pub const i8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for isize
+pub const isize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u16
+pub const u16::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u32
+pub const u32::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u64
+pub const u64::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for u8
+pub const u8::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
+impl lean_rs::abi::traits::LeanCReprAbi for usize
+pub const usize::EXPORT_ABI_REPR: lean_toolchain::loader::LeanExportAbiRepr
 pub trait lean_rs::LeanCallbackPayload: lean_rs::callback::private::Sealed + core::marker::Send + core::marker::Sync + 'static
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanProgressTick
 impl lean_rs::callback::LeanCallbackPayload for lean_rs::callback::LeanStringEvent

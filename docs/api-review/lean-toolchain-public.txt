@@ -5,6 +5,7 @@ pub use lean_toolchain::LEAN_VERSION
 pub mod lean_toolchain::manifest_validation
 pub struct lean_toolchain::manifest_validation::CapabilityManifest
 pub lean_toolchain::manifest_validation::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
+pub lean_toolchain::manifest_validation::CapabilityManifest::exports: alloc::vec::Vec<lean_toolchain::LeanExportSignature>
 pub lean_toolchain::manifest_validation::CapabilityManifest::lean_header_sha256: core::option::Option<alloc::string::String>
 pub lean_toolchain::manifest_validation::CapabilityManifest::lean_version: core::option::Option<alloc::string::String>
 pub lean_toolchain::manifest_validation::CapabilityManifest::module: alloc::string::String
@@ -96,6 +97,108 @@ impl core::marker::Unpin for lean_toolchain::LeanBuiltCapabilityError
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanBuiltCapabilityError
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanBuiltCapabilityError
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanBuiltCapabilityError
+pub enum lean_toolchain::LeanExportAbiRepr
+pub lean_toolchain::LeanExportAbiRepr::F64
+pub lean_toolchain::LeanExportAbiRepr::I16
+pub lean_toolchain::LeanExportAbiRepr::I32
+pub lean_toolchain::LeanExportAbiRepr::I64
+pub lean_toolchain::LeanExportAbiRepr::I8
+pub lean_toolchain::LeanExportAbiRepr::ISize
+pub lean_toolchain::LeanExportAbiRepr::LeanObject
+pub lean_toolchain::LeanExportAbiRepr::U16
+pub lean_toolchain::LeanExportAbiRepr::U32
+pub lean_toolchain::LeanExportAbiRepr::U64
+pub lean_toolchain::LeanExportAbiRepr::U8
+pub lean_toolchain::LeanExportAbiRepr::USize
+impl lean_toolchain::LeanExportAbiRepr
+pub const fn lean_toolchain::LeanExportAbiRepr::as_str(self) -> &'static str
+impl core::clone::Clone for lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportAbiRepr::clone(&self) -> lean_toolchain::LeanExportAbiRepr
+impl core::cmp::Eq for lean_toolchain::LeanExportAbiRepr
+impl core::cmp::PartialEq for lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportAbiRepr::eq(&self, &lean_toolchain::LeanExportAbiRepr) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportAbiRepr::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportAbiRepr::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportAbiRepr
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportAbiRepr
+impl core::marker::Freeze for lean_toolchain::LeanExportAbiRepr
+impl core::marker::Send for lean_toolchain::LeanExportAbiRepr
+impl core::marker::Sync for lean_toolchain::LeanExportAbiRepr
+impl core::marker::Unpin for lean_toolchain::LeanExportAbiRepr
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportAbiRepr
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportAbiRepr
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportAbiRepr
+pub enum lean_toolchain::LeanExportOwnership
+pub lean_toolchain::LeanExportOwnership::None
+pub lean_toolchain::LeanExportOwnership::Owned
+impl lean_toolchain::LeanExportOwnership
+pub const fn lean_toolchain::LeanExportOwnership::as_str(self) -> &'static str
+impl core::clone::Clone for lean_toolchain::LeanExportOwnership
+pub fn lean_toolchain::LeanExportOwnership::clone(&self) -> lean_toolchain::LeanExportOwnership
+impl core::cmp::Eq for lean_toolchain::LeanExportOwnership
+impl core::cmp::PartialEq for lean_toolchain::LeanExportOwnership
+pub fn lean_toolchain::LeanExportOwnership::eq(&self, &lean_toolchain::LeanExportOwnership) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportOwnership
+pub fn lean_toolchain::LeanExportOwnership::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportOwnership
+pub fn lean_toolchain::LeanExportOwnership::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportOwnership
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportOwnership
+impl core::marker::Freeze for lean_toolchain::LeanExportOwnership
+impl core::marker::Send for lean_toolchain::LeanExportOwnership
+impl core::marker::Sync for lean_toolchain::LeanExportOwnership
+impl core::marker::Unpin for lean_toolchain::LeanExportOwnership
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportOwnership
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportOwnership
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportOwnership
+pub enum lean_toolchain::LeanExportResultConvention
+pub lean_toolchain::LeanExportResultConvention::IoResult
+pub lean_toolchain::LeanExportResultConvention::Pure
+impl lean_toolchain::LeanExportResultConvention
+pub const fn lean_toolchain::LeanExportResultConvention::as_str(self) -> &'static str
+impl core::clone::Clone for lean_toolchain::LeanExportResultConvention
+pub fn lean_toolchain::LeanExportResultConvention::clone(&self) -> lean_toolchain::LeanExportResultConvention
+impl core::cmp::Eq for lean_toolchain::LeanExportResultConvention
+impl core::cmp::PartialEq for lean_toolchain::LeanExportResultConvention
+pub fn lean_toolchain::LeanExportResultConvention::eq(&self, &lean_toolchain::LeanExportResultConvention) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportResultConvention
+pub fn lean_toolchain::LeanExportResultConvention::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportResultConvention
+pub fn lean_toolchain::LeanExportResultConvention::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportResultConvention
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportResultConvention
+impl core::marker::Freeze for lean_toolchain::LeanExportResultConvention
+impl core::marker::Send for lean_toolchain::LeanExportResultConvention
+impl core::marker::Sync for lean_toolchain::LeanExportResultConvention
+impl core::marker::Unpin for lean_toolchain::LeanExportResultConvention
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportResultConvention
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportResultConvention
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportResultConvention
+pub enum lean_toolchain::LeanExportSymbolKind
+pub lean_toolchain::LeanExportSymbolKind::Function
+pub lean_toolchain::LeanExportSymbolKind::Global
+impl lean_toolchain::LeanExportSymbolKind
+pub const fn lean_toolchain::LeanExportSymbolKind::as_str(self) -> &'static str
+impl core::clone::Clone for lean_toolchain::LeanExportSymbolKind
+pub fn lean_toolchain::LeanExportSymbolKind::clone(&self) -> lean_toolchain::LeanExportSymbolKind
+impl core::cmp::Eq for lean_toolchain::LeanExportSymbolKind
+impl core::cmp::PartialEq for lean_toolchain::LeanExportSymbolKind
+pub fn lean_toolchain::LeanExportSymbolKind::eq(&self, &lean_toolchain::LeanExportSymbolKind) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportSymbolKind
+pub fn lean_toolchain::LeanExportSymbolKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportSymbolKind
+pub fn lean_toolchain::LeanExportSymbolKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportSymbolKind
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportSymbolKind
+impl core::marker::Freeze for lean_toolchain::LeanExportSymbolKind
+impl core::marker::Send for lean_toolchain::LeanExportSymbolKind
+impl core::marker::Sync for lean_toolchain::LeanExportSymbolKind
+impl core::marker::Unpin for lean_toolchain::LeanExportSymbolKind
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportSymbolKind
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportSymbolKind
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportSymbolKind
 pub enum lean_toolchain::LeanLoaderDiagnosticCode
 pub lean_toolchain::LeanLoaderDiagnosticCode::MalformedManifest
 pub lean_toolchain::LeanLoaderDiagnosticCode::MissingImportedSymbol
@@ -256,6 +359,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::BuiltLeanCapabi
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::BuiltLeanCapability
 pub struct lean_toolchain::CapabilityManifest
 pub lean_toolchain::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
+pub lean_toolchain::CapabilityManifest::exports: alloc::vec::Vec<lean_toolchain::LeanExportSignature>
 pub lean_toolchain::CapabilityManifest::lean_header_sha256: core::option::Option<alloc::string::String>
 pub lean_toolchain::CapabilityManifest::lean_version: core::option::Option<alloc::string::String>
 pub lean_toolchain::CapabilityManifest::module: alloc::string::String
@@ -284,6 +388,7 @@ impl lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
 pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::module(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>) -> Self
@@ -355,6 +460,79 @@ impl core::marker::Unpin for lean_toolchain::LeanBuiltCapability
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanBuiltCapability
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanBuiltCapability
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanBuiltCapability
+pub struct lean_toolchain::LeanExportArgAbi
+impl lean_toolchain::LeanExportArgAbi
+pub const fn lean_toolchain::LeanExportArgAbi::new(lean_toolchain::LeanExportAbiRepr, lean_toolchain::LeanExportOwnership) -> Self
+pub const fn lean_toolchain::LeanExportArgAbi::ownership(self) -> lean_toolchain::LeanExportOwnership
+pub const fn lean_toolchain::LeanExportArgAbi::repr(self) -> lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportArgAbi::to_json(self) -> serde_json::value::Value
+impl core::clone::Clone for lean_toolchain::LeanExportArgAbi
+pub fn lean_toolchain::LeanExportArgAbi::clone(&self) -> lean_toolchain::LeanExportArgAbi
+impl core::cmp::Eq for lean_toolchain::LeanExportArgAbi
+impl core::cmp::PartialEq for lean_toolchain::LeanExportArgAbi
+pub fn lean_toolchain::LeanExportArgAbi::eq(&self, &lean_toolchain::LeanExportArgAbi) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportArgAbi
+pub fn lean_toolchain::LeanExportArgAbi::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportArgAbi
+pub fn lean_toolchain::LeanExportArgAbi::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportArgAbi
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportArgAbi
+impl core::marker::Freeze for lean_toolchain::LeanExportArgAbi
+impl core::marker::Send for lean_toolchain::LeanExportArgAbi
+impl core::marker::Sync for lean_toolchain::LeanExportArgAbi
+impl core::marker::Unpin for lean_toolchain::LeanExportArgAbi
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportArgAbi
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportArgAbi
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportArgAbi
+pub struct lean_toolchain::LeanExportReturnAbi
+impl lean_toolchain::LeanExportReturnAbi
+pub const fn lean_toolchain::LeanExportReturnAbi::convention(self) -> lean_toolchain::LeanExportResultConvention
+pub const fn lean_toolchain::LeanExportReturnAbi::new(lean_toolchain::LeanExportAbiRepr, lean_toolchain::LeanExportOwnership, lean_toolchain::LeanExportResultConvention) -> Self
+pub const fn lean_toolchain::LeanExportReturnAbi::ownership(self) -> lean_toolchain::LeanExportOwnership
+pub const fn lean_toolchain::LeanExportReturnAbi::repr(self) -> lean_toolchain::LeanExportAbiRepr
+pub fn lean_toolchain::LeanExportReturnAbi::to_json(self) -> serde_json::value::Value
+impl core::clone::Clone for lean_toolchain::LeanExportReturnAbi
+pub fn lean_toolchain::LeanExportReturnAbi::clone(&self) -> lean_toolchain::LeanExportReturnAbi
+impl core::cmp::Eq for lean_toolchain::LeanExportReturnAbi
+impl core::cmp::PartialEq for lean_toolchain::LeanExportReturnAbi
+pub fn lean_toolchain::LeanExportReturnAbi::eq(&self, &lean_toolchain::LeanExportReturnAbi) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportReturnAbi
+pub fn lean_toolchain::LeanExportReturnAbi::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for lean_toolchain::LeanExportReturnAbi
+pub fn lean_toolchain::LeanExportReturnAbi::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for lean_toolchain::LeanExportReturnAbi
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportReturnAbi
+impl core::marker::Freeze for lean_toolchain::LeanExportReturnAbi
+impl core::marker::Send for lean_toolchain::LeanExportReturnAbi
+impl core::marker::Sync for lean_toolchain::LeanExportReturnAbi
+impl core::marker::Unpin for lean_toolchain::LeanExportReturnAbi
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportReturnAbi
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportReturnAbi
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportReturnAbi
+pub struct lean_toolchain::LeanExportSignature
+impl lean_toolchain::LeanExportSignature
+pub fn lean_toolchain::LeanExportSignature::args(&self) -> &[lean_toolchain::LeanExportArgAbi]
+pub fn lean_toolchain::LeanExportSignature::function(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::vec::Vec<lean_toolchain::LeanExportArgAbi>>, lean_toolchain::LeanExportReturnAbi) -> Self
+pub fn lean_toolchain::LeanExportSignature::global(impl core::convert::Into<alloc::string::String>, lean_toolchain::LeanExportReturnAbi) -> Self
+pub const fn lean_toolchain::LeanExportSignature::kind(&self) -> lean_toolchain::LeanExportSymbolKind
+pub const fn lean_toolchain::LeanExportSignature::result(&self) -> lean_toolchain::LeanExportReturnAbi
+pub fn lean_toolchain::LeanExportSignature::symbol(&self) -> &str
+pub fn lean_toolchain::LeanExportSignature::to_json(&self) -> serde_json::value::Value
+impl core::clone::Clone for lean_toolchain::LeanExportSignature
+pub fn lean_toolchain::LeanExportSignature::clone(&self) -> lean_toolchain::LeanExportSignature
+impl core::cmp::Eq for lean_toolchain::LeanExportSignature
+impl core::cmp::PartialEq for lean_toolchain::LeanExportSignature
+pub fn lean_toolchain::LeanExportSignature::eq(&self, &lean_toolchain::LeanExportSignature) -> bool
+impl core::fmt::Debug for lean_toolchain::LeanExportSignature
+pub fn lean_toolchain::LeanExportSignature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::LeanExportSignature
+impl core::marker::Freeze for lean_toolchain::LeanExportSignature
+impl core::marker::Send for lean_toolchain::LeanExportSignature
+impl core::marker::Sync for lean_toolchain::LeanExportSignature
+impl core::marker::Unpin for lean_toolchain::LeanExportSignature
+impl core::marker::UnsafeUnpin for lean_toolchain::LeanExportSignature
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanExportSignature
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanExportSignature
 pub struct lean_toolchain::LeanLakeProjectModules
 pub lean_toolchain::LeanLakeProjectModules::declared_lean_libs: alloc::vec::Vec<alloc::string::String>
 pub lean_toolchain::LeanLakeProjectModules::fingerprint: lean_toolchain::LeanModuleSetFingerprint

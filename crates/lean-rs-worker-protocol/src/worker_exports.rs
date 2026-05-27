@@ -1,8 +1,10 @@
-//! Closed worker capability export shapes.
+//! Hidden closed worker capability export shapes.
 //!
 //! The worker protocol lets downstream callers choose export names, but not
 //! ABI shapes. This module is the shared source of truth for the small set of
 //! worker operation signatures that may cross the child process boundary.
+//! It is public only because parent, child, and harness live in separate
+//! crates; it is not downstream extensibility for arbitrary worker exports.
 
 use lean_toolchain::{
     LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,

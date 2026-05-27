@@ -29,9 +29,16 @@
 //! format does not require a semver-major bump. Struct shapes with public
 //! fields that downstream code legitimately constructs (currently [`protocol::DataRow`])
 //! remain exhaustive; adding a field there is a breaking change.
+//!
+//! The hidden `worker_exports` module is an implementation table for the
+//! closed worker capability operation shapes shared by the parent, child, and
+//! test harness. It is not an extension registry for downstream callers.
+
+#![forbid(unsafe_code)]
 
 pub mod protocol;
 pub mod types;
+#[doc(hidden)]
 pub mod worker_exports;
 
 #[cfg(feature = "harness")]

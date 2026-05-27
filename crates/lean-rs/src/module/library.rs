@@ -214,19 +214,11 @@ impl<'lean> LeanLibrary<'lean> {
 
     /// Resolve `name` as a function-pointer symbol (text section).
     ///
-    /// Returns the raw symbol address. The caller is responsible for
-    /// casting to the right `unsafe extern "C" fn(...) -> ...`
-    /// signature, typically by handing the address to
-    /// [`LeanExported::from_function_address`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`LeanError::Host`] with stage [`HostStage::Link`] if
-    /// the symbol is not exported by this library. The diagnostic
-    /// embeds the symbol name and the library path.
-    ///
-    /// [`LeanExported::from_function_address`]: crate::module::LeanExported::from_function_address
-    pub fn resolve_function_symbol(&self, name: &str) -> LeanResult<*mut c_void> {
+    /// Private to `lean-rs`: callers reach this through
+    /// [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked)
+    /// or manifest-checked [`LeanCapability::exported`](super::capability::LeanCapability::exported),
+    /// not by handling raw dynamic-loader addresses.
+    pub(crate) fn resolve_function_symbol(&self, name: &str) -> LeanResult<*mut c_void> {
         // SAFETY: `libloading::Library::get::<*mut c_void>` is the raw
         // address lookup; the returned `Symbol<'_, *mut c_void>` borrows
         // from `self.library`, so dereferencing it inside this scope is
@@ -241,29 +233,6 @@ impl<'lean> LeanLibrary<'lean> {
                 ))
             })?;
         Ok(*symbol)
-    }
-
-    /// Resolve `name` as a function-pointer symbol, tolerating a missing
-    /// symbol.
-    ///
-    /// Returns `Some(address)` when the symbol resolves, `None` when it
-    /// is absent from this library. The opinionated `lean-rs-host` stack
-    /// uses this to pre-resolve *optional* capability symbols at
-    /// `LeanCapabilities::new` time without failing capability load when
-    /// a fixture omits a service.
-    ///
-    /// Symbol resolution at the dlsym level only fails with "symbol not
-    /// present" — the dynamic linker has already accepted the library at
-    /// [`Self::open`], so a per-symbol lookup error is either "missing"
-    /// or a `\0` in the name (which a sane caller never passes). Both
-    /// are collapsed into the `None` branch by design.
-    pub fn resolve_optional_function_symbol(&self, name: &str) -> Option<*mut c_void> {
-        // SAFETY: identical to `resolve_function_symbol`; the symbol
-        // borrow does not escape this scope.
-        match unsafe { self.library.get::<*mut c_void>(name.as_bytes()) } {
-            Ok(symbol) => Some(*symbol),
-            Err(_) => None,
-        }
     }
 
     /// Resolve `name` as a Lean nullary-constant global symbol

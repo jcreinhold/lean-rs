@@ -1094,7 +1094,8 @@ fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
 mod tests {
     use super::{
         CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, LakeRun, LakeRunner,
-        build_lake_target_with_runner, capability_env_var, capability_manifest_env_var, command_detail,
+        build_lake_target_with_runner, capability_env_var, capability_manifest_env_var, capability_manifest_name,
+        command_detail,
     };
     use crate::LinkDiagnostics;
     use crate::{
@@ -1397,6 +1398,40 @@ mod tests {
             capability_manifest_env_var("lean-dup_index"),
             "LEAN_RS_CAPABILITY_LEAN_DUP_INDEX_MANIFEST"
         );
+    }
+
+    #[test]
+    fn capability_manifest_name_includes_signature_digest_for_non_empty_exports() {
+        let first = vec![LeanExportSignature::function(
+            "my_capability_u8_identity",
+            vec![LeanExportArgAbi::new(LeanExportAbiRepr::U8, LeanExportOwnership::None)],
+            LeanExportReturnAbi::new(
+                LeanExportAbiRepr::U8,
+                LeanExportOwnership::None,
+                LeanExportResultConvention::Pure,
+            ),
+        )];
+        let second = vec![LeanExportSignature::function(
+            "my_capability_u16_identity",
+            vec![LeanExportArgAbi::new(LeanExportAbiRepr::U16, LeanExportOwnership::None)],
+            LeanExportReturnAbi::new(
+                LeanExportAbiRepr::U16,
+                LeanExportOwnership::None,
+                LeanExportResultConvention::Pure,
+            ),
+        )];
+
+        assert_eq!(
+            capability_manifest_name("MyCapability", &[]),
+            "MyCapability.lean-rs-capability.json"
+        );
+        let first_name = capability_manifest_name("MyCapability", &first);
+        let second_name = capability_manifest_name("MyCapability", &second);
+        assert_ne!(first_name, second_name);
+        assert!(first_name.starts_with("MyCapability-"));
+        assert!(first_name.ends_with(".lean-rs-capability.json"));
+        assert!(second_name.starts_with("MyCapability-"));
+        assert!(second_name.ends_with(".lean-rs-capability.json"));
     }
 
     #[test]

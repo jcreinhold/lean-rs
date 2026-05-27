@@ -11,14 +11,14 @@ this file catches the inverse—invariants that drifted away from what the code 
 The thesis these invariants serve is in [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
 Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; `lean-rs` consumes them through narrow per-file
 `#![allow(unsafe_code)]` opt-outs; `lean-rs-host` forbids unsafe code crate-wide and consumes checked `lean-rs` facades;
-`lean-toolchain` has no Rust `unsafe`.
+`lean-toolchain`, `lean-rs-worker-parent`, and `lean-rs-worker-protocol` also forbid unsafe code crate-wide.
 
 ## Safety boundary audit, 2026-05-27
 
 This section classifies the production search surface requested for the pre-1.0 migration series:
 
 ```sh
-rg -n "unsafe|lean_rs_sys|from_function_address|exported_unchecked<" crates/lean-rs crates/lean-rs-host crates/lean-toolchain
+rg -n "unsafe|lean_rs_sys|exported_unchecked<" crates/lean-rs crates/lean-rs-host crates/lean-toolchain
 ```
 
 Tests, examples, fuzz targets, compile-fail stderr snapshots, and generated fixture/shim source are not counted as
@@ -31,7 +31,7 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 | --- | --- | --- |
 | Lean runtime ownership/lifetime management that belongs in `lean-rs` | `lean-rs/src/runtime/{init,obj,thread}.rs`; `lean-rs/src/abi/traits.rs`; handle wrappers in `lean-rs/src/handle/{name,level,expr,declaration}.rs` | Correctly centralised in `lean-rs`. Host argument-only impls name `Obj`'s associated C representation and reject impossible owned-return decoding without touching raw pointers. |
 | Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. `lean-rs::abi::structure::{ObjView, CtorView}` now centralises scalar/nullary tag, ctor-tag, ctor-arity, and scalar-tail reads; host production decoders consume those views instead of direct `lean_rs_sys` object-layout helpers. |
-| Dynamic symbol dispatch that must be checked or explicitly unsafe | `lean-rs/src/module/library.rs`; `lean-rs/src/module/exported.rs` | `lean-rs` owns `dlopen`, global-vs-function classification, `dlsym`, initializer lookup, and the unsafe function-pointer cast. Checked lookup is safe only when backed by trusted export signature metadata. Arbitrary dynamic lookup remains `LeanModule::exported_unchecked` and is named unsafe. `lean-rs-host` resolves bundled shims through manifest-backed `HostShimBindings` and exposes no arbitrary dispatch wrapper. |
+| Dynamic symbol dispatch that must be checked or explicitly unsafe | `lean-rs/src/module/library.rs`; `lean-rs/src/module/exported.rs`; `lean-rs/src/module/capability.rs` | `lean-rs` owns `dlopen`, global-vs-function classification, `dlsym`, initializer lookup, and the unsafe function-pointer cast. Checked lookup is safe only when backed by trusted export signature metadata. Arbitrary dynamic lookup remains `LeanModule::exported_unchecked` and is named unsafe. `lean-rs-host` resolves bundled shims through manifest-backed `HostShimBindings`; `lean-rs-worker-child` resolves user worker exports through manifest-backed worker bindings. Neither exposes arbitrary dispatch wrappers. |
 | Callback or context-pointer handling that belongs behind a safe callback API | `lean-rs/src/callback.rs` | `lean-rs` owns the callback registry, status bytes, panic containment, and string/progress payload trampolines. `lean-rs-host` uses that safe callback surface for progress reporting. |
 | Unrelated unsafe that needs its own justification | `lean-rs/src/module/initializer.rs` `from_utf8_unchecked` for prevalidated symbol bytes and initializer call; `lean-rs/src/module/library.rs` platform loader calls including `RTLD_GLOBAL`; bundled Lean shims call `unsafe Lean.enableInitializersExecution` | Keep documented locally. These are not Lean object layout or Rust callback lifetime leaks, but each remains load-bearing and should stay isolated. |
 | `lean_rs_sys` constants only, no unsafe | `lean-toolchain/src/{discover,fingerprint,lib,manifest_validation,modules}.rs`; selected docs/tests | Build-time version, digest, required-symbol, and supported-toolchain metadata. This is not raw object access and does not by itself expand the unsafe boundary. |
@@ -41,8 +41,9 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 - **Lean object layout leakage:** closed for the current host decoders. `lean-rs` owns scalar-vs-constructor tags and
   constructor scalar-tail reads through `ObjView` / `CtorView`; diagnostic severity, elaboration failures, evidence
   status, module-query cache facts, timings, booleans, and sum tags now decode through that API.
-- **Symbol ABI leakage:** closed for host dispatch. The ABI fact lives in Lean shim declarations and the generated
-  capability manifest; `HostShimBindings` consumes trusted signature metadata rather than raw address comments.
+- **Symbol ABI leakage:** closed for host and worker dispatch. The ABI fact lives in Lean shim/worker declarations and
+  generated capability manifests; `HostShimBindings` and worker checked bindings consume trusted signature metadata
+  rather than raw address comments.
 - **Callback lifetime leakage:** closed for host progress callbacks. `lean-rs` owns callback handles and trampolines;
   host passes progress sinks through that safe surface.
 - **Ownership/drop leakage:** closed for host request-only `LeanAbi` impls. They still name the C-ABI representation

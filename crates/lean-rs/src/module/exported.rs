@@ -1,7 +1,15 @@
 //! Typed handles for exported Lean functions.
 //!
-//! The user-facing surface is two types, three sealed traits, and one
-//! lookup method:
+//! The public dispatch surface has two lookup paths:
+//!
+//! - [`LeanCapability::exported<Args, R>(name)`](super::capability::LeanCapability::exported)
+//!   — safe checked lookup for capabilities opened from trusted manifest
+//!   signature metadata.
+//! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
+//!   — unsafe arbitrary lookup for callers that can prove the symbol's
+//!   compiled C ABI matches the requested Rust `Args`/`R` shape.
+//!
+//! The typed handle surface is two types and three sealed traits:
 //!
 //! - [`LeanExported<'lean, 'lib, Args, R>`] — a typed handle for an
 //!   exported Lean symbol. `Args` is a tuple of Rust argument types
@@ -16,10 +24,11 @@
 //!   [`crate::abi::traits::TryFromLean::try_from_lean`]. The `.call(...)` method
 //!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`) — the marker
 //!   only lives in the type signature.
-//! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
-//!   — the single unchecked lookup. Distinguishes function-symbol resolution from
-//!   Lean nullary-constant global reads transparently, using the
-//!   `globals` set computed at [`super::library::LeanLibrary::open`].
+//!
+//! `LeanModule::exported_unchecked` distinguishes function-symbol
+//! resolution from Lean nullary-constant global reads transparently,
+//! using the `globals` set computed at
+//! [`super::library::LeanLibrary::open`].
 //!
 //! ## Call shape
 //!
@@ -54,30 +63,14 @@
 //! optimises away for top-level IO exports, so `.call` synthesises no
 //! world token.
 //!
-//! ## Why no declarative macro
+//! ## Checked lookup boundary
 //!
-//! The dispatch sites in `crates/lean-rs-host/src/host/session.rs` each
-//! spell out an address read, a `// SAFETY:` comment, a typed
-//! `LeanExported<...>` annotation, and the
-//! `unsafe { from_function_address(...) }` construction — about four
-//! source lines per site. A declarative macro could compress this to one
-//! line, but at the cost of hiding the type annotation that is the
-//! safety contract, breaking grep over
-//! `LeanExported<'lean, '_, (...), LeanIo<...>>`, and adding one more
-//! abstraction every reader has to learn. Total complexity rises for a
-//! cosmetic gain. Reopen the decision when any of these holds:
-//!
-//! - Five or more new dispatch sites in `host/session.rs` (or a sibling
-//!   module) share the same arity and return shape.
-//! - A bulk-method or `SessionPool` helper introduces an arity-uniform
-//!   batch pattern the manual shape obscures.
-//! - A larger registry-and-dispatch macro becomes viable that subsumes
-//!   both `SessionSymbols::resolve()` and per-site typed-handle
-//!   construction in one declaration.
-//! - A typed `SessionSymbols<'lean>` carries per-field phantom
-//!   signatures so `from_function_address` becomes safe at the type
-//!   level; the per-site `// SAFETY:` comments then lose their per-site
-//!   content and a macro becomes information-preserving.
+//! `LeanCapability::exported` is safe because the capability manifest
+//! supplies the trusted ABI fact before the typed handle is built.
+//! `LeanModule::exported_unchecked` remains unsafe because a raw symbol
+//! name plus caller-chosen generic types cannot establish that fact.
+//! Raw dynamic-loader addresses are intentionally not part of the
+//! public API.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
@@ -324,42 +317,6 @@ impl<Args, R> core::fmt::Debug for LeanExported<'_, '_, Args, R> {
             CallableTarget::Global(_) => "Global",
         };
         f.debug_struct("LeanExported").field("kind", &kind).finish()
-    }
-}
-
-// `'lib` is anchored to the callable target slot in the returned handle;
-// `'_` elides it because it appears only in the impl header.
-impl<'lean, Args, R> LeanExported<'lean, '_, Args, R> {
-    /// Build a function-targeted typed handle from a pre-resolved symbol
-    /// address.
-    ///
-    /// `LeanModule::exported_unchecked` is the normal lookup path; this constructor
-    /// exists so external opinionated host stacks (e.g. `lean-rs-host`'s
-    /// `LeanCapabilities`) can pre-resolve a capability dylib's function
-    /// symbols once at load time via [`LeanLibrary::resolve_function_symbol`]
-    /// and then dispatch through cached addresses without re-`dlsym`-ing
-    /// per call. It always produces a `Function`-targeted handle — global
-    /// symbols still go through `LeanModule::exported_unchecked`.
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee all of the following:
-    ///
-    /// - `address` is the entry point of a function in a library that
-    ///   outlives `'lib` (typically a `&'lib LeanLibrary<'lean>`).
-    /// - The function's C ABI matches the requested `Args` / `R` shape
-    ///   under Lake's emission conventions (per-arg `LeanAbi::CRepr`,
-    ///   per-result `DecodeCallResult::CRepr`).
-    /// - `runtime` is the witness for `'lean`.
-    ///
-    /// [`LeanLibrary::resolve_function_symbol`]: crate::module::LeanLibrary::resolve_function_symbol
-    pub unsafe fn from_function_address(runtime: &'lean LeanRuntime, address: *mut c_void) -> Self {
-        Self {
-            target: CallableTarget::Function(address),
-            runtime,
-            _life: PhantomData,
-            _args: PhantomData,
-        }
     }
 }
 

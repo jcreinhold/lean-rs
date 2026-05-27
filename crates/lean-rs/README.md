@@ -38,14 +38,31 @@ lean-rs = "0.1"
 lean-toolchain = "0.1"
 ```
 
-**`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun triggers, and the
-compile-time dylib path:
+**`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun triggers, the
+compile-time manifest path, and trusted export signature metadata:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use lean_toolchain::{
+        LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+        LeanExportSignature,
+    };
+
     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
         .package("my_app")
         .module("MyCapability")
+        .export_signature(LeanExportSignature::function(
+            "my_app_add",
+            vec![
+                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
+                LeanExportArgAbi::new(LeanExportAbiRepr::U64, LeanExportOwnership::None),
+            ],
+            LeanExportReturnAbi::new(
+                LeanExportAbiRepr::U64,
+                LeanExportOwnership::None,
+                LeanExportResultConvention::Pure,
+            ),
+        ))
         .build()?;
     Ok(())
 }
@@ -75,18 +92,15 @@ def add (a b : UInt64) : UInt64 := a + b
 **`src/main.rs`**—open the build-script capability, dispatch typed:
 
 ```rust
-use lean_rs::{LeanBuiltCapability, LeanCapability, LeanResult, LeanRuntime};
+use lean_rs::{LeanBuiltCapability, LeanCapability, LeanRuntime};
 
-fn main() -> LeanResult<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = LeanRuntime::init()?;
     let capability = LeanCapability::from_build_manifest(
         runtime,
         LeanBuiltCapability::manifest_path(env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")),
     )?;
-    let module = capability.module()?;
-
-    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    let add = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_app_add") }?;
+    let add = capability.exported::<(u64, u64), u64>("my_app_add")?;
     println!("{}", add.call(40, 2)?);  // 42
     Ok(())
 }
@@ -98,10 +112,10 @@ Build and run:
 cargo run
 ```
 
-`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache, filename convention, and the
-artifact manifest handoff. `LeanCapability` reads that manifest and keeps the built path, dependency bundle, and
-initializer names together at runtime. Use `build_lake_target`, `LeanLibraryBundle`, and `LeanLibrary` directly only for
-lower-level custom interop.
+`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache, filename convention, trusted export
+signatures, and the artifact manifest handoff. `LeanCapability` reads that manifest and keeps the built path, dependency
+bundle, initializer names, and checked export metadata together at runtime. Use `build_lake_target`,
+`LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
 
 See the complete shipping recipe at
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).

@@ -11,6 +11,8 @@
 //! This crate does not link `libleanshared`. The worker child runtime that
 //! does is published separately as [`lean-rs-worker-child`](https://docs.rs/lean-rs-worker-child).
 
+#![forbid(unsafe_code)]
+
 mod capability;
 mod planning;
 mod pool;

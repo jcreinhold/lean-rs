@@ -23,10 +23,7 @@
 //!     runtime,
 //!     lean_rs::LeanBuiltCapability::manifest_path(env!("MY_CAPABILITY_MANIFEST")),
 //! )?;
-//! let module  = capability.module()?;
-//! // SAFETY: `my_export_add` is compiled from a Lean export with C ABI
-//! // matching `(UInt64, UInt64) -> UInt64`.
-//! let add     = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_export_add") }?;
+//! let add = capability.exported::<(u64, u64), u64>("my_export_add")?;
 //! let sum     = add.call(3, 4)?;
 //! ```
 //!
@@ -55,9 +52,11 @@
 //!   surface; [`LeanCapabilityPreflight`] reports package/loader problems
 //!   before `dlopen`; [`LeanLibraryBundle`] anchors dependency dylibs;
 //!   [`LeanLibrary`] is the advanced one-dylib RAII handle; [`LeanModule`]
-//!   proves a module's initializer succeeded;
-//!   [`LeanExported`] is a single generic typed function handle whose
-//!   `.call` impl is macro-stamped per arity `0..=12`.
+//!   proves a module's initializer succeeded; [`LeanCapability::exported`]
+//!   is the safe checked lookup path; [`LeanModule::exported_unchecked`] is
+//!   the explicit unsafe path for arbitrary exports; [`LeanExported`] is a
+//!   single generic typed function handle whose `.call` impl is macro-stamped
+//!   per arity `0..=12`.
 //! - [`handle`] — opaque, lifetime-bound receipts for the four core
 //!   Lean semantic values ([`LeanName`], [`LeanLevel`], [`LeanExpr`],
 //!   [`LeanDeclaration`]). Construction and inspection happen Lean-side
@@ -79,7 +78,8 @@
 //! `lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`. The first
 //! two crates expose raw FFI and toolchain metadata; this crate is the
 //! L1 safe surface every (β)-binding consumer depends on. The
-//! standard Lean service layer lives in `lean-rs-host`.
+//! standard Lean service layer lives in `lean-rs-host`, and worker
+//! process facades live in `lean-rs-worker-*`.
 //! Embedders that genuinely need the raw `lean_*` symbols can depend
 //! on `lean-rs-sys` directly, accepting its full `unsafe` discipline.
 //!
