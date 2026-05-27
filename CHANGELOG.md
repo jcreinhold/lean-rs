@@ -9,6 +9,37 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-05-27
+
+### Checked export signatures and host boundary tightening
+
+Breaking pre-1.0 change: direct Lean export lookup is now split into a safe checked capability path and an explicit
+unsafe unchecked module path. `LeanCapability::exported` validates the requested Rust ABI shape against trusted
+manifest signature metadata before dispatch, while arbitrary raw symbol lookup moves to
+`unsafe LeanModule::exported_unchecked`. The low-level function-address constructors and raw library symbol resolvers
+are no longer public API.
+
+`CargoLeanCapability` manifests now use schema version 2 and can record export signatures. The workspace also exposes
+the public signature-description types (`LeanExportSignature`, `LeanExportAbiRepr`, ownership/result-convention
+metadata, and related values) so downstream build scripts and capability loaders can describe the checked boundary
+without duplicating Lean ABI knowledge.
+
+Worker capability dispatch now uses those checked signatures for the closed operation shapes shared by parent, child,
+and harness. `lean-rs-worker-parent` re-exports the newer module-query, declaration-search, proof-state, cache, and
+budget result types, and the parent/protocol crates now forbid unsafe code.
+
+### Worker module snapshots and declaration lookup
+
+Worker module processing gains a module snapshot cache and bounded declaration lookup surfaces for repeated query
+workloads. The new query/result types expose cache status, timings, declaration summaries, target-info results, and
+output-budget controls while preserving bounded responses for large modules.
+
+### Lean object decoding and progress callbacks
+
+`lean-rs` adds safe Lean object view helpers for scalar/sum/constructor decoding and a dedicated
+`LeanProgressCallback` wrapper for progress callback ABI plumbing. Host-side decoders were migrated onto these safe
+views, and `lean-rs-host` no longer contains unsafe code.
+
 ## [0.1.15] - 2026-05-26
 
 ### Bounded module-query projections
