@@ -3,10 +3,10 @@
 //! The public dispatch surface has two lookup paths:
 //!
 //! - [`LeanCapability::exported<Args, R>(name)`](super::capability::LeanCapability::exported)
-//!  —safe checked lookup for capabilities opened from trusted manifest
+//!   —safe checked lookup for capabilities opened from trusted manifest
 //!   signature metadata.
 //! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
-//!  —unsafe arbitrary lookup for callers that can prove the symbol's
+//!   —unsafe arbitrary lookup for callers that can prove the symbol's
 //!   compiled C ABI matches the requested Rust `Args`/`R` shape.
 //!
 //! The typed handle surface is two types and three sealed traits:
