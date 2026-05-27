@@ -32,7 +32,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -119,15 +119,15 @@ pub enum Message {
 pub enum Request {
     Health,
     LoadFixtureCapability {
-        fixture_root: String,
+        manifest_path: String,
     },
     CallFixtureMul {
-        fixture_root: String,
+        manifest_path: String,
         lhs: u64,
         rhs: u64,
     },
     TriggerLeanPanic {
-        fixture_root: String,
+        manifest_path: String,
     },
     OpenHostSession {
         project_root: String,
@@ -228,7 +228,11 @@ pub enum Request {
 #[non_exhaustive]
 pub enum HostSessionMode {
     /// Open a user capability dylib and the bundled host shims.
-    Capability { package: String, lib_name: String },
+    Capability {
+        package: String,
+        lib_name: String,
+        manifest_path: Option<String>,
+    },
     /// Open only the bundled host shims.
     ShimsOnly,
 }

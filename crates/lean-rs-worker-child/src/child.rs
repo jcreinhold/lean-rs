@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -6,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use lean_rs::error::host_internal;
-use lean_rs::module::{LeanIo, LeanLibrary, LeanModule};
+use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanCheckedExportError, LeanExported, LeanIo};
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
@@ -45,6 +46,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo,
     LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
+use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
 const DECLARATION_TYPE_MAX_BYTES: usize = 64 * 1024;
 const MODULE_QUERY_CACHE_API_VERSION: &str = "lean-rs.module-query-cache.v1";
@@ -242,27 +244,33 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             Request::Health => {
                 write_response(&writer, Response::HealthOk)?;
             }
-            Request::LoadFixtureCapability { fixture_root } => {
-                let response = match load_fixture_capability(runtime, Path::new(&fixture_root)) {
+            Request::LoadFixtureCapability { manifest_path } => {
+                let response = match load_fixture_capability(runtime, Path::new(&manifest_path)) {
                     Ok(()) => Response::CapabilityLoaded,
                     Err(err) => error_response(&err),
                 };
                 write_response(&writer, response)?;
             }
-            Request::CallFixtureMul { fixture_root, lhs, rhs } => {
-                let response = match call_fixture_mul(runtime, Path::new(&fixture_root), lhs, rhs) {
+            Request::CallFixtureMul {
+                manifest_path,
+                lhs,
+                rhs,
+            } => {
+                let response = match call_fixture_mul(runtime, Path::new(&manifest_path), lhs, rhs) {
                     Ok(value) => Response::U64 { value },
-                    Err(err) => error_response(&err),
+                    Err(WorkerCallError::Host(err)) => error_response(&err),
+                    Err(WorkerCallError::Binding(err)) => binding_error_response(&err),
                 };
                 write_response(&writer, response)?;
             }
-            Request::TriggerLeanPanic { fixture_root } => {
-                let response = match trigger_lean_panic(runtime, Path::new(&fixture_root)) {
+            Request::TriggerLeanPanic { manifest_path } => {
+                let response = match trigger_lean_panic(runtime, Path::new(&manifest_path)) {
                     Ok(()) => Response::Error {
                         code: "lean_rs.worker.panic_fixture_returned".to_owned(),
                         message: "Lean panic fixture returned instead of terminating the child".to_owned(),
                     },
-                    Err(err) => error_response(&err),
+                    Err(WorkerCallError::Host(err)) => error_response(&err),
+                    Err(WorkerCallError::Binding(err)) => binding_error_response(&err),
                 };
                 write_response(&writer, response)?;
             }
@@ -331,9 +339,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 progress,
             } => {
                 let response = match host_session.as_mut() {
-                    Some(state) => match state.run_data_stream(&export, &request_json, progress, &writer) {
+                    Some(state) => match state.run_data_stream(&export, request_json, progress, &writer) {
                         Ok(summary) => Response::StreamComplete { summary },
                         Err(StreamRunError::Host(err)) => error_response(&err),
+                        Err(StreamRunError::Binding(err)) => binding_error_response(&err),
                         Err(StreamRunError::ExportStatus(status)) => {
                             Response::StreamExportFailed { status_byte: status }
                         }
@@ -349,8 +358,9 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             }
             Request::CapabilityMetadata { export, request_json } => {
                 let response = match host_session.as_mut() {
-                    Some(state) => match state.capability_metadata(&export, &request_json) {
+                    Some(state) => match state.capability_metadata(&export, request_json) {
                         Ok(metadata) => Response::CapabilityMetadata { metadata },
+                        Err(CapabilityJsonError::Binding(err)) => binding_error_response(&err),
                         Err(CapabilityJsonError::Host(err)) => error_response(&err),
                         Err(CapabilityJsonError::Malformed(message)) => {
                             Response::CapabilityMetadataMalformed { message }
@@ -362,8 +372,9 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             }
             Request::CapabilityDoctor { export, request_json } => {
                 let response = match host_session.as_mut() {
-                    Some(state) => match state.capability_doctor(&export, &request_json) {
+                    Some(state) => match state.capability_doctor(&export, request_json) {
                         Ok(report) => Response::CapabilityDoctor { report },
+                        Err(CapabilityJsonError::Binding(err)) => binding_error_response(&err),
                         Err(CapabilityJsonError::Host(err)) => error_response(&err),
                         Err(CapabilityJsonError::Malformed(message)) => Response::CapabilityDoctorMalformed { message },
                     },
@@ -373,9 +384,10 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             }
             Request::JsonCommand { export, request_json } => {
                 let response = match host_session.as_mut() {
-                    Some(state) => match state.json_command(&export, &request_json) {
+                    Some(state) => match state.json_command(&export, request_json) {
                         Ok(response_json) => Response::JsonCommand { response_json },
-                        Err(err) => error_response(&err),
+                        Err(WorkerCallError::Host(err)) => error_response(&err),
+                        Err(WorkerCallError::Binding(err)) => binding_error_response(&err),
                     },
                     None => missing_session_response(),
                 };
@@ -534,50 +546,50 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn load_fixture_capability(runtime: &'static LeanRuntime, fixture_root: &Path) -> LeanResult<()> {
-    let host = LeanHost::from_lake_project(runtime, fixture_root)?;
-    let _caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
+fn load_fixture_capability(runtime: &'static LeanRuntime, manifest_path: &Path) -> LeanResult<()> {
+    let _capability = LeanCapability::from_build_manifest(runtime, LeanBuiltCapability::manifest_path(manifest_path))?;
     Ok(())
 }
 
-fn capability_dylib_path(project_root: &Path, package: &str, lib_name: &str) -> PathBuf {
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = project_root.join(".lake").join("build").join("lib");
-    let escaped_package = package.replace('_', "__");
-    let new_style = lib_dir.join(format!("lib{escaped_package}_{lib_name}.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("lib{lib_name}.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
+fn call_fixture_mul(
+    runtime: &'static LeanRuntime,
+    manifest_path: &Path,
+    lhs: u64,
+    rhs: u64,
+) -> Result<u64, WorkerCallError> {
+    let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
+        runtime,
+        LeanBuiltCapability::manifest_path(manifest_path),
+    )?));
+    let mut bindings = WorkerCapabilityBindings::new(capability);
+    bindings
+        .fixture_mul("lean_rs_fixture_u64_mul")?
+        .call(lhs, rhs)
+        .map_err(WorkerCallError::Host)
 }
 
-#[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
-fn call_fixture_mul(runtime: &'static LeanRuntime, fixture_root: &Path, lhs: u64, rhs: u64) -> LeanResult<u64> {
-    let library = LeanLibrary::open(
+fn trigger_lean_panic(runtime: &'static LeanRuntime, manifest_path: &Path) -> Result<(), WorkerCallError> {
+    let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
         runtime,
-        capability_dylib_path(fixture_root, "lean_rs_fixture", "LeanRsFixture"),
-    )?;
-    let module = library.initialize_module("lean_rs_fixture", "LeanRsFixture")?;
-    // SAFETY: the requested Lean export signature is pinned by the fixture source.
-    unsafe { module.exported_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul") }?.call(lhs, rhs)
-}
-
-#[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
-fn trigger_lean_panic(runtime: &'static LeanRuntime, fixture_root: &Path) -> LeanResult<()> {
-    let library = LeanLibrary::open(
-        runtime,
-        capability_dylib_path(fixture_root, "lean_rs_fixture", "LeanRsFixture"),
-    )?;
-    let module = library.initialize_module("lean_rs_fixture", "LeanRsFixture")?;
-    // SAFETY: the requested Lean export signature is pinned by the fixture source.
-    unsafe { module.exported_unchecked::<(u8,), ()>("lean_rs_fixture_panic_unit") }?.call(0)
+        LeanBuiltCapability::manifest_path(manifest_path),
+    )?));
+    let mut bindings = WorkerCapabilityBindings::new(capability);
+    bindings
+        .fixture_panic("lean_rs_fixture_panic_unit")?
+        .call(0)
+        .map_err(WorkerCallError::Host)
 }
 
 fn error_response(err: &LeanError) -> Response {
     Response::Error {
         code: err.code().as_str().to_owned(),
+        message: err.to_string(),
+    }
+}
+
+fn binding_error_response(err: &WorkerBindingError) -> Response {
+    Response::Error {
+        code: "lean_rs.worker.checked_binding".to_owned(),
         message: err.to_string(),
     }
 }
@@ -594,11 +606,172 @@ struct HostSessionState {
     host: &'static LeanHost<'static>,
     #[allow(dead_code, reason = "leaked capabilities anchor the session borrow")]
     capabilities: &'static LeanCapabilities<'static, 'static>,
-    user_library: Option<LeanLibrary<'static>>,
-    user_package: Option<String>,
-    user_lib_name: Option<String>,
+    worker_bindings: Option<WorkerCapabilityBindings>,
     session: LeanSession<'static, 'static>,
     imports: Vec<String>,
+}
+
+struct WorkerCapabilityBindings {
+    capability: &'static LeanCapability<'static>,
+    string_io: HashMap<String, LeanExported<'static, 'static, (String,), LeanIo<String>>>,
+    streams: HashMap<String, LeanExported<'static, 'static, (String, usize, usize), LeanIo<u8>>>,
+    fixture_mul: HashMap<String, LeanExported<'static, 'static, (u64, u64), u64>>,
+    fixture_panic: HashMap<String, LeanExported<'static, 'static, (u8,), ()>>,
+}
+
+impl WorkerCapabilityBindings {
+    fn new(capability: &'static LeanCapability<'static>) -> Self {
+        Self {
+            capability,
+            string_io: HashMap::new(),
+            streams: HashMap::new(),
+            fixture_mul: HashMap::new(),
+            fixture_panic: HashMap::new(),
+        }
+    }
+
+    fn string_io(
+        &mut self,
+        operation: WorkerExportOperation,
+        export: &str,
+    ) -> Result<&LeanExported<'static, 'static, (String,), LeanIo<String>>, WorkerCallError> {
+        if !self.string_io.contains_key(export) {
+            let binding = self
+                .capability
+                .exported::<(String,), LeanIo<String>>(export)
+                .map_err(|source| WorkerBindingError::checked(operation, export, source))?;
+            self.string_io.insert(export.to_owned(), binding);
+        }
+        self.string_io.get(export).ok_or_else(|| {
+            WorkerCallError::Binding(WorkerBindingError::internal(
+                operation,
+                export,
+                "checked worker String -> IO String binding cache missed after insertion",
+            ))
+        })
+    }
+
+    fn stream(
+        &mut self,
+        export: &str,
+    ) -> Result<&LeanExported<'static, 'static, (String, usize, usize), LeanIo<u8>>, WorkerCallError> {
+        if !self.streams.contains_key(export) {
+            let binding = self
+                .capability
+                .exported::<(String, usize, usize), LeanIo<u8>>(export)
+                .map_err(|source| {
+                    WorkerBindingError::checked(WorkerExportOperation::StreamingCommand, export, source)
+                })?;
+            self.streams.insert(export.to_owned(), binding);
+        }
+        self.streams.get(export).ok_or_else(|| {
+            WorkerCallError::Binding(WorkerBindingError::internal(
+                WorkerExportOperation::StreamingCommand,
+                export,
+                "checked worker streaming binding cache missed after insertion",
+            ))
+        })
+    }
+
+    fn fixture_mul(
+        &mut self,
+        export: &str,
+    ) -> Result<&LeanExported<'static, 'static, (u64, u64), u64>, WorkerCallError> {
+        if !self.fixture_mul.contains_key(export) {
+            let binding = self
+                .capability
+                .exported::<(u64, u64), u64>(export)
+                .map_err(|source| WorkerBindingError::checked(WorkerExportOperation::FixtureMul, export, source))?;
+            self.fixture_mul.insert(export.to_owned(), binding);
+        }
+        self.fixture_mul.get(export).ok_or_else(|| {
+            WorkerCallError::Binding(WorkerBindingError::internal(
+                WorkerExportOperation::FixtureMul,
+                export,
+                "checked fixture multiplication binding cache missed after insertion",
+            ))
+        })
+    }
+
+    fn fixture_panic(&mut self, export: &str) -> Result<&LeanExported<'static, 'static, (u8,), ()>, WorkerCallError> {
+        if !self.fixture_panic.contains_key(export) {
+            let binding = self
+                .capability
+                .exported::<(u8,), ()>(export)
+                .map_err(|source| WorkerBindingError::checked(WorkerExportOperation::FixturePanic, export, source))?;
+            self.fixture_panic.insert(export.to_owned(), binding);
+        }
+        self.fixture_panic.get(export).ok_or_else(|| {
+            WorkerCallError::Binding(WorkerBindingError::internal(
+                WorkerExportOperation::FixturePanic,
+                export,
+                "checked fixture panic binding cache missed after insertion",
+            ))
+        })
+    }
+}
+
+#[derive(Debug)]
+struct WorkerBindingError {
+    operation: WorkerExportOperation,
+    export: String,
+    source: WorkerBindingErrorSource,
+}
+
+#[derive(Debug)]
+enum WorkerBindingErrorSource {
+    Checked(LeanCheckedExportError),
+    Internal(String),
+}
+
+impl WorkerBindingError {
+    fn checked(operation: WorkerExportOperation, export: &str, source: LeanCheckedExportError) -> WorkerCallError {
+        WorkerCallError::Binding(Self {
+            operation,
+            export: export.to_owned(),
+            source: WorkerBindingErrorSource::Checked(source),
+        })
+    }
+
+    fn internal(operation: WorkerExportOperation, export: &str, message: impl Into<String>) -> Self {
+        Self {
+            operation,
+            export: export.to_owned(),
+            source: WorkerBindingErrorSource::Internal(message.into()),
+        }
+    }
+}
+
+impl std::fmt::Display for WorkerBindingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.source {
+            WorkerBindingErrorSource::Checked(source) => write!(
+                f,
+                "failed to resolve checked worker export '{}' for {}: {}",
+                self.export,
+                self.operation.as_str(),
+                source
+            ),
+            WorkerBindingErrorSource::Internal(message) => write!(
+                f,
+                "failed to resolve checked worker export '{}' for {}: {}",
+                self.export,
+                self.operation.as_str(),
+                message
+            ),
+        }
+    }
+}
+
+enum WorkerCallError {
+    Host(LeanError),
+    Binding(WorkerBindingError),
+}
+
+impl From<LeanError> for WorkerCallError {
+    fn from(value: LeanError) -> Self {
+        Self::Host(value)
+    }
 }
 
 impl HostSessionState {
@@ -609,21 +782,30 @@ impl HostSessionState {
         imports: &[String],
     ) -> LeanResult<Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let (capabilities, user_library, user_package, user_lib_name) = match mode {
-            HostSessionMode::Capability { package, lib_name } => {
-                let capabilities = Box::leak(Box::new(host.load_capabilities(package, lib_name)?));
-                let library = LeanLibrary::open(
-                    runtime,
-                    capability_dylib_path(Path::new(project_root), package, lib_name),
-                )?;
-                (
-                    capabilities,
-                    Some(library),
-                    Some(package.clone()),
-                    Some(lib_name.clone()),
-                )
+        let (capabilities, worker_bindings) = match mode {
+            HostSessionMode::Capability {
+                package,
+                lib_name,
+                manifest_path,
+            } => {
+                let worker_bindings = match manifest_path {
+                    Some(path) => {
+                        let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
+                            runtime,
+                            LeanBuiltCapability::manifest_path(path),
+                        )?));
+                        Some(WorkerCapabilityBindings::new(capability))
+                    }
+                    None => None,
+                };
+                let capabilities = if worker_bindings.is_some() {
+                    Box::leak(Box::new(host.load_shims_only()?))
+                } else {
+                    Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
+                };
+                (capabilities, worker_bindings)
             }
-            HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None, None, None),
+            HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None),
             _ => {
                 return Err(host_internal(
                     "worker child received an unsupported host session loading mode".to_owned(),
@@ -635,29 +817,24 @@ impl HostSessionState {
         Ok(Self {
             host,
             capabilities,
-            user_library,
-            user_package,
-            user_lib_name,
+            worker_bindings,
             session,
             imports: imports.to_vec(),
         })
     }
 
-    fn user_module(&self) -> LeanResult<LeanModule<'static, '_>> {
-        let Some(library) = &self.user_library else {
-            return Err(host_internal(
-                "worker request requires a user capability dylib, but this host session was opened shims-only",
-            ));
-        };
-        let package = self
-            .user_package
-            .as_deref()
-            .ok_or_else(|| host_internal("worker session is missing its user package name"))?;
-        let lib_name = self
-            .user_lib_name
-            .as_deref()
-            .ok_or_else(|| host_internal("worker session is missing its user library name"))?;
-        library.initialize_module(package, lib_name)
+    fn worker_bindings_for(
+        &mut self,
+        operation: WorkerExportOperation,
+        export: &str,
+    ) -> Result<&mut WorkerCapabilityBindings, WorkerCallError> {
+        self.worker_bindings.as_mut().ok_or_else(|| {
+            WorkerCallError::Binding(WorkerBindingError::internal(
+                operation,
+                export,
+                "worker request requires a manifest-backed capability identity, but this session has no capability manifest",
+            ))
+        })
     }
 
     fn elaborate(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerElabResult> {
@@ -762,14 +939,10 @@ impl HostSessionState {
         }
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "worker capability stream export lookup is intentionally unchecked"
-    )]
     fn run_data_stream(
-        &self,
+        &mut self,
         export: &str,
-        request_json: &str,
+        request_json: String,
         progress: bool,
         writer: &ProtocolWriter,
     ) -> Result<StreamSummary, StreamRunError> {
@@ -869,10 +1042,12 @@ impl HostSessionState {
         .map_err(StreamRunError::Host)?;
 
         let (handle, trampoline) = callback.abi_parts();
-        let module = self.user_module().map_err(StreamRunError::Host)?;
-        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let status = unsafe { module.exported_unchecked::<(&str, usize, usize), LeanIo<u8>>(export) }
-            .and_then(|call| call.call(request_json, handle, trampoline))
+        let status = self
+            .worker_bindings_for(WorkerExportOperation::StreamingCommand, export)
+            .map_err(StreamRunError::from_worker_call)?
+            .stream(export)
+            .map_err(StreamRunError::from_worker_call)?
+            .call(request_json, handle, trampoline)
             .map_err(StreamRunError::Host)?;
 
         if let Some(error) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
@@ -896,48 +1071,41 @@ impl HostSessionState {
         Ok(guard.summary(started.elapsed()))
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "worker capability metadata export lookup is intentionally unchecked"
-    )]
     fn capability_metadata(
-        &self,
+        &mut self,
         export: &str,
-        request_json: &str,
+        request_json: String,
     ) -> Result<LeanWorkerCapabilityMetadata, CapabilityJsonError> {
-        let module = self.user_module().map_err(CapabilityJsonError::Host)?;
-        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let raw = unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }
-            .and_then(|call| call.call(request_json))
+        let raw = self
+            .worker_bindings_for(WorkerExportOperation::Metadata, export)
+            .map_err(CapabilityJsonError::from_worker_call)?
+            .string_io(WorkerExportOperation::Metadata, export)
+            .map_err(CapabilityJsonError::from_worker_call)?
+            .call(request_json)
             .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "worker capability doctor export lookup is intentionally unchecked"
-    )]
     fn capability_doctor(
-        &self,
+        &mut self,
         export: &str,
-        request_json: &str,
+        request_json: String,
     ) -> Result<LeanWorkerDoctorReport, CapabilityJsonError> {
-        let module = self.user_module().map_err(CapabilityJsonError::Host)?;
-        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let raw = unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }
-            .and_then(|call| call.call(request_json))
+        let raw = self
+            .worker_bindings_for(WorkerExportOperation::Doctor, export)
+            .map_err(CapabilityJsonError::from_worker_call)?
+            .string_io(WorkerExportOperation::Doctor, export)
+            .map_err(CapabilityJsonError::from_worker_call)?
+            .call(request_json)
             .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "worker capability command export lookup is intentionally unchecked"
-    )]
-    fn json_command(&self, export: &str, request_json: &str) -> LeanResult<String> {
-        let module = self.user_module()?;
-        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }?.call(request_json)
+    fn json_command(&mut self, export: &str, request_json: String) -> Result<String, WorkerCallError> {
+        self.worker_bindings_for(WorkerExportOperation::JsonCommand, export)?
+            .string_io(WorkerExportOperation::JsonCommand, export)?
+            .call(request_json)
+            .map_err(WorkerCallError::Host)
     }
 
     fn infer_type(
@@ -1381,6 +1549,7 @@ impl StreamForwarder {
 #[derive(Debug)]
 enum StreamRunError {
     Host(LeanError),
+    Binding(WorkerBindingError),
     ExportStatus(u8),
     CallbackStatus(LeanCallbackStatus),
     MalformedRow(String),
@@ -1388,7 +1557,26 @@ enum StreamRunError {
 
 enum CapabilityJsonError {
     Host(LeanError),
+    Binding(WorkerBindingError),
     Malformed(String),
+}
+
+impl StreamRunError {
+    fn from_worker_call(value: WorkerCallError) -> Self {
+        match value {
+            WorkerCallError::Host(err) => Self::Host(err),
+            WorkerCallError::Binding(err) => Self::Binding(err),
+        }
+    }
+}
+
+impl CapabilityJsonError {
+    fn from_worker_call(value: WorkerCallError) -> Self {
+        match value {
+            WorkerCallError::Host(err) => Self::Host(err),
+            WorkerCallError::Binding(err) => Self::Binding(err),
+        }
+    }
 }
 
 impl From<ProtocolError> for StreamRunError {

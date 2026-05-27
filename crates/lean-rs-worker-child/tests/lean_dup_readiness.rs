@@ -62,6 +62,15 @@ fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
         .next()
         .expect("readiness planner produced a batch")
         .capability_builder()
+        .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+        .json_command_export("lean_rs_interop_consumer_worker_shape_version")
+        .json_command_export("lean_rs_interop_consumer_worker_shape_doctor")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_extract")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_features")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_probe")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
         .worker_executable(worker_binary())
 }
 

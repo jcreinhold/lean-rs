@@ -81,23 +81,22 @@ fn lean_internal_panic_kills_only_child() {
 }
 
 #[test]
-fn missing_fixture_path_reports_worker_error_without_crashing_child() {
+fn missing_fixture_path_reports_manifest_build_error_without_crashing_child() {
     let missing = workspace_root()
         .join("fixtures")
         .join("definitely-missing-worker-fixture");
     let mut worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
     let err = worker
         .load_fixture_capability(&missing)
-        .expect_err("missing fixture path should be a typed worker error");
+        .expect_err("missing fixture path should be a typed harness build error");
     match err {
-        WorkerHarnessError::WorkerError { code, message } => {
-            assert_eq!(code, "lean_rs.module_init");
+        WorkerHarnessError::CapabilityBuild(message) => {
             assert!(
                 message.contains("definitely-missing-worker-fixture"),
                 "message should identify missing fixture path, got {message}",
             );
         }
-        other => panic!("expected WorkerError, got {other:?}"),
+        other => panic!("expected CapabilityBuild, got {other:?}"),
     }
     let status = worker.terminate().expect("worker terminates after typed error");
     assert!(status.success(), "worker should stay alive after typed load error");

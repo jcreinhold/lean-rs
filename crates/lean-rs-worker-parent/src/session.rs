@@ -40,7 +40,11 @@ pub struct LeanWorkerSessionConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LeanWorkerSessionMode {
-    Capability { package: String, lib_name: String },
+    Capability {
+        package: String,
+        lib_name: String,
+        manifest_path: Option<PathBuf>,
+    },
     ShimsOnly,
 }
 
@@ -57,6 +61,27 @@ impl LeanWorkerSessionConfig {
             mode: LeanWorkerSessionMode::Capability {
                 package: package.into(),
                 lib_name: lib_name.into(),
+                manifest_path: None,
+            },
+            imports: imports.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Create a manifest-backed session configuration for a Lake capability.
+    #[must_use]
+    pub fn manifest_backed(
+        project_root: impl Into<PathBuf>,
+        package: impl Into<String>,
+        lib_name: impl Into<String>,
+        manifest_path: impl Into<PathBuf>,
+        imports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            project_root: project_root.into(),
+            mode: LeanWorkerSessionMode::Capability {
+                package: package.into(),
+                lib_name: lib_name.into(),
+                manifest_path: Some(manifest_path.into()),
             },
             imports: imports.into_iter().map(Into::into).collect(),
         }

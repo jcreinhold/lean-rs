@@ -121,6 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_large_payload")
     .worker_executable(worker_binary())
     .open()?;
     let parent_rss_before = parent_rss_kib();

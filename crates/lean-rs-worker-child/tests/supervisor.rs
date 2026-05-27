@@ -229,23 +229,23 @@ fn child_crash_and_policy_restart_are_distinguishable() {
 }
 
 #[test]
-fn missing_fixture_path_maps_to_worker_error() {
+fn missing_fixture_path_maps_to_capability_build_error() {
     let missing = workspace_root()
         .join("fixtures")
         .join("definitely-missing-worker-fixture");
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let err = worker
         .load_fixture_capability(&missing)
-        .expect_err("missing fixture path should be a typed worker error");
+        .expect_err("missing fixture path should be a typed capability build error");
     match err {
-        LeanWorkerError::Worker { code, message } => {
-            assert_eq!(code, "lean_rs.module_init");
+        LeanWorkerError::CapabilityBuild { diagnostic } => {
+            let message = diagnostic.to_string();
             assert!(
                 message.contains("definitely-missing-worker-fixture"),
                 "message should identify missing fixture path, got {message}",
             );
         }
-        other => panic!("expected worker error, got {other:?}"),
+        other => panic!("expected capability build error, got {other:?}"),
     }
     let exit = worker.terminate().expect("worker terminates after typed error");
     assert!(exit.success, "worker should stay alive after typed load error");

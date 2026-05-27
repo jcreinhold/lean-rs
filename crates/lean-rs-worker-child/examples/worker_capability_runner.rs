@@ -314,6 +314,9 @@ fn capability_builder() -> LeanWorkerCapabilityBuilder {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
 }
 
 fn workspace_root() -> PathBuf {

@@ -174,7 +174,18 @@ fn planned_builder() -> Result<lean_rs_worker_parent::LeanWorkerCapabilityBuilde
         .into_iter()
         .next()
         .ok_or("readiness planner produced no batches")?;
-    Ok(batch.capability_builder())
+    Ok(batch
+        .capability_builder()
+        .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+        .json_command_export("lean_rs_interop_consumer_worker_shape_version")
+        .json_command_export("lean_rs_interop_consumer_worker_shape_doctor")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_extract")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_features")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_probe")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
+        .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many"))
 }
 
 fn run_version(

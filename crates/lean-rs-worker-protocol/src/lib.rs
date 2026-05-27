@@ -32,6 +32,7 @@
 
 pub mod protocol;
 pub mod types;
+pub mod worker_exports;
 
 #[cfg(feature = "harness")]
 pub mod harness;

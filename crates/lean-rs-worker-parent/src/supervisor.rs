@@ -21,6 +21,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
     LeanWorkerRendered,
 };
+use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
 use crate::session::LeanWorkerDataSinkTarget;
@@ -745,9 +746,10 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, fixture loading fails,
     /// or protocol communication fails.
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
+        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
         self.send_request(Request::LoadFixtureCapability {
-            fixture_root: path_string(fixture_root.as_ref()),
+            manifest_path: path_string(&manifest_path),
         })?;
         self.record_request(true);
         match self.read_response("load_fixture_capability")? {
@@ -768,9 +770,10 @@ impl LeanWorker {
         lhs: u64,
         rhs: u64,
     ) -> Result<u64, LeanWorkerError> {
+        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
         self.send_request(Request::CallFixtureMul {
-            fixture_root: path_string(fixture_root.as_ref()),
+            manifest_path: path_string(&manifest_path),
             lhs,
             rhs,
         })?;
@@ -929,9 +932,10 @@ impl LeanWorker {
         mut self,
         fixture_root: impl AsRef<Path>,
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
+        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
         self.send_request(Request::TriggerLeanPanic {
-            fixture_root: path_string(fixture_root.as_ref()),
+            manifest_path: path_string(&manifest_path),
         })?;
         self.record_request(true);
         match self.read_response("trigger_lean_panic") {
@@ -981,9 +985,14 @@ impl LeanWorker {
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(true)?;
         let mode = match config.mode() {
-            LeanWorkerSessionMode::Capability { package, lib_name } => HostSessionMode::Capability {
+            LeanWorkerSessionMode::Capability {
+                package,
+                lib_name,
+                manifest_path,
+            } => HostSessionMode::Capability {
                 package: package.clone(),
                 lib_name: lib_name.clone(),
+                manifest_path: manifest_path.as_ref().map(|path| path_string(path)),
             },
             LeanWorkerSessionMode::ShimsOnly => HostSessionMode::ShimsOnly,
         };
@@ -2165,6 +2174,17 @@ fn unexpected_response(operation: &'static str, response: &Response) -> LeanWork
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, LeanWorkerError> {
+    let built = lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
+        .package("lean_rs_fixture")
+        .module("LeanRsFixture")
+        .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
+        .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
+        .build_quiet()
+        .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?;
+    Ok(built.manifest_path().to_path_buf())
 }
 
 /// Parent-side collector that decodes per-row JSON-string payloads from

@@ -841,7 +841,7 @@ fn write_capability_manifest(
     manifest_env_var: &str,
     export_signatures: &[LeanExportSignature],
 ) -> Result<PathBuf, LinkDiagnostics> {
-    let manifest_path = capability_manifest_path(project_root, target_name);
+    let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
     let dependencies = capability_dependencies(project_root, target_name)?;
     let fingerprint = ToolchainFingerprint::current();
     let search_dirs = capability_search_dirs(project_root, dylib_path);
@@ -895,15 +895,42 @@ fn write_capability_manifest(
     Ok(manifest_path)
 }
 
-fn capability_manifest_path(project_root: &Path, target_name: &str) -> PathBuf {
+fn capability_manifest_path(
+    project_root: &Path,
+    target_name: &str,
+    export_signatures: &[LeanExportSignature],
+) -> PathBuf {
+    let manifest_name = capability_manifest_name(target_name, export_signatures);
     if let Some(out_dir) = env::var_os("OUT_DIR") {
-        PathBuf::from(out_dir).join(format!("{}.lean-rs-capability.json", sanitize_target_name(target_name)))
+        PathBuf::from(out_dir).join(manifest_name)
     } else {
         project_root
             .join(".lake")
             .join("lean-rs-build-cache")
-            .join(format!("{}.lean-rs-capability.json", sanitize_target_name(target_name)))
+            .join(manifest_name)
     }
+}
+
+fn capability_manifest_name(target_name: &str, export_signatures: &[LeanExportSignature]) -> String {
+    let target = sanitize_target_name(target_name);
+    if export_signatures.is_empty() {
+        return format!("{target}.lean-rs-capability.json");
+    }
+    let mut hasher = Sha256::new();
+    for signature in export_signatures {
+        hasher.update(signature.symbol().as_bytes());
+        hasher.update([0]);
+        if let Ok(bytes) = serde_json::to_vec(&signature.to_json()) {
+            hasher.update(bytes);
+        }
+        hasher.update([0xff]);
+    }
+    let digest = hasher.finalize();
+    let mut suffix = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        let _ = write!(&mut suffix, "{byte:02x}");
+    }
+    format!("{target}-{suffix}.lean-rs-capability.json")
 }
 
 fn capability_search_dirs(project_root: &Path, dylib_path: &Path) -> Vec<PathBuf> {

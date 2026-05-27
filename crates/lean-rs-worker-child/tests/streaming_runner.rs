@@ -30,9 +30,34 @@ fn interop_root() -> PathBuf {
 }
 
 fn ensure_interop_built() {
-    let fixture = interop_root();
-    lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsInteropConsumer")
-        .expect("interop consumer Lake target builds");
+    drop(interop_manifest_path());
+}
+
+fn interop_manifest_path() -> PathBuf {
+    let mut builder = lean_toolchain::CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
+        .package("lean_rs_interop_consumer")
+        .module("LeanRsInteropConsumer");
+    for export in [
+        "lean_rs_interop_consumer_worker_data_stream",
+        "lean_rs_interop_consumer_worker_data_stream_malformed_json",
+        "lean_rs_interop_consumer_worker_data_stream_missing_stream",
+        "lean_rs_interop_consumer_worker_data_stream_missing_payload",
+        "lean_rs_interop_consumer_worker_data_stream_status",
+        "lean_rs_interop_consumer_worker_data_stream_wrong_callback",
+        "lean_rs_interop_consumer_worker_data_stream_panic",
+        "lean_rs_interop_consumer_worker_data_stream_slow_after_row",
+        "lean_rs_interop_consumer_worker_data_stream_row_then_panic",
+        "lean_rs_interop_consumer_worker_data_stream_many",
+    ] {
+        builder = builder.export_signature(lean_rs_worker_protocol::worker_exports::streaming_command_signature(
+            export,
+        ));
+    }
+    builder
+        .build_quiet()
+        .expect("interop consumer capability manifest builds")
+        .manifest_path()
+        .to_path_buf()
 }
 
 fn worker_config() -> LeanWorkerConfig {
@@ -40,10 +65,11 @@ fn worker_config() -> LeanWorkerConfig {
 }
 
 fn stream_session_config() -> LeanWorkerSessionConfig {
-    LeanWorkerSessionConfig::new(
+    LeanWorkerSessionConfig::manifest_backed(
         interop_root(),
         "lean_rs_interop_consumer",
         "LeanRsInteropConsumer",
+        interop_manifest_path(),
         ["LeanRsInteropConsumer.Callback"],
     )
 }

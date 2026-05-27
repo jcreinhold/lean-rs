@@ -145,6 +145,7 @@ fn builder(worker_binary: &Path) -> LeanWorkerCapabilityBuilder {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .json_command_export("lean_rs_interop_consumer_worker_json_command")
     .worker_executable(worker_binary)
 }
 

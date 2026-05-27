@@ -188,7 +188,15 @@ fn planned_builders(
         LeanWorkerImportPlanner::new(config).plan_work_items(workload.modules.clone(), &workload.fingerprint)?;
     Ok(batches
         .into_iter()
-        .map(|batch| batch.capability_builder().worker_executable(worker_binary))
+        .map(|batch| {
+            batch
+                .capability_builder()
+                .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+                .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+                .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
+                .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
+                .worker_executable(worker_binary)
+        })
         .collect())
 }
 

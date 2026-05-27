@@ -266,6 +266,10 @@ fn capability_builder() -> LeanWorkerCapabilityBuilder {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_extract")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
     .worker_executable(worker_binary())
 }
 

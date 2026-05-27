@@ -11,7 +11,10 @@ use std::process::Command;
 use std::time::Duration;
 
 use lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata;
-use lean_toolchain::{LeanBuiltCapability, LeanLoaderDiagnosticCode};
+use lean_rs_worker_protocol::worker_exports::{
+    doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
+};
+use lean_toolchain::{LeanBuiltCapability, LeanExportSignature, LeanLoaderDiagnosticCode};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -52,6 +55,7 @@ pub struct LeanWorkerCapabilityBuilder {
     lib_name: String,
     imports: Vec<String>,
     built_dylib_path: Option<PathBuf>,
+    built_manifest_path: Option<PathBuf>,
     built_capability: Option<LeanBuiltCapability>,
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
@@ -59,6 +63,7 @@ pub struct LeanWorkerCapabilityBuilder {
     restart_policy: Option<LeanWorkerRestartPolicy>,
     metadata_check: Option<CapabilityMetadataCheck>,
     max_frame_bytes: Option<u32>,
+    worker_export_signatures: Vec<LeanExportSignature>,
 }
 
 impl LeanWorkerCapabilityBuilder {
@@ -80,6 +85,7 @@ impl LeanWorkerCapabilityBuilder {
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
             built_dylib_path: None,
+            built_manifest_path: None,
             built_capability: None,
             worker_child: None,
             startup_timeout: None,
@@ -87,6 +93,7 @@ impl LeanWorkerCapabilityBuilder {
             restart_policy: None,
             metadata_check: None,
             max_frame_bytes: None,
+            worker_export_signatures: Vec::new(),
         }
     }
 
@@ -117,6 +124,7 @@ impl LeanWorkerCapabilityBuilder {
             lib_name: artifact.module,
             imports: imports.into_iter().map(Into::into).collect(),
             built_dylib_path: Some(artifact.dylib_path),
+            built_manifest_path: artifact.manifest_path,
             built_capability: Some(spec.clone()),
             worker_child: None,
             startup_timeout: None,
@@ -124,6 +132,7 @@ impl LeanWorkerCapabilityBuilder {
             restart_policy: None,
             metadata_check: None,
             max_frame_bytes: None,
+            worker_export_signatures: Vec::new(),
         })
     }
 
@@ -192,8 +201,10 @@ impl LeanWorkerCapabilityBuilder {
     /// stored on the opened capability for callers that need it.
     #[must_use]
     pub fn validate_metadata(mut self, export: impl Into<String>, request: Value) -> Self {
+        let export = export.into();
+        self.add_worker_export_signature(metadata_signature(export.clone()));
         self.metadata_check = Some(CapabilityMetadataCheck {
-            export: export.into(),
+            export,
             request,
             expected: None,
         });
@@ -212,12 +223,52 @@ impl LeanWorkerCapabilityBuilder {
         request: Value,
         expected: LeanWorkerCapabilityMetadata,
     ) -> Self {
+        let export = export.into();
+        self.add_worker_export_signature(metadata_signature(export.clone()));
         self.metadata_check = Some(CapabilityMetadataCheck {
-            export: export.into(),
+            export,
             request,
             expected: Some(expected),
         });
         self
+    }
+
+    /// Trust one manifest-backed metadata export with ABI `String -> IO String`.
+    #[must_use]
+    pub fn metadata_export(mut self, export: impl Into<String>) -> Self {
+        self.add_worker_export_signature(metadata_signature(export));
+        self
+    }
+
+    /// Trust one manifest-backed doctor export with ABI `String -> IO String`.
+    #[must_use]
+    pub fn doctor_export(mut self, export: impl Into<String>) -> Self {
+        self.add_worker_export_signature(doctor_signature(export));
+        self
+    }
+
+    /// Trust one manifest-backed JSON command export with ABI `String -> IO String`.
+    #[must_use]
+    pub fn json_command_export(mut self, export: impl Into<String>) -> Self {
+        self.add_worker_export_signature(json_command_signature(export));
+        self
+    }
+
+    /// Trust one manifest-backed streaming command export with ABI `String, USize, USize -> IO UInt8`.
+    #[must_use]
+    pub fn streaming_command_export(mut self, export: impl Into<String>) -> Self {
+        self.add_worker_export_signature(streaming_command_signature(export));
+        self
+    }
+
+    fn add_worker_export_signature(&mut self, signature: LeanExportSignature) {
+        if self
+            .worker_export_signatures
+            .iter()
+            .all(|existing| existing.symbol() != signature.symbol())
+        {
+            self.worker_export_signatures.push(signature);
+        }
     }
 
     /// Return the session reuse key represented by this builder.
@@ -316,10 +367,24 @@ impl LeanWorkerCapabilityBuilder {
     }
 
     fn open_unchecked(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
-        let dylib_path = match self.built_dylib_path {
-            Some(path) => path,
-            None => lean_toolchain::build_lake_target_quiet(&self.project_root, &self.lib_name)
-                .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?,
+        let (dylib_path, manifest_path) = match (self.built_dylib_path, self.built_manifest_path) {
+            (Some(dylib_path), Some(manifest_path)) => (dylib_path, manifest_path),
+            (_, None) => {
+                let mut builder = lean_toolchain::CargoLeanCapability::new(&self.project_root, &self.lib_name)
+                    .package(&self.package)
+                    .module(&self.lib_name);
+                for signature in self.worker_export_signatures {
+                    builder = builder.export_signature(signature);
+                }
+                let built = builder
+                    .build_quiet()
+                    .map_err(|diagnostic| LeanWorkerError::CapabilityBuild { diagnostic })?;
+                (built.dylib_path().to_path_buf(), built.manifest_path().to_path_buf())
+            }
+            (None, Some(manifest_path)) => {
+                let artifact = WorkerCapabilityArtifact::from_manifest(&manifest_path)?;
+                (artifact.dylib_path, manifest_path)
+            }
         };
         let mut worker = spawn_checked_worker(
             self.worker_child,
@@ -329,10 +394,11 @@ impl LeanWorkerCapabilityBuilder {
             self.max_frame_bytes,
         )?;
 
-        let session_config = LeanWorkerSessionConfig::new(
+        let session_config = LeanWorkerSessionConfig::manifest_backed(
             self.project_root.clone(),
             self.package.clone(),
             self.lib_name.clone(),
+            manifest_path,
             self.imports.clone(),
         );
 
@@ -856,6 +922,7 @@ struct CapabilityMetadataCheck {
 #[derive(Debug)]
 struct WorkerCapabilityArtifact {
     dylib_path: PathBuf,
+    manifest_path: Option<PathBuf>,
     package: String,
     module: String,
 }
@@ -863,7 +930,9 @@ struct WorkerCapabilityArtifact {
 impl WorkerCapabilityArtifact {
     fn from_built_capability(spec: &LeanBuiltCapability) -> Result<Self, LeanWorkerError> {
         if let Ok(manifest_path) = spec.resolved_manifest_path() {
-            return Self::from_manifest(&manifest_path);
+            let mut artifact = Self::from_manifest(&manifest_path)?;
+            artifact.manifest_path = Some(manifest_path);
+            return Ok(artifact);
         }
 
         let dylib_path = spec.dylib_path().map_err(|err| LeanWorkerError::Setup {
@@ -877,6 +946,7 @@ impl WorkerCapabilityArtifact {
         })?;
         Ok(Self {
             dylib_path,
+            manifest_path: None,
             package: package.to_owned(),
             module: module.to_owned(),
         })
@@ -916,6 +986,7 @@ impl WorkerCapabilityArtifact {
         }
         Ok(Self {
             dylib_path: manifest.primary_dylib,
+            manifest_path: Some(manifest_path.to_path_buf()),
             package: manifest.package,
             module: manifest.module,
         })

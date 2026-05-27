@@ -12,12 +12,13 @@
 
 use std::fmt;
 use std::io::{BufReader, BufWriter, Read as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
 use serde_json::Value;
 
 use crate::protocol::{MAX_FRAME_BYTES, Message, Request, Response, read_frame, write_frame};
+use crate::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
 #[derive(Debug)]
 pub struct WorkerProcess {
@@ -32,6 +33,7 @@ pub enum WorkerHarnessError {
     Spawn(std::io::Error),
     MissingPipe(&'static str),
     Protocol(String),
+    CapabilityBuild(String),
     UnexpectedMessage(String),
     WorkerError { code: String, message: String },
     FatalExit(WorkerFatalExit),
@@ -57,6 +59,7 @@ impl fmt::Display for WorkerHarnessError {
             Self::Spawn(err) => write!(f, "failed to spawn worker child: {err}"),
             Self::MissingPipe(which) => write!(f, "worker child missing {which} pipe"),
             Self::Protocol(err) => write!(f, "worker protocol failed: {err}"),
+            Self::CapabilityBuild(err) => write!(f, "failed to build fixture capability manifest: {err}"),
             Self::UnexpectedMessage(message) => write!(f, "worker sent unexpected message: {message}"),
             Self::WorkerError { code, message } => write!(f, "worker returned {code}: {message}"),
             Self::FatalExit(exit) => write!(f, "worker exited fatally with {}", exit.status),
@@ -148,8 +151,9 @@ impl WorkerProcess {
     /// Returns the protocol- or worker-level error variant if the round-trip
     /// fails or the child returned an unexpected response.
     pub fn load_fixture_capability(&mut self, fixture_root: &Path) -> Result<(), WorkerHarnessError> {
+        let manifest_path = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::LoadFixtureCapability {
-            fixture_root: path_string(fixture_root),
+            manifest_path: path_string(&manifest_path),
         })?;
         match self.read_response()? {
             Response::CapabilityLoaded => Ok(()),
@@ -165,8 +169,9 @@ impl WorkerProcess {
     /// Returns the protocol- or worker-level error variant if the round-trip
     /// fails or the child returned a non-`u64` response.
     pub fn call_fixture_mul(&mut self, fixture_root: &Path, lhs: u64, rhs: u64) -> Result<u64, WorkerHarnessError> {
+        let manifest_path = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::CallFixtureMul {
-            fixture_root: path_string(fixture_root),
+            manifest_path: path_string(&manifest_path),
             lhs,
             rhs,
         })?;
@@ -201,8 +206,9 @@ impl WorkerProcess {
     /// if reaping the child fails, or [`WorkerHarnessError::Protocol`] for a
     /// codec-level failure during the teardown read.
     pub fn trigger_lean_panic(mut self, fixture_root: &Path) -> Result<WorkerFatalExit, WorkerHarnessError> {
+        let manifest_path = fixture_capability_manifest(fixture_root)?;
         self.send_request(Request::TriggerLeanPanic {
-            fixture_root: path_string(fixture_root),
+            manifest_path: path_string(&manifest_path),
         })?;
         match read_frame(&mut self.stdout, self.max_frame_bytes) {
             Ok(frame) => match frame.message {
@@ -403,4 +409,15 @@ impl Drop for WorkerProcess {
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn fixture_capability_manifest(fixture_root: &Path) -> Result<PathBuf, WorkerHarnessError> {
+    let built = lean_toolchain::CargoLeanCapability::new(fixture_root, "LeanRsFixture")
+        .package("lean_rs_fixture")
+        .module("LeanRsFixture")
+        .export_signature(fixture_mul_signature("lean_rs_fixture_u64_mul"))
+        .export_signature(fixture_panic_signature("lean_rs_fixture_panic_unit"))
+        .build_quiet()
+        .map_err(|diagnostic| WorkerHarnessError::CapabilityBuild(diagnostic.to_string()))?;
+    Ok(built.manifest_path().to_path_buf())
 }

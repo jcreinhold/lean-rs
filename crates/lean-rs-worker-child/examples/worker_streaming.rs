@@ -43,6 +43,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "lean_rs_interop_consumer_worker_metadata",
         json!({"source": "worker_streaming_example"}),
     )
+    .doctor_export("lean_rs_interop_consumer_worker_doctor")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream")
     .open()?;
     println!("worker_status=started");
     println!(

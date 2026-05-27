@@ -7,10 +7,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lean_rs::LeanBuiltCapability;
 use lean_rs_worker_parent::{
-    LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
-    LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
-    LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerRestartPolicy,
+    LeanWorker, LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
+    LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerConfig,
+    LeanWorkerDeclarationFilter, LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerJsonCommand,
+    LeanWorkerRestartPolicy, LeanWorkerSessionConfig,
 };
+use lean_rs_worker_protocol::worker_exports::fixture_mul_signature;
+use lean_toolchain::CargoLeanCapability;
 use serde_json::json;
 
 fn worker_binary() -> PathBuf {
@@ -561,13 +564,134 @@ fn metadata_validation_failure_is_typed() {
 
     match err {
         LeanWorkerError::Worker { code, message } => {
-            assert_eq!(code, "lean_rs.symbol_lookup");
+            assert_eq!(code, "lean_rs.worker.checked_binding");
             assert!(
                 message.contains("lean_rs_interop_consumer_worker_metadata_missing"),
                 "message should name missing export, got {message}",
             );
         }
         other => panic!("expected worker symbol lookup error, got {other:?}"),
+    }
+}
+
+#[test]
+fn manifest_missing_worker_export_signature_fails_before_dispatch() {
+    let built = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
+        .package("lean_rs_interop_consumer")
+        .module("LeanRsInteropConsumer")
+        .build_quiet()
+        .expect("interop capability manifest builds without worker command signatures");
+
+    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
+    let config = LeanWorkerSessionConfig::manifest_backed(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        built.manifest_path(),
+        ["LeanRsInteropConsumer.Callback"],
+    );
+    let mut session = worker
+        .open_session(&config, None, None)
+        .expect("manifest-backed session opens");
+    let command = LeanWorkerJsonCommand::<serde_json::Value, serde_json::Value>::new(
+        "lean_rs_interop_consumer_worker_json_command",
+    );
+
+    let err = session
+        .run_json_command(&command, &json!({"caller": "missing-signature-test"}), None, None)
+        .expect_err("missing manifest signature should fail before invoking Lean");
+
+    match err {
+        LeanWorkerError::Worker { code, message } => {
+            assert_eq!(code, "lean_rs.worker.checked_binding");
+            assert!(
+                message.contains("lean_rs_interop_consumer_worker_json_command"),
+                "diagnostic should name missing export: {message}",
+            );
+            assert!(
+                message.contains("json command String -> IO String"),
+                "diagnostic should name operation shape: {message}",
+            );
+        }
+        other => panic!("expected checked binding worker error, got {other:?}"),
+    }
+}
+
+#[test]
+fn manifest_wrong_worker_export_signature_fails_before_dispatch() {
+    let built = CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
+        .package("lean_rs_interop_consumer")
+        .module("LeanRsInteropConsumer")
+        .export_signature(fixture_mul_signature("lean_rs_interop_consumer_worker_json_command"))
+        .build_quiet()
+        .expect("interop capability manifest builds with intentionally wrong worker command signature");
+
+    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
+    let config = LeanWorkerSessionConfig::manifest_backed(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        built.manifest_path(),
+        ["LeanRsInteropConsumer.Callback"],
+    );
+    let mut session = worker
+        .open_session(&config, None, None)
+        .expect("manifest-backed session opens");
+    let command = LeanWorkerJsonCommand::<serde_json::Value, serde_json::Value>::new(
+        "lean_rs_interop_consumer_worker_json_command",
+    );
+
+    let err = session
+        .run_json_command(&command, &json!({"caller": "wrong-signature-test"}), None, None)
+        .expect_err("wrong manifest signature should fail before invoking Lean");
+
+    match err {
+        LeanWorkerError::Worker { code, message } => {
+            assert_eq!(code, "lean_rs.worker.checked_binding");
+            assert!(
+                message.contains("lean_rs_interop_consumer_worker_json_command"),
+                "diagnostic should name wrong-signature export: {message}",
+            );
+            assert!(
+                message.contains("json command String -> IO String"),
+                "diagnostic should name expected operation shape: {message}",
+            );
+        }
+        other => panic!("expected checked binding worker error, got {other:?}"),
+    }
+}
+
+#[test]
+fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
+    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
+    let config = LeanWorkerSessionConfig::new(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["LeanRsInteropConsumer.Callback"],
+    );
+    let mut session = worker.open_session(&config, None, None).expect("legacy session opens");
+    let command = LeanWorkerJsonCommand::<serde_json::Value, serde_json::Value>::new(
+        "lean_rs_interop_consumer_worker_json_command",
+    );
+
+    let err = session
+        .run_json_command(&command, &json!({"caller": "no-manifest-test"}), None, None)
+        .expect_err("worker command without manifest identity should fail before unchecked dispatch");
+
+    match err {
+        LeanWorkerError::Worker { code, message } => {
+            assert_eq!(code, "lean_rs.worker.checked_binding");
+            assert!(
+                message.contains("lean_rs_interop_consumer_worker_json_command"),
+                "diagnostic should name requested export: {message}",
+            );
+            assert!(
+                message.contains("json command String -> IO String"),
+                "diagnostic should name operation shape: {message}",
+            );
+        }
+        other => panic!("expected checked binding worker error, got {other:?}"),
     }
 }
 

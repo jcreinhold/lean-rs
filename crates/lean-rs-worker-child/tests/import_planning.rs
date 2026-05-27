@@ -171,6 +171,7 @@ fn planned_batches_execute_through_pool_with_one_import_group() {
             "LeanRsInteropConsumer",
             ["LeanRsInteropConsumer.Callback"],
         )
+        .json_command_export("lean_rs_interop_consumer_worker_json_command")
         .worker_executable(worker_binary())
         .open()
         .expect("naive capability opens");
@@ -192,7 +193,13 @@ fn planned_batches_execute_through_pool_with_one_import_group() {
     let planned_start = Instant::now();
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
     let mut lease = pool
-        .acquire_lease(batches[0].capability_builder().worker_executable(worker_binary()))
+        .acquire_lease(
+            batches[0]
+                .capability_builder()
+                .metadata_export("lean_rs_interop_consumer_worker_metadata")
+                .json_command_export("lean_rs_interop_consumer_worker_json_command")
+                .worker_executable(worker_binary()),
+        )
         .expect("planned batch lease opens");
     for module in &batches[0].modules {
         let response = lease

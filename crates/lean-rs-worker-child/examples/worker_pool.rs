@@ -16,7 +16,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "lean_rs_interop_consumer",
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
-    );
+    )
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream");
 
     let command =
         LeanWorkerStreamingCommand::<Request, Row, Summary>::new("lean_rs_interop_consumer_worker_data_stream");

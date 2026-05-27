@@ -92,6 +92,10 @@ fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
         .next()
         .expect("one planned batch")
         .capability_builder()
+        .metadata_export("lean_rs_interop_consumer_worker_shape_metadata")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_timeout_after_row")
+        .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
         .worker_executable(worker_binary())
 }
 

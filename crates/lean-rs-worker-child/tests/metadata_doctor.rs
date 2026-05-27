@@ -26,9 +26,29 @@ fn interop_root() -> PathBuf {
 }
 
 fn ensure_interop_built() {
-    let fixture = interop_root();
-    lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsInteropConsumer")
-        .expect("interop consumer Lake target builds");
+    drop(interop_manifest_path());
+}
+
+fn interop_manifest_path() -> PathBuf {
+    lean_toolchain::CargoLeanCapability::new(interop_root(), "LeanRsInteropConsumer")
+        .package("lean_rs_interop_consumer")
+        .module("LeanRsInteropConsumer")
+        .export_signature(lean_rs_worker_protocol::worker_exports::metadata_signature(
+            "lean_rs_interop_consumer_worker_metadata",
+        ))
+        .export_signature(lean_rs_worker_protocol::worker_exports::metadata_signature(
+            "lean_rs_interop_consumer_worker_metadata_malformed",
+        ))
+        .export_signature(lean_rs_worker_protocol::worker_exports::doctor_signature(
+            "lean_rs_interop_consumer_worker_doctor",
+        ))
+        .export_signature(lean_rs_worker_protocol::worker_exports::doctor_signature(
+            "lean_rs_interop_consumer_worker_doctor_malformed",
+        ))
+        .build_quiet()
+        .expect("interop consumer capability manifest builds")
+        .manifest_path()
+        .to_path_buf()
 }
 
 fn worker_config() -> LeanWorkerConfig {
@@ -36,10 +56,11 @@ fn worker_config() -> LeanWorkerConfig {
 }
 
 fn session_config() -> LeanWorkerSessionConfig {
-    LeanWorkerSessionConfig::new(
+    LeanWorkerSessionConfig::manifest_backed(
         interop_root(),
         "lean_rs_interop_consumer",
         "LeanRsInteropConsumer",
+        interop_manifest_path(),
         ["LeanRsInteropConsumer.Callback"],
     )
 }
@@ -201,7 +222,7 @@ fn missing_metadata_and_doctor_exports_are_typed_worker_errors() {
         .expect_err("missing metadata export should fail");
     match err {
         LeanWorkerError::Worker { code, message } => {
-            assert_eq!(code, "lean_rs.symbol_lookup");
+            assert_eq!(code, "lean_rs.worker.checked_binding");
             assert!(
                 message.contains("lean_rs_interop_consumer_worker_metadata_missing"),
                 "message should name missing export, got {message}",
@@ -215,7 +236,7 @@ fn missing_metadata_and_doctor_exports_are_typed_worker_errors() {
         .expect_err("missing doctor export should fail");
     match err {
         LeanWorkerError::Worker { code, message } => {
-            assert_eq!(code, "lean_rs.symbol_lookup");
+            assert_eq!(code, "lean_rs.worker.checked_binding");
             assert!(
                 message.contains("lean_rs_interop_consumer_worker_doctor_missing"),
                 "message should name missing export, got {message}",

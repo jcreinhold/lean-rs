@@ -37,6 +37,9 @@ fn builder() -> LeanWorkerCapabilityBuilder {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .json_command_export("lean_rs_interop_consumer_worker_json_command")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_row_then_panic")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_slow_after_row")
     .worker_executable(worker_binary())
 }
 

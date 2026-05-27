@@ -36,6 +36,8 @@ fn builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
         "LeanRsInteropConsumer",
         ["LeanRsInteropConsumer.Callback"],
     )
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
+    .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many_then_panic")
     .worker_executable(worker_binary())
 }
 
