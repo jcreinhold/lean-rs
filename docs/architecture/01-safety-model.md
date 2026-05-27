@@ -1,9 +1,22 @@
 # Safety Model
 
-`lean-rs` exposes a fully safe Rust surface over an `unsafe` C ABI by confining raw FFI to one crate, denying
-`Send`/`Sync` on every Lean handle, and binding handle lifetimes to a process-once runtime anchor. Every change that
-adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules below. An API that
-cannot be made consistent does not ship.
+`lean-rs` is the crate that owns raw Lean ABI operations for the workspace. It may use `unsafe` internally to initialise
+the Lean runtime, manage Lean object ownership, decode Lean object layouts, load dynamic symbols, and bridge callbacks.
+Safe public APIs in `lean-rs` are allowed only when the crate enforces the relevant safety invariants itself.
+
+This is a Rust memory-safety claim for safe Rust APIs. It is not a claim that Lean code is semantically correct, that a
+proof term proves what the user intended, that user-authored Lean code terminates, or that Lean's kernel/elaborator never
+rejects the input.
+
+The current host stack is still partly inside the trusted boundary. `lean-rs-host` pre-resolves shim symbols, calls
+`LeanExported::from_function_address`, decodes several host-specific Lean constructor/scalar layouts directly through
+`lean_rs_sys`, and owns a temporary context pointer for progress callbacks. That is intentional debt in this pre-1.0
+migration series, not the final boundary. The target state is for `lean-rs-host` to become a safe consumer of `lean-rs`:
+host-specific symbol dispatch should be checked or explicitly unsafe, Lean object layout reads should sit behind safe
+`lean-rs` view APIs, and callback/context-pointer handling should go through a safe callback API.
+
+Every change that adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
+below. An API that cannot be made consistent does not ship as safe.
 
 ## Unsafe boundary
 
@@ -11,9 +24,16 @@ Raw `lean_*` symbols enter the workspace only through `lean-rs-sys` (published).
 `lean_object` is `[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`, and downstream code reaches object state only
 through `pub unsafe fn` helpers. Lean's header layout (`LeanObjectRepr`) is `pub(crate)`.
 
-Inside `lean-rs`, every import of a `lean_rs_sys` item lives in a `pub(crate)` module of `runtime` and is never
-re-exported. Every public function of `lean-rs` and `lean-toolchain` is safe Rust. A reader of `lean_rs::*` cannot
-acquire a raw Lean pointer through the public API.
+Inside `lean-rs`, imports of `lean_rs_sys` live in the runtime, ABI conversion, module loading/dispatch, callback, and
+error-decoding internals and are never re-exported. Every public safe function of `lean-rs` must either avoid raw Lean
+state or fully enforce the needed ownership, lifetime, layout, and ABI-signature invariants before returning. A reader
+of `lean_rs::*` should not have to choose a refcount discipline, inspect a Lean object header, or cast a symbol address
+to a C function pointer to use the safe surface.
+
+`LeanModule::exported::<Args, R>(name)` is safe because `lean-rs` owns the lookup and dispatch machinery, but arbitrary
+dynamic export lookup is not inherently safe. A raw symbol name plus caller-chosen `Args`/`R` is memory-safe only if the
+symbol's compiled C ABI is known to match those Rust types. Until signature metadata is available and checked,
+function-address dispatch remains an unsafe construction point or trusted host-stack code.
 
 Applications that genuinely need raw FFI opt in by depending on `lean-rs-sys` directly, accepting full `unsafe`
 discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and opaque public types—friendlier than forking the
@@ -30,6 +50,10 @@ The public surface never accepts or returns raw `lean_obj_arg`, `b_lean_obj_arg`
 `lean-rs` does not need to know what `lean_inc` and `lean_dec` are. If a future API would force the caller to choose a
 refcount discipline, that is a charter violation, not an option.
 
+Current leakage to remove: `lean-rs-host` still imports `lean_rs_sys::lean_object` for several argument-only `LeanAbi`
+impls and wraps unreachable call-result pointers with `Obj::from_owned_raw` to drop them. That is ownership/lifetime
+management that belongs in `lean-rs`.
+
 ## Proof objects
 
 Proof-related results cross into Rust as opaque handles or Lean-authored summaries. Rust does not reconstruct proof
@@ -37,6 +61,10 @@ terms, inspect their structure, or re-derive a kernel judgement; the kernel is i
 
 A handle's only safe public operations are the ones Lean explicitly exposes through a capability—"ask Lean to print this
 proof's type" is fine if Lean offers it; "walk the proof's expression tree in Rust" is not.
+
+The same rule applies to host diagnostic and query payloads: Rust may decode a Lean-authored summary shape, but raw
+constructor layout knowledge should be hidden in `lean-rs` conversion/view APIs rather than duplicated in
+`lean-rs-host`.
 
 ## Concurrency
 

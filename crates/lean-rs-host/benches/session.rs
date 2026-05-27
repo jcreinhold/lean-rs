@@ -14,11 +14,13 @@ use std::path::PathBuf;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lean_rs::LeanRuntime;
+use lean_rs_host::host::process::{ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector};
 use lean_rs_host::meta::LeanMetaOptions;
 use lean_rs_host::meta::whnf;
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanProgressEvent, LeanProgressSink, SessionPool};
 
 // -- fixture bring-up ---------------------------------------------------
 
@@ -82,6 +84,75 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
             });
         });
     }
+    group.finish();
+}
+
+// -- dynamic capability lookup ------------------------------------------
+//
+// Workload: `host::session::call_capability_lookup_u32_add` —
+// `LeanSession::call_capability` against a user fixture export. This is
+// the intentionally uncached escape hatch: each iteration resolves the
+// symbol by name before constructing a typed `LeanExported` and calling
+// it. Compare with `module::scalar_dispatch_u32_add` in the `lean-rs`
+// `hot_paths` bench for the cached-handle floor.
+
+fn bench_call_capability_lookup(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let mut session = caps
+        .session(&["LeanRsFixture.Scalars"], None, None)
+        .expect("Scalars imports cleanly");
+
+    c.bench_function("host::session::call_capability_lookup_u32_add", |b| {
+        b.iter(|| {
+            let result: u32 = session
+                .call_capability::<(u32, u32), u32>(
+                    black_box("lean_rs_fixture_u32_add"),
+                    (black_box(7_u32), black_box(35_u32)),
+                    None,
+                )
+                .expect("capability call");
+            black_box(result);
+        });
+    });
+}
+
+// -- progress callback delivery -----------------------------------------
+//
+// Workload: `host::session::query_declarations_bulk_progress/16` — the
+// same bulk declaration query as above, but with a progress sink wired
+// through the Lean callback trampoline. This is the callback-delivery
+// baseline for future progress API changes.
+
+#[derive(Default)]
+struct CountingSink {
+    events: AtomicU64,
+}
+
+impl LeanProgressSink for CountingSink {
+    fn report(&self, event: LeanProgressEvent) {
+        black_box(event);
+        self.events.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn bench_query_declarations_bulk_progress(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let mut session = caps
+        .session(&["LeanRsFixture.Handles"], None, None)
+        .expect("Handles imports cleanly");
+    let sink = CountingSink::default();
+    let names = &HANDLES_NAMES[..16];
+
+    let mut group = c.benchmark_group("host::session::query_declarations_bulk_progress");
+    group.throughput(Throughput::Elements(names.len() as u64));
+    group.bench_function("16", |b| {
+        b.iter(|| {
+            let before = sink.events.load(Ordering::Relaxed);
+            let decls = session
+                .query_declarations_bulk(black_box(names), None, Some(&sink))
+                .expect("progress bulk query");
+            black_box(decls);
+            black_box(sink.events.load(Ordering::Relaxed).saturating_sub(before));
+        });
+    });
     group.finish();
 }
 
@@ -264,6 +335,55 @@ fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     });
 }
 
+// -- module-query object decoding ---------------------------------------
+//
+// Workload: `host::process::module_query_batch_cached_decode` —
+// `LeanSession::process_module_query_batch_cached` over a tiny module.
+// The Lean result decodes host query envelopes plus cache facts, including
+// scalar-tail `UInt64` timings, `UInt8` cache status, and constructor tags.
+
+fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
+    let mut session = caps
+        .session(&["LeanRsHostShims.InfoTree"], None, None)
+        .expect("InfoTree imports cleanly");
+    let source = "def benchValue : Nat := 1\n#check benchValue\n";
+    let selectors = vec![
+        ModuleQuerySelector::Diagnostics {
+            id: "diagnostics".to_owned(),
+        },
+        ModuleQuerySelector::TypeAt {
+            id: "type_at".to_owned(),
+            line: 1,
+            column: 20,
+        },
+    ];
+    let budgets = ModuleQueryOutputBudgets::default();
+    let options = LeanElabOptions::new();
+    let policy = ModuleQueryCachePolicy {
+        file_identity: "bench.lean".to_owned(),
+        key: "module-query-batch-cached-decode".to_owned(),
+        max_entries: 8,
+        ttl_millis: 60_000,
+        max_bytes: 1_048_576,
+    };
+
+    c.bench_function("host::process::module_query_batch_cached_decode", |b| {
+        b.iter(|| {
+            let outcome = session
+                .process_module_query_batch_cached(
+                    black_box(source),
+                    black_box(&selectors),
+                    black_box(&budgets),
+                    black_box(&options),
+                    black_box(&policy),
+                    None,
+                )
+                .expect("cached module query");
+            black_box(outcome);
+        });
+    });
+}
+
 // -- SessionPool reuse hit ----------------------------------------------
 //
 // Workload: `host::pool::session_reuse_hit` — `SessionPool::acquire`
@@ -302,11 +422,14 @@ fn criterion_benchmarks(c: &mut Criterion) {
         .expect("capabilities load");
 
     bench_query_declarations_bulk(c, &caps);
+    bench_call_capability_lookup(c, &caps);
+    bench_query_declarations_bulk_progress(c, &caps);
     bench_declaration_type_bulk_vs_loop(c, &caps);
     bench_declaration_kind_bulk_vs_loop(c, &caps);
     bench_declaration_name_bulk_vs_loop(c, &caps);
     bench_elaborate(c, &caps);
     bench_run_meta_whnf(c, &caps);
+    bench_module_query_batch_cached_decode(c, &caps);
     bench_session_pool_reuse_hit(c, runtime, &caps);
 }
 
