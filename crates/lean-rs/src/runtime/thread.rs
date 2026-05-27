@@ -44,7 +44,7 @@ thread_local! {
 /// Called from [`super::LeanRuntime::init`] on every successful return,
 /// not only the first. Subsequent calls on the same thread are no-ops:
 /// the depth never drops below the permanent floor of `1` that `init`
-/// installs. The init thread is, by this rule, also covered — it called
+/// installs. The init thread is, by this rule, also covered—it called
 /// `init` on itself like every other client.
 pub(crate) fn mark_calling_thread_permitted() {
     ATTACH_DEPTH.with(|d| {

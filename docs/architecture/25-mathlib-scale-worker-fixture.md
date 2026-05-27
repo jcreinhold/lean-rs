@@ -1,7 +1,7 @@
 # Mathlib-Scale Worker Fixture
 
 A large-workload fixture for the worker capability layer. It is deliberately not a `lean-dup` implementation; it uses
-mathlib-shaped module names and command-like exports to stress the operational boundary:
+mathlib-style module names and command-like exports to stress the operational boundary:
 
 ```text
 import planner -> LeanWorkerPool -> session lease -> typed command
@@ -9,9 +9,9 @@ import planner -> LeanWorkerPool -> session lease -> typed command
 
 ## Boundary
 
-The fixture may simulate `version`, `doctor`, `index`, `extract`, `features`, and `probe` command shapes, but the row
-schemas remain small test data owned by the worker fixtures. It does not copy `lean-dup` declaration rows, feature rows,
-cache rules, ranking, reporting, or source-provenance policy.
+The fixture may simulate `version`, `doctor`, `index`, `extract`, `features`, and `probe` commands, but the row schemas
+remain small test data owned by the worker fixtures. It does not copy `lean-dup` declaration rows, feature rows, cache
+rules, ranking, reporting, or source-provenance policy.
 
 The normal path is the pool path:
 
@@ -34,13 +34,13 @@ The fixture export `lean_rs_interop_consumer_worker_shape_mathlib_scale_index` e
 - chunk progress for the simulated import/index pass;
 - terminal metadata with fixture name, command, row count, and module count.
 
-The fallback workload uses 16 mathlib-shaped module names and emits 47 rows: 16 declarations, 16 features, and 15
-probes. This keeps CI deterministic while still exercising mixed streams and terminal accounting.
+The fallback workload uses 16 mathlib-style module names and emits 47 rows: 16 declarations, 16 features, and 15 probes.
+This keeps CI deterministic while still exercising mixed streams and terminal accounting.
 
 When `LEAN_RS_MATHLIB_ROOT` points at a mathlib checkout, the `mathlib_scale_probe` example uses the discovered mathlib
-module list as the planning workload shape. The current fixture still emits deterministic test rows; a run with a
-mathlib module list is evidence about planning, pool leases, and session reuse, not a claim that the worker crates have
-indexed mathlib semantics.
+module list as the planning workload. The current fixture still emits deterministic test rows; a run with a mathlib
+module list is evidence about planning, pool leases, and session reuse, not a claim that the worker crates have indexed
+mathlib semantics.
 
 ## Commands
 
@@ -85,4 +85,4 @@ and whether RSS sampling was available. Re-capture on the same hardware before d
 
 This fixture does not add remote workers, search/ranking/cache semantics, downstream row schemas, or new callback
 payloads. Worker throughput still flows through worker IPC, pool leases, scheduling, row formats, and batching
-decisions; L1 object callbacks are not a worker-scale shortcut.
+decisions; same-process object callbacks are not a worker-scale shortcut.

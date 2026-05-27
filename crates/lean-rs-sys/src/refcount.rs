@@ -1,11 +1,11 @@
-//! Refcount fast paths — Rust mirrors of `lean.h:536–563`.
+//! Refcount fast paths—Rust mirrors of `lean.h:536–563`.
 //!
 //! The header encodes the runtime mode in the RC sign:
-//! - `m_rc > 0`  — single-threaded: bump or decrement in place.
-//! - `m_rc < 0`  — multi-threaded: RC is negated; `fetch_sub` is the relaxed
+//! - `m_rc > 0` —single-threaded: bump or decrement in place.
+//! - `m_rc < 0` —multi-threaded: RC is negated; `fetch_sub` is the relaxed
 //!   atomic decrement, mirroring `atomic_fetch_sub_explicit(.., relaxed)` in
 //!   `lean.h`.
-//! - `m_rc == 0` — persistent (compact regions); never refcounted.
+//! - `m_rc == 0`—persistent (compact regions); never refcounted.
 //!
 //! Each mirror reaches `m_rc` through [`AtomicI32::from_ptr`] so the actual
 //! load / store / `fetch_sub` call site sees a safe `&AtomicI32`.
@@ -26,7 +26,7 @@ unsafe extern "C" {
     /// object actually needs freeing.
     pub fn lean_dec_ref_cold(o: *mut lean_object);
 
-    /// Mark a heap object — and everything reachable from it — as
+    /// Mark a heap object—and everything reachable from it—as
     /// multi-threaded (`lean.h:612`).
     pub fn lean_mark_mt(o: *mut lean_object);
 
@@ -41,7 +41,7 @@ unsafe fn rc_atom<'a>(o: *mut lean_object) -> &'a AtomicI32 {
     // `LeanObjectRepr`'s layout is pinned by `LEAN_HEADER_DIGEST`; the
     // `m_rc` field is at offset 0. `AtomicI32::from_ptr` requires the
     // pointer to be aligned (Lean allocates `lean_object`s with at least
-    // 4-byte alignment — pinned by the same digest) and valid for shared
+    // 4-byte alignment—pinned by the same digest) and valid for shared
     // access for the duration of `'a`.
     unsafe {
         let repr = o.cast::<LeanObjectRepr>();

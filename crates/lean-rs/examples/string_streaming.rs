@@ -1,4 +1,4 @@
-//! L1 string streaming callback example.
+//! Same-process string streaming callback example.
 //!
 //! The example stays below `lean-rs-host`: Lean emits JSONL-like strings through
 //! the generic interop shim, and Rust receives them through

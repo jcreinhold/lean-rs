@@ -140,7 +140,7 @@ fn level_round_trips_succ_zero() {
     let rendered = to_str.call(one).expect("level_to_string");
 
     // Lean prints `succ zero` as `"1"`; assert a non-empty render and a
-    // digit somewhere so the test is robust against pretty-printer
+    // digit somewhere so the test tolerates pretty-printer
     // formatting tweaks across toolchain updates.
     assert!(
         rendered.chars().any(|c| c.is_ascii_digit()),

@@ -13,7 +13,7 @@
 //! (`crates/lean-rs/src/runtime/init.rs`) and module initialisers are
 //! guarded by Lean-side `_G_initialized` flags. Repeated invocation
 //! inside `b.iter` measures the cached fast-path, not the cost the
-//! prompt names. Subprocess-per-sample would conflate Lean init with
+//! subprocess names. Subprocess-per-sample would conflate Lean init with
 //! `fork+execve+ld` cost.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::print_stdout)]

@@ -26,7 +26,7 @@
 //!
 //! The rule callers learn: **runtime / host failures are [`LeanError`];
 //! application semantics are values.** A Lean function returning
-//! `IO (Except E T)` decodes as `LeanResult<Result<T, E>>` — outer `IO`
+//! `IO (Except E T)` decodes as `LeanResult<Result<T, E>>`—outer `IO`
 //! failure becomes a [`LeanError::LeanException`], inner `Except`
 //! becomes a Rust [`Result`].
 //!
@@ -34,8 +34,8 @@
 //!
 //! Every error-bearing type on the public surface projects to a stable
 //! [`LeanDiagnosticCode`] via `.code()`. The code names the failure
-//! family a downstream caller must react to — `Linking`, `Elaboration`,
-//! `Unsupported`, and so on — independent of the internal [`HostStage`]
+//! family a downstream caller must react to—`Linking`, `Elaboration`,
+//! `Unsupported`, and so on—independent of the internal [`HostStage`]
 //! tag. The `as_str()` form of each code is the identifier used by the
 //! tracing spans and the published `docs/diagnostics.md` catalogue;
 //! variant names and string ids are stable across patch releases.
@@ -134,7 +134,7 @@ impl LeanError {
     }
 
     /// Build a `SymbolLookup` host failure (dlsym miss, signature
-    /// mismatch — function symbol expected but global found, etc.).
+    /// mismatch—function symbol expected but global found, etc.).
     pub(crate) fn symbol_lookup(message: impl Into<String>) -> Self {
         Self::host(HostStage::Link, LeanDiagnosticCode::SymbolLookup, message)
     }
@@ -177,7 +177,7 @@ impl LeanError {
         })
     }
 
-    /// Shared host-failure constructor. Private — every call site uses
+    /// Shared host-failure constructor. Private—every call site uses
     /// the typed wrappers above so the [`HostStage`] / [`LeanDiagnosticCode`]
     /// pair cannot drift.
     fn host(stage: HostStage, code: LeanDiagnosticCode, message: impl Into<String>) -> Self {
@@ -241,7 +241,7 @@ impl LeanException {
     ///
     /// Use this to classify a Lean-thrown exception when the
     /// caller-facing taxonomy in [`LeanDiagnosticCode`] is not specific
-    /// enough — for example, distinguishing `FileNotFound` from
+    /// enough—for example, distinguishing `FileNotFound` from
     /// `PermissionDenied` to drive different recovery paths.
     #[must_use]
     pub fn kind(&self) -> LeanExceptionKind {
@@ -320,7 +320,7 @@ impl fmt::Display for HostFailure {
 ///
 /// A flat tag enum; callers rarely match on it and read
 /// [`HostFailure::message`] instead. Use [`LeanDiagnosticCode`] for the
-/// stable, caller-facing failure taxonomy — `HostStage` is the
+/// stable, caller-facing failure taxonomy—`HostStage` is the
 /// host-stack's internal classification and may grow new variants when
 /// new internal paths are added.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -345,10 +345,10 @@ pub enum HostStage {
 /// Every error-bearing public type projects to one of these via
 /// `.code()`:
 ///
-/// - [`LeanError::code`] — `LeanException` → [`LeanDiagnosticCode::LeanException`],
+/// - [`LeanError::code`]—`LeanException` → [`LeanDiagnosticCode::LeanException`],
 ///   `Host` → the code recorded by the construction site.
-/// - `lean_rs_host::LeanElabFailure::code` — always [`LeanDiagnosticCode::Elaboration`].
-/// - `lean_rs_host::meta::LeanMetaResponse::code` — `Ok` → `None`,
+/// - `lean_rs_host::LeanElabFailure::code`—always [`LeanDiagnosticCode::Elaboration`].
+/// - `lean_rs_host::meta::LeanMetaResponse::code`—`Ok` → `None`,
 ///   `Failed` / `TimeoutOrHeartbeat` → `Elaboration`, `Unsupported` →
 ///   `Unsupported`.
 ///
@@ -386,7 +386,7 @@ pub enum LeanDiagnosticCode {
     /// The payload is a `lean_rs_host::LeanElabFailure` with the typed
     /// diagnostic list.
     Elaboration,
-    /// The loaded capability does not expose the requested service —
+    /// The loaded capability does not expose the requested service—
     /// either the Lean shim returned `unsupported` for the request
     /// shape, or the optional capability symbol was absent at load
     /// time.
@@ -447,7 +447,7 @@ impl fmt::Display for LeanDiagnosticCode {
 
 /// Constructor tag for Lean's `IO.Error`.
 ///
-/// 1:1 with `IO.Error` at the active Lean toolchain version (4.29.1 —
+/// 1:1 with `IO.Error` at the active Lean toolchain version (4.29.1—
 /// see `src/lean/Init/System/IOError.lean`), plus an [`Other`] catch-all
 /// for tag values not in the declaration. The crate-internal decoder
 /// maps the raw `lean_obj_tag` to a variant via a `const` table; a unit
@@ -515,7 +515,7 @@ pub fn bound_message(mut s: String) -> String {
     // Walk to the largest char boundary at or below the limit, then
     // truncate. `floor_char_boundary` is unstable; do it manually with a
     // single backward scan from the limit. `saturating_sub` keeps clippy's
-    // arithmetic-side-effects lint quiet without changing semantics — the
+    // arithmetic-side-effects lint quiet without changing semantics—the
     // loop guard already prevents `cut == 0` from underflowing.
     let mut cut = LEAN_ERROR_MESSAGE_LIMIT;
     while cut > 0 && !s.is_char_boundary(cut) {
@@ -525,7 +525,7 @@ pub fn bound_message(mut s: String) -> String {
     s
 }
 
-// -- L1 → L2 boundary helpers -----------------------------------------
+// -- Service-layer error helpers --------------------------------------
 //
 // `LeanError`'s constructors are `pub(crate)` to preserve the structural
 // bounding invariant: external crates cannot mint `LeanError` values

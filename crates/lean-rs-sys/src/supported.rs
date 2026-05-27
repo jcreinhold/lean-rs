@@ -6,7 +6,7 @@
 //!
 //! Each entry records the SHA-256 of one `include/lean/lean.h`, the
 //! `LEAN_VERSION_STRING` values that ship that exact header (Lean does not
-//! always bump the header between releases — header-identical releases share
+//! always bump the header between releases—header-identical releases share
 //! one entry), and the set of [`REQUIRED_SYMBOLS`](crate::REQUIRED_SYMBOLS)
 //! that are absent from this toolchain. Layout assumptions encoded in the
 //! crate-private `repr` module are verified to be consistent across the
@@ -42,7 +42,7 @@ impl SupportedToolchain {
 /// the checklist in `docs/bump-toolchain.md`.
 // Lower bound of the window is **4.26.0**, not 4.23.0. Empirical
 // verification (multi-toolchain sweep on 2026-05-18) showed that Lean
-// ≤ 4.25.x crashes inside `lean_dec_ref_cold` from the L2 host stack —
+// ≤ 4.25.x crashes inside `lean_dec_ref_cold` from the service layer—
 // a refcount-path divergence between 4.25 and 4.26 that the current
 // mirrors do not cover. Narrowing the window to the empirically green
 // range (4.26.0 → current head) is the honest v0.1.0 promise; reopening

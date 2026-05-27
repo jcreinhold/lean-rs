@@ -68,13 +68,13 @@ The capability layer fills the gap between row transport and a production worker
 
 ## Relationship To Callback Payloads
 
-Worker capability streaming is IPC work. It does not replace the L1 callback payload track in `lean-rs`.
+Worker capability streaming is IPC work. It does not replace same-process callback payloads in `lean-rs`.
 
 Inside the child, a streaming runner may use `LeanCallbackHandle<LeanStringEvent>` to receive row JSON from Lean. Across
 the worker boundary, the parent receives worker rows and diagnostics. Callback handles, raw Lean object lifetimes, and
 trampoline values remain in-process mechanisms.
 
-Future byte or object callback work remains L1 `lean-rs` payload work. It is not a shortcut for worker capability
+Future byte or object callback work remains `lean-rs` payload work. It is not a shortcut for worker capability
 streaming, and worker capability streaming is not a reason to expose arbitrary downstream `LeanCallbackPayload`
 implementations. Byte callbacks need a concrete same-process binary callback caller before they earn public surface.
 Object callbacks are not exposed until a soundness proof produces a scoped API.
@@ -121,7 +121,7 @@ timeouts, cancellation, and terminal completion. Typed row decode failures carry
 sequence; raw `LeanWorkerDataRow` access remains available through `run_data_stream` for callers that want schema-less
 rows.
 
-The private worker protocol uses an adjacent tag shape so `DataRow` can carry a `serde_json::value::RawValue` payload.
+The private worker protocol uses an adjacent-tag enum so `DataRow` can carry a `serde_json::value::RawValue` payload.
 Typed streaming commands deserialize that validated raw JSON directly into downstream row types. The public
 `LeanWorkerDataRow { payload: serde_json::Value }` surface remains for schema-less tooling but is not on the typed
 command hot path.
@@ -130,7 +130,7 @@ Private row batching is not implemented. The microbenchmark and the broader 512-
 `DataRowBatch` frames or a public batch sink; row delivery stays live and per-row until a workload proves batching
 improves the full worker path, not just a synthetic frame loop.
 
-The worker crates ship a downstream-shaped fixture that combines the pieces above without adding business methods. It
+The worker crates ship a downstream-style fixture that combines the pieces above without adding business methods. It
 exports command-like names `version`, `doctor`, `extract`, `features`, `index`, and `probe` only to stress the generic
 capability layer: metadata discovery, doctor diagnostics, typed JSON commands, typed streaming commands, terminal
 summaries, cancellation, request timeouts, fatal child exits, explicit cycling, and RSS/throughput measurement. The row
@@ -142,7 +142,7 @@ Lean capability authors can use [`24-lean-side-worker-streaming.md`](24-lean-sid
 helpers live below the worker capability facade: they reduce Lean-side envelope boilerplate, but they do not define
 command semantics, row schemas, pool scheduling, or session keys.
 
-The scenario benchmark and `worker_capability_probe` example are the performance envelope for this shape. They measure
+The scenario benchmark and `worker_capability_probe` example are the performance envelope for this path. They measure
 cold startup, first import, import-once streaming, row throughput, cancellation latency, fatal-exit recovery, worker
 cycling, and memory growth. A comparison against an existing subprocess worker is optional and must name the exact
 downstream command and revision; it is not part of the worker-crates API.

@@ -6,7 +6,7 @@
 //! defaults the host stack uses, without a backward dep on `lean-rs-host` or a
 //! mirror that drifts.
 
-/// Default heartbeat ceiling — matches Lean's own `maxHeartbeats` default
+/// Default heartbeat ceiling—matches Lean's own `maxHeartbeats` default
 /// at 4.29.1 (`Lean.Core.maxHeartbeats`).
 pub const LEAN_HEARTBEAT_LIMIT_DEFAULT: u64 = 200_000;
 

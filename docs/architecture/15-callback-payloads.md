@@ -3,7 +3,7 @@
 The original two-counter callback payload is a progress tick. It was enough to prove the callback handle, trampoline,
 stale-handle, panic, and reentrancy contracts, but it is not a general Lean-to-Rust callback payload model.
 
-The next callback boundary keeps the same deep-module rule as the existing L1 registry: `lean-rs` owns callback handle
+The next callback boundary keeps the same deep-module rule as the existing registry: `lean-rs` owns callback handle
 lifetime, trampoline safety, payload decoding, panic containment, stale handles, and wrong-payload handling. Callers
 should not learn raw Lean object lifetimes, refcount rules, or callback ABI details to receive a payload.
 
@@ -48,16 +48,16 @@ pub struct LeanStringEvent {
 `LeanProgressTick` carries the existing counter payload. `LeanProgressCallback<'a>` is the scoped progress registration
 that lets host code borrow its sink without owning raw context pointers. `lean-rs-host` continues to own progress
 policy: phase names, elapsed time, cancellation checkpoints, and which `LeanSession` methods emit events. The host layer
-maps a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the general L1 callback abstraction. It is an
+maps a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the general callback abstraction. It is an
 observability/control signal, not a data row.
 
-`LeanStringEvent` is the next useful L1 payload. It supports downstream same-process line-oriented protocols: Lean can
-emit one encoded line at a time, Rust receives owned strings, and neither side has to tunnel through subprocess stdout.
+`LeanStringEvent` is the next useful payload. It supports downstream same-process line-oriented protocols: Lean can emit
+one encoded line at a time, Rust receives owned strings, and neither side has to tunnel through subprocess stdout.
 Worker-style tools should not expose this handle to parent callers; the worker crates turn child-local callbacks into
-typed worker rows when a process boundary is needed. The runnable L1 proof is
+typed worker rows when a process boundary is needed. The runnable proof is
 [`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md).
 
-Byte arrays and arbitrary Lean-object callbacks are deferred. They should land only when a measured same-process L1
+Byte arrays and arbitrary Lean-object callbacks are deferred. They should land only when a measured same-process
 consumer needs them, because each payload adds ABI, ownership, and diagnostics surface area. Worker JSON/raw-JSON rows
 do not require new callback payloads.
 

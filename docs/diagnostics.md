@@ -104,10 +104,10 @@ metadata/doctor/command helpers so the artifact manifest carries the trusted wor
 `Internal` covers Rust callback panics caught before they unwind across C or Lean. It does not mean a Lean
 kernel/runtime panic was contained. Those failures require a worker-process boundary.
 
-L1 callback shims also return `LeanCallbackStatus` for callback-local outcomes. `Ok = 0` continues the Lean-side
-callback loop; `StaleHandle = 1` means Lean called a dropped handle; `Panic = 2` means Rust contained a callback panic
-and recorded `LeanError::Host` on the live handle; `WrongPayload = 3` means Lean used a handle with the wrong payload
-trampoline; and `Stopped = 4` means the Rust callback asked Lean to stop cleanly.
+Same-process callback shims also return `LeanCallbackStatus` for callback-local outcomes. `Ok = 0` continues the
+Lean-side callback loop; `StaleHandle = 1` means Lean called a dropped handle; `Panic = 2` means Rust contained a
+callback panic and recorded `LeanError::Host` on the live handle; `WrongPayload = 3` means Lean used a handle with the
+wrong payload trampoline; and `Stopped = 4` means the Rust callback asked Lean to stop cleanly.
 
 `lean-toolchain` uses a separate `LinkDiagnostics` enum for build-script work. Those diagnostics cover Lean discovery,
 unsupported toolchains, missing `lake`, missing Lake targets, Lake build failures, and unresolved Lake outputs. They
@@ -185,7 +185,7 @@ tracing_subscriber::fmt()
     .init();
 ```
 
-### Spans emitted by `lean-rs` (L1)
+### Spans emitted by `lean-rs`
 
 FFI-primitive spans: init, library open, module initializer, typed-export dispatch, ABI decode. Fire whether the caller
 is `lean-rs-host` or any other downstream of `lean-rs`.
@@ -199,7 +199,7 @@ is `lean-rs-host` or any other downstream of `lean-rs`.
 | `lean_rs.module.exported.call` | trace | `arity` |
 | `lean_rs.abi.decode` (event) | trace | `shape`, `len` (bytes for strings; element count otherwise) |
 
-### Spans emitted by `lean-rs-host` (L2)
+### Spans emitted by `lean-rs-host`
 
 Service-layer session and pool spans. Fire only if the caller opted into `lean-rs-host` and is driving a session.
 
@@ -270,18 +270,19 @@ requires full path suppression, install a `tracing-subscriber` filter that drops
 
 ## Cross-references
 
-- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; defined on L1, `lean-rs` and
-  `lean-rs-host` project to it.
+- [`lean_rs::LeanDiagnosticCode`](../crates/lean-rs/src/error/mod.rs)—the enum; `lean-rs` and `lean-rs-host` project to
+  it.
 - [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from
   `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
-- [Service-layer surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2
-  spans above.
+- [Service-layer surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the
+  service-layer spans above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
 - [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.
 - [Cooperative cancellation](architecture/07-cooperative-cancellation.md)—where cancellation tokens are checked and what
   they cannot interrupt.
-- [Callback registry](architecture/10-callback-registry.md)—how L1 callback statuses relate to the error taxonomy.
+- [Callback registry](architecture/10-callback-registry.md)—how same-process callback statuses relate to the error
+  taxonomy.
 - [Interop build and link](architecture/12-interop-build-and-link.md)—typed `lean-toolchain` build diagnostics and cache
   behavior.
 - [Structured progress](architecture/13-structured-progress.md)—live in-process progress events for long-running host

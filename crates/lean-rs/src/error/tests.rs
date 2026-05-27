@@ -149,9 +149,9 @@ fn catch_callback_panic_bounds_oversize_panic_payload() {
 }
 
 /// Regression: a long run of caught panics must not leak state between
-/// invocations. Each call is supposed to be independent — the helper
+/// invocations. Each call is supposed to be independent—the helper
 /// holds no global registry, no thread-local payload buffer, no
-/// accumulating counter — and a leak would surface either as a
+/// accumulating counter—and a leak would surface either as a
 /// monotonic growth in resident memory under the sanitizer job or as a
 /// flaky assertion if the message-bounding side-channel shared state.
 #[test]
@@ -204,8 +204,8 @@ fn catch_callback_panic_handles_non_string_payload() {
         panic!("expected Host");
     };
     assert_eq!(host.stage(), HostStage::CallbackPanic);
-    // We do not assert on the exact wording — the catch path is only
-    // contractually required to produce *some* bounded message — but
+    // We do not assert on the exact wording—the catch path is only
+    // contractually required to produce *some* bounded message—but
     // the message must be non-empty so a downstream reader can tell
     // a panic occurred at all.
     assert!(

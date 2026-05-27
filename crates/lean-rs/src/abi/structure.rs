@@ -19,8 +19,8 @@
 //! ### Lifetime and refcount invariants
 //!
 //! - [`alloc_ctor_with_objects`] consumes the input array of `Obj<'lean>`
-//!   handles. Each handle's owned refcount is transferred — via
-//!   [`Obj::into_raw`] — into the freshly allocated constructor's
+//!   handles. Each handle's owned refcount is transferred—via
+//!   [`Obj::into_raw`]—into the freshly allocated constructor's
 //!   object-slot, so the new parent owns exactly one count per field plus
 //!   its own header count. No `Obj::clone` (which would `lean_inc`) runs
 //!   on the input path.
@@ -200,7 +200,7 @@ impl<'lean, 'a> CtorView<'lean, 'a> {
                 "expected Lean constructor, found object with tag {found_tag}"
             )));
         }
-        // SAFETY: ctor object — its tag fits a `u8` per Lean's
+        // SAFETY: ctor object—its tag fits a `u8` per Lean's
         // `LEAN_MAX_CTOR_TAG` ceiling, and `m_other` holds the object
         // field count for ctors.
         let tag = unsafe { lean_obj_tag(ptr) };
@@ -337,7 +337,7 @@ impl<'lean, 'a> CtorView<'lean, 'a> {
 /// # Panics
 ///
 /// Panics only via `lean_alloc_ctor`'s `strict_*` arithmetic overflow
-/// guard — unreachable for the constructor shapes Lean emits
+/// guard—unreachable for the constructor shapes Lean emits
 /// (`LEAN_MAX_CTOR_FIELDS` = 256).
 pub fn alloc_ctor_with_objects<'lean, const N: usize>(
     runtime: &'lean LeanRuntime,
@@ -368,7 +368,7 @@ pub fn alloc_ctor_with_objects<'lean, const N: usize>(
 /// Each returned [`Obj`] carries one refcount: [`lean_inc`] is called on
 /// the slot pointer before wrapping it. The parent `obj` is consumed and
 /// its [`Drop`] runs the matching `lean_dec` (which decrements each field
-/// once more — balancing the `lean_inc`s and leaving the returned handles
+/// once more—balancing the `lean_inc`s and leaving the returned handles
 /// with the same effective ownership the parent originally held).
 ///
 /// `label` is embedded in the diagnostic on failure so callers see

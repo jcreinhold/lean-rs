@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn header_repr_matches_lean_h() {
-        // lean.h:131–136 — int + 16-bit + 8-bit + 8-bit = 8 bytes total.
+        // lean.h:131–136—int + 16-bit + 8-bit + 8-bit = 8 bytes total.
         assert_eq!(size_of::<LeanObjectRepr>(), 8);
         assert_eq!(align_of::<LeanObjectRepr>(), 4);
     }
@@ -153,7 +153,7 @@ mod tests {
     fn ctor_repr_has_just_a_header() {
         // The `objs` flexible array is zero-sized; the struct should match
         // the header's footprint exactly (modulo whatever the C compiler
-        // does — both targets we support are 64-bit, so no tail padding).
+        // does—both targets we support are 64-bit, so no tail padding).
         assert_eq!(size_of::<LeanCtorObjectRepr>(), size_of::<LeanObjectRepr>());
     }
 

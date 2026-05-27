@@ -128,7 +128,7 @@ pub(crate) fn run_stdio() -> ExitCode {
 /// independently advertised as "no core dump" knobs; in practice on the
 /// `ubuntu-latest` runner they reduce the delay substantially but do not
 /// eliminate it (observed: ~107 s without either, ~23 s with `setrlimit`
-/// alone — still above the supervisor's 30 s budget). The decisive fix is
+/// alone—still above the supervisor's 30 s budget). The decisive fix is
 /// to take over `SIGABRT` ourselves: a `sigaction` handler that calls
 /// `_exit(134)` short-circuits the entire kernel signal-default path,
 /// closes the pipes immediately, and lets the parent observe the fatal

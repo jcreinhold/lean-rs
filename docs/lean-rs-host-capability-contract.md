@@ -82,8 +82,8 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 ## Optional contract (9 symbols)
 
 If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call
-site degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services,
-and module-query methods return their `Unsupported` outcome for bounded module projections.
+site degrades gracefully—`LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services, and
+module-query methods return their `Unsupported` outcome for bounded module projections.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |

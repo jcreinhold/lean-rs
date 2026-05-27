@@ -1,4 +1,4 @@
-//! External objects — externs and inline accessors from `lean.h:295–1332`.
+//! External objects—externs and inline accessors from `lean.h:295–1332`.
 
 #![allow(clippy::inline_always)]
 

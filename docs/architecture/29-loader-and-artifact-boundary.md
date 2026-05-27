@@ -118,8 +118,8 @@ canonical shipped-crate path.
 
 `LeanCapability` is the normal same-process runtime surface for shipped capabilities. `LeanCapabilityPreflight` is the
 doctor-style surface for checking a manifest-backed capability before opening it. `LeanLibrary::open` and
-`LeanLibrary::open_globally` remain public for advanced L1 interop and focused tests, but they are escape hatches: using
-them means the caller has chosen to manage loader details explicitly.
+`LeanLibrary::open_globally` remain public for advanced same-process interop and focused tests, but they are escape
+hatches: using them means the caller has chosen to manage loader details explicitly.
 
 ### the worker crates
 

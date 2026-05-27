@@ -10,7 +10,7 @@
 //! by concatenation and the bundled shims are built on demand through
 //! `lean-toolchain`.
 //!
-//! The type is `pub(crate)` — `LeanHost` exposes the only operations
+//! The type is `pub(crate)`—`LeanHost` exposes the only operations
 //! callers actually want (open the project, load a capability dylib).
 
 use std::fs;

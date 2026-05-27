@@ -1,4 +1,4 @@
-//! [`LeanMetaService`] — sealed descriptor for a registered bounded
+//! [`LeanMetaService`]—sealed descriptor for a registered bounded
 //! `MetaM` service.
 //!
 //! Each pinned service ties together:
@@ -10,7 +10,7 @@
 //!   -> Resp>`) the [`crate::LeanSession::run_meta`] generic
 //!   parameters must agree with.
 //!
-//! The struct has no public constructor — the only `LeanMetaService`
+//! The struct has no public constructor—the only `LeanMetaService`
 //! values downstream code can name are returned by the four free
 //! functions in this module, which form the closed registry. Adding a
 //! new service requires landing a Lean `@[export]` *and* a Rust-side
@@ -107,7 +107,7 @@ pub fn whnf<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>> {
 /// heartbeat budget below the loop bound trips
 /// `Lean.Exception.isMaxHeartbeat` and surfaces as
 /// `LeanMetaResponse::TimeoutOrHeartbeat`. The supplied `LeanExpr` is
-/// ignored — the request shape is uniform with the inference / whnf
+/// ignored—the request shape is uniform with the inference / whnf
 /// services so callers do not need a separate "no input" descriptor.
 #[must_use]
 pub fn heartbeat_burn<'lean>() -> LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>> {
@@ -127,7 +127,7 @@ pub fn is_def_eq<'lean>() -> LeanMetaService<(LeanExpr<'lean>, LeanExpr<'lean>, 
 
 /// Register the `Lean.PrettyPrinter.ppExpr` service.
 ///
-/// Returns the pretty-printed string form of the supplied expression —
+/// Returns the pretty-printed string form of the supplied expression—
 /// the form a Lean user reads. `MetaM`-bounded, so a deeply nested
 /// term under a tight heartbeat budget surfaces as
 /// [`super::LeanMetaResponse::TimeoutOrHeartbeat`]. For a cheap,

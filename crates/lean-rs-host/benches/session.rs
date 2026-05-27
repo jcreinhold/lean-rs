@@ -2,7 +2,7 @@
 //! query, bulk introspection, elaboration, bounded `MetaM` (`whnf`), and `SessionPool`
 //! reuse. Each workload names the user-visible code path it represents.
 //!
-//! All four workloads share one process and one `LeanRuntime` — Lean's
+//! All four workloads share one process and one `LeanRuntime`—Lean's
 //! initialiser is `OnceLock`-cached and re-running it inside `b.iter`
 //! would measure only the cached fast-path. Per-bench session and pool
 //! construction happens once outside `b.iter`, so the recorded numbers
@@ -40,12 +40,12 @@ fn fixture_host() -> LeanHost<'static> {
 
 // -- query_declarations_bulk --------------------------------------------
 //
-// Workload: `host::session::query_declarations_bulk/N` —
+// Workload: `host::session::query_declarations_bulk/N`—
 // `LeanSession::query_declarations_bulk` (crates/lean-rs/src/host/session.rs:704)
 // over N pre-resolvable fixture declaration names. Measures the bulk
 // dispatch: one FFI call regardless of N, plus N internal
 // `name_from_string` conversions and N `Obj` decodes. The session is
-// re-used across iterations — only the bulk call is in the measurement.
+// re-used across iterations—only the bulk call is in the measurement.
 
 const HANDLES_NAMES: [&str; 16] = [
     "LeanRsFixture.Handles.nameAnonymous",
@@ -89,7 +89,7 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
 
 // -- progress callback delivery -----------------------------------------
 //
-// Workload: `host::session::query_declarations_bulk_progress/16` — the
+// Workload: `host::session::query_declarations_bulk_progress/16`—the
 // same bulk declaration query as above, but with a progress sink wired
 // through the Lean callback trampoline. This is the callback-delivery
 // baseline for future progress API changes.
@@ -130,7 +130,7 @@ fn bench_query_declarations_bulk_progress(c: &mut Criterion, caps: &LeanCapabili
 
 // -- declaration_*_bulk -------------------------------------------------
 //
-// Workload: `host::session::declaration_*_bulk_vs_loop/5000` — each
+// Workload: `host::session::declaration_*_bulk_vs_loop/5000`—each
 // method over 5k declaration names, compared against the singular
 // per-name loop with the same output allocation shape. The batch uses
 // repeated fixture names so the measurement isolates FFI round-trips and
@@ -252,12 +252,12 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 
 // -- elaborate ----------------------------------------------------------
 //
-// Workload: `host::session::elaborate_small` — `LeanSession::elaborate`
+// Workload: `host::session::elaborate_small`—`LeanSession::elaborate`
 // (crates/lean-rs/src/host/session.rs:471) on `(1 + 1 : Nat)`. The
 // elaborator runs against the cached `Elaboration` environment; the
 // measurement reflects warm steady-state cost. `elaborate` accumulates
 // session state across calls, so the first call in a fresh session is
-// systematically slower than the steady-state number recorded here —
+// systematically slower than the steady-state number recorded here—
 // see `docs/performance/baseline.md` for the caveat.
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
@@ -279,11 +279,11 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 // -- run_meta(whnf) -----------------------------------------------------
 //
-// Workload: `host::meta::run_meta_whnf` — `LeanSession::run_meta`
+// Workload: `host::meta::run_meta_whnf`—`LeanSession::run_meta`
 // (crates/lean-rs/src/host/session.rs:640) with the `whnf` service
 // (crates/lean-rs/src/host/meta/service.rs:98) on the type of
 // `Nat.zero`. The expression is built once in setup so the per-iter
-// cost is `LeanExpr::clone` + meta dispatch + decode — not Expr
+// cost is `LeanExpr::clone` + meta dispatch + decode—not Expr
 // construction.
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
@@ -309,7 +309,7 @@ fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 // -- module-query object decoding ---------------------------------------
 //
-// Workload: `host::process::module_query_batch_cached_decode` —
+// Workload: `host::process::module_query_batch_cached_decode`—
 // `LeanSession::process_module_query_batch_cached` over a tiny module.
 // The Lean result decodes host query envelopes plus cache facts, including
 // scalar-tail `UInt64` timings, `UInt8` cache status, and constructor tags.
@@ -358,7 +358,7 @@ fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabili
 
 // -- SessionPool reuse hit ----------------------------------------------
 //
-// Workload: `host::pool::session_reuse_hit` — `SessionPool::acquire`
+// Workload: `host::pool::session_reuse_hit`—`SessionPool::acquire`
 // (crates/lean-rs/src/host/pool.rs:130+) on a warm pool. After a
 // warm-up acquire+drop, the free list holds one entry; each measured
 // iteration is a hot-cache LIFO pop, drop returns it. Imports are

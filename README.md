@@ -6,12 +6,12 @@
 [![Docs](https://img.shields.io/badge/docs-jcreinhold.github.io%2Flean--rs-blue)](https://jcreinhold.github.io/lean-rs/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](#license)
 
-A Lean runtime bridge for Rust. The workspace has three layers: a typed FFI layer (`lean-rs`), a standard Lean service
-layer (`lean-rs-host`), and an optional process-isolation layer (`lean-rs-worker-*`). Lean owns Lean semantics:
-elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. This project owns the
-hosting work around those semantics: linking, runtime initialization, ABI conversion, module loading, error and panic
-boundaries, scheduling, diagnostics, batching, process isolation, and packaging. Rust does not reconstruct Lean semantic
-facts.
+A Lean runtime bridge for Rust. Use it to load Lean-built shared libraries, call typed `@[export]` functions, run
+standard Lean services such as elaboration and kernel checking, or isolate Lean work in a child process.
+
+Lean remains the authority for elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type
+meaning. This project handles the Rust hosting work around Lean: linking, runtime initialization, ABI conversion, module
+loading, error and panic boundaries, scheduling, diagnostics, batching, process isolation, and packaging.
 
 ## Prerequisites
 
@@ -51,7 +51,7 @@ for sessions, kernel checks, and `MetaM`.
 If something goes wrong, re-run with `RUST_LOG=lean_rs=debug` for structured spans. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for the code catalogue and the in-process capture API.
 
-## The published crates
+## Choose a Crate
 
 Choose by job:
 
@@ -62,7 +62,7 @@ Choose by job:
 | Use imports, elaboration, kernel checks, declaration queries, or `MetaM` | `lean-rs-host` |
 | Drive a worker child from a parent process (process isolation, live rows, timeouts, cycling) | `lean-rs-worker-parent` |
 | Build the worker binary that hosts a Lean runtime | `lean-rs-worker-child` |
-| Speak the worker wire protocol from another peer (codegen, fuzz, alternate transport) | `lean-rs-worker-protocol` |
+| Speak the worker wire protocol from another peer | `lean-rs-worker-protocol` |
 | Bind raw Lean C symbols directly (advanced, `unsafe`) | `lean-rs-sys` |
 
 Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. In plain terms: raw Lean C ABI, toolchain and
@@ -200,9 +200,9 @@ your Lake package only declares your capability library.
 | `cargo run -p lean-rs-worker-child --example worker_capability_runner` | Normal worker-capability path: builder, typed commands, live rows, diagnostics, timeouts, terminal completion, cycling. Recipe: [`worker-capability-runner.md`](docs/recipes/worker-capability-runner.md). |
 | `cargo run -p lean-rs-worker-child --example worker_streaming` | Process-isolated typed streaming command with parent-side watchdog and worker cycling. Recipe: [`worker-process-boundary.md`](docs/recipes/worker-process-boundary.md). |
 | `cargo run -p lean-rs-worker-child --example worker_pool` | Local multi-worker fanout via `LeanWorkerPool` and `LeanWorkerSessionLease`. |
-| `cargo run --release -p lean-rs-worker-child --example worker_capability_probe` | Performance probe of generic command shapes (`version`, `doctor`, `extract`, `features`, `index`, `probe`). |
+| `cargo run --release -p lean-rs-worker-child --example worker_capability_probe` | Performance probe for generic worker commands (`version`, `doctor`, `extract`, `features`, `index`, `probe`). |
 | `cargo run -p lean-rs-worker-child --example mathlib_scale_probe` | Planner → pool → session lease → typed command scale fixture. Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` to use a real module list as the planning workload. |
-| `cargo run -p lean-rs-worker-child --example lean_dup_readiness` | End-to-end readiness fixture exercising all command shapes through the import planner, pool, and lease. |
+| `cargo run -p lean-rs-worker-child --example lean_dup_readiness` | End-to-end worker fixture for generic commands through the import planner, pool, and lease. |
 
 The Lean side of a worker capability can use `LeanRsInterop.Worker.Stream` helpers from `lean-rs-interop-shims` for row,
 diagnostic, progress, terminal, and status envelopes. Downstream packages still own request parsing, row schemas,
@@ -234,9 +234,9 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 - [`01-safety-model.md`](docs/architecture/01-safety-model.md): unsafe boundary, refcount ownership, concurrency stance.
 - [`02-versioning-and-compatibility.md`](docs/architecture/02-versioning-and-compatibility.md): toolchain window, crate
   semver, supported platforms.
-- [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md): per-decision rationale behind `lean-rs-sys`.
+- [`05-raw-sys-design.md`](docs/architecture/05-raw-sys-design.md): `lean-rs-sys` design rationale.
 
-**Same-process FFI (`lean-rs`)**
+**Same-Process FFI (`lean-rs`)**
 - [`04-concurrency.md`](docs/architecture/04-concurrency.md): `!Send + !Sync` contract.
 - [`06-panic-containment.md`](docs/architecture/06-panic-containment.md): panic containment via process boundary.
 - [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md): cancellation token contract.
@@ -272,7 +272,7 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
   mathlib probe.
 - [`26-worker-pool-observability.md`](docs/architecture/26-worker-pool-observability.md): pool snapshots and
   backpressure.
-- [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md): readiness proof for subprocess-worker shape.
+- [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md): downstream worker replacement fixture.
 - [`28-production-scale-release.md`](docs/architecture/28-production-scale-release.md): local pool scale contract and
   non-goals.
 

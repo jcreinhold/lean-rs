@@ -3,7 +3,7 @@
 //! [`LeanLevel`] is a receipt for an owned universe-level value produced
 //! on the Lean side. The Rust API is intentionally minimal: it carries
 //! the handle through the FFI boundary and nothing else. Construction
-//! and inspection — `.zero`, `.succ`, `.max`, `toString`, `==` — live in
+//! and inspection—`.zero`, `.succ`, `.max`, `toString`, `==`—live in
 //! Lean exports the caller reaches through
 //! [`crate::module::LeanModule::exported_unchecked`].
 //!
@@ -61,7 +61,7 @@ impl<'lean> LeanAbi<'lean> for LeanLevel<'lean> {
 
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is an owned `lean_object*` produced by a Lean

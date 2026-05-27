@@ -2,7 +2,7 @@
 //!
 //! One case recurs in the span instrumentation: filesystem paths
 //! emitted as span fields (`library.path`, `project.root`). For
-//! human-readable logs we don't need the full absolute path — the last
+//! human-readable logs we don't need the full absolute path—the last
 //! two parents plus the basename are enough to identify the artefact
 //! and short enough to keep one span on one line in a typical terminal.
 //!
@@ -20,7 +20,7 @@ use crate::error::bound_message;
 ///
 /// Examples:
 ///
-/// - `/Users/me/lake/build/lib/lib.dylib` → `lake/build/lib/lib.dylib`
+/// - `/workspace/lake/build/lib/lib.dylib` → `lake/build/lib/lib.dylib`
 /// - `/tmp/lib.dylib`                     → `tmp/lib.dylib`
 /// - `lib.dylib`                          → `lib.dylib`
 ///
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn short_path_keeps_three_tail_components() {
         assert_eq!(
-            short_path(Path::new("/Users/me/lake/build/lib/lib.dylib")),
+            short_path(Path::new("/workspace/lake/build/lib/lib.dylib")),
             "build/lib/lib.dylib",
         );
     }

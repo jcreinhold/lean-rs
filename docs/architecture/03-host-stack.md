@@ -1,6 +1,6 @@
 # Standard Lean Service Layer (`lean-rs-host`)
 
-The curated public API of the L2 standard service layer—the published [`lean-rs-host`](https://docs.rs/lean-rs-host)
+The curated public API of the standard Lean service layer—the published [`lean-rs-host`](https://docs.rs/lean-rs-host)
 crate. This layer sits above the typed FFI crate (`lean-rs`) and provides common Lean services: imports, elaboration,
 kernel checks, declaration queries, bounded `MetaM`, info-tree projections, sessions, and pooling.
 
@@ -11,11 +11,11 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling r
 
 ## Layering
 
-`lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The L1 FFI primitive `lean-rs` ships the typed
-`@[export]`-calling machinery and the structured error boundary; this L2 crate adds standard Lean services through
-`LeanHost`, `LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 9 `lean_rs_host_*` `@[export]`
-Lean shims bundled with `lean-rs-host`, resolved from manifest-backed trusted signature metadata, and loaded alongside
-consumer capability dylibs.
+`lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The `lean-rs` crate ships the typed `@[export]`-calling
+machinery and the structured error boundary; `lean-rs-host` adds standard Lean services through `LeanHost`,
+`LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 9 `lean_rs_host_*` `@[export]` Lean shims
+bundled with `lean-rs-host`, resolved from manifest-backed trusted signature metadata, and loaded alongside consumer
+capability dylibs.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed arguments—the norm for Rust
 bindings to GC-hosted languages—depend on `lean-rs` directly and skip this crate.
@@ -45,13 +45,13 @@ pub use crate::host::evidence::{
 
 The handle types (`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`) and the error model live on `lean_rs::*`;
 callers needing both surfaces write `use lean_rs::{LeanRuntime, LeanName}` and
-`use lean_rs_host::{LeanHost, LeanSession}` side by side. The L1 crate root re-exports them; no module-path import
-needed.
+`use lean_rs_host::{LeanHost, LeanSession}` side by side. The `lean-rs` crate root re-exports them; no module-path
+import needed.
 
 ## Specialised sub-module surfaces
 
 The crate root names mandatory session capabilities and entry points only. Sub-module paths host **specialised or
-optional** capabilities so the layer difference is visible at the import site: different layer, different abstraction.
+optional** capabilities so the import path names the extra service explicitly.
 
 - **`lean_rs_host::meta`**—the bounded `MetaM` capability. Five host-shim bindings (`meta_infer_type`, `meta_whnf`,
   `meta_heartbeat_burn`, `meta_is_def_eq`, `meta_pp_expr`) are optional, and `run_meta` is the only call site that
@@ -111,7 +111,7 @@ optional** capabilities so the layer difference is visible at the import site: d
 | `LakeProject` | `lean_rs_host::host::lake::LakeProject` | `pub(crate)`: Lake discovery helper used by `LeanHost`. |
 | `meta::{LeanMetaOptions, LeanMetaService, LeanMetaResponse, LeanMetaTransparency, MetaCallStatus, infer_type, whnf, heartbeat_burn, is_def_eq}` | `lean_rs_host::meta::*` (re-exports `host::meta::*`) | Opt-in `MetaM` surface—see *Specialised sub-module surfaces*. |
 
-## Methods on the curated types (happy-path shape)
+## Methods on the Curated Types
 
 Each requires doc comments and `# Errors` / `# Panics` sections.
 
@@ -129,7 +129,7 @@ Each requires doc comments and `# Errors` / `# Panics` sections.
   where `Req: LeanAbi<'lean>` and `Resp: TryFromLean<'lean>`.
 - `LeanSession::query_declarations_bulk(&mut self, names: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<LeanDeclaration<'lean>>>`—strict
   semantics; first missing name errors the batch with `Host(Conversion)` naming it. With no token and no progress, the
-  method keeps the `N + 1` FFI-call shape (one bulk dispatch + N `name_from_string`) vs `2N` for the singular fold. With
+  method keeps the `N + 1` FFI-call cost (one bulk dispatch + N `name_from_string`) vs `2N` for the singular fold. With
   a token, it loops through the singular path so it can check between names and discard partial output on cancellation.
   With progress and no token, it uses one Lean-side progress dispatch.
 - `LeanSession::declaration_source_range(&mut self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<Option<LeanSourceRange>>`—returns
@@ -171,22 +171,22 @@ LeanRuntime                 ::init() -> LeanResult<&'static LeanRuntime>
 LeanHost<'lean>             ::from_lake_project(&'lean LeanRuntime, path) -> ...
 LeanCapabilities<'lean, 'h> ::load_capabilities(&'h LeanHost<'lean>, package, lib_name)
 LeanSession<'lean, 'c>      ::session(&'c LeanCapabilities<'lean, '_>, imports, cancellation, progress)
-LeanExpr<'lean>             // (and the other L1 handles)
+LeanExpr<'lean>             // and the other `lean-rs` handles
 ```
 
 `'lean` is invisible at typical call sites (inferred from the runtime borrow). Compile-time enforcement: no handle
-outlives the runtime borrow; no L2 type escapes to another thread (all types are `!Send + !Sync` by default—see the
-trybuild assertion at `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs`).
+outlives the runtime borrow; no service-layer type escapes to another thread (all types are `!Send + !Sync` by
+default—see the trybuild assertion at `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs`).
 
 ## Error model
 
-`LeanError` lives on `lean-rs` (L1). It is the only public error type that crosses either crate's boundary. Two
-variants: `LeanException(LeanException)` for Lean-thrown `IO` errors that callers may surface to end users, and
+`LeanError` lives on `lean-rs`. It is the only public error type that crosses either crate's boundary. Two variants:
+`LeanException(LeanException)` for Lean-thrown `IO` errors that callers may surface to end users, and
 `Host(HostFailure)` for any host failure (init, link, load, conversion, contained callback panic, internal invariant).
 Payload structs have private fields and `pub(crate)` constructors that run the bounding helper, so the
 `LEAN_ERROR_MESSAGE_LIMIT` (4 KiB) cap on `message()` is a structural invariant—external callers receive `LeanError`
 values but cannot mint one with an unbounded message. `lean-rs-host` constructs `Host(...)` variants via the
-`lean_rs::__host_internals` seam.
+`lean_rs::__host_internals` internal bridge.
 
 `Except<E, T>` is a **value type**, not an error. When an exported function returns `IO (Except E T)`:
 
@@ -196,12 +196,12 @@ values but cannot mint one with an unbounded message. `lean-rs-host` constructs 
 The caller sees `LeanResult<Result<T, E>>` and decides how to flatten. Rule: runtime / host failures are `LeanError`;
 application semantics are values.
 
-## Consumed L1 surface
+## Consumed `lean-rs` Surface
 
 `lean-rs-host` reaches into `lean_rs::*` as a normal downstream consumer. None of these belong to this crate's semver
-surface—they are listed so the L1 → L2 dependency is visible.
+surface—they are listed so the dependency is visible.
 
-- `LeanRuntime`—process-once init; lifetime anchor for every L2 type.
+- `LeanRuntime`—process-once init; lifetime anchor for every service-layer type.
 - `LeanThreadGuard`—RAII attach for worker threads not started inside Lean.
 - `LeanLibrary`—RAII handle over the capability dylib `LeanCapabilities` opens.
 - `LeanModule`—initialized module handle used behind the closed host-shim binding table.
@@ -209,12 +209,12 @@ surface—they are listed so the L1 → L2 dependency is visible.
   arbitrary dispatcher.
 - `LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi`—bounds and markers used by internal checked host bindings and
   host-defined ABI records.
-- `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`—opaque handles re-used as L2 method return shapes.
+- `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`—opaque handles reused as service-layer method return types.
 - `lean_rs::error::*`—`LeanError`, `LeanResult`, `LeanException`, `LeanCancelled`, `HostFailure`, `HostStage`,
   `LeanExceptionKind`, `LeanDiagnosticCode`, `LEAN_ERROR_MESSAGE_LIMIT`, `DiagnosticCapture`, `CapturedEvent`,
   `DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY`. The shared error model.
 
-Two `#[doc(hidden)] pub` seams substitute for Cargo's missing "friend crate" visibility:
+Two `#[doc(hidden)] pub` bridges substitute for Cargo's missing "friend crate" visibility:
 
 - `lean_rs::__host_internals::{host_module_init,host_cancelled}`—the narrow support facade this crate calls from
   `host/lake.rs` and `host/cancellation.rs`. They preserve the bounding invariant (external callers receive `LeanError`
@@ -223,8 +223,8 @@ Two `#[doc(hidden)] pub` seams substitute for Cargo's missing "friend crate" vis
   re-export) if a future call site needs one.
 - `lean_rs::error::bound_message`—UTF-8-boundary truncation helper used at six sites in
   `host/{elaboration,meta}/options.rs` and `host/elaboration/diagnostic.rs` to bound Lean-authored strings before they
-  flow into `Host(...)` payloads. Lives on the L1 surface (not at `__host_internals`) because it is a string utility,
-  not a constructor wrapper.
+  flow into `Host(...)` payloads. Lives on the `lean-rs` surface (not at `__host_internals`) because it is a string
+  utility, not a constructor wrapper.
 
 The supertrait `lean_rs::abi::traits::sealed::SealedAbi` is similarly `pub` so this crate can implement `LeanAbi` for
 its own host-defined types (`LeanEvidence`, etc.); external crates are blocked by the orphan rule plus the
@@ -235,15 +235,15 @@ its own host-defined types (`LeanEvidence`, etc.); external crates are blocked b
 - **Re-export every `pub` item from every internal module at the crate root.** Path-shortening dressed up as curation;
   gives mandatory and specialised items equal status. Consistency requires dissimilar things to be done differently.
 - **One `LeanHost` god-type with every operation as a method.** Braids runtime, modules, sessions, semantic handles, and
-  error policy into one mechanism. Kills the `'lean` cascade — `LeanExpr<'lean>` cannot outlive its session, but a god
-  type would have to be `'static` to host every method — and forces caller code to thread one large `&mut` through every
+  error policy into one mechanism. Kills the `'lean` cascade—`LeanExpr<'lean>` cannot outlive its session, but a god
+  type would have to be `'static` to host every method—and forces caller code to thread one large `&mut` through every
   layer.
 - **Hide `lean-rs-host`'s internal modules behind a top-level façade.** Over-encapsulates for hypothetical safety wins.
   Advanced users already have a clean escape hatch via `lean-rs-sys`, but that drops them to raw FFI. Keeping
   `lean-rs::module` visible at module paths preserves the middle tier: typed handles, no raw `lean_*` symbols.
 - **Keep `LeanHost` / `LeanCapabilities` / `LeanSession` in `lean-rs` itself.** Conflated two layers behind one default
-  entry point and made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without satisfying
-  the 28 + 9 `lean_rs_host_*` shim contract.
+  entry point and made it impossible for an external typed-FFI consumer to depend on `lean-rs = "0.1"` without
+  satisfying the 28 + 9 `lean_rs_host_*` shim contract.
 
 ## Naming convention
 
@@ -260,7 +260,7 @@ The classification is satisfied when:
 1. `rg -n "^pub use" crates/lean-rs-host/src/lib.rs` matches the curated set above.
 2. `crates/lean-rs-host/tests/curated_surface.rs` uses only `use lean_rs::{...}` and `use lean_rs_host::{...}`
    crate-root items (no module-path access).
-3. `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs` confirms every L2 type is neither `Send` nor
-   `Sync`.
+3. `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs` confirms every service-layer type is neither
+   `Send` nor `Sync`.
 4. `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` is clean and every curated item has a doc comment.
 5. `docs/api-review/lean-rs-host-public.txt` matches the curated surface 1:1.

@@ -34,11 +34,11 @@ by building an array of envelopes with `row`, `chunkProgress`, `diagnostic`, and
 once. Single-envelope convenience functions are intentionally absent: the active worker shared-library path is stable
 when the downstream capability constructs the envelope array and hands it to `emitAll`.
 
-A more ambitious generic Lean-side chunk runner was tested and rejected for this prompt. Runtime helpers that looped
-over `Array String` in `lean-rs-interop-shims`, source macros that expanded the same loop, and single-envelope helpers
-that allocated a one-element array in the shared shim package caused the worker child to terminate with SIGSEGV under
-Lean 4.29.1 in the shared library worker path. The safe release surface therefore keeps chunk scheduling in downstream
-Lean code and factors only worker envelope construction plus `emitAll` into the helper package.
+A generic Lean-side chunk runner was tested and rejected. Runtime helpers that looped over `Array String` in
+`lean-rs-interop-shims`, source macros that expanded the same loop, and single-envelope helpers that allocated a
+one-element array in the shared shim package caused the worker child to terminate with SIGSEGV under Lean 4.29.1 in the
+shared library worker path. The safe release surface therefore keeps chunk scheduling in downstream Lean code and
+factors only worker envelope construction plus `emitAll` into the helper package.
 
 This is not a pool scheduling feature. Real parallelism for large workloads belongs in `LeanWorkerPool`, session
 leasing, import planning, and memory-aware admission. Lean-side helpers can emit progress at chunk boundaries, but they
@@ -49,6 +49,6 @@ do not choose workers, spawn tasks, or define session keys.
 Use these helpers when authoring a Lean capability that will be run through the worker crates. They remove repeated
 worker-envelope boilerplate while keeping downstream schemas and algorithms downstream-owned.
 
-Use direct L1 callbacks only for same-process interop that accepts the in-process Lean failure model. Use `lean-rs-host`
-for checked in-process theorem-prover sessions. Use the worker crates or `LeanWorkerPool` when the caller needs process
-isolation, timeouts, memory cycling, row streaming, diagnostics, or pool orchestration.
+Use direct `lean-rs` callbacks only for same-process interop that accepts the in-process Lean failure model. Use
+`lean-rs-host` for checked in-process theorem-prover sessions. Use the worker crates or `LeanWorkerPool` when the caller
+needs process isolation, timeouts, memory cycling, row streaming, diagnostics, or pool orchestration.

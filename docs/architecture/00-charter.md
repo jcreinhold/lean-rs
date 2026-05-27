@@ -18,7 +18,7 @@ diagnostics, batching, process isolation, and packaging. The two halves do not n
 recompute a Lean semantic fact is out of scope; anything that asks Lean to know about Rust hosting (thread pools, panic
 conversion, FFI batching, module loaders) is out of scope.
 
-## Adopted Shape
+## Adopted Design
 
 Five published crates plus one workspace-internal helper:
 
@@ -30,18 +30,17 @@ Five published crates plus one workspace-internal helper:
 - **`lean-toolchain`** (published). Toolchain discovery, typed `ToolchainFingerprint`, fixture digest, layered link
   diagnostics, build-script helpers. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS` from
   `lean-rs-sys` so the allowlist lives in one place.
-- **`lean-rs`** (published, **L1**). The safe FFI primitive: bring the runtime up, open a Lake-built dylib, initialise a
-  module, call typed `@[export]` functions, and register Rust callbacks through a generic shim package. Five public
-  modules (`error`, `module`, `handle`, `runtime`, `abi`) plus one `#[doc(hidden)] pub mod __host_internals` giving the
-  sibling `lean-rs-host` the small set of `LeanError`-constructor wrappers it needs without exposing them to external
-  callers. It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts
-  here.
-- **`lean-rs-host`** (published, **L2**). The standard Lean service layer built on `lean-rs`: `LeanHost`,
-  `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 9
-  `lean_rs_host_*` `@[export]` Lean shim contract it loads through manifest-checked `HostShimBindings` alongside
-  consumer capability dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate
-  `batch` module. Downstreams that need common Lean services add it on top of `lean-rs`; downstreams that only need
-  typed FFI do not pay for it.
+- **`lean-rs`** (published). The safe FFI crate: bring the runtime up, open a Lake-built dylib, initialise a module,
+  call typed `@[export]` functions, and register Rust callbacks through a generic shim package. Five public modules
+  (`error`, `module`, `handle`, `runtime`, `abi`) plus one `#[doc(hidden)] pub mod __host_internals` giving the sibling
+  `lean-rs-host` the small set of `LeanError`-constructor wrappers it needs without exposing them to external callers.
+  It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts here.
+- **`lean-rs-host`** (published). The standard Lean service layer built on `lean-rs`: `LeanHost`, `LeanCapabilities`,
+  `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 9 `lean_rs_host_*`
+  `@[export]` Lean shim contract it loads through manifest-checked `HostShimBindings` alongside consumer capability
+  dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate `batch` module.
+  Downstreams that need common Lean services add it on top of `lean-rs`; downstreams that only need typed FFI do not pay
+  for it.
 - **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
   process-boundary layer). The parent supervises a child process around the standard Lean service layer. They own
   process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming,
@@ -66,37 +65,38 @@ caller should hand-compose.
 ### Lifetime spine
 
 The universal currency inside `lean-rs` is a token-bound object handle: `runtime::Obj<'lean>` carries a phantom lifetime
-tied to a `&'lean LeanRuntime` borrow. Public types built on top—the L1 semantic handles (`LeanExpr<'lean>`,
-`LeanName<'lean>`, …) and the L2 surfaces in `lean-rs-host` (`LeanHost<'lean>`, `LeanCapabilities<'lean, 'h>`,
-`LeanSession<'lean, 'c>`)—propagate the lifetime so the type system enforces *init-before-use* and *no value escapes the
-runtime*. The pattern is borrowed from PyO3's `Bound<'py, T>`; `LeanRuntime` plays the role `Python<'py>` plays, except
-creation is process-once rather than GIL-scoped. `'lean` is invisible at typical call sites (inferred from the runtime
-borrow) and disappears from the `*_rs::*` re-exports when bound to `'static`.
+tied to a `&'lean LeanRuntime` borrow. Public types built on top—the semantic handles (`LeanExpr<'lean>`,
+`LeanName<'lean>`, …) and the service-layer surfaces in `lean-rs-host` (`LeanHost<'lean>`,
+`LeanCapabilities<'lean, 'h>`, `LeanSession<'lean, 'c>`)—propagate the lifetime so the type system enforces
+*init-before-use* and *no value escapes the runtime*. The pattern is borrowed from PyO3's `Bound<'py, T>`; `LeanRuntime`
+plays the role `Python<'py>` plays, except creation is process-once rather than GIL-scoped. `'lean` is invisible at
+typical call sites (inferred from the runtime borrow) and disappears from the `*_rs::*` re-exports when bound to
+`'static`.
 
-The L1/L2 crate split gives each layer its own semver and refactor surface: `lean-rs`'s internal modules can reshape
-without affecting `lean-rs-host` callers, and vice versa, as long as both crate roots stay stable.
+The crate split gives each layer its own semver and refactor surface: `lean-rs`'s internal modules can reshape without
+affecting `lean-rs-host` callers, and vice versa, as long as both crate roots stay stable.
 
 Topic deep-dives:
 
-- [`05-raw-sys-design.md`](05-raw-sys-design.md) — `lean-rs-sys` per-decision rationale.
-- [`03-host-stack.md`](03-host-stack.md) — `lean-rs-host` curated service surface.
-- [`14-interop-release-contract.md`](14-interop-release-contract.md) — reusable interop release contract.
+- [`05-raw-sys-design.md`](05-raw-sys-design.md)—`lean-rs-sys` design rationale.
+- [`03-host-stack.md`](03-host-stack.md)—`lean-rs-host` curated service surface.
+- [`14-interop-release-contract.md`](14-interop-release-contract.md)—reusable interop release contract.
 - [`16-production-boundary.md`](16-production-boundary.md),
-  [`17-worker-session-adapter.md`](17-worker-session-adapter.md) — worker-process boundary and the host-session subset
+  [`17-worker-session-adapter.md`](17-worker-session-adapter.md)—worker-process boundary and the host-session subset
   crossing it.
-- [`18-worker-data-streaming.md`](18-worker-data-streaming.md) — downstream row streams over the worker boundary.
-- [`20-worker-pool.md`](20-worker-pool.md) — local worker-pool boundary.
+- [`18-worker-data-streaming.md`](18-worker-data-streaming.md)—downstream row streams over the worker boundary.
+- [`20-worker-pool.md`](20-worker-pool.md)—local worker-pool boundary.
 - [`22-worker-row-batching.md`](22-worker-row-batching.md),
-  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) — row batching and data-plane format decisions.
-- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) — Lean-side worker envelope helpers.
-- [`28-production-scale-release.md`](28-production-scale-release.md) — production-scale worker contract.
+  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md)—row batching and data-plane format decisions.
+- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md)—Lean-side worker envelope helpers.
+- [`28-production-scale-release.md`](28-production-scale-release.md)—production-scale worker contract.
 
 ## Hidden knowledge
 
-No public Rust API requires a caller to know any of this. If an L1 item appears in `lean-rs`'s public surface, or an L2
-item in `lean-rs-host`'s, the wrong layer has taken ownership.
+No public Rust API requires a caller to know any of this. If `lean-rs` exposes a service-layer detail, or `lean-rs-host`
+exposes a raw runtime detail, the wrong layer has taken ownership.
 
-**Hidden by `lean-rs` (L1):**
+**Hidden by `lean-rs`:**
 
 - Runtime init order: `lean_initialize_runtime_module`, `lean_initialize`, per-thread `lean_initialize_thread` /
   `lean_finalize_thread`, process-args setup, `LEAN_INIT_MUTEX`.
@@ -108,9 +108,9 @@ item in `lean-rs-host`'s, the wrong layer has taken ownership.
 - Object conversion: boxed scalars (`lean_box` / `lean_unbox`), strings, bytearrays, arrays, ctor structures, closures.
 - Exception and panic boundary: Lean exceptions to typed Rust errors; Rust panics caught before unwinding across a C
   frame.
-- The seam between Lean semantic authority and Rust hosting: Rust never owns a semantic fact about a Lean term.
+- The boundary between Lean semantic authority and Rust hosting: Rust never owns a semantic fact about a Lean term.
 
-**Hidden by `lean-rs-host` (L2):**
+**Hidden by `lean-rs-host`:**
 
 - Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order, imports cache, capability
   refresh, the 28 + 9 `lean_rs_host_*` Lean shim contract.
@@ -176,8 +176,8 @@ Each was considered before the adopted shape. Recorded so reviewers can recogniz
   `0.0.9` was pinned to a Lean below our target, and the surfaces we needed (`LEAN_VERSION` const,
   `cargo:rerun-if-changed=lean.h`, signature-checked allowlist, typed diagnostics) would have required ongoing upstream
   PRs the published crate did not provide.
-- **Conflate L1 FFI primitive and L2 service layer in one crate.** Putting both layers behind one default entry point
-  (`LeanHost`) made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without first
+- **Conflate typed FFI and standard services in one crate.** Putting both layers behind one default entry point
+  (`LeanHost`) made it impossible for an external typed-FFI consumer to depend on `lean-rs = "0.1"` without first
   satisfying the `lean_rs_host_*` shim contract. Generic callback helpers belong below the service layer; theorem-prover
   shims do not.
 

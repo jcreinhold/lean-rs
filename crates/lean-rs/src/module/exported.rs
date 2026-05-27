@@ -3,26 +3,26 @@
 //! The public dispatch surface has two lookup paths:
 //!
 //! - [`LeanCapability::exported<Args, R>(name)`](super::capability::LeanCapability::exported)
-//!   — safe checked lookup for capabilities opened from trusted manifest
+//!  —safe checked lookup for capabilities opened from trusted manifest
 //!   signature metadata.
 //! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
-//!   — unsafe arbitrary lookup for callers that can prove the symbol's
+//!  —unsafe arbitrary lookup for callers that can prove the symbol's
 //!   compiled C ABI matches the requested Rust `Args`/`R` shape.
 //!
 //! The typed handle surface is two types and three sealed traits:
 //!
-//! - [`LeanExported<'lean, 'lib, Args, R>`] — a typed handle for an
+//! - [`LeanExported<'lean, 'lib, Args, R>`]—a typed handle for an
 //!   exported Lean symbol. `Args` is a tuple of Rust argument types
 //!   (`()`, `(A,)`, `(A, B)`, … up to arity 12); each element must
 //!   implement [`crate::abi::traits::LeanAbi`]. `R` is the return type, bounded
-//!   by [`DecodeCallResult`] — a sealed trait satisfied by every
+//!   by [`DecodeCallResult`]—a sealed trait satisfied by every
 //!   [`crate::abi::traits::LeanAbi`] type (pure call) and by [`LeanIo<T>`] for
 //!   `T: crate::abi::traits::TryFromLean` (IO-returning Lean export).
-//! - [`LeanIo<T>`] — return-type marker for Lean exports declared
+//! - [`LeanIo<T>`]—return-type marker for Lean exports declared
 //!   `IO α`. Writing `exported_unchecked::<Args, LeanIo<T>>(name)` tells the
 //!   handle to compose `decode_io` before
 //!   [`crate::abi::traits::TryFromLean::try_from_lean`]. The `.call(...)` method
-//!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`) — the marker
+//!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`)—the marker
 //!   only lives in the type signature.
 //!
 //! `LeanModule::exported_unchecked` distinguishes function-symbol
@@ -55,7 +55,7 @@
 //! type, not in the method name. IO-ness lives in the return type rather
 //! than in a `.call_io()` method. Per-type C-ABI representation (unboxed
 //! scalar vs boxed `lean_object*`) is hidden behind [`crate::abi::traits::LeanAbi`]
-//! — Lake emits both shapes depending on the Lean type, and the typed
+//!—Lake emits both shapes depending on the Lean type, and the typed
 //! handle's function-pointer cast is generic over each arg's `CRepr`.
 //!
 //! Lake's compiled `IO α` exports take only the user-visible arguments at
@@ -131,7 +131,7 @@ pub struct LeanExported<'lean, 'lib, Args, R> {
 /// Writing `exported_unchecked::<Args, LeanIo<T>>(name)` makes [`LeanExported`]'s
 /// `.call` method compose `decode_io` before
 /// `TryFromLean::try_from_lean`, so the handle returns `LeanResult<T>`.
-/// The marker has no value — it is a pure type-level switch.
+/// The marker has no value—it is a pure type-level switch.
 ///
 /// `LeanIo<T>` cannot be constructed from outside the crate (its single
 /// field is private); it appears only in `R` positions on
@@ -158,16 +158,16 @@ enum CallableTarget {
 /// at the crate boundary.
 ///
 /// Two distinct sealed traits (rather than one shared `Sealed`) because
-/// `()`, `(u64,)`, and other tuples implement [`TryFromLean`] — a single
+/// `()`, `(u64,)`, and other tuples implement [`TryFromLean`]—a single
 /// `Sealed` blanket-implemented over `T: TryFromLean` would overlap with
 /// any per-arity `Sealed` impl on tuples. Splitting the seal by which
 /// public trait it gates removes the overlap.
 mod sealed {
     /// Sealed supertrait for [`super::LeanArgs`].
-    #[allow(unreachable_pub, reason = "sealed trait pattern — pub inside a pub(crate) module")]
+    #[allow(unreachable_pub, reason = "sealed trait pattern—pub inside a pub(crate) module")]
     pub trait SealedArgs {}
     /// Sealed supertrait for [`super::DecodeCallResult`].
-    #[allow(unreachable_pub, reason = "sealed trait pattern — pub inside a pub(crate) module")]
+    #[allow(unreachable_pub, reason = "sealed trait pattern—pub inside a pub(crate) module")]
     pub trait SealedResult {}
 }
 
@@ -209,11 +209,11 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
 /// Sealed via `SealedResult`; downstream cannot implement it.
 /// Two implementors:
 ///
-/// - blanket `impl<T: LeanAbi<'lean>> DecodeCallResult<'lean> for T` —
+/// - blanket `impl<T: LeanAbi<'lean>> DecodeCallResult<'lean> for T`—
 ///   the *pure* path; `CRepr = T::CRepr`, `Output = T`; `decode_c` is
 ///   `T::from_c(c, rt)`.
 /// - special `impl<T: TryFromLean<'lean>> DecodeCallResult<'lean> for
-///   LeanIo<T>` — the *IO* path; `CRepr = *mut lean_object` (the IO
+///   LeanIo<T>`—the *IO* path; `CRepr = *mut lean_object` (the IO
 ///   result wrapper), `Output = T`; `decode_c` wraps the pointer in
 ///   `Obj`, runs `decode_io`, then `T::try_from_lean`.
 ///
@@ -239,7 +239,7 @@ pub trait DecodeCallResult<'lean>: Sized + sealed::SealedResult {
     ///
     /// # Errors
     ///
-    /// Returns whatever the underlying decoder returns —
+    /// Returns whatever the underlying decoder returns—
     /// [`LeanAbi::from_c`] for the pure path, `decode_io` chained into
     /// `TryFromLean::try_from_lean` for the IO path.
     #[doc(hidden)]
@@ -279,7 +279,7 @@ where
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on DecodeCallResult::decode_c"
+        reason = "sealed trait—caller invariant documented on DecodeCallResult::decode_c"
     )]
     fn decode_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<T> {
         // SAFETY: `c` is an owned `lean_io_result_*` returned by an
@@ -324,7 +324,7 @@ impl<Args, R> core::fmt::Debug for LeanExported<'_, '_, Args, R> {
 /// `lean_inc` it, and return the bumped pointer.
 ///
 /// The same logic appears in the arity-0 stamped `.call` impl on the
-/// Global branch — extracted here so the per-arity macro stays small.
+/// Global branch—extracted here so the per-arity macro stays small.
 ///
 /// # Safety
 ///
@@ -380,10 +380,10 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     ///
     /// - the symbol is not exported by this module's library;
     /// - the symbol is a Lean nullary-constant global (data-section
-    ///   symbol) and `Args::ARITY > 0` — the function-vs-global mismatch
+    ///   symbol) and `Args::ARITY > 0`—the function-vs-global mismatch
     ///   is diagnosed at lookup so the next `.call` cannot SIGBUS;
     /// - the symbol is a Lean nullary-constant global and `R` is
-    ///   [`LeanIo<_>`] — globals are never IO-returning in Lean, so the
+    ///   [`LeanIo<_>`]—globals are never IO-returning in Lean, so the
     ///   decoder cannot apply.
     pub unsafe fn exported_unchecked<Args, R>(&self, name: &str) -> LeanResult<LeanExported<'lean, 'lib, Args, R>>
     where
@@ -431,7 +431,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
 ///
 /// Invoked once per arity 0..=12. Each invocation spells out the
 /// per-slot `<$A as LeanAbi<'lean>>::CRepr` arguments in the function
-/// pointer signature — stable Rust has no token-counting expansion that
+/// pointer signature—stable Rust has no token-counting expansion that
 /// would let us synthesise N copies of the type from a count.
 ///
 /// The macro takes only the typed-arg list `(A1 a1, ..., AN aN)` plus
@@ -536,7 +536,7 @@ macro_rules! impl_arity {
                         $(let $a = $a.into_c(runtime);)*
                         // SAFETY: per-arg ownership transferred per
                         // Lake's `lean_obj_arg` contract; the return
-                        // value owns one refcount (or is a scalar — no
+                        // value owns one refcount (or is a scalar—no
                         // refcount obligation).
                         unsafe { f($($a,)*) }
                     }

@@ -3,13 +3,13 @@
 Run the capability runner from a clean checkout:
 
 ```sh
-cargo run -p lean-rs-worker --example worker_capability_runner
+cargo run -p lean-rs-worker-child --example worker_capability_runner
 ```
 
-This is the normal downstream shape for a project that wants a Lean worker process, live rows, typed decoding,
-diagnostics, timeout policy, terminal completion, and explicit worker cycling without writing a subprocess protocol. It
-uses the generic fixture under [`fixtures/interop-shims/`](../../fixtures/interop-shims/); the command names are shaped
-like a downstream tool, but the row schemas are deliberately small fixture schemas.
+This is the normal path for a project that wants a Lean worker process, live rows, typed decoding, diagnostics, timeout
+policy, terminal completion, and explicit worker cycling without writing a subprocess protocol. It uses the generic
+fixture under [`fixtures/interop-shims/`](../../fixtures/interop-shims/); the command names resemble a downstream tool,
+but the row schemas are deliberately small fixture schemas.
 
 If you are packaging your own application, start with [`ship-crate-with-lean.md`](ship-crate-with-lean.md). That recipe
 shows the `build.rs` helper, runtime capability open, and app-owned worker child binary. This page explains the worker
@@ -103,4 +103,4 @@ The worker crates do not define business commands or row schemas. A downstream p
 - any ranking, indexing, or domain-specific interpretation.
 
 The fixture uses command-like names such as `version`, `doctor`, `extract`, `features`, `index`, and `probe` only to
-exercise the generic worker capability layer. They are examples of shape, not APIs that the worker crates reserve.
+exercise the generic worker capability layer. They are examples, not APIs reserved by the worker crates.

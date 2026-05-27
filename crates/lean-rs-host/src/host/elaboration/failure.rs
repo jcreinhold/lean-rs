@@ -1,4 +1,4 @@
-//! [`LeanElabFailure`] — the typed-diagnostic payload returned by the
+//! [`LeanElabFailure`]—the typed-diagnostic payload returned by the
 //! inner `Result` of [`crate::LeanSession::elaborate`] and by the
 //! non-`Checked` variants of [`crate::host::evidence::LeanKernelOutcome`].
 //!
@@ -53,7 +53,7 @@ impl LeanElabFailure {
 
     /// Project to the stable [`LeanDiagnosticCode`] taxonomy.
     ///
-    /// Always [`LeanDiagnosticCode::Elaboration`] — the variant is here
+    /// Always [`LeanDiagnosticCode::Elaboration`]—the variant is here
     /// for uniformity with [`lean_rs::LeanError::code`] and
     /// [`LeanMetaResponse::code`](crate::host::meta::LeanMetaResponse::code).
     #[must_use]
@@ -64,7 +64,7 @@ impl LeanElabFailure {
     /// Construct a one-message failure carrying a host-synthesised
     /// error diagnostic (no Lean source). Used by
     /// [`crate::LeanSession::run_meta`] when a capability dylib does
-    /// not export the requested meta service — there is no Lean shim
+    /// not export the requested meta service—there is no Lean shim
     /// to produce diagnostics, so the host stack builds one itself.
     /// `truncated` is always `false` for synthesised failures.
     pub(crate) fn synthetic(message: String, file_label: String) -> Self {

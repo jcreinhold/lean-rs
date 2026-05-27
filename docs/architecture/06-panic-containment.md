@@ -138,7 +138,7 @@ The `LeanWorkerConfig` docstring states the policy at the public surface. The su
 before any explicit `LeanWorkerConfig::env(...)` entries, so a caller who has independently arranged for the demangler
 module to be initialized can opt back into a demangled backtrace with `.env("LEAN_BACKTRACE", "1")`.
 
-In-process embedders that use `LeanHost` directly (not via worker) are not affected by this default — they own their own
+In-process embedders that use `LeanHost` directly (not via worker) are not affected by this default—they own their own
 process environment, and the host shim's `import Lean` transitively initializes `Lean.Compiler.NameDemangling`, so the
 panic-time demangler callback resolves cleanly. The worker child is the case that needs the explicit boundary.
 
@@ -146,7 +146,7 @@ panic-time demangler callback resolves cleanly. The worker child is the case tha
 
 `LEAN_ABORT_ON_PANIC=1` turns a Lean internal panic into `abort()` → `SIGABRT`. The parent supervisor recognises that
 fatal exit by reading EOF on the child's stdout and translating it to `LeanWorkerError::ChildPanicOrAbort { exit }`.
-That round trip is fast — *unless* the kernel suspends the dying child to feed its core image to a pipe-based
+That round trip is fast—*unless* the kernel suspends the dying child to feed its core image to a pipe-based
 `core_pattern` handler.
 
 On GitHub Actions `ubuntu-latest`, the runner inherits Ubuntu's default `core_pattern`, which pipes the core image to

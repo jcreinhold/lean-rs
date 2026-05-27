@@ -1,8 +1,8 @@
 //! Raw FFI bindings for the Lean 4 C ABI.
 //!
 //! **Calling any function in this crate is `unsafe`.** Prefer the safe front
-//! door in [`lean-rs`](https://docs.rs/lean-rs) — specifically its `host`,
-//! `module`, and `error` modules — for almost all use cases. Raw FFI is the
+//! door in [`lean-rs`](https://docs.rs/lean-rs)—specifically its `host`,
+//! `module`, and `error` modules—for almost all use cases. Raw FFI is the
 //! escape hatch for embedders who need it.
 //!
 //! Raw functions inherit Lean's C ABI ownership rules:

@@ -2,7 +2,7 @@
 //! `Result<T, E>`.
 //!
 //! Lean's `Except ε α` is a two-constructor inductive whose declaration
-//! order — `error` then `ok` — is load-bearing for the C ABI tag:
+//! order—`error` then `ok`—is load-bearing for the C ABI tag:
 //!
 //! ```text
 //! inductive Except (ε : Type u) (α : Type v) where
@@ -42,9 +42,9 @@ use crate::runtime::obj::Obj;
 /// impls below.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Except<E, T> {
-    /// Constructor `Except.error e` — tag 0.
+    /// Constructor `Except.error e`—tag 0.
     Error(E),
-    /// Constructor `Except.ok a` — tag 1.
+    /// Constructor `Except.ok a`—tag 1.
     Ok(T),
 }
 
@@ -140,7 +140,7 @@ mod lean_abi_impls {
         }
         #[allow(
             clippy::not_unsafe_ptr_arg_deref,
-            reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+            reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
         )]
         fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
             // SAFETY: `c` is a `lean_obj_res` owning one refcount per
@@ -162,7 +162,7 @@ mod lean_abi_impls {
         }
         #[allow(
             clippy::not_unsafe_ptr_arg_deref,
-            reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+            reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
         )]
         fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
             // SAFETY: `c` is a `lean_obj_res` owning one refcount per

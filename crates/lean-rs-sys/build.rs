@@ -12,7 +12,7 @@
 //!    `mimalloc`).
 //! 5. Emit `cargo:rerun-if-*` for the discovery inputs.
 
-// Build scripts panic to abort the build with a diagnostic — that is the
+// Build scripts panic to abort the build with a diagnostic—that is the
 // correct failure mode here, not a smell.
 #![allow(clippy::panic, clippy::manual_assert)]
 

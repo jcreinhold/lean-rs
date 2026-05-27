@@ -5,7 +5,7 @@
 //! 1. Bring up the Lean runtime + open the fixture library via
 //!    [`fixture_library`] and initialize the root module inline.
 //! 2. Build a Rust value, marshal it through [`IntoLean`] (or a `from_*`
-//!    helper) into a Lean object — done implicitly by `LeanExported::call`
+//!    helper) into a Lean object—done implicitly by `LeanExported::call`
 //!    for typed-handle round trips.
 //! 3. Look up the fixture export by name through
 //!    `unsafe { module.exported_unchecked::<Args, R>(...) }`
@@ -949,7 +949,7 @@ fn io_failure_decodes_inner_except() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    // `IO (Except String Nat)` — outer IO succeeds, inner Except carries
+    // `IO (Except String Nat)`—outer IO succeeds, inner Except carries
     // the failure. We get the inner `Obj<'_>` then walk the ctor.
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let f = unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_failure") }.expect("lookup");

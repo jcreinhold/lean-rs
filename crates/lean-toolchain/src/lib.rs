@@ -18,7 +18,7 @@
 //! ## Layering
 //!
 //! `lean-rs-sys → lean-toolchain → lean-rs`. Raw `lean_*` symbols never appear in this
-//! crate's public surface — they remain in `lean-rs-sys` and reach the safe layers through
+//! crate's public surface—they remain in `lean-rs-sys` and reach the safe layers through
 //! `lean-rs`'s `pub(crate)` modules.
 
 #![forbid(unsafe_code)]
@@ -64,7 +64,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Curated allowlist of `LEAN_EXPORT` symbols the workspace relies on.
 ///
-/// Returns [`lean_rs_sys::REQUIRED_SYMBOLS`] directly — the allowlist lives in
+/// Returns [`lean_rs_sys::REQUIRED_SYMBOLS`] directly—the allowlist lives in
 /// exactly one place. Use this through `lean-toolchain` so consumer crates do
 /// not also need a direct `lean-rs-sys` dependency just to enumerate symbol
 /// names.

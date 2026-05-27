@@ -6,13 +6,13 @@ Run the worked example from a clean checkout:
 cargo run -p lean-rs --example interop_callback
 ```
 
-The example stays below `lean-rs-host`. Rust builds a generic Lean interop shim target and a downstream-style Lake
-target, opens both dylibs through `lean-rs`, calls one ordinary Lean export, and then lets Lean call a Rust callback
-through `LeanCallbackHandle`.
+The example uses `lean-rs` directly. Rust builds a generic Lean interop shim target and a downstream-style Lake target,
+opens both dylibs through `lean-rs`, calls one ordinary Lean export, and then lets Lean call a Rust callback through
+`LeanCallbackHandle`.
 
-This is the advanced L1 same-process path. Use it when the Lean extension is trusted, lives in the same process, and
-really needs to push data back into Rust before the exported function returns. Worker-style applications should start
-with [`worker-capability-runner.md`](worker-capability-runner.md), where the worker crates hide callbacks behind typed
+This is the advanced same-process path. Use it when the Lean extension is trusted, lives in the same process, and really
+needs to push data back into Rust before the exported function returns. Worker-style applications should start with
+[`worker-capability-runner.md`](worker-capability-runner.md), where the worker crates hide callbacks behind typed
 commands, live rows, diagnostics, terminal summaries, timeouts, and worker cycling.
 
 The snippets below intentionally use `LeanModule::exported_unchecked`: this recipe demonstrates the lower-level escape

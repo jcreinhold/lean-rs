@@ -4,9 +4,9 @@ The worker crates needs a row stream for downstream protocols that produce arbit
 running. The host-session adapter can already return copied theorem-prover values and progress events, but that is not
 enough for tools that need a sequence of downstream-owned rows such as JSONL-like `lean-dup` output.
 
-Worker data rows are worker IPC data. They are not L1 callback payloads and not Lean runtime handles. The worker owns
-process framing, ordering, cancellation boundaries, fatal-exit behavior, and sink panic containment. Downstream crates
-own the row schema.
+Worker data rows are worker IPC data. They are not same-process callback payloads and not Lean runtime handles. The
+worker owns process framing, ordering, cancellation boundaries, fatal-exit behavior, and sink panic containment.
+Downstream crates own the row schema.
 
 ## Public Row Shape
 
@@ -59,7 +59,7 @@ does not absorb downstream domain schemas.
 every consumer. It also competes with structured worker diagnostics and progress for the same untyped channel. That
 would make each downstream tool reimplement the worker protocol outside the worker.
 
-**Public cross-process callbacks.** Rejected. `LeanCallbackHandle` is an in-process L1 mechanism. Its handle lifetime,
+**Public cross-process callbacks.** Rejected. `LeanCallbackHandle` is a same-process mechanism. Its handle lifetime,
 trampoline values, refcount rules, panic containment, and wrong-payload checks are valid only inside one process.
 Passing those handles across the worker boundary would turn an in-process FFI tool into an IPC API and leak exactly the
 mechanics the worker exists to hide.
@@ -68,28 +68,28 @@ mechanics the worker exists to hide.
 rows while preserving the worker's deep module boundary. Callers learn a row sink and a row type; they do not learn
 frame bytes, pipe reads, child exits, callback handles, or terminal-response frames.
 
-## Relationship To L1 Callback Payloads
+## Relationship To Callback Payloads
 
-The child may use in-process L1 callbacks to collect strings from a Lean export, but those callbacks remain child-local.
+The child may use in-process callbacks to collect strings from a Lean export, but those callbacks remain child-local.
 For the first streaming runner, the child registers a `LeanCallbackHandle<LeanStringEvent>`, parses each callback string
 as a row, diagnostic, or terminal-metadata envelope, and sends private worker frames to the parent. The parent sees
 `LeanWorkerDataRow`, `LeanWorkerDiagnosticSink` events, and a terminal summary; callback handles stay inside the child.
 
-Byte streaming and Lean-object callbacks stay in the L1 callback-payload track. They require their own ABI and soundness
-work because they change how Lean data enters Rust in one process. Worker row streaming does not shortcut that work: it
-serializes process-safe JSON values over IPC.
+Byte streaming and Lean-object callbacks stay in the same-process callback-payload track. They require their own ABI and
+soundness work because they change how Lean data enters Rust in one process. Worker row streaming does not shortcut that
+work: it serializes process-safe JSON values over IPC.
 
 The reverse is also true: worker row streaming does not need wider callback payloads. Worker-class data already travels
-to the parent as JSON or validated raw JSON frames. Add byte or object callback payloads only for real same-process L1
+to the parent as JSON or validated raw JSON frames. Add byte or object callback payloads only for real same-process
 interop needs, not to improve worker ergonomics.
 
 ## Consumer Guidance
 
-Use direct L1 string callbacks when the Lean extension is trusted, in-process, and the application does not need crash
+Use direct string callbacks when the Lean extension is trusted, in-process, and the application does not need crash
 isolation or memory reset.
 
 Use worker data rows when the application needs the worker process boundary. The row payload can be any JSON value, but
-The worker crates treats it as data. Schema ownership remains with the downstream crate.
+the worker crates treat it as data. Schema ownership remains with the downstream crate.
 
 For throughput, private `DataRow` frames carry validated raw JSON payloads. The public schema-less `LeanWorkerDataRow`
 still exposes `serde_json::Value`; that conversion happens only for callers that choose the low-level raw-row API. The

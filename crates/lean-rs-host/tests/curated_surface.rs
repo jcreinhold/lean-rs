@@ -3,7 +3,7 @@
 //! sufficient to drive a Lean capability from runtime init through
 //! kernel-checked evidence and back to a `ProofSummary`.
 //!
-//! This test deliberately uses only `use lean_rs::{...};` imports — no
+//! This test deliberately uses only `use lean_rs::{...};` imports—no
 //! `lean_rs::host::*`, `lean_rs::module::*`, or `lean_rs::error::*`
 //! paths. If it fails to compile because a name is missing, the curated
 //! surface in `crates/lean-rs/src/lib.rs` and the classification table

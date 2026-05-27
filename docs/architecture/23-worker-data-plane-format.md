@@ -15,7 +15,7 @@ The normal downstream surface remains the worker capability layer:
 The data-plane format is an implementation detail below that surface. Changing it is justified only by an end-to-end
 worker workload, not by a standalone encoding microbenchmark.
 
-L1 callback payload expansion is deliberately unrelated. Same-process callbacks remain the `lean-rs` mechanism layer.
+Callback payload expansion is deliberately unrelated. Same-process callbacks remain the `lean-rs` mechanism layer.
 Worker row throughput is a worker IPC question and should be solved with worker framing, scheduling, chunking, and
 measured encoding changes.
 

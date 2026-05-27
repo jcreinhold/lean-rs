@@ -13,7 +13,7 @@ The example uses `LeanWorkerCapabilityBuilder` to build the downstream Lake targ
 session, validate capability metadata, run a streaming Lean export, print JSONL-like rows, cycle the worker, and prove
 that the next request succeeds in a fresh child.
 
-Use this path when the application needs process isolation or memory cycling. Use direct L1 callbacks, such as
+Use this path when the application needs process isolation or memory cycling. Use direct same-process callbacks, such as
 [`string-callback-streaming.md`](string-callback-streaming.md), when the Lean extension is trusted and same-process
 execution is acceptable.
 

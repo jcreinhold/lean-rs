@@ -4,7 +4,7 @@
 //!
 //! Imports every symbol named in [`lean_toolchain::required_symbols`] through
 //! the `lean_rs_sys::*` consumer surface and takes its address. If any symbol
-//! is missing from the linked Lean runtime, this binary fails to link — the
+//! is missing from the linked Lean runtime, this binary fails to link—the
 //! same failure mode the sys-internal test catches, but verified through the
 //! dependency graph `lean-toolchain` consumers actually see.
 

@@ -147,7 +147,7 @@ where
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };

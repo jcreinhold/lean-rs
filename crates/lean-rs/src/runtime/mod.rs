@@ -1,9 +1,9 @@
 //! Process-wide Lean runtime anchor.
 //!
-//! The L1 lifetime-bound owned-object handle [`obj::Obj`] (with its
+//! The lifetime-bound owned-object handle [`obj::Obj`] (with its
 //! borrowed view [`obj::ObjRef`]) is `pub` here so the sibling
 //! `lean-rs-host` crate can wrap them inside its host-defined handle
-//! types. The init cell and thread-attach helpers stay `pub(crate)` —
+//! types. The init cell and thread-attach helpers stay `pub(crate)`—
 //! callers reach them through [`LeanRuntime::init`] and
 //! [`LeanThreadGuard::attach`] re-exported at the crate root.
 //!

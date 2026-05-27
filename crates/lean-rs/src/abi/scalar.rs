@@ -62,7 +62,7 @@ fn require_scalar(obj: &Obj<'_>, expected: &str) -> LeanResult<()> {
     if unsafe { lean_is_scalar(ptr) } {
         Ok(())
     } else {
-        // SAFETY: non-scalar branch — `obj_tag` reads `m_tag`, which is valid
+        // SAFETY: non-scalar branch—`obj_tag` reads `m_tag`, which is valid
         // for any non-scalar Lean heap object we hold (`Obj` ownership).
         let found_tag = unsafe { lean_obj_tag(ptr) };
         Err(wrong_kind(expected, found_tag))
@@ -105,7 +105,7 @@ impl<'lean> TryFromLean<'lean> for () {
         // Unit has a single inhabitant; the payload value is `0` by
         // construction. We do not assert on the unbox result because a
         // future Lean encoding change (e.g. tag != 0 for Unit) should not
-        // silently fail at this layer — the ctor decoder catches true
+        // silently fail at this layer—the ctor decoder catches true
         // mismatches at the surrounding constructor boundary.
         Ok(())
     }
@@ -266,7 +266,7 @@ impl<'lean> IntoLean<'lean> for char {
         // Lean's `Char` is a `uint32_t` Unicode scalar value. In a
         // polymorphic position Lean's `UInt32` is scalar-tagged on 64-bit
         // hosts (the encoding `lean_unbox_uint32` falls back to on 64-bit)
-        // — keep the impl simple and unified with `u32`.
+        //—keep the impl simple and unified with `u32`.
         u32::from(self).into_lean(runtime)
     }
 }
@@ -317,7 +317,7 @@ impl<'lean> TryFromLean<'lean> for f64 {
 // match these per-arg CRepr types, then dispatches.
 //
 // `Unit` uses `*mut lean_object` (boxed) because Lake encodes `Unit`
-// arguments as `lean_box(0)` at the C boundary — verified against
+// arguments as `lean_box(0)` at the C boundary—verified against
 // `fixtures/lean/.lake/build/ir/LeanRsFixture/Scalars.c`
 // (`lean_rs_fixture_unit_id(lean_object*)`).
 
@@ -330,7 +330,7 @@ impl<'lean> LeanAbi<'lean> for () {
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: take ownership for Drop; consumes the returned object.

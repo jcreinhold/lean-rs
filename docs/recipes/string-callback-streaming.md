@@ -6,9 +6,9 @@ Run the example from a clean checkout:
 cargo run -p lean-rs --example string_streaming
 ```
 
-This recipe stays below `lean-rs-host`. It shows the advanced L1 same-process mechanism for sending strings from a Lean
-export to Rust through `LeanCallbackHandle<LeanStringEvent>`. `lean-rs` owns the callback handle, trampoline, string
-copy, stale-handle status, and panic boundary. Any row schema belongs to the downstream application.
+This recipe uses `lean-rs` directly. It shows the advanced same-process mechanism for sending strings from a Lean export
+to Rust through `LeanCallbackHandle<LeanStringEvent>`. `lean-rs` owns the callback handle, trampoline, string copy,
+stale-handle status, and panic boundary. Any row schema belongs to the downstream application.
 
 Do not use this as the public interface for a worker-style tool. If the caller needs process isolation, live rows,
 diagnostics, terminal summaries, timeout policy, or memory cycling, use

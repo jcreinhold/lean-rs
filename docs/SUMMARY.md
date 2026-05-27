@@ -43,7 +43,7 @@
 - [Lean-side worker streaming](architecture/24-lean-side-worker-streaming.md)
 - [Mathlib-scale worker fixture](architecture/25-mathlib-scale-worker-fixture.md)
 - [Worker pool observability](architecture/26-worker-pool-observability.md)
-- [Lean-dup readiness](architecture/27-lean-dup-readiness.md)
+- [Downstream worker replacement fixture](architecture/27-lean-dup-readiness.md)
 - [Production-scale release](architecture/28-production-scale-release.md)
 
 # Recipes

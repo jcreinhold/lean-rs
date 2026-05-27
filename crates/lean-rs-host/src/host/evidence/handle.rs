@@ -13,7 +13,7 @@ use lean_rs::error::LeanResult;
 /// [`crate::host::evidence::LeanKernelOutcome::Checked`] branch returned
 /// by [`crate::LeanSession::kernel_check`]. The Rust handle wraps the
 /// Lean-side `Evidence` value (currently a one-field structure carrying
-/// a `Lean.Declaration`) opaquely — Rust does not inspect the contained
+/// a `Lean.Declaration`) opaquely—Rust does not inspect the contained
 /// proof term or declaration. The two operations callers do with a
 /// handle are [`crate::LeanSession::check_evidence`] (re-run the kernel
 /// against it) and [`crate::LeanSession::summarize_evidence`] (project

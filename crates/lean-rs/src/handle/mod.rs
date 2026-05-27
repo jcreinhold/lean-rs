@@ -6,7 +6,7 @@
 //! [`crate::LeanRuntime::init`] and the underlying refcount obligation is
 //! honoured automatically. Construction and inspection live on the Lean
 //! side: the Rust handle has no public methods to mint, decode, or compare
-//! the value it carries — those operations require knowledge of Lean
+//! the value it carries—those operations require knowledge of Lean
 //! constructor layout, which by charter belongs to Lean code, not to this
 //! crate.
 //!

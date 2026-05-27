@@ -1,6 +1,6 @@
 //! Structured progress reporting for host-session operations.
 //!
-//! Progress is host policy layered over the L1 `lean-rs` scoped progress
+//! Progress is host policy layered over the `lean-rs` scoped progress
 //! callback. Public callers provide a borrowed [`LeanProgressSink`]; this
 //! module maps Lean progress ticks into host phases and elapsed time.
 
@@ -37,7 +37,7 @@ pub struct LeanProgressEvent {
 /// reported many times for bulk operations.
 ///
 /// Rust panics from sinks invoked through Lean progress shims are
-/// contained by the L1 callback trampoline and returned as a host
+/// contained by the `lean-rs` callback trampoline and returned as a host
 /// internal error. Panics from host-side progress checkpoints are caught
 /// before they escape the session method.
 pub trait LeanProgressSink: Send + Sync {

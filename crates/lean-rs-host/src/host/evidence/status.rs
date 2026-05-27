@@ -3,7 +3,7 @@
 //!
 //! The Lean side encodes the outcome as a four-constructor inductive
 //! (`checked | rejected | unavailable | unsupported`); each constructor
-//! carries one object payload — the [`crate::LeanEvidence`] handle for
+//! carries one object payload—the [`crate::LeanEvidence`] handle for
 //! `Checked`, a [`LeanElabFailure`] for the other three. The constructor
 //! tags are 0..=3 in declaration order; the [`TryFromLean`] impl below
 //! does the dispatch.
@@ -30,7 +30,7 @@ pub enum EvidenceStatus {
     /// The declaration was well-formed enough to reach kernel checking,
     /// and the kernel (or the elaborator's type-check pass) refused it.
     Rejected,
-    /// The capability ran but could not produce evidence — typically a
+    /// The capability ran but could not produce evidence—typically a
     /// parse failure that aborted before the kernel could see the
     /// declaration.
     Unavailable,

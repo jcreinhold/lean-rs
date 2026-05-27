@@ -1,6 +1,6 @@
 //! Rust callback handles for Lean-to-Rust interop.
 //!
-//! This module is an L1 interop primitive. It owns the Rust side of the
+//! This module owns the same-process callback ABI. It owns the Rust side of the
 //! callback ABI: handle lifetime, trampoline selection, payload decoding,
 //! stale-handle checks, and panic containment. Lean receives two `USize`
 //! values, an opaque handle and the crate-owned trampoline, then calls back

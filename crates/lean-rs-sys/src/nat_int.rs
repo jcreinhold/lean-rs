@@ -1,4 +1,4 @@
-//! Bignum dispatch — externs from `lean.h:1334–1853` plus the small-int
+//! Bignum dispatch—externs from `lean.h:1334–1853` plus the small-int
 //! ceiling constants.
 
 use crate::types::{b_lean_obj_arg, lean_obj_res, lean_object};

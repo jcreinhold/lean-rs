@@ -3,8 +3,8 @@
 //! These types are the single representation of every shape that flows through
 //! the worker IPC. The earlier triple-layer split (host type → `pub(crate)`
 //! wire type → public worker mirror) collapsed once it became clear that the
-//! worker's "different abstraction" from the host is process supervision —
-//! not data shape — so the wire format and the public surface are the same
+//! worker's "different abstraction" from the host is process supervision—
+//! not data shape—so the wire format and the public surface are the same
 //! concern. See `docs/architecture/16-production-boundary.md` for the boundary
 //! contract.
 //!
@@ -122,7 +122,7 @@ pub struct LeanWorkerKernelResult {
 /// Projection of `lean_rs_host::ProofSummary` for the kernel-check success arm.
 ///
 /// `declaration_name` is a dotted-path rendering of the checked declaration
-/// (diagnostic only — multiple distinct `Lean.Name`s can render to the same
+/// (diagnostic only—multiple distinct `Lean.Name`s can render to the same
 /// string). `kind` is one of `"theorem"`, `"definition"`, `"axiom"`,
 /// `"opaque"`, or `"unsupported"`. `type_signature` is the pretty-printed
 /// declaration type as the host's `ProofSummary` emits it.

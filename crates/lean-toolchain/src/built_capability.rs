@@ -1,7 +1,7 @@
 //! Runtime descriptor for a Lean capability built by a downstream `build.rs`.
 //!
 //! The descriptor carries the identity of a Lean capability the consumer's
-//! build script embedded — dylib path or manifest path (either literal or via
+//! build script embedded—dylib path or manifest path (either literal or via
 //! environment variable), Lake package and module names, and any dependent
 //! dylibs. It is pure data: it does not link `libleanshared`, so the worker
 //! parent crate can consume it without dragging the Lean runtime into its

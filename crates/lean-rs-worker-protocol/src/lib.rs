@@ -12,10 +12,10 @@
 //!
 //! ## Module map
 //!
-//! - [`types`] — `serde`-derived value types that appear in request and
+//! - [`types`]—`serde`-derived value types that appear in request and
 //!   response bodies (elaboration options, kernel results, processed-file
 //!   projections, capability metadata).
-//! - [`protocol`] — the length-delimited frame codec, [`protocol::Frame`]
+//! - [`protocol`]—the length-delimited frame codec, [`protocol::Frame`]
 //!   envelope, [`protocol::Message`] message variants, and the
 //!   [`protocol::Request`] / [`protocol::Response`] / [`protocol::Diagnostic`]
 //!   / [`protocol::ProgressTick`] / [`protocol::DataRow`] /

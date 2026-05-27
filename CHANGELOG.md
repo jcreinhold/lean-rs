@@ -18,7 +18,7 @@ lookup, cursor goal lookup, and name-reference lookup no longer serialize whole-
 module-syntax files that previously killed the worker with `worker protocol frame too large` now return bounded
 structured results or explicit truncation.
 
-## [0.1.14] — 2026-05-26
+## [0.1.14]—2026-05-26
 
 ### Module-system headers in info-tree processing
 
@@ -27,7 +27,7 @@ ordinary private-scope imports, and `import all`. Files using `import all` now r
 surfacing `unknown module prefix 'all'`, and `userImports` / `missingImports` report the bare module names just as the
 legacy header path does.
 
-## [0.1.13] — 2026-05-26
+## [0.1.13]—2026-05-26
 
 ### Lake-manifest transitive search paths in shims-only sessions
 
@@ -35,7 +35,7 @@ legacy header path does.
 Shims-only sessions opened with `LeanHost::load_shims_only()` can import modules from mathlib, batteries, aesop, and
 other transitive Lake dependencies without requiring a user `:shared` dylib.
 
-## [0.1.12] — 2026-05-26
+## [0.1.12]—2026-05-26
 
 ### Shims-only host sessions
 
@@ -53,7 +53,7 @@ user `@[export]` dylibs while giving downstream tools a path that does not run `
 a session. The worker protocol adds `HostSessionMode::{Capability, ShimsOnly}` so the child can route shims-only opens
 to `LeanHost::load_shims_only()`.
 
-## [0.1.11] — 2026-05-25
+## [0.1.11]—2026-05-25
 
 ### `lean-toolchain`: worker bootstrap accepts `lakefile.toml`
 
@@ -67,10 +67,10 @@ front and dispatches declaration and package-name checks on the file extension, 
 ### `lean-rs-worker-parent`: `Display` now surfaces child stderr on fatal exits
 
 `impl Display for LeanWorkerError` previously rendered `ChildExited` / `ChildPanicOrAbort` as the exit status alone
-(`"worker exited fatally with exit status: 1"`). The captured child stderr on `LeanWorkerExit.diagnostics` — populated
-by `wait_with_stderr` for exactly this purpose since 0.1.10 — was unreachable through the `Display` surface, forcing
-every downstream that logs `tracing::error!("{err}")` or stores `err.to_string()` to pattern-match the variants and read
-the field by hand.
+(`"worker exited fatally with exit status: 1"`). The captured child stderr on `LeanWorkerExit.diagnostics`—populated by
+`wait_with_stderr` for exactly this purpose since 0.1.10—was unreachable through the `Display` surface, forcing every
+downstream that logs `tracing::error!("{err}")` or stores `err.to_string()` to pattern-match the variants and read the
+field by hand.
 
 The `Display` rendering now appends the trimmed stderr tail when non-empty:
 
@@ -85,7 +85,7 @@ string.
 
 No public-API change: the new helpers are private and the `Display` trait signature is unchanged.
 
-## [0.1.10] — 2026-05-25
+## [0.1.10]—2026-05-25
 
 Re-tagging of 0.1.9. The tag-push release workflow failed in the public-API diff step because the CI's
 `cargo-public-api` upgraded from v0.51.0 (which includes parameter names in function signatures) to v0.52.0 (which omits
@@ -93,29 +93,29 @@ them); locally regenerated baselines were on v0.51.0 and drifted against the CI 
 release regenerates every baseline with v0.52.0 and bumps the patch per `docs/release.md` step 7. Functionality
 identical to 0.1.9.
 
-## [0.1.9] — 2026-05-25
+## [0.1.9]—2026-05-25
 
 ### Worker boundary: configurable per-capability frame cap
 
 `MAX_FRAME_BYTES` is no longer a hard-coded codec ceiling. The parent negotiates a per-connection cap with the child at
 handshake time, immediately after the existing `Handshake` frame:
 
-- `Message::ConfigureFrameLimit { max_frame_bytes: u32 }` — new wire variant the parent sends after reading the child's
+- `Message::ConfigureFrameLimit { max_frame_bytes: u32 }`—new wire variant the parent sends after reading the child's
   `Handshake`; the child installs it on its codec state for the lifetime of the connection.
-- `LeanWorkerConfig::max_frame_bytes(n: u32)` and the parallel `LeanWorkerCapabilityBuilder::max_frame_bytes(n: u32)` —
+- `LeanWorkerConfig::max_frame_bytes(n: u32)` and the parallel `LeanWorkerCapabilityBuilder::max_frame_bytes(n: u32)`—
   the supervisor and capability-builder setters. Values are clamped at the public boundary into
   `[MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP]` (64 KiB / 256 MiB), so the child only ever sees a sanitised value.
-- `MIN_FRAME_BYTES` and `MAX_FRAME_BYTES_HARD_CAP` — new public constants describing the clamp bounds. `MAX_FRAME_BYTES`
+- `MIN_FRAME_BYTES` and `MAX_FRAME_BYTES_HARD_CAP`—new public constants describing the clamp bounds. `MAX_FRAME_BYTES`
   (1 MiB) keeps its name and value, role changes from "hard limit baked into the codec" to "default cap the supervisor
   applies when no caller overrides".
 - `protocol::write_frame` / `protocol::read_frame` gain a `max_frame_bytes: u32` parameter; the codec trusts whatever
   cap the caller (supervisor or child) passes. There is no caller-facing change for callers who do not override the cap.
-- `PROTOCOL_VERSION` bumps from 3 to 4 — the existing handshake mismatch check is the structural guard against an
-  old↔new pairing slipping into the `ConfigureFrameLimit` step.
+- `PROTOCOL_VERSION` bumps from 3 to 4—the existing handshake mismatch check is the structural guard against an old↔new
+  pairing slipping into the `ConfigureFrameLimit` step.
 
-This makes tools whose single logical result is a frame — outlines of large modules, full-file diagnostics, future
-"render the whole info tree" cap shapes — opt into a larger envelope without forking the protocol crate. Existing tools
-see the same 1 MiB default.
+This makes tools whose single logical result is a frame—outlines of large modules, full-file diagnostics, future "render
+the whole info tree" cap shapes—opt into a larger envelope without forking the protocol crate. Existing tools see the
+same 1 MiB default.
 
 ### `lean-toolchain`: delete `lake_target_declared`, expose `declared_lean_libs`
 
@@ -124,26 +124,26 @@ every `lakefile.toml` project. Its single caller in `lean-rs-worker-parent` alre
 `discover_lake_modules` parses both lakefile formats. The format-aware helper was a parallel implementation of a check
 the surrounding code could satisfy from existing state, so it is removed and the planner inlines the lookup against a
 new `LeanLakeProjectModules::declared_lean_libs: Vec<String>` field. The field preserves the "explicitly declared by the
-lakefile" semantics that motivated the old helper — top-level-fallback projects produce an empty `declared_lean_libs`,
-so a loose `Demo.lean` at project root without a matching `lean_lib` is still rejected by the worker bootstrap.
+lakefile" semantics that motivated the old helper—top-level-fallback projects produce an empty `declared_lean_libs`, so
+a loose `Demo.lean` at project root without a matching `lean_lib` is still rejected by the worker bootstrap.
 
 - Added: `LeanLakeProjectModules::declared_lean_libs: Vec<String>`.
 - Removed: `lean_toolchain::lake_target_declared` and its unit test.
 
 ### `lean-rs-worker-parent`: bind toolchain identity to `LeanWorkerChild`
 
-A worker child binary is built against one Lean toolchain — its rpath points at one `libleanshared`, and `LEAN_SYSROOT`
-at spawn time must point at the matching stdlib oleans. The locator now carries both:
+A worker child binary is built against one Lean toolchain—its rpath points at one `libleanshared`, and `LEAN_SYSROOT` at
+spawn time must point at the matching stdlib oleans. The locator now carries both:
 
-- `LeanWorkerChild::for_toolchain(path, sysroot)` — name-and-toolchain constructor.
-- `LeanWorkerChild::lean_sysroot(sysroot)` — explicit sysroot setter on an existing locator.
+- `LeanWorkerChild::for_toolchain(path, sysroot)`—name-and-toolchain constructor.
+- `LeanWorkerChild::lean_sysroot(sysroot)`—explicit sysroot setter on an existing locator.
 
 The supervisor sets `LEAN_SYSROOT` from the locator (falling back to `lean_toolchain::discover_toolchain` when no
 explicit sysroot is bound) before `Command::spawn`. A single parent process can now host workers for multiple toolchains
 by giving each `LeanWorkerCapability` its own `LeanWorkerChild::for_toolchain` locator; downstream consumers
 (`lean-host-mcp`) drop their "one server per toolchain" workaround.
 
-`LeanWorkerCapabilityBuilder` deliberately does **not** grow a general `env(key, value)` passthrough — each env var the
+`LeanWorkerCapabilityBuilder` deliberately does **not** grow a general `env(key, value)` passthrough—each env var the
 worker child needs gets a typed builder method whose name describes the invariant it enforces. The rustdoc on
 `LeanWorkerChild` documents this discipline as a load-bearing API contract.
 
@@ -156,24 +156,24 @@ handshake error path now goes through the same helper. Bootstrap failures surfac
 `exit.diagnostics` carries the underlying loader message, in the same shape as runtime crashes. `Handshake { message }`
 survives for the legitimate case where the child completes the handshake but sends a malformed or wrong-version frame.
 
-## [0.1.8] — 2026-05-25
+## [0.1.8]—2026-05-25
 
 ### Worker boundary: split into three sibling crates
 
 `lean-rs-worker` is replaced by three crates that separate concerns at the link-graph boundary:
 
-- **`lean-rs-worker-protocol`** — wire types and frame codec. Depends only on `serde` / `serde_json`. Does not link
+- **`lean-rs-worker-protocol`**—wire types and frame codec. Depends only on `serde` / `serde_json`. Does not link
   `libleanshared`. The `harness` Cargo feature exposes the in-memory frame exerciser and fake-worker test affordances.
   Every public `enum` and field-bearing `struct` is `#[non_exhaustive]` so additive variants do not require a major
   bump.
-- **`lean-rs-worker-parent`** — parent-side supervisor, pool, planning, capability, and session. Depends on
+- **`lean-rs-worker-parent`**—parent-side supervisor, pool, planning, capability, and session. Depends on
   `lean-rs-worker-protocol` and `lean-toolchain`. **Does not link `libleanshared`.** A parent binary that only depends
   on `lean-rs-worker-parent` is free to dispatch to per-toolchain worker children at runtime without being rpath-pinned
   at link time. The crate re-exports the wire types that appear in its public signatures so the common path is a single
   dependency.
-- **`lean-rs-worker-child`** — child runtime and the `lean-rs-worker-child` binary. Depends on
-  `lean-rs-worker-protocol`, `lean-rs`, `lean-rs-host`, and `lean-toolchain`. The only worker crate that links
-  `libleanshared`. The integration tests, examples, and benchmarks that drive a real Lean runtime live here.
+- **`lean-rs-worker-child`**—child runtime and the `lean-rs-worker-child` binary. Depends on `lean-rs-worker-protocol`,
+  `lean-rs`, `lean-rs-host`, and `lean-toolchain`. The only worker crate that links `libleanshared`. The integration
+  tests, examples, and benchmarks that drive a real Lean runtime live here.
 
 The old `lean-rs-worker` crate is removed. There is no shim and no compile_error stub; consumers swap
 `lean-rs-worker = "0.1.7"` for `lean-rs-worker-parent = "0.1.8"` (parent process) and `lean-rs-worker-child = "0.1.8"`
@@ -211,20 +211,20 @@ shape is unchanged.
 ### Migration
 
 ```toml
-# Cargo.toml — parent process (the common case)
+# Cargo.toml—parent process (the common case)
 - lean-rs-worker = "0.1.7"
 + lean-rs-worker-parent = "0.1.8"
 
-# Cargo.toml — separate worker binary
+# Cargo.toml—separate worker binary
 + lean-rs-worker-child = "0.1.8"
 ```
 
 ```rust
-// imports — parent surface
+// imports—parent surface
 - use lean_rs_worker::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerPool};
 + use lean_rs_worker_parent::{LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerPool};
 
-// imports — wire types (only when working with the protocol directly)
+// imports—wire types (only when working with the protocol directly)
 - use lean_rs_worker::{Request, Response, LeanWorkerElabOptions};
 + use lean_rs_worker_protocol::{Request, Response, LeanWorkerElabOptions};
 ```
@@ -232,7 +232,7 @@ shape is unchanged.
 Test-only helpers move from `lean_rs_worker::__test_support` to `lean_rs_worker_protocol::harness` and require the
 `harness` feature on `lean-rs-worker-protocol`.
 
-## [0.1.7] — 2026-05-24
+## [0.1.7]—2026-05-24
 
 ### `lean-rs-worker` 0.1.7
 
@@ -245,14 +245,14 @@ the worker IPC boundary. Both restore behaviour that the host already implements
 - `LeanWorkerSession::infer_type` and `whnf` now attempt notation-aware rendering via the optional `meta_pp_expr` shim
   (`Lean.PrettyPrinter.ppExpr`) and fall back to `Expr.toString` when the shim is absent or reports `Unsupported`. Both
   return `LeanWorkerMetaResult<LeanWorkerRendered>` so callers can see which path was taken via the `rendering`
-  (`LeanWorkerRendering::Pretty | Raw`) field. Heartbeat budget is shared with the primary meta call — a slow
-  pretty-print on a deeply nested term can in principle starve the meta op (acceptable in practice; `pp_expr` is cheap
-  relative to inference).
+  (`LeanWorkerRendering::Pretty | Raw`) field. Heartbeat budget is shared with the primary meta call—a slow pretty-print
+  on a deeply nested term can in principle starve the meta op (acceptable in practice; `pp_expr` is cheap relative to
+  inference).
 - A failed `pp_expr` pass (`Failed` / `TimeoutOrHeartbeat`) propagates as the meta call's failure rather than falling
   back to raw. Matches the in-process behaviour the downstream MCP tool already implements.
 - Bumped the worker IPC `PROTOCOL_VERSION` from `2` to `3`. The added `summary` field on `LeanWorkerKernelResult` and
   the changed `MetaExpr` payload (`LeanWorkerMetaResult<LeanWorkerRendered>` instead of `<String>`) are
-  wire-incompatible with 0.1.6 — a mismatched parent/child pair now fails the handshake with a clear
+  wire-incompatible with 0.1.6—a mismatched parent/child pair now fails the handshake with a clear
   `LeanWorkerError::Handshake` rather than a cryptic deserialize error on the first request.
 
 Pre-1.0; the changed return types on `infer_type` / `whnf` and the added field on `LeanWorkerKernelResult` break 0.1.6
@@ -263,7 +263,7 @@ callers at the call-site. No other crate in the workspace changes.
 - Removed the stale post-publish step in `docs/release.md` referencing nonexistent `lean-rs-downstream` and
   `lean-rs-host-downstream` proof repos. No such repositories exist under the project; the line was aspirational.
 
-## [0.1.6] — 2026-05-24
+## [0.1.6]—2026-05-24
 
 ### `lean-rs-worker` 0.1.6
 
@@ -279,12 +279,12 @@ crate, so the diff is deliberate.
 #### Eight new typed methods on `LeanWorkerSession`
 
 - Added `infer_type`, `whnf`, `is_def_eq`, `describe`, `list_declarations_strings`, `describe_bulk`, `process_file`, and
-  `process_module`. Each follows the established `elaborate` / `kernel_check` template — `ensure_open` → typed `Request`
-  → typed `Response` projection — and invalidates the session on `Cancelled` / `Timeout`.
+  `process_module`. Each follows the established `elaborate` / `kernel_check` template—`ensure_open` → typed `Request` →
+  typed `Response` projection—and invalidates the session on `Cancelled` / `Timeout`.
 - The methods compose existing `LeanSession::*` primitives in the child: `infer_type` / `whnf` run a bounded `MetaM`
   call and render the result `LeanExpr` through `LeanSession::expr_to_string_raw` (deterministic, no second MetaM
-  round-trip, same shape `ProcessedFile.TermInfo.expr_str` already uses). `describe` composes three primitives —
-  `declaration_kind`, `declaration_type`, `declaration_source_range` — into one IPC round-trip.
+  round-trip, same shape `ProcessedFile.TermInfo.expr_str` already uses). `describe` composes three primitives—
+  `declaration_kind`, `declaration_type`, `declaration_source_range`—into one IPC round-trip.
 - No changes to `lean-rs-sys`, `lean-rs`, `lean-rs-host`, `lean-rs-host-shims`, or the JSON command protocol.
 
 #### Type-surface refactor: one representation per shape
@@ -338,7 +338,7 @@ extract closure, replacing what was a 22-variant exhaustive `Response` wildcard 
 ### Workspace-wide: enums and structs are exhaustive
 
 `#[non_exhaustive]` has been removed from every public enum and struct it was attached to across `lean-rs`,
-`lean-rs-host`, `lean-rs-worker`, and `lean-toolchain` — 17 attributes in total (`LeanError`, `HostStage`,
+`lean-rs-host`, `lean-rs-worker`, and `lean-toolchain`—17 attributes in total (`LeanError`, `HostStage`,
 `LeanDiagnosticCode`, `LeanExceptionKind`, `LeanLoaderDiagnosticCode`, `LeanLoaderSeverity`, `EvidenceStatus`,
 `LeanKernelOutcome`, `MetaCallStatus`, `LeanMetaResponse`, `LeanMetaTransparency`, `LeanSeverity`, `ProcessFileOutcome`,
 `ProcessModuleOutcome`, `LinkDiagnostics`, `LeanModuleDiscoveryDiagnostic`, `ToolchainInfo`, plus the worker's
@@ -348,7 +348,7 @@ rely on the variant set being closed; the worker's `child.rs` defensive wildcard
 (`LeanMetaResponse`, `LeanKernelOutcome`, `ProcessFileOutcome`, `ProcessModuleOutcome`, `LeanSeverity`) are gone for the
 same reason.
 
-## [0.1.5] — 2026-05-23
+## [0.1.5]—2026-05-23
 
 ### `lean-rs-worker` 0.1.5
 
@@ -364,7 +364,7 @@ same reason.
   request, so this is a Rust-side ergonomic gap closing, not a new capability.
 - Existing `open_session` is unchanged. No removals; additive on the public API.
 
-## [0.1.4] — 2026-05-23
+## [0.1.4]—2026-05-23
 
 ### `lean-rs-host` 0.1.4
 
@@ -372,15 +372,15 @@ same reason.
 
 - Added `LeanSession::process_module_with_info_tree` and the optional shim `lean_rs_host_process_module_with_info_tree`.
   The new entry point parses a file's header with `Lean.Parser.parseHeader` first, then resumes `IO.processCommands`
-  from the parser state — so positions in the returned `ProcessedFile` land in the original file's line/column system
-  with no Rust-side offset arithmetic. The previous `process_with_info_tree` shim is still the right call for body-only
+  from the parser state—so positions in the returned `ProcessedFile` land in the original file's line/column system with
+  no Rust-side offset arithmetic. The previous `process_with_info_tree` shim is still the right call for body-only
   snippets and stays untouched.
-- Returns a new outcome enum `ProcessModuleOutcome` with four arms — `Ok { file, imports }`,
+- Returns a new outcome enum `ProcessModuleOutcome` with four arms—`Ok { file, imports }`,
   `MissingImports { file, imports, missing }`, `HeaderParseFailed { diagnostics }`, and `Unsupported`. Missing imports
   is a soft failure: the body still elaborates against whatever the env carries, and the partial projection is returned
   for downstream consumers to use.
 - Capability contract: mandatory count unchanged (28); optional count 6 → 7. Capability dylibs built against the 0.1.3
-  shim set continue to load — the new symbol degrades to `ProcessModuleOutcome::Unsupported`.
+  shim set continue to load—the new symbol degrades to `ProcessModuleOutcome::Unsupported`.
 
 ### `lean-rs` 0.1.4
 
@@ -394,7 +394,7 @@ same reason.
   downstream module initializers loaded via `LeanLibrary::initialize_module` continue to run normally because
   Lake-emitted initializers do not check the flag.
 
-## [0.1.3] — 2026-05-23
+## [0.1.3]—2026-05-23
 
 Adds string projections for opaque `LeanName` and `LeanExpr` handles and a new info-tree projection over processed Lean
 sources. Concentrated in `lean-rs-host`; the other four crates have only the toolchain-window extension. The supported
@@ -406,14 +406,14 @@ Lean window now covers **4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candi
 
 - Added `LeanSession::name_to_string`, `name_to_string_bulk`, and `list_declarations_strings` for projecting opaque
   `LeanName` handles into Rust `String`s. Backed by the new mandatory shim `lean_rs_host_name_to_string`. The handle
-  stays opaque — no `Display`, `Eq`, or `From<String>` — so the FFI cost is visible at the call site and the
-  diagnostic-only semantics are not papered over.
+  stays opaque—no `Display`, `Eq`, or `From<String>`—so the FFI cost is visible at the call site and the diagnostic-only
+  semantics are not papered over.
 
 #### `LeanExpr` rendering
 
 - Added two complementary projections so callers pick the cost tier without a flag.
   - `LeanSession::expr_to_string_raw` walks `Expr.toString` through the new mandatory shim
-    `lean_rs_host_env_expr_to_string_raw`. No `MetaM`, no notation, ugly but deterministic — suitable for indexing,
+    `lean_rs_host_env_expr_to_string_raw`. No `MetaM`, no notation, ugly but deterministic—suitable for indexing,
     logging, and search keys.
   - `LeanSession::pp_expr` runs `Lean.PrettyPrinter.ppExpr` as a new optional meta service, heartbeat-bounded by
     `LeanMetaOptions`. Capability dylibs that predate the service still load; `run_meta` returns `Unsupported` so
@@ -429,7 +429,7 @@ Lean window now covers **4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candi
 #### Capability contract
 
 - Mandatory shim count: 26 → 28. Optional shim count: 3 → 6. Capability dylibs built against the 0.1.2 shim set **must
-  be rebuilt** before they will pass 0.1.3 capability preflight — the two new mandatory entries
+  be rebuilt** before they will pass 0.1.3 capability preflight—the two new mandatory entries
   (`lean_rs_host_name_to_string`, `lean_rs_host_env_expr_to_string_raw`) have no fallback path. The new optional entries
   degrade cleanly: missing `pp_expr` and `process_with_info_tree` surface as `Unsupported` rather than load failure.
 
@@ -456,7 +456,7 @@ Lean window now covers **4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candi
   `crates/lean-rs-host/shims/` (was top-level `lake/`), added the `templates/shipped-lean-crate/lean/` pin, and brought
   the script up to shellcheck/shfmt clean (real bug fix on a `[ ... =~ ... ]` test).
 
-## [0.1.2] — 2026-05-21
+## [0.1.2]—2026-05-21
 
 ### Shipping Lean code
 
@@ -484,7 +484,7 @@ Lean window now covers **4.26.0 through 4.29.1 plus the 4.30.0-rc2 release candi
 - Added CI/release gates for packaged-tarball docs.rs simulation, loader regressions, workflow validation, package
   creation, and public-API baseline drift.
 
-## [0.1.1] — 2026-05-20
+## [0.1.1]—2026-05-20
 
 Hardening release for the Lean/Rust interop stack and the first publish of **`lean-rs-worker`**, the worker-process
 boundary around `lean-rs-host`. After this release crates.io has all five workspace crates at 0.1.1. The Lean toolchain
@@ -544,7 +544,7 @@ window stays at **4.26.0 through 4.29.1**.
   lease → typed command → live rows → terminal summary → pool stats. The contract records remote workers, byte
   callbacks, object callbacks, and downstream schemas as non-goals for the current scale release.
 
-## [0.1.0] — 2026-05-18
+## [0.1.0]—2026-05-18
 
 First public release of **four** crates. Crate-publish order is load-bearing: `lean-rs-sys` → `lean-toolchain` →
 `lean-rs` → `lean-rs-host`. The publish is mediated by [`.github/workflows/release.yml`](.github/workflows/release.yml):

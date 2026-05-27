@@ -4,7 +4,7 @@
 //! (re-exported at the crate root) plus the unboxing/boxing impls for
 //! every Lean type that crosses [`crate::module::LeanExported`]'s typed
 //! dispatch. Sealing prevents downstream crates from implementing
-//! `LeanAbi` for foreign types — wrong impls would produce undefined
+//! `LeanAbi` for foreign types—wrong impls would produce undefined
 //! behaviour at the FFI boundary.
 //!
 //! The submodules ([`nat`], [`structure`], [`traits`]) expose the

@@ -13,7 +13,7 @@
 //! **constructors with fields are heap-allocated ctors** with the tag in
 //! the header. Concretely for `Option`:
 //!
-//! - `none` → `lean_box(0)` — scalar-tagged, no allocation.
+//! - `none` → `lean_box(0)`—scalar-tagged, no allocation.
 //! - `some x` → heap ctor with `tag = 1`, `num_objs = 1`, slot 0 = `x`.
 //!
 //! Matching Lean's encoding bit-for-bit is what lets Rust-built `Option`
@@ -58,7 +58,7 @@ where
         let ptr = obj.as_raw_borrowed();
         // SAFETY: `lean_is_scalar` reads pointer bits only.
         if unsafe { lean_is_scalar(ptr) } {
-            // SAFETY: scalar branch — `lean_unbox` returns the encoded
+            // SAFETY: scalar branch—`lean_unbox` returns the encoded
             // tag (`Option.none` is `lean_box(0)`).
             let payload = unsafe { lean_unbox(ptr) };
             return match payload {
@@ -103,7 +103,7 @@ where
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };

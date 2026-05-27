@@ -48,10 +48,10 @@ pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mi
 /// **Worker-child panic policy.** The supervisor spawns every child with two
 /// defaults that together pin a process boundary around Lean panics:
 ///
-/// - `LEAN_ABORT_ON_PANIC=1` — Lean internal panics terminate the child
+/// - `LEAN_ABORT_ON_PANIC=1`—Lean internal panics terminate the child
 ///   instead of returning default values, so the parent observes a fatal
 ///   exit rather than silently-corrupted state.
-/// - `LEAN_BACKTRACE=0` — Lean's panic-time backtrace handler is skipped.
+/// - `LEAN_BACKTRACE=0`—Lean's panic-time backtrace handler is skipped.
 ///   Since Lean 4.30 that handler calls back into Lean code (the demangler
 ///   is now `@[export]`'d from `Lean.Compiler.NameDemangling`); a worker
 ///   child embeds a minimal Lean and cannot guarantee that callback's
@@ -59,7 +59,7 @@ pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mi
 ///   Disabling the backtrace removes that dependency entirely. See
 ///   `docs/architecture/06-panic-containment.md` for the boundary argument.
 ///
-/// Both are safe defaults — explicit `.env()` entries supplied here override
+/// Both are safe defaults—explicit `.env()` entries supplied here override
 /// them, in case a caller knows the dependency is satisfied and wants a
 /// demangled backtrace on the child's stderr.
 #[derive(Clone, Debug)]
@@ -148,9 +148,9 @@ impl LeanWorkerConfig {
     /// and applies in both directions for the lifetime of the connection. The
     /// default is [`MAX_FRAME_BYTES`] (1 MiB), which is enough for every
     /// session-backed tool whose result composes from many frames. Capabilities
-    /// whose *single* logical result is a frame — e.g. an outline of an
+    /// whose *single* logical result is a frame—e.g. an outline of an
     /// entire module, or a diagnostics snapshot of a refactor-in-progress
-    /// file — can raise the cap here to admit larger envelopes.
+    /// file—can raise the cap here to admit larger envelopes.
     ///
     /// Values are clamped into <code>[[MIN_FRAME_BYTES], [MAX_FRAME_BYTES_HARD_CAP]]</code>.
     /// The floor keeps even a malformed setter from breaking the handshake
@@ -664,11 +664,11 @@ impl LeanWorker {
             Ok((_stdout, Err(_handshake_err))) => {
                 // The handshake-thread observed a protocol-level error reading
                 // the child's first frame. In practice this means the child is
-                // mid-`abort()` and hasn't quite died yet — using `try_wait`
+                // mid-`abort()` and hasn't quite died yet—using `try_wait`
                 // (non-blocking) here loses the race and drops the child's
                 // stderr. Kill if still alive, then go through the canonical
                 // post-mortem path so `LeanWorkerExit.diagnostics` carries the
-                // bootstrap stderr in the same shape as a runtime crash.
+                // bootstrap stderr with the same diagnostic contract as a runtime crash.
                 drop(child.kill());
                 let exit = wait_with_stderr(&mut child, stderr)?;
                 return Err(if exit.success {
@@ -758,7 +758,7 @@ impl LeanWorker {
         }
     }
 
-    /// Call the prompt fixture multiplication export in the worker child.
+    /// Call the fixture multiplication export in the worker child.
     ///
     /// # Errors
     ///
@@ -922,7 +922,7 @@ impl LeanWorker {
     }
 
     #[doc(hidden)]
-    /// Trigger the prompt fixture panic path.
+    /// Trigger the fixture panic path.
     ///
     /// # Errors
     ///

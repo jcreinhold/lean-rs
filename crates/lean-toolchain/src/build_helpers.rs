@@ -1,7 +1,7 @@
 //! Reusable build-script helpers for downstream embedders.
 //!
 //! Inside this workspace `lean-rs-sys`'s `build.rs` is the single source of
-//! `cargo:rustc-link-*` directives — `lean-toolchain` does not call into the
+//! `cargo:rustc-link-*` directives—`lean-toolchain` does not call into the
 //! helper from its own build script. The helper exists for **downstream
 //! embedders** whose own `build.rs` would otherwise duplicate the link-policy
 //! probe, the directive set, and the runtime rpath logic.
@@ -111,7 +111,7 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 
 /// Build a Lake `lean_lib` shared-library target and return the produced dylib path.
 ///
-/// `project_root` must be the directory containing the project's lakefile —
+/// `project_root` must be the directory containing the project's lakefile—
 /// either `lakefile.lean` (Lean DSL) or `lakefile.toml`. `target_name` is the
 /// Lake target name to build; the helper invokes `lake build <target_name>:shared` on a
 /// cache miss and returns the supported-window dylib path under

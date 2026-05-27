@@ -1,4 +1,4 @@
-//! Object inspection and allocation helpers — mirrors `lean.h:312–630`.
+//! Object inspection and allocation helpers—mirrors `lean.h:312–630`.
 //!
 //! Covers scalar-pointer encoding ([`lean_is_scalar`]), tag reads, the
 //! `lean_is_*` predicates, the `lean_to_*` casts (returned as raw `*mut

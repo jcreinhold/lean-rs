@@ -1,4 +1,4 @@
-//! String objects — externs and inline accessors from `lean.h:1157–1234`.
+//! String objects—externs and inline accessors from `lean.h:1157–1234`.
 
 #![allow(clippy::inline_always)]
 
@@ -39,7 +39,7 @@ unsafe fn as_string<'a>(o: *mut lean_object) -> &'a LeanStringObjectRepr {
     unsafe { &*o.cast::<LeanStringObjectRepr>() }
 }
 
-/// `m_size` field — byte length including the trailing `\0` (`lean.h:1182`).
+/// `m_size` field—byte length including the trailing `\0` (`lean.h:1182`).
 ///
 /// # Safety
 ///
@@ -50,7 +50,7 @@ pub unsafe fn lean_string_size(o: b_lean_obj_arg) -> usize {
     unsafe { as_string(o).size }
 }
 
-/// `m_length` field — UTF-8 character count (`lean.h:1183`).
+/// `m_length` field—UTF-8 character count (`lean.h:1183`).
 ///
 /// # Safety
 ///

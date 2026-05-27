@@ -31,7 +31,7 @@ use crate::runtime::obj::Obj;
 #[must_use]
 pub fn from_u64(runtime: &LeanRuntime, n: u64) -> Obj<'_> {
     // SAFETY: `lean_uint64_to_nat` returns an owned `lean_obj_res` (refcount
-    // = 1) — scalar-tagged or heap-allocated as appropriate.
+    // = 1)—scalar-tagged or heap-allocated as appropriate.
     unsafe { Obj::from_owned_raw(runtime, lean_uint64_to_nat(n)) }
 }
 
@@ -48,7 +48,7 @@ pub fn from_usize(runtime: &LeanRuntime, n: usize) -> Obj<'_> {
 ///
 /// Returns `LeanError::Host { stage: Conversion, .. }` if the `Nat` is a
 /// heap MPZ (which always exceeds `LEAN_MAX_SMALL_NAT` and therefore may
-/// exceed `u64::MAX` on 64-bit platforms — the safe API does not attempt
+/// exceed `u64::MAX` on 64-bit platforms—the safe API does not attempt
 /// the bignum read).
 #[allow(
     clippy::needless_pass_by_value,
@@ -62,7 +62,7 @@ pub fn try_to_u64(obj: Obj<'_>) -> LeanResult<u64> {
         let raw = unsafe { lean_unbox(ptr) };
         Ok(raw as u64)
     } else {
-        // SAFETY: non-scalar branch — heap MPZ. Read the tag for the diagnostic.
+        // SAFETY: non-scalar branch—heap MPZ. Read the tag for the diagnostic.
         let found_tag = unsafe { lean_obj_tag(ptr) };
         Err(bignum_nat(found_tag))
     }

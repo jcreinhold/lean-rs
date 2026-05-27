@@ -25,7 +25,7 @@ fn main() {
     }
     // `host` is borrowing `local`, which dropped at the end of the
     // inner block. The next line tries to keep `host` alive in the
-    // outer scope — the borrow checker must reject the assignment
+    // outer scope—the borrow checker must reject the assignment
     // above.
     let _escape = host;
 }

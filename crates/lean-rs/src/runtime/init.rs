@@ -49,15 +49,15 @@ impl LeanRuntime {
     ///
     /// Idempotent and safe to call from any thread: the underlying
     /// initialization runs exactly once for the lifetime of the process.
-    /// Subsequent calls — including calls from other threads — return the
+    /// Subsequent calls—including calls from other threads—return the
     /// same borrow, or replay the cached failure if the first attempt
     /// failed.
     ///
     /// # Worker threads
     ///
     /// `init` starts a process-wide Lean task manager. The worker thread
-    /// count is Lean's compiled-in default — typically one worker per
-    /// hardware core — unless the `LEAN_RS_NUM_THREADS` environment
+    /// count is Lean's compiled-in default—typically one worker per
+    /// hardware core—unless the `LEAN_RS_NUM_THREADS` environment
     /// variable is set to a positive integer before the first call to
     /// `init`. The first call captures the value; later changes to the
     /// variable have no effect. Set `LEAN_RS_NUM_THREADS` when several
@@ -162,7 +162,7 @@ fn do_initialize_once() -> Result<(), LeanError> {
         //
         // `lean_io_mark_end_initialization()` flips Lean's
         // `IO.initializing` flag to `false`. Several Lean APIs gate on
-        // this flag — most notably `Lean.mkEmptyEnvironment` (called
+        // this flag—most notably `Lean.mkEmptyEnvironment` (called
         // transitively by `Lean.Parser.parseHeader`), which throws
         // `IO.userError "environment objects cannot be created during
         // initialization"` otherwise. Omitting this call leaves the
@@ -172,7 +172,7 @@ fn do_initialize_once() -> Result<(), LeanError> {
         // check the flag.
         //
         // The task manager is required for any code path that spawns
-        // Lean tasks — including `Lean.Elab.Frontend.process` (driven
+        // Lean tasks—including `Lean.Elab.Frontend.process` (driven
         // by `kernel_check`), which would otherwise abort with a
         // "g_task_manager" assertion on the first
         // `Language.Lean.processCommands` call. Lean tears the

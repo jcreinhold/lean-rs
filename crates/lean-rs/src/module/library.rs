@@ -14,8 +14,8 @@
 //!
 //! ## Symbol-table walk at `open`
 //!
-//! Lean compiles `def x : T := constant` — a nullary export whose body
-//! reduces to a constant — to a persistent `lean_object*` global variable
+//! Lean compiles `def x : T := constant`—a nullary export whose body
+//! reduces to a constant—to a persistent `lean_object*` global variable
 //! (`lean_mark_persistent` at module init), not a callable function.
 //! Calling such a symbol as a function pointer SIGBUSes. To make the
 //! distinction invisible to callers, [`LeanLibrary::open`] reads the
@@ -222,7 +222,7 @@ impl<'lean> LeanLibrary<'lean> {
         // SAFETY: `libloading::Library::get::<*mut c_void>` is the raw
         // address lookup; the returned `Symbol<'_, *mut c_void>` borrows
         // from `self.library`, so dereferencing it inside this scope is
-        // valid. We copy the address out via `*symbol` — the same idiom
+        // valid. We copy the address out via `*symbol`—the same idiom
         // `lookup_initializer` uses.
         let symbol: libloading::Symbol<'_, *mut c_void> =
             unsafe { self.library.get(name.as_bytes()) }.map_err(|err| {
@@ -367,7 +367,7 @@ fn classify_globals(path: &Path) -> LeanResult<HashSet<String>> {
 fn open_with_global_visibility(path: &Path) -> LeanResult<libloading::Library> {
     #[cfg(unix)]
     {
-        // SAFETY: identical contract to `Library::new` — runs the
+        // SAFETY: identical contract to `Library::new`—runs the
         // platform dynamic loader against `path`. The added
         // `RTLD_GLOBAL` flag only affects symbol-table visibility for
         // later loads; it does not change initializer-execution

@@ -1,7 +1,7 @@
 //! Builders for worker-backed downstream capabilities and host sessions.
 //!
 //! This module composes worker child resolution, worker startup, and session
-//! opening. User-export capabilities additionally build a Lake shared-library
+//! opening. User-export capabilities also build a Lake shared-library
 //! target and may validate downstream metadata. Shim-backed host sessions skip
 //! that user dylib path entirely and use only the bundled host services.
 
@@ -1073,7 +1073,7 @@ fn spawn_checked_worker(
 /// worker child cares about has a typed method whose name describes the
 /// invariant it enforces (e.g. [`Self::lean_sysroot`] enforces the
 /// rpath/sysroot match). If a future env var needs to be plumbed through, add
-/// a typed builder for it — do **not** add a generic `env(...)`. Generic
+/// a typed builder for it—do **not** add a generic `env(...)`. Generic
 /// passthroughs leak implementation knowledge (env var names, framing
 /// invariants) into every caller and erode the structural guarantee that
 /// supported configurations cannot be misconstructed.

@@ -1,4 +1,4 @@
-# `LeanRsFixture`—ABI-boundary fixtures
+# `LeanRsFixture`—ABI Boundary Fixtures
 
 In-tree Lake package the workspace's tests, benchmarks, and example binaries load. It exists so the `lean-rs` Rust
 crates have a stable set of compiled Lean symbols to call when exercising every distinct ABI behavior at the C boundary.

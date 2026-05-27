@@ -15,7 +15,7 @@
 //!    consults at runtime.
 //!
 //! This script does not emit `cargo:rustc-link-search` or
-//! `cargo:rustc-link-lib` directives — `lean-rs-sys` already does that
+//! `cargo:rustc-link-lib` directives—`lean-rs-sys` already does that
 //! for the whole dependency graph, and `emit_lean_link_directives()` in
 //! `src/build_helpers.rs` is the helper downstream embedders call from
 //! their own `build.rs`. It does emit a `cargo:rustc-link-arg=-Wl,-rpath,...`
@@ -23,7 +23,7 @@
 //! dependents, so each crate that produces a test/bench/example binary
 //! that loads Lean must bake its own rpath.
 
-// Build scripts use `panic!` as the abort mechanism — same pattern as
+// Build scripts use `panic!` as the abort mechanism—same pattern as
 // `lean-rs-sys/build.rs`.
 #![allow(clippy::expect_used, clippy::manual_assert, clippy::panic, clippy::unwrap_used)]
 

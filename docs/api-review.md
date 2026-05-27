@@ -30,8 +30,8 @@ Walk the diff with these questions. Any "yes" is a stop-and-discuss signal, not 
    ones?
 6. **Conjoined methods.** Does a single method bundle two operations callers should be able to pay for independently?
 7. **Hard-to-describe API.** Can a new reader reduce the surface to one sentence and a five-line snippet?
-8. **Implementation details in comments.**
-   `rg -nE "(land(s|ed|ing)|follow(s|ed)|scheduled).*\b(prompt|RD-[0-9])" crates/` should return no matches.
+8. **Implementation history in comments.** Comments should explain current invariants, not when work landed or which
+   planning artifact requested it.
 
 ## Doc rules
 

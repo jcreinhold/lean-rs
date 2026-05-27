@@ -85,7 +85,7 @@ fn planned_builder() -> lean_rs_worker_parent::LeanWorkerCapabilityBuilder {
     });
     let batches = planner
         .plan_work_items(work, &source_fingerprint(modules.len()))
-        .expect("mathlib-shaped modules plan");
+        .expect("mathlib-style modules plan");
     assert_eq!(batches.len(), 1, "fallback modules share one worker session key");
     batches
         .into_iter()

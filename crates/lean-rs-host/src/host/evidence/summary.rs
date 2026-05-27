@@ -1,4 +1,4 @@
-//! [`ProofSummary`] — Lean-authored display + identifier projection of
+//! [`ProofSummary`]—Lean-authored display + identifier projection of
 //! a [`crate::LeanEvidence`] handle.
 //!
 //! The summary owns only bounded `String` fields (declared name, kind
@@ -49,7 +49,7 @@ pub struct ProofSummary {
 
 impl ProofSummary {
     /// The declared name rendered as a dotted path (e.g. `"Nat.add"`).
-    /// Diagnostic only — multiple distinct `Lean.Name`s can render to
+    /// Diagnostic only—multiple distinct `Lean.Name`s can render to
     /// the same dotted string.
     #[must_use]
     pub fn declaration_name(&self) -> &str {

@@ -41,7 +41,7 @@ pub const PROTOCOL_VERSION: u16 = 7;
 /// handshake time via [`Message::ConfigureFrameLimit`]. Both [`write_frame`]
 /// and [`read_frame`] reject frames whose serialised JSON payload exceeds the
 /// cap passed in, so a runaway producer cannot make the peer allocate without
-/// bound. The cap is per-connection — set once at handshake, applied to every
+/// bound. The cap is per-connection—set once at handshake, applied to every
 /// subsequent frame in both directions.
 pub const MAX_FRAME_BYTES: u32 = 1024 * 1024;
 
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn larger_cap_accepts_frame_rejected_under_default() {
         // A 2 MiB payload is rejected under MAX_FRAME_BYTES (1 MiB) but
-        // accepted when the cap is raised — proving the cap parameter is the
+        // accepted when the cap is raised—proving the cap parameter is the
         // only thing the codec consults.
         let raised = MAX_FRAME_BYTES.saturating_mul(8);
         let row = DataRow {

@@ -107,7 +107,7 @@ impl<'lean> Obj<'lean> {
     /// [`Obj::from_owned_raw`]).
     pub fn into_raw(self) -> *mut lean_object {
         // `ManuallyDrop` blocks the destructor so we do not decrement
-        // the count on the way out — the caller takes ownership.
+        // the count on the way out—the caller takes ownership.
         ManuallyDrop::new(self).ptr.as_ptr()
     }
 
@@ -139,7 +139,7 @@ impl<'lean> Obj<'lean> {
     /// the runtime through every signature in the trait surface.
     ///
     /// `&self` rather than an associated function because the borrow
-    /// pins the inferred `'lean` lifetime to this `Obj`'s lifetime —
+    /// pins the inferred `'lean` lifetime to this `Obj`'s lifetime—
     /// callers do not need to spell the parameter out at the call site.
     #[allow(clippy::unused_self, reason = "`&self` pins the inferred 'lean lifetime parameter")]
     pub fn runtime(&self) -> &'lean LeanRuntime {
@@ -208,7 +208,7 @@ mod tests {
     //! Tests share a process; `LeanRuntime::init()` is the same cell
     //! used by `runtime::tests`. The refcount-observation tests rely on
     //! the `pub unsafe fn` predicates in `lean-rs-sys::object`
-    //! (`lean_is_exclusive`, `lean_is_shared`) — neither dereferences
+    //! (`lean_is_exclusive`, `lean_is_shared`)—neither dereferences
     //! the object payload, only the header's refcount.
 
     #![allow(clippy::expect_used, clippy::panic)]
@@ -358,7 +358,7 @@ mod tests {
 
         fn _obj_is_not_send() {
             // Compile-time: trait selection is ambiguous iff
-            // `Obj<'static>: Send`, which yields E0283 — that is the
+            // `Obj<'static>: Send`, which yields E0283—that is the
             // compile-fail signal this assertion produces. Picking
             // `'static` is fine: `Send`/`Sync` are lifetime-invariant.
             <Obj<'static> as AmbiguousIfSend<_>>::check();
@@ -371,8 +371,8 @@ mod tests {
 
     /// Positive lifetime check: the returned `Obj<'_>` is tied to the
     /// input runtime borrow, not `'static`. If a future refactor
-    /// weakened the lifetime — e.g. by erasing the `&LeanRuntime`
-    /// argument or returning `Obj<'static>` — the borrow checker would
+    /// weakened the lifetime—e.g. by erasing the `&LeanRuntime`
+    /// argument or returning `Obj<'static>`—the borrow checker would
     /// refuse this function and any caller that tried to outlive the
     /// runtime borrow.
     fn _lifetime_anchored_to_runtime_borrow(runtime: &LeanRuntime) -> Obj<'_> {
@@ -426,7 +426,7 @@ mod tests {
         // alternate handle to push half of them into the shared regime,
         // then drop the originals in reverse order while keeping the
         // clones live. Each clone must still inspect as exclusive after
-        // the matching original is gone — i.e. `Drop` released exactly
+        // the matching original is gone—i.e. `Drop` released exactly
         // one refcount, no more, no fewer. AddressSanitizer turns any
         // double-`lean_dec` here into a heap-after-free diagnostic.
         let runtime = LeanRuntime::init().expect("runtime init must succeed");

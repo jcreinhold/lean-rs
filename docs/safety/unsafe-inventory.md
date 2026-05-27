@@ -2,7 +2,7 @@
 
 Every `unsafe` block and `pub unsafe fn` in the workspace, paired with two things: the caller's **precondition** (what
 the call site must guarantee before invoking) and the block's **invariant** (what it promises in return). Audience:
-auditors reviewing the safety story, and maintainers about to change an unsafe seam.
+auditors reviewing the safety story, and maintainers about to change an unsafe boundary.
 
 **Maintenance rule.** Any commit that adds, removes, or reshapes an `unsafe` block must update the matching row in this
 file in the same commit. CI catches `unsafe` without a `// SAFETY:` comment (the `missing_safety_doc` lint at `warn`);
@@ -387,8 +387,8 @@ weekly cron, and manual dispatch. The ABI fuzz smoke is manual-only in the sanit
 - **macOS AddressSanitizer is not yet run in CI.** ASan is available on `aarch64-apple-darwin` nightly, but the
   interaction between Lean's runtime (`libleanrt` links its own mimalloc) and ASan's allocator-shim on macOS has not
   been validated. Open future work.
-- **Miri does not cover the Lean C runtime.** Miri can validate the pure-Rust seams in `lean-rs-sys` (refcount mirror's
-  `AtomicI32::from_ptr`, layout casts in `repr` tests, `NonNull` arithmetic on mock pointers), but it cannot execute
-  `libleanshared`. The safety-test guidance in
+- **Miri does not cover the Lean C runtime.** Miri can validate the pure-Rust boundaries in `lean-rs-sys` (refcount
+  mirror's `AtomicI32::from_ptr`, layout casts in `repr` tests, `NonNull` arithmetic on mock pointers), but it cannot
+  execute `libleanshared`. The safety-test guidance in
   [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md) accepts this by naming sanitizers and
   stress tests as the alternative.

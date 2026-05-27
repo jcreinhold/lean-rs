@@ -10,7 +10,7 @@
 //! `--include-ignored`.
 //!
 //! The `PoolStats` / `SessionStats` assertions are not leak detection
-//! per se — they pin the wrapper's bookkeeping so a future refactor
+//! per se—they pin the wrapper's bookkeeping so a future refactor
 //! cannot silently change how acquires, releases, and drops are
 //! counted. The sanitizer run is what actually proves the absence of
 //! leaks.
@@ -57,8 +57,8 @@ fn iters(default: usize) -> usize {
 fn session_create_drop_loop_small() {
     // Eight session lifecycles is enough to exercise the import +
     // Environment drop path on every supported platform under the
-    // normal test budget. Each create/drop is independent — sessions do
-    // not share state on the Rust side — so a leak would multiply
+    // normal test budget. Each create/drop is independent—sessions do
+    // not share state on the Rust side—so a leak would multiply
     // linearly with `n` under the sanitizer's longer override.
     let host = fixture_host();
     let caps = host
@@ -151,7 +151,7 @@ fn pool_acquire_release_loop_long() {
         drop(sess);
     }
 
-    // Sanity assertions — the long loop must still reuse the same one
+    // Sanity assertions—the long loop must still reuse the same one
     // cached environment, otherwise the leak surface we are measuring is
     // not the one we think.
     let stats = pool.stats();

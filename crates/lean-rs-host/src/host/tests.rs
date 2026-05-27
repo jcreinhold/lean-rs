@@ -729,11 +729,11 @@ fn kernel_check_rejects_bad_proof() {
 
 #[test]
 fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
-    // `Lean.Elab.Frontend.process` is robust: nearly every malformed
-    // source produces error diagnostics in the `MessageLog` (the
+    // `Lean.Elab.Frontend.process` usually turns malformed
+    // source into error diagnostics in the `MessageLog` (the
     // shim's `Rejected` path), not an `IO`-level exception (the
     // shim's `Unavailable` path). The Unavailable branch fires only
-    // when `process` itself raises through `IO` — for example on
+    // when `process` itself raises through `IO`—for example on
     // resource exhaustion, internal panic, or runtime failure during
     // task scheduling. Driving any of those from user input alone is
     // not contract: a given Lean release can move the boundary
@@ -741,7 +741,7 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
     //
     // This test pins what the Rust mapping *guarantees*: a deeply
     // pathological input must classify as either `Rejected` or
-    // `Unavailable` — never `Checked` and never `Unsupported` (those
+    // `Unavailable`—never `Checked` and never `Unsupported` (those
     // would mean the shim treated broken input as a valid command).
     // It also confirms the four-tag `EvidenceStatus` discriminator is
     // wired correctly for the two failure branches the shim can pick
@@ -925,8 +925,7 @@ fn diagnostic_byte_limit_truncates() {
 
 // -- timing note: amortised import across many queries -------------------
 //
-// Informational only. Per the prompt's "no performance claim without
-// numbers" rule, this test prints the numbers and does not assert
+// Informational only. This test prints the numbers and does not assert
 // thresholds. Run with `cargo test session_reuse_amortises_import -- --nocapture`.
 
 #[test]
@@ -1057,7 +1056,7 @@ fn meta_infer_type_returns_ok_for_nat_type() {
     let mut session = session_over_meta(&caps);
 
     // The type of `Nat.zero` is `Nat`; inferring its type yields `Type`.
-    // Using a Lean-produced Expr keeps the test honest — Rust never
+    // Using a Lean-produced Expr keeps the test honest—Rust never
     // constructs an Expr directly.
     let expr = session
         .declaration_type("Nat.zero", None)
@@ -1122,7 +1121,7 @@ fn meta_heartbeat_burn_yields_timeout_status() {
         .expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    // Any Expr will do — heartbeat_burn ignores its argument.
+    // Any Expr will do—heartbeat_burn ignores its argument.
     let expr = session
         .declaration_type("Nat.zero", None)
         .expect("type query for Nat.zero")
@@ -1193,7 +1192,7 @@ fn meta_pp_expr_honours_heartbeat_budget() {
     // pp_expr runs `Lean.PrettyPrinter.ppExpr` inside MetaM, which
     // consults `checkMaxHeartbeats` on every reduction step. With
     // `heartbeat_limit(1)` the first internal check trips and the
-    // outcome must classify as `TimeoutOrHeartbeat` — never `Ok`,
+    // outcome must classify as `TimeoutOrHeartbeat`—never `Ok`,
     // never a panic.
     let host = fixture_host();
     let caps = host

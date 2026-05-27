@@ -3,7 +3,7 @@
 //! [`LeanExpr`] is a receipt for an owned Lean expression value produced
 //! on the Lean side. The Rust API is intentionally minimal: it carries
 //! the handle through the FFI boundary and nothing else. Construction
-//! and inspection — `.bvar`, `.const`, `.app`, `toString`, `==` — live
+//! and inspection—`.bvar`, `.const`, `.app`, `toString`, `==`—live
 //! in Lean exports the caller reaches through
 //! [`crate::module::LeanModule::exported_unchecked`]. Rust deliberately offers no
 //! constructor for `Expr`: rebuilding the Lean term algebra outside the
@@ -16,7 +16,7 @@
 //!
 //! Two render paths cover the cost/quality tradeoff and the host stack
 //! exposes both deliberately. `LeanSession::expr_to_string_raw` walks
-//! `Expr.toString` directly — cheap, deterministic, ugly — and is the
+//! `Expr.toString` directly—cheap, deterministic, ugly—and is the
 //! right choice for indexing, logging, and search keys. The optional
 //! `lean_rs_host::meta::pp_expr` service runs
 //! `Lean.PrettyPrinter.ppExpr` under the standard heartbeat budget; it
@@ -76,7 +76,7 @@ impl<'lean> LeanAbi<'lean> for LeanExpr<'lean> {
 
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is an owned `lean_object*` produced by a Lean

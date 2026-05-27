@@ -67,7 +67,7 @@ fn open_fixture() -> LeanLibrary<'static> {
 
 // -- scalar dispatch -----------------------------------------------------
 //
-// Workload: `module::scalar_dispatch_u32_add` — measures the cost of a
+// Workload: `module::scalar_dispatch_u32_add`—measures the cost of a
 // fully-typed `LeanExported<(u32, u32), u32>::call` against
 // `lean_rs_fixture_u32_add` (fixtures/lean/LeanRsFixture/Scalars.lean:25).
 // This is the floor for any unboxed-scalar exported call: no Lean-side
@@ -92,7 +92,7 @@ fn bench_scalar_dispatch(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 
 // -- string conversion ---------------------------------------------------
 //
-// Workload: `abi::string_roundtrip/<bytes>` — `LeanExported<(String,),
+// Workload: `abi::string_roundtrip/<bytes>`—`LeanExported<(String,),
 // String>::call` against `lean_rs_fixture_string_identity`
 // (fixtures/lean/LeanRsFixture/Strings.lean:7). End-to-end cost of
 // `String::into_lean` (one `lean_alloc_small` + memcpy) + the indirect
@@ -129,7 +129,7 @@ fn bench_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 
 // -- array conversion ----------------------------------------------------
 //
-// Workload: `abi::array_string_roundtrip/<n>` — `LeanExported<(Vec<String>,),
+// Workload: `abi::array_string_roundtrip/<n>`—`LeanExported<(Vec<String>,),
 // Vec<String>>::call` against `lean_rs_fixture_array_string_identity`
 // (fixtures/lean/LeanRsFixture/Containers.lean:7). Covers the
 // `Array T` ABI: per-element `String` encode, container-level
@@ -137,7 +137,7 @@ fn bench_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 // path. Elements are 8-byte ASCII so the per-element string allocation
 // is a single small-object alloc.
 //
-// `ByteArray` is intentionally excluded — its `from_bytes` / `to_vec`
+// `ByteArray` is intentionally excluded—its `from_bytes` / `to_vec`
 // helpers (crates/lean-rs/src/abi/bytearray.rs:40, 69) are `pub(crate)`
 // because `Vec<u8>` also names `Array UInt8` and overloading would
 // pick a Lean shape by accident (see the module comment for the

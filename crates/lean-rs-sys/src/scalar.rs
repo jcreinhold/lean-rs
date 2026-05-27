@@ -1,4 +1,4 @@
-//! Boxed-scalar conversions — Rust mirrors of `lean.h:1356–2065`.
+//! Boxed-scalar conversions—Rust mirrors of `lean.h:1356–2065`.
 //!
 //! [`crate::object::lean_box`] / [`crate::object::lean_unbox`] live in
 //! [`crate::object`]; this module focuses on the `uintN_to_nat` /
@@ -127,7 +127,7 @@ pub unsafe fn lean_uint32_to_nat(a: u32) -> lean_obj_res {
 #[inline(always)]
 pub unsafe fn lean_int_to_int(n: i32) -> lean_obj_res {
     // On 64-bit hosts every `i32` fits in a scalar Lean `Int`. On 32-bit
-    // hosts we additionally have to check against `LEAN_MIN_SMALL_INT ..=
+    // hosts we also have to check against `LEAN_MIN_SMALL_INT ..=
     // LEAN_MAX_SMALL_INT`, since the scalar pointer only spares 31 bits.
     let fits =
         core::mem::size_of::<*mut ()>() == 8 || (LEAN_MIN_SMALL_INT..=LEAN_MAX_SMALL_INT).contains(&i64::from(n));

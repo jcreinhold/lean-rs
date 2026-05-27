@@ -1,5 +1,5 @@
 #![no_main]
-//! `cargo +nightly fuzz run abi_decode` — drives `lean_rs::abi`'s
+//! `cargo +nightly fuzz run abi_decode`—drives `lean_rs::abi`'s
 //! decoders with structured Lean-shaped inputs and asserts the
 //! contract: every decode returns either `Ok(_)` or
 //! `Err(LeanError::Host(stage = Conversion))`. Any panic, any other
@@ -201,7 +201,7 @@ fuzz_target!(|data: &[u8]| {
             assert_clean(result.map(|_| ()));
         }
         DecoderInput::Scalar { raw: payload } => {
-            // Feed a raw scalar pointer to multiple decoders — they
+            // Feed a raw scalar pointer to multiple decoders—they
             // should all reject it cleanly.
             let scalar = unsafe { lean_box(payload as usize) };
             // Bump refcount five times by re-boxing the same scalar so
@@ -284,7 +284,7 @@ fn assert_clean(result: Result<(), LeanError>) {
         Err(LeanError::LeanException(exc)) => {
             panic!("unexpected LeanException from a pure-decode path: {:?}", exc.kind());
         }
-        // Catch-all for future variants — fuzzing must surface any
+        // Catch-all for future variants—fuzzing must surface any
         // variant the decoder gains that is not yet whitelisted.
         Err(other) => panic!("unexpected LeanError variant: {other:?}"),
     }

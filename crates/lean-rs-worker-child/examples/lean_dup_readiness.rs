@@ -1,4 +1,4 @@
-//! Lean-dup-class worker readiness proof.
+//! Downstream worker replacement fixture.
 //!
 //! This example exercises the generic worker capability path that a downstream
 //! subprocess worker can migrate to:

@@ -7,7 +7,7 @@
 //!
 //! `lean-rs-sys`'s build script already emits an rpath for *its own*
 //! binaries, but `cargo:rustc-link-arg` directives do not propagate to
-//! dependents — each crate that produces an executable that loads Lean
+//! dependents—each crate that produces an executable that loads Lean
 //! must emit the flag itself.
 //!
 //! Toolchain discovery uses `lean --print-prefix` directly to avoid
@@ -36,7 +36,7 @@ fn main() {
     }
 
     let Some(prefix) = discover_prefix() else {
-        // Discovery failed — fall through silently. The link step in
+        // Discovery failed—fall through silently. The link step in
         // `lean-rs-sys` will report the underlying problem with a more
         // specific diagnostic than this script could produce.
         return;

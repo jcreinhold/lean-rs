@@ -1,4 +1,4 @@
-//! End-to-end tour of the curated `lean_rs::*` surface — every stage
+//! End-to-end tour of the curated `lean_rs::*` surface—every stage
 //! composed in one process.
 //!
 //! The focused examples (`theorem_query`, `proof_check`, `meta_query`,
@@ -98,7 +98,7 @@ fn main() {
     report("elaborate_2", t.elapsed().as_micros());
 
     // Stage 6: one `kernel_check`. The declaration name must be unique
-    // within this session — repeated invocations of this binary each get
+    // within this session—repeated invocations of this binary each get
     // a fresh process and a fresh environment.
     let t = Instant::now();
     let outcome = session

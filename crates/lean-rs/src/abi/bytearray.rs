@@ -53,7 +53,7 @@ pub(crate) fn from_bytes<'lean>(runtime: &'lean LeanRuntime, bytes: &[u8]) -> Ob
 
 /// Decode an owned Lean `ByteArray` into a fresh `Vec<u8>`.
 ///
-/// Consumes the [`Obj`] — even on failure, the refcount is released by
+/// Consumes the [`Obj`]—even on failure, the refcount is released by
 /// `Obj`'s `Drop`. Allocates one Rust buffer of the payload size; for a
 /// zero-copy view tied to the source's lifetime, use [`borrow_bytes`]
 /// against an [`ObjRef`] instead.

@@ -9,7 +9,7 @@
 //!
 //! The heartbeat and diagnostic-byte ceilings reuse the existing
 //! `LEAN_HEARTBEAT_LIMIT_*` / `LEAN_DIAGNOSTIC_BYTE_LIMIT_*` constants
-//! from [`crate::host::elaboration`] — the underlying Lean machinery
+//! from [`crate::host::elaboration`]—the underlying Lean machinery
 //! (`Lean.maxHeartbeats`) and the failure-bytes invariant are the same.
 
 use lean_rs::abi::traits::{IntoLean, TryFromLean, conversion_error};
@@ -29,7 +29,7 @@ use crate::host::elaboration::{
 /// site.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum LeanMetaTransparency {
-    /// Lean's standard reducibility — non-reducible / non-irreducible
+    /// Lean's standard reducibility—non-reducible / non-irreducible
     /// definitions unfold on demand.
     #[default]
     Default,
@@ -39,7 +39,7 @@ pub enum LeanMetaTransparency {
     Reducible,
     /// `Default` plus the bodies of instance bindings.
     Instances,
-    /// Every definition unfolds. Most aggressive setting — also the
+    /// Every definition unfolds. Most aggressive setting—also the
     /// most likely to blow the heartbeat budget on non-trivial terms.
     All,
 }
@@ -158,10 +158,7 @@ impl LeanMetaOptions {
 
     // -- crate-internal accessors used by the dispatch site -----------
 
-    #[allow(
-        dead_code,
-        reason = "first caller lands with the run_meta dispatch in the same prompt"
-    )]
+    #[allow(dead_code, reason = "reserved for run_meta dispatch accessors")]
     pub(crate) fn namespace_context_str(&self) -> &str {
         &self.namespace_context
     }

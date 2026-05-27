@@ -1,6 +1,6 @@
 //! Safe Rust FFI primitive for embedding Lean 4 from a host application.
 //!
-//! `lean-rs` is the L1 typed-FFI binding to the Lean 4 runtime — the
+//! `lean-rs` is the typed FFI binding to the Lean 4 runtime—the
 //! minimum surface a Rust crate needs to drive a compiled Lean library:
 //! bring the runtime up, open a Lake-built capability bundle, initialise a
 //! module, and call typed `@[export]` functions with first-class type
@@ -9,10 +9,10 @@
 //! lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
 //! 28+9 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
-//! interop shims used by L1 callbacks; it has no theorem-prover host shim
+//! interop shims used by same-process callbacks; it has no theorem-prover host shim
 //! contract.
 //!
-//! ## Happy path (L1)
+//! ## Happy Path
 //!
 //! Bring the runtime up once, open the build-script produced capability,
 //! initialise the module, look up a typed export, and call it:
@@ -38,7 +38,7 @@
 //!
 //! ## Module map
 //!
-//! - [`error`] — typed error boundary. [`LeanError`] is a three-variant
+//! - [`error`]—typed error boundary. [`LeanError`] is a three-variant
 //!   enum (`LeanException` for Lean-thrown `IO` errors, `Host` for
 //!   host failures, `Cancelled` for cooperative host
 //!   cancellation); payload structs ([`LeanException`],
@@ -47,7 +47,7 @@
 //!   [`LeanDiagnosticCode`] via `.code()`. The in-process
 //!   [`DiagnosticCapture`] RAII guard lets tests assert on `tracing`
 //!   events without installing a global subscriber.
-//! - [`module`] — load a Lake-built Lean capability and call typed
+//! - [`module`]—load a Lake-built Lean capability and call typed
 //!   exported functions. [`LeanCapability`] is the normal shipped-crate
 //!   surface; [`LeanCapabilityPreflight`] reports package/loader problems
 //!   before `dlopen`; [`LeanLibraryBundle`] anchors dependency dylibs;
@@ -57,18 +57,18 @@
 //!   the explicit unsafe path for arbitrary exports; [`LeanExported`] is a
 //!   single generic typed function handle whose `.call` impl is macro-stamped
 //!   per arity `0..=12`.
-//! - [`handle`] — opaque, lifetime-bound receipts for the four core
+//! - [`handle`]—opaque, lifetime-bound receipts for the four core
 //!   Lean semantic values ([`LeanName`], [`LeanLevel`], [`LeanExpr`],
 //!   [`LeanDeclaration`]). Construction and inspection happen Lean-side
 //!   through [`LeanModule::exported_unchecked`] against caller-authored shims.
-//! - [`callback`] — RAII callback registrations for Lean-to-Rust calls.
+//! - [`callback`]—RAII callback registrations for Lean-to-Rust calls.
 //!   [`LeanCallbackHandle`] hides the registry id, payload decoder, and
 //!   trampoline while still producing the two `USize` ABI values generic
 //!   interop shims pass to Lean.
-//! - [`runtime`] — process-wide [`LeanRuntime`] anchor,
+//! - [`runtime`]—process-wide [`LeanRuntime`] anchor,
 //!   [`LeanThreadGuard`] attach RAII, and the lifetime-bound owned /
 //!   borrowed object handles [`Obj`] / [`ObjRef`].
-//! - [`abi`] — sealed [`LeanAbi`] trait + per-Lean-type C-ABI
+//! - [`abi`]—sealed [`LeanAbi`] trait + per-Lean-type C-ABI
 //!   representation impls. The trait is the bound on
 //!   [`LeanExported`]'s argument and return types; the impls are
 //!   crate-internal (sealing prevents downstream `LeanAbi for MyType`).
@@ -77,7 +77,7 @@
 //!
 //! `lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`. The first
 //! two crates expose raw FFI and toolchain metadata; this crate is the
-//! L1 safe surface every (β)-binding consumer depends on. The
+//! safe surface every direct typed-FFI consumer depends on. The
 //! standard Lean service layer lives in `lean-rs-host`, and worker
 //! process facades live in `lean-rs-worker-*`.
 //! Embedders that genuinely need the raw `lean_*` symbols can depend
@@ -87,7 +87,7 @@
 //!
 //! Items at `lean_rs::*` are the curated semver surface. The crate
 //! root re-exports the typed-FFI primitive plus the four handle types
-//! and the L1 error model. Refactors that reshape internal modules
+//! and the `lean-rs` error model. Refactors that reshape internal modules
 //! are free as long as those re-exports stay stable. The public-
 //! surface baseline lives at `docs/api-review/lean-rs-public.txt`.
 
@@ -103,7 +103,7 @@ pub mod runtime;
 /// `LeanError` values via the narrow constructor wrappers it
 /// uses without bypassing the structural bounding invariant: external
 /// callers cannot mint `LeanError` values with unbounded messages. The
-/// seam stays narrow on purpose:
+/// internal bridge stays narrow on purpose:
 /// every extra re-export here is interface surface external readers
 /// might mistake for a stable API. Add a wrapper only when a real call
 /// site needs it.

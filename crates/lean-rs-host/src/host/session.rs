@@ -1,18 +1,18 @@
-//! `LeanSession` — a long-lived Lean session over an imported
+//! `LeanSession`—a long-lived Lean session over an imported
 //! environment.
 //!
 //! A [`LeanSession`] holds an imported `Lean.Environment` value (as an
 //! opaque `Obj<'lean>`) plus a borrow of its parent
 //! [`crate::host::LeanCapabilities`]. Each typed query method
 //! ([`LeanSession::query_declaration`], …) dispatches through a
-//! manifest-checked typed host-shim binding cached on the session — one
+//! manifest-checked typed host-shim binding cached on the session—one
 //! struct-field read, one FFI call, no per-query `dlsym`.
 //!
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
 //! exports twenty-eight **mandatory** `@[export]` symbols and may export nine
-//! **optional** symbols (checked when session bindings are constructed) —
+//! **optional** symbols (checked when session bindings are constructed)—
 //! five bounded `MetaM` services plus module-query entry points and cache control:
 //!
 //! | C symbol                                               | Mandatory? | Lean signature                                                                                                                                                       |
@@ -56,7 +56,7 @@
 //! | `lean_rs_host_clear_module_snapshot_cache`             | optional   | `Unit -> IO ModuleSnapshotCacheClearResult`                                                                                                                          |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
-//! [`lean_rs::HostStage::Link`] — failures bind to the capability's load,
+//! [`lean_rs::HostStage::Link`]—failures bind to the capability's load,
 //! not to the first query. Missing **optional** symbols degrade
 //! gracefully: [`LeanSession::run_meta`] returns
 //! [`crate::host::meta::LeanMetaResponse::Unsupported`] against a service whose
@@ -81,7 +81,7 @@
 //! per-item counts for the bulk methods) and the wall time spent inside
 //! `.call(...)`. Snapshot via [`LeanSession::stats`]; reset by dropping
 //! the session. `import` itself is **not** counted as a query FFI call
-//! — pool reuse vs. fresh import is tracked at the
+//!—pool reuse vs. fresh import is tracked at the
 //! [`crate::host::pool::SessionPool`] level instead.
 //!
 //! ## Cancellation
@@ -96,7 +96,7 @@
 //!
 //! ## Progress
 //!
-//! Long-running session operations additionally accept
+//! Long-running session operations also accept
 //! `Option<&dyn LeanProgressSink>`. `None` allocates no callback handle
 //! and preserves the existing fast path. `Some(sink)` delivers
 //! phase-local [`crate::host::progress::LeanProgressEvent`] values on
@@ -154,9 +154,9 @@ use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 /// Cumulative dispatch metrics for one [`LeanSession`].
 ///
 /// Snapshot via [`LeanSession::stats`]. Each typed query method records
-/// one FFI call; the bulk methods additionally record the per-item batch
+/// one FFI call; the bulk methods also record the per-item batch
 /// size. `elapsed_ns` accumulates the wall time spent inside the inner
-/// `.call(...)` dispatch (measured with [`Instant::now`]) — it excludes
+/// `.call(...)` dispatch (measured with [`Instant::now`])—it excludes
 /// Rust-side argument marshaling, name lookup, and result decoding so
 /// the number is comparable across singular and bulk paths.
 ///
@@ -297,13 +297,13 @@ impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
 pub struct LeanSession<'lean, 'c> {
     capabilities: &'c LeanCapabilities<'lean, 'c>,
     shims: HostShimBindings<'lean, 'c>,
-    /// The imported `Lean.Environment`. Private — Rust never inspects
+    /// The imported `Lean.Environment`. Private—Rust never inspects
     /// the environment directly; every query routes through a Lean
     /// capability export.
     environment: Obj<'lean>,
     /// Per-session dispatch metrics. `Cell` because every query method
     /// takes `&mut self` but the bulk path can also be invoked through a
-    /// shared reference (e.g. inside a fold helper) — keeping the
+    /// shared reference (e.g. inside a fold helper)—keeping the
     /// counter in `Cell` makes the recording uniform without adding an
     /// extra `&mut` borrow at each call site.
     stats: Cell<SessionStats>,
@@ -355,7 +355,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // Lean 4.30 strictly enforces `enableInitializersExecution` before
         // `importModules (loadExts := true)`. The flag is process-global,
         // but `Lean.withImporting` (wrapped around every import) resets it
-        // on completion — two threads importing concurrently race the
+        // on completion—two threads importing concurrently race the
         // shim's enable→import sequence and the loser sees the flag
         // cleared by the winner's reset. Serializing the import phase
         // across the process matches Lean's "single execution thread
@@ -391,7 +391,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Crate-private; only [`crate::host::pool::SessionPool::acquire`]
     /// calls this to recycle a pooled environment under a new
     /// capability borrow. The returned session's [`SessionStats`] start
-    /// at zero — accumulated counters from the previous owner do not
+    /// at zero—accumulated counters from the previous owner do not
     /// leak across pool checkouts.
     pub(crate) fn from_environment(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
@@ -867,7 +867,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// through the capability's `Name.toString` shim so callers see the
     /// same canonical form Lean would log.
     ///
-    /// Diagnostic only — not a semantic key. Use
+    /// Diagnostic only—not a semantic key. Use
     /// [`LeanSession::query_declaration`] + a typed handle when
     /// equality matters.
     ///
@@ -991,7 +991,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// This is the supported way to turn a `LeanName` (e.g. an element
     /// of [`Self::list_declarations_filtered`]'s result) into Rust text.
-    /// The output is diagnostic — not a semantic key — and equality on
+    /// The output is diagnostic—not a semantic key—and equality on
     /// the underlying `Lean.Name` still lives in Lean.
     ///
     /// # Errors
@@ -1082,7 +1082,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         self.name_to_string_bulk(&names, cancellation, progress)
     }
 
-    /// Render `expr` via `Expr.toString` — the cheap, deterministic
+    /// Render `expr` via `Expr.toString`—the cheap, deterministic
     /// projection.
     ///
     /// Walks the syntax tree directly: no `MetaM`, no notation lookup,
@@ -1090,7 +1090,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// dump suitable for indexing, logging, and search keys. For the
     /// form a Lean user reads, use the optional
     /// [`crate::host::meta::pp_expr`] service through
-    /// [`Self::run_meta`] instead — it pays for elaboration context to
+    /// [`Self::run_meta`] instead—it pays for elaboration context to
     /// get notation and unfolding right but can time out under a tight
     /// heartbeat budget.
     ///
@@ -1431,14 +1431,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// carries the kernel-accepted `Lean.Declaration` opaquely. The
     /// session never installs that declaration into its stored
     /// environment, so re-checking against the unchanged environment
-    /// is the supported way to ask "is this evidence still valid?" —
+    /// is the supported way to ask "is this evidence still valid?"—
     /// the kernel runs fresh.
     ///
     /// The returned [`EvidenceStatus`] mirrors
     /// [`LeanKernelOutcome::status`]: `Checked` on success, `Rejected`
     /// if the kernel now refuses the declaration, `Unavailable` if
     /// the Lean shim caught an `IO` exception. The Lean fixture does
-    /// not currently emit `Unsupported` from this path — `Unsupported`
+    /// not currently emit `Unsupported` from this path—`Unsupported`
     /// only fires during the initial classification in
     /// `kernel_check`.
     ///
@@ -1471,7 +1471,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`ProofSummary`] for diagnostics or storage.
     ///
     /// The Lean shim renders the captured declaration's name, kind,
-    /// and type expression as three byte-bounded `String`s — no
+    /// and type expression as three byte-bounded `String`s—no
     /// `Lean.Expr` or proof term crosses the FFI boundary. The
     /// summary is computed on demand (not at
     /// [`Self::kernel_check`] time) because most callers only ever
@@ -1518,8 +1518,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// The outer [`LeanResult`] surfaces host-stack failures (a Lean
     /// `IO`-level exception from the shim itself, or an undecodable
-    /// return value). The four-way classification — `Ok` / `Failed` /
-    /// `TimeoutOrHeartbeat` / `Unsupported` — lives in the inner
+    /// return value). The four-way classification—`Ok` / `Failed` /
+    /// `TimeoutOrHeartbeat` / `Unsupported`—lives in the inner
     /// [`LeanMetaResponse`].
     ///
     /// # Errors
@@ -1560,7 +1560,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// `Array (Option Declaration)` allocation out. The Lean shim folds
     /// the singular `envQueryDeclaration` across the input array, so the
     /// iteration semantics are identical to a Rust-side fold over the
-    /// singular path — a missing name still errors the batch.
+    /// singular path—a missing name still errors the batch.
     ///
     /// Names are still resolved through the capability's
     /// `name_from_string` shim, one [`lean_rs::LeanName`] handle per

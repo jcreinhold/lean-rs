@@ -99,34 +99,22 @@ impl LeanElabOptions {
 
     // -- crate-internal accessors used by the dispatch site -----------
 
-    #[allow(
-        dead_code,
-        reason = "first caller lands with the session-method dispatch in the same prompt"
-    )]
+    #[allow(dead_code, reason = "reserved for session-method dispatch accessors")]
     pub(crate) fn namespace_context_str(&self) -> &str {
         &self.namespace_context
     }
 
-    #[allow(
-        dead_code,
-        reason = "first caller lands with the session-method dispatch in the same prompt"
-    )]
+    #[allow(dead_code, reason = "reserved for session-method dispatch accessors")]
     pub(crate) fn file_label_str(&self) -> &str {
         &self.file_label
     }
 
-    #[allow(
-        dead_code,
-        reason = "first caller lands with the session-method dispatch in the same prompt"
-    )]
+    #[allow(dead_code, reason = "reserved for session-method dispatch accessors")]
     pub(crate) fn heartbeats(&self) -> u64 {
         self.heartbeat_limit
     }
 
-    #[allow(
-        dead_code,
-        reason = "first caller lands with the session-method dispatch in the same prompt"
-    )]
+    #[allow(dead_code, reason = "reserved for session-method dispatch accessors")]
     pub(crate) fn diagnostic_byte_limit_usize(&self) -> usize {
         self.diagnostic_byte_limit
     }

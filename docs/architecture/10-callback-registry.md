@@ -1,10 +1,10 @@
 # Callback Registry
 
-`lean-rs` exposes a narrow Rust callback registry for Lean-to-Rust calls. This is an L1 primitive, not a `LeanSession`
-feature and not the worker-facing data streaming API. A callback handle is the low-level same-process mechanism used
-when an exported Lean function must push data into Rust before it returns. Worker-style callers should normally use The
-worker crates typed commands and row sinks; the worker child may use callbacks internally, but parent callers do not
-receive or pass callback handles.
+`lean-rs` exposes a narrow Rust callback registry for Lean-to-Rust calls. This is a same-process primitive, not a
+`LeanSession` feature and not the worker-facing data streaming API. A callback handle is the low-level same-process
+mechanism used when an exported Lean function must push data into Rust before it returns. Worker-style callers should
+normally use The worker crates typed commands and row sinks; the worker child may use callbacks internally, but parent
+callers do not receive or pass callback handles.
 
 ## Public Shape
 

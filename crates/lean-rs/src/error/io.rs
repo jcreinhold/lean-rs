@@ -7,14 +7,14 @@
 //! the owned success [`Obj`] or a classified
 //! [`LeanError::LeanException`]. Application-level ABI conversion of
 //! the success value (`TryFromLean`, scalar / `Nat` / `String` decoders)
-//! is the caller's job — separating the two responsibilities keeps each
+//! is the caller's job—separating the two responsibilities keeps each
 //! decode site readable and avoids tying `IO α` to a single Rust type.
 //!
 //! Classification is anchored to Lean 4.29.1's
 //! `src/lean/Init/System/IOError.lean` declaration order (see
 //! [`KIND_TABLE`]). A unit test pins the `userError` mapping against
 //! the live runtime via the existing `lean_rs_fixture_io_throw`
-//! fixture — that test fails if the table drifts and the fix is to
+//! fixture—that test fails if the table drifts and the fix is to
 //! update `KIND_TABLE` to match the new declaration order.
 //!
 //! Message extraction is best-effort. Most `IO.Error` constructors
@@ -22,7 +22,7 @@
 //! Lean `String`); we read that field and bound it. Constructors
 //! without an object field (today: `unexpectedEof`) and unknown tags
 //! collapse to a generic placeholder. Faithful per-variant rendering
-//! is out of scope here — it would require pretty-printing arbitrary
+//! is out of scope here—it would require pretty-printing arbitrary
 //! Lean exceptions through `MetaM`, which the bounded `host::meta`
 //! surface does not currently expose.
 
@@ -235,7 +235,7 @@ mod tests {
         assert!(path.exists(), "fixture dylib not found at {}", path.display());
         let library = LeanLibrary::open(runtime, &path).expect("fixture dylib opens cleanly");
         // Initializing the root cascades into `Effects` (where the IO
-        // fixtures live); drop the typed handle — these tests reach the
+        // fixtures live); drop the typed handle—these tests reach the
         // raw entry points via the library directly.
         drop(
             library
@@ -255,7 +255,7 @@ mod tests {
         let f: FnPtr = unsafe { core::mem::transmute::<*mut core::ffi::c_void, FnPtr>(addr) };
         // SAFETY: `lean_box(0)` is the conventional scalar world token.
         let world = unsafe { lean_rs_sys::object::lean_box(0) };
-        // SAFETY: the function takes ownership of `world` (a scalar — no
+        // SAFETY: the function takes ownership of `world` (a scalar—no
         // refcount transfer) and returns an owned IO result pointer.
         let raw = unsafe { f(world) };
         // SAFETY: `raw` is the owned IO result returned by Lake's IO export.

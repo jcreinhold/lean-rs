@@ -32,7 +32,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     /// Build the typed handle.
     ///
     /// `pub(super)` so only `LeanLibrary::initialize_module` can produce
-    /// one — the construction site is the proof that initialization
+    /// one—the construction site is the proof that initialization
     /// succeeded.
     pub(super) fn new(library: &'lib LeanLibrary<'lean>, initializer: InitializerName) -> Self {
         Self { library, initializer }
@@ -62,7 +62,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     ///
     /// `pub(crate)` so internal symbol-derivation code can reach the
     /// canonical Lake mangling without re-running the validator.
-    #[allow(dead_code, reason = "reserved for symbol-derivation helpers in later prompts")]
+    #[allow(dead_code, reason = "reserved for future symbol-derivation helpers")]
     pub(crate) fn initializer(&self) -> &InitializerName {
         &self.initializer
     }

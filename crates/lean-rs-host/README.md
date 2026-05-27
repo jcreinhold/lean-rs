@@ -5,9 +5,9 @@ Standard Lean services for Rust applications embedding Lean 4. Provides the `Lea
 elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`, `LeanSeverity`, `LeanPosition`), the
 bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` / `PooledSession` reuse helper.
 
-Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed-FFI primitive. The opaque semantic handles `LeanName`,
+Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed FFI crate. The opaque semantic handles `LeanName`,
 `LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`; this crate consumes them through `use lean_rs::{...}`.
-If you only need to call typed `@[export]` Lean functions from Rust, depend on `lean-rs` directly: it is the typed-FFI
+If you only need to call typed `@[export]` Lean functions from Rust, depend on `lean-rs` directly: it is the typed FFI
 minimum and has no Lean-side shim contract.
 
 **You write zero shim exports yourself.** `lean-rs-host` bundles its host and generic interop shim packages and builds

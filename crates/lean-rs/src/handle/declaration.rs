@@ -4,8 +4,8 @@
 //! (axiom, definition, theorem, opaque, inductive, …) produced on the
 //! Lean side. The Rust API is intentionally minimal: it carries the
 //! handle through the FFI boundary and nothing else. Construction and
-//! inspection — selecting the constructor, reading the declaration name
-//! or type, rendering a summary — live in Lean exports the caller
+//! inspection—selecting the constructor, reading the declaration name
+//! or type, rendering a summary—live in Lean exports the caller
 //! reaches through [`crate::module::LeanModule::exported_unchecked`]. Rust offers
 //! no constructor: building a `Declaration` outside Lean would either be
 //! wrong (lacking universe and type machinery) or duplicate Lean's
@@ -64,7 +64,7 @@ impl<'lean> LeanAbi<'lean> for LeanDeclaration<'lean> {
 
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is an owned `lean_object*` produced by a Lean

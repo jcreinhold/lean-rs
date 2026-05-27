@@ -86,7 +86,7 @@ impl<'lean> TryFromLean<'lean> for String {
 /// # Errors
 ///
 /// Returns `LeanError::Host { stage: Conversion, .. }` if `obj` is not a
-/// Lean `String`, or if its bytes are not valid UTF-8 (defensive — Lean
+/// Lean `String`, or if its bytes are not valid UTF-8 (defensive—Lean
 /// enforces the invariant, but we honour it rather than relying on
 /// `from_utf8_unchecked`).
 pub(crate) fn borrow_str<'a>(obj: &'a ObjRef<'_, '_>) -> LeanResult<&'a str> {
@@ -150,7 +150,7 @@ impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is a `lean_obj_res` owning one reference per
@@ -187,7 +187,7 @@ impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
+        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`

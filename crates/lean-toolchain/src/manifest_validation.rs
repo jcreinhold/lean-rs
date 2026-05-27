@@ -110,7 +110,7 @@ impl CapabilityManifest {
 /// toolchain fingerprint match, and primary-dylib staleness.
 ///
 /// This is the cheap, link-free preflight the worker parent runs before
-/// spawning a child. The runtime preflight in `lean-rs` additionally inspects
+/// spawning a child. The runtime preflight in `lean-rs` also inspects
 /// the dylib's symbol table.
 #[must_use]
 pub fn check_static(manifest_path: &Path) -> LeanLoaderReport {

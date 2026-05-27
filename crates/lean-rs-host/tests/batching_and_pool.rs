@@ -647,7 +647,7 @@ fn bulk_vs_singular_timing_note() {
          {ITEMS} singular queries took {singular_elapsed:?}; \
          one bulk query took {bulk_elapsed:?}",
     );
-    // No threshold asserted — for the tiny fixture queries used here
+    // No threshold asserted—for the tiny fixture queries used here
     // (each is a microsecond-scale `env.find?` lookup), bulk's
     // single-Vec allocation overhead can exceed the per-call FFI cost
     // it saves. The amortisation win is asymptotic and shows up
@@ -656,7 +656,7 @@ fn bulk_vs_singular_timing_note() {
     // reference, not asserted.
     //
     // The `query_declarations_bulk_returns_all_for_existing_names`
-    // test does pin the *FFI-call count* contract — bulk is one
-    // dispatch regardless of N — which is the structural guarantee
+    // test does pin the *FFI-call count* contract—bulk is one
+    // dispatch regardless of N—which is the structural guarantee
     // worth asserting.
 }

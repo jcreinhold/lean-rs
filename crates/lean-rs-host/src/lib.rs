@@ -1,7 +1,7 @@
 //! Standard Lean service layer for Rust applications embedding Lean 4.
 //!
-//! This crate is the L2 application framework built on top of the L1
-//! FFI primitive shipped by [`lean-rs`](https://docs.rs/lean-rs). It owns:
+//! This crate is the standard service layer built on top of the typed FFI
+//! crate shipped by [`lean-rs`](https://docs.rs/lean-rs). It owns:
 //!
 //! - The high-level [`LeanHost`] / [`LeanCapabilities`] / [`LeanSession`]
 //!   trio, plus the [`SessionPool`] / [`PooledSession`] reuse helper and
@@ -14,8 +14,8 @@
 //!   `@[export]` Lean shims bundled with this crate and loaded alongside the
 //!   consumer capability dylib.
 //!
-//! Downstream applications that want the (β)-binding minimum — call any
-//! `@[export]` Lean function with typed arguments, no shim contract —
+//! Downstream applications that only need to call `@[export]` Lean functions
+//! with typed arguments and no shim contract
 //! should depend on `lean-rs` directly and skip this crate.
 
 #![forbid(unsafe_code)]

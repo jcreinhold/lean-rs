@@ -6,14 +6,14 @@
 //! required in the session, and a typed `(Req, Resp)` shape. Four
 //! services are pinned:
 //!
-//! - [`infer_type`] — runs `Meta.inferType` on a supplied `Expr`.
-//! - [`whnf`] — runs `Meta.whnf` on a supplied `Expr` under the bundle's
+//! - [`infer_type`]—runs `Meta.inferType` on a supplied `Expr`.
+//! - [`whnf`]—runs `Meta.whnf` on a supplied `Expr` under the bundle's
 //!   reducibility setting.
-//! - [`heartbeat_burn`] — a diagnostic loop that consumes a heartbeat
+//! - [`heartbeat_burn`]—a diagnostic loop that consumes a heartbeat
 //!   per step, exercising the heartbeat-exhaustion classification path.
-//! - [`is_def_eq`] — runs `Meta.isDefEq` on two supplied expressions
+//! - [`is_def_eq`]—runs `Meta.isDefEq` on two supplied expressions
 //!   under a request-supplied transparency setting.
-//! - [`pp_expr`] — runs `Lean.PrettyPrinter.ppExpr` on a supplied `Expr`
+//! - [`pp_expr`]—runs `Lean.PrettyPrinter.ppExpr` on a supplied `Expr`
 //!   and returns the rendered string. Slow relative to the raw
 //!   [`crate::LeanSession::expr_to_string_raw`] projection but produces
 //!   the form a Lean user reads.

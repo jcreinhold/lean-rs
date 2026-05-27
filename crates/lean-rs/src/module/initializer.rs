@@ -40,7 +40,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
 // single `pub(crate)` site that runs Lean-generated module initializers
-// — a per-file opt-out per `docs/architecture/01-safety-model.md`.
+//—a per-file opt-out per `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
 
 use std::ffi::CString;
@@ -67,7 +67,7 @@ use crate::runtime::obj::Obj;
 pub(crate) struct InitializerName {
     /// Modern (Lean ≥ 4.27) C-string symbol bytes with trailing NUL.
     symbol: CString,
-    /// Legacy (Lean ≤ 4.26) C-string symbol bytes with trailing NUL —
+    /// Legacy (Lean ≤ 4.26) C-string symbol bytes with trailing NUL—
     /// the same module mangled without the package prefix.
     legacy_symbol: CString,
     /// Human-readable form, e.g. `lean_rs_fixture::LeanRsFixture.Scalars`.
@@ -140,7 +140,7 @@ impl InitializerName {
         self.legacy_symbol.as_bytes_with_nul()
     }
 
-    /// Modern symbol bytes without the trailing NUL — for diagnostics.
+    /// Modern symbol bytes without the trailing NUL—for diagnostics.
     pub(crate) fn symbol_str(&self) -> &str {
         // SAFETY: `from_lake_names` only constructs symbols from ASCII
         // bytes (the validator restricts components to ASCII), and
@@ -149,7 +149,7 @@ impl InitializerName {
         unsafe { std::str::from_utf8_unchecked(self.symbol.as_bytes()) }
     }
 
-    /// Legacy symbol bytes without the trailing NUL — for diagnostics.
+    /// Legacy symbol bytes without the trailing NUL—for diagnostics.
     pub(crate) fn legacy_symbol_str(&self) -> &str {
         // SAFETY: same construction as `symbol_str` above.
         unsafe { std::str::from_utf8_unchecked(self.legacy_symbol.as_bytes()) }

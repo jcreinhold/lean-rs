@@ -6,10 +6,10 @@
 //! <https://nnethercote.github.io/dh_view/dh_view.html>.
 //!
 //! Lean's internal mimalloc (statically linked into `libleanrt.a`) is
-//! a separate allocator — it does not flow through `#[global_allocator]`
+//! a separate allocator—it does not flow through `#[global_allocator]`
 //! and is invisible to this probe. The numbers captured here are
 //! host-side Rust churn (`String::from_utf8`, `Vec` resize, ABI buffer
-//! ownership transfers, error-message bounding) — the surface the
+//! ownership transfers, error-message bounding)—the surface the
 //! conversion-path interventions target.
 //!
 //! Usage:
@@ -90,7 +90,7 @@ fn run_array_string(library: &LeanLibrary<'_>, n: usize) {
 
 fn main() {
     // The dhat profiler is initialised *before* runtime/library setup
-    // so the bring-up cost is included — this matches what a real
+    // so the bring-up cost is included—this matches what a real
     // application sees on first request. Use the dhat viewer to
     // partition setup vs. steady-state by the recorded backtraces.
     let _profiler = dhat::Profiler::new_heap();

@@ -5,7 +5,7 @@ belongs to Lean/Rust interop itself, not to the theorem-prover host session mode
 
 ## Package Boundary
 
-The packaged L1 copy lives under
+The packaged same-process copy lives under
 [`crates/lean-rs/shims/lean-rs-interop-shims/`](../../crates/lean-rs/shims/lean-rs-interop-shims/). `lean-rs-host`
 carries its own bundled copy under
 [`crates/lean-rs-host/shims/lean-rs-interop-shims/`](../../crates/lean-rs-host/shims/lean-rs-interop-shims/) so the host
@@ -18,8 +18,8 @@ Current modules:
 - `LeanRsInterop.Callback.String`: string callback helper for `LeanCallbackHandle<LeanStringEvent>`.
 - `LeanRsInterop.Callback`: roll-up module that imports both payload-specific helper namespaces.
 
-Name, byte, and object helpers belong in this package when a prompt adds a real caller. They are not present yet,
-because unused helpers would widen the shim surface without hiding any current complexity.
+Name, byte, and object helpers belong in this package when a real caller needs them. They are not present yet, because
+unused helpers would widen the shim surface without hiding any current complexity.
 
 ## Callback Helper
 

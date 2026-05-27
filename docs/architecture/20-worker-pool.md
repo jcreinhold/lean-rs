@@ -146,11 +146,11 @@ budgets, but they do not poll child RSS, inspect child pids, or decide which chi
 
 ## Related docs
 
-- [`21-import-set-planning.md`](21-import-set-planning.md) — stable work batches that make pool reuse effective.
+- [`21-import-set-planning.md`](21-import-set-planning.md)—stable work batches that make pool reuse effective.
 - [`22-worker-row-batching.md`](22-worker-row-batching.md),
-  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md) — batching and data-plane format decisions.
-- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md) — Lean-side streaming helpers.
-- [`25-mathlib-scale-worker-fixture.md`](25-mathlib-scale-worker-fixture.md) — mathlib-scale fixture.
-- [`26-worker-pool-observability.md`](26-worker-pool-observability.md) — pool observability.
-- [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md) — downstream readiness proof.
-- [`28-production-scale-release.md`](28-production-scale-release.md) — production-scale contract.
+  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md)—batching and data-plane format decisions.
+- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md)—Lean-side streaming helpers.
+- [`25-mathlib-scale-worker-fixture.md`](25-mathlib-scale-worker-fixture.md)—mathlib-scale fixture.
+- [`26-worker-pool-observability.md`](26-worker-pool-observability.md)—pool observability.
+- [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md)—downstream worker replacement fixture.
+- [`28-production-scale-release.md`](28-production-scale-release.md)—production-scale contract.

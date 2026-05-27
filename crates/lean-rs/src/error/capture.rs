@@ -76,7 +76,7 @@ pub struct CapturedEvent {
 /// [`Self::events`]; drop to uninstall. Single-threaded by construction:
 /// the installed subscriber is per-thread (via
 /// [`tracing::subscriber::set_default`]), and the inner buffer is
-/// reachable only through this guard. `!Send` is structural — the
+/// reachable only through this guard. `!Send` is structural—the
 /// `Rc` and the [`tracing::dispatcher::DefaultGuard`] both inherit it.
 #[must_use = "Drop the DiagnosticCapture only when you are done collecting"]
 pub struct DiagnosticCapture {
@@ -214,7 +214,7 @@ where
         if let Ok(mut buf) = self.buffer.lock() {
             buf.push(event);
         }
-        // The span itself is intentionally ignored after this — we do
+        // The span itself is intentionally ignored after this—we do
         // not retain per-span extension storage. `ctx` is only here for
         // potential future enrichment.
         let _ = (id, ctx);

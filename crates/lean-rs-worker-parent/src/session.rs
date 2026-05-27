@@ -548,7 +548,7 @@ impl LeanWorkerSession<'_> {
     /// Heartbeat budgeting: each `MetaM` pass (the primary `inferType` call
     /// and the pretty-printer) runs under the same
     /// [`LeanWorkerElabOptions::heartbeat_limit`] value, independently
-    /// bounded — the pretty-printer does not consume budget left over from
+    /// bounded—the pretty-printer does not consume budget left over from
     /// the primary call. A `Failed` or `TimeoutOrHeartbeat` reported by the
     /// pretty-printer surfaces as the *whole* call's failure (matching
     /// in-process behaviour); there is no path that returns the inferred

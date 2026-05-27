@@ -75,7 +75,7 @@ fn run() -> LeanResult<()> {
 
     match response {
         LeanMetaResponse::Ok(_inferred_expr) => {
-            // `LeanExpr` is opaque on purpose — the host stack never
+            // `LeanExpr` is opaque on purpose—the host stack never
             // pretty-prints proof terms. The `Ok` variant proves the
             // service ran cleanly; downstream callers usually feed
             // the inferred handle into further `MetaM` work or back

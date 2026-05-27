@@ -1,23 +1,23 @@
 //! High-level surface for hosting Lean capabilities.
 //!
 //! Sits on top of the [`lean_rs::module`] dispatch primitives. The four-piece
-//! shape is pinned by `docs/architecture/03-host-stack.md`:
+//! structure is pinned by `docs/architecture/03-host-stack.md`:
 //!
-//! - L1 handles ([`lean_rs::handle::LeanName`],
+//! - `lean-rs` handles ([`lean_rs::handle::LeanName`],
 //!   [`lean_rs::handle::LeanLevel`], [`lean_rs::handle::LeanExpr`],
 //!   [`lean_rs::handle::LeanDeclaration`]) ship in the FFI primitive
 //!   crate `lean-rs`; the session methods here take and return them.
-//! - [`LeanHost`], [`LeanCapabilities`], [`LeanSession`] — Lake-project
+//! - [`LeanHost`], [`LeanCapabilities`], [`LeanSession`]—Lake-project
 //!   entry point, capability loading (either user-dylib-backed or
 //!   shims-only, with manifest-checked host-shim bindings resolved when a
 //!   session is constructed), and a long-lived session that owns the imported
 //!   `Lean.Environment` and dispatches every typed query, elaboration,
 //!   kernel check, bulk operation, and meta call.
-//! - [`elaboration`] — bounded [`elaboration::LeanElabOptions`], typed
+//! - [`elaboration`]—bounded [`elaboration::LeanElabOptions`], typed
 //!   [`elaboration::LeanDiagnostic`] / [`elaboration::LeanElabFailure`],
 //!   and the published byte / heartbeat ceilings consumed by
 //!   [`LeanSession::elaborate`] and [`LeanSession::kernel_check`].
-//! - [`evidence`] — opaque [`evidence::LeanEvidence`] kernel-checked
+//! - [`evidence`]—opaque [`evidence::LeanEvidence`] kernel-checked
 //!   evidence handle plus the [`evidence::EvidenceStatus`] /
 //!   [`evidence::LeanKernelOutcome`] taxonomy returned by
 //!   [`LeanSession::kernel_check`], and the bounded

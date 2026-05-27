@@ -1,4 +1,4 @@
-//! `IO`-result helpers — mirrors `lean.h:2893–2907`.
+//! `IO`-result helpers—mirrors `lean.h:2893–2907`.
 //!
 //! `IO α` results from compiled Lean are encoded as constructors with tag 0
 //! (`ok`) or tag 1 (`error`). The single object payload sits in constructor

@@ -26,7 +26,7 @@ fn main() {
     }
 
     let Some(prefix) = discover_prefix() else {
-        // Discovery failed — fall through silently. `lean-rs-sys` will
+        // Discovery failed—fall through silently. `lean-rs-sys` will
         // report the underlying problem with a more specific diagnostic
         // than this script could produce.
         return;

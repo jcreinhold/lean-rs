@@ -1,4 +1,4 @@
-//! Constructor objects and polymorphic boxing — Rust mirrors of
+//! Constructor objects and polymorphic boxing—Rust mirrors of
 //! `lean.h:642–760` and the `lean_box_uint*` / `lean_box_float` family at
 //! `lean.h:2811–2873`.
 //!
@@ -26,7 +26,7 @@ use crate::repr::{LeanCtorObjectRepr, LeanObjectRepr};
 use crate::types::{b_lean_obj_arg, lean_obj_res, lean_object};
 
 /// Write the single-threaded header (`m_rc=1`, `m_tag`, `m_other`) on a
-/// freshly allocated object — Rust mirror of `lean_set_st_header`
+/// freshly allocated object—Rust mirror of `lean_set_st_header`
 /// (`lean.h:615–623`).
 ///
 /// Constructor allocation uses Lean's small-object sizing convention:
@@ -100,7 +100,7 @@ pub unsafe fn lean_ctor_scalar_cptr(o: *mut lean_object) -> *mut u8 {
     }
 }
 
-/// Allocate a freshly initialized constructor object — Rust mirror of
+/// Allocate a freshly initialized constructor object—Rust mirror of
 /// `lean_alloc_ctor` (`lean.h:659–664`).
 ///
 /// `tag` selects the constructor (`0..=LEAN_MAX_CTOR_TAG`), `num_objs`
@@ -280,7 +280,7 @@ pub unsafe fn lean_unbox_float(o: b_lean_obj_arg) -> f64 {
 pub unsafe fn lean_ctor_get_usize(o: b_lean_obj_arg, i: u8) -> usize {
     // SAFETY: precondition above. The scalar area starts at the first
     // object-slot pointer, which is `*mut lean_object`-aligned (8 bytes on
-    // 64-bit, 4 on 32-bit) — sufficient for `usize`. `read_unaligned` is
+    // 64-bit, 4 on 32-bit)—sufficient for `usize`. `read_unaligned` is
     // used to mirror C's byte-pointer cast without invoking Rust's
     // strict-alignment requirement on plain pointer reads.
     unsafe { lean_ctor_obj_cptr(o).add(i as usize).cast::<usize>().read_unaligned() }
@@ -370,7 +370,7 @@ pub unsafe fn lean_ctor_get_float(o: b_lean_obj_arg, offset: u32) -> f64 {
 }
 
 /// Write a `usize` field at slot `i` (counted in `usize` units past the
-/// object-pointer slots) — mirror of `lean.h:727–730`.
+/// object-pointer slots)—mirror of `lean.h:727–730`.
 ///
 /// # Safety
 ///
@@ -516,7 +516,7 @@ mod tests {
     fn box_unbox_usize_round_trips() {
         ensure_runtime();
         for v in [0_usize, 1, usize::MAX] {
-            // SAFETY: same shape as `box_unbox_uint64_round_trips`.
+            // SAFETY: same ownership contract as `box_unbox_uint64_round_trips`.
             unsafe {
                 let o = lean_box_usize(v);
                 assert_eq!(lean_unbox_usize(o), v);
@@ -529,7 +529,7 @@ mod tests {
     fn box_unbox_uint32_round_trips() {
         ensure_runtime();
         for v in [0_u32, 1, u32::MAX] {
-            // SAFETY: same shape as `box_unbox_uint64_round_trips`.
+            // SAFETY: same ownership contract as `box_unbox_uint64_round_trips`.
             unsafe {
                 let o = lean_box_uint32(v);
                 assert_eq!(lean_unbox_uint32(o), v);
@@ -542,7 +542,7 @@ mod tests {
     fn box_unbox_float_round_trips() {
         ensure_runtime();
         for v in [0.0_f64, -1.5, core::f64::consts::PI, f64::INFINITY] {
-            // SAFETY: same shape as `box_unbox_uint64_round_trips`.
+            // SAFETY: same ownership contract as `box_unbox_uint64_round_trips`.
             unsafe {
                 let o = lean_box_float(v);
                 assert_eq!(lean_unbox_float(o), v);
@@ -550,7 +550,7 @@ mod tests {
             }
         }
         // NaN is a separate assertion: `==` is false against itself.
-        // SAFETY: same shape as above.
+        // SAFETY: same ownership contract as above.
         unsafe {
             let o = lean_box_float(f64::NAN);
             assert!(lean_unbox_float(o).is_nan());

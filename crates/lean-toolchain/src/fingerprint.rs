@@ -1,6 +1,6 @@
 //! Typed composition of the build-baked Lean toolchain identity.
 //!
-//! Every field is a `&'static str` resolved at build time — by
+//! Every field is a `&'static str` resolved at build time—by
 //! `lean-rs-sys`'s build script (`LEAN_VERSION`, `LEAN_HEADER_DIGEST`) or by
 //! this crate's `build.rs` (`LAKE_FIXTURE_DIGEST`, `HOST_TRIPLE`). Published
 //! crate builds that do not contain the workspace fixture record a zero

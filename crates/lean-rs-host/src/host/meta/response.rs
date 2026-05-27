@@ -1,9 +1,9 @@
-//! `LeanMetaResponse<Resp>` and `MetaCallStatus` — typed outcome of a
+//! `LeanMetaResponse<Resp>` and `MetaCallStatus`—typed outcome of a
 //! bounded `MetaM` service call.
 //!
 //! The Lean side encodes `MetaResponse α` as a four-constructor
 //! inductive (`ok / failed / timeoutOrHeartbeat / unsupported`); each
-//! constructor carries a single object payload — the typed response on
+//! constructor carries a single object payload—the typed response on
 //! `Ok`, a [`LeanElabFailure`] on every other branch. Tag indices are
 //! 0..=3 in declaration order; the [`TryFromLean`] impl below does the
 //! dispatch.
@@ -35,7 +35,7 @@ pub enum MetaCallStatus {
     /// Equivalent to `Lean.Exception.isMaxHeartbeat` matching on the
     /// caught exception.
     TimeoutOrHeartbeat,
-    /// The capability does not expose this service — either the Lean
+    /// The capability does not expose this service—either the Lean
     /// shim returned `unsupported` for the request shape, or the
     /// loaded capability does not export the service's C symbol.
     Unsupported,
@@ -77,7 +77,7 @@ impl<Resp> LeanMetaResponse<Resp> {
 
     /// Project to the stable [`LeanDiagnosticCode`] taxonomy.
     ///
-    /// `Ok` returns `None` — the response carries a typed payload, not
+    /// `Ok` returns `None`—the response carries a typed payload, not
     /// a diagnostic. The three failure variants map to
     /// [`LeanDiagnosticCode::Elaboration`] (the failure carries a
     /// [`LeanElabFailure`] in every case except `Unsupported`, which

@@ -26,8 +26,8 @@ is the [bump procedure](../bump-toolchain.md).
 **Lower bound: 4.26.0.** A 2026-05-18 multi-toolchain sweep
 ([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1. The six
 releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases ≤ 4.25.x SIGSEGV inside
-`lean_dec_ref_cold` from L2 service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2
-row on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release.
+`lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
+on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release.
 
 **Policy.**
 
@@ -69,7 +69,7 @@ There is no external `lean-sys` dependency. The split between `lean-rs-sys` and 
   `is_supported()`), the Lake fixture digest, layered link diagnostics, reusable build-script helpers, and
   `required_symbols()` returning `lean_rs_sys::REQUIRED_SYMBOLS` so the allowlist lives in one place.
 
-See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the per-decision rationale behind `lean-rs-sys`'s shape.
+See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the rationale behind `lean-rs-sys`.
 
 ## Header digest
 

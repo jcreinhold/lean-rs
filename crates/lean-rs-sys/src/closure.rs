@@ -1,4 +1,4 @@
-//! Closure objects — externs and inline accessors from `lean.h:762–813`.
+//! Closure objects—externs and inline accessors from `lean.h:762–813`.
 
 #![allow(clippy::inline_always)]
 // `arity` and `num_fixed` are stored as `u16` in the Lean closure object,

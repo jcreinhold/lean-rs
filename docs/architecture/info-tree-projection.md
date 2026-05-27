@@ -24,13 +24,13 @@ reconstruct info-tree semantics from a broad internal dump.
 
 `ModuleQueryOutcome` distinguishes transport capability from module-header state:
 
-- `Ok { result, imports }` — header parsed, all user-written imports are present in the session environment, and the
-  query result is available.
-- `MissingImports { result, imports, missing }` — header parsed, but some user imports are absent from the session
+- `Ok { result, imports }`—header parsed, all user-written imports are present in the session environment, and the query
+  result is available.
+- `MissingImports { result, imports, missing }`—header parsed, but some user imports are absent from the session
   environment's transitive module closure. The body still elaborates against the available environment and returns the
   requested result.
-- `HeaderParseFailed { diagnostics }` — header parsing failed; body elaboration and info-tree traversal do not run.
-- `Unsupported` — the loaded capability dylib does not export `lean_rs_host_process_module_query`.
+- `HeaderParseFailed { diagnostics }`—header parsing failed; body elaboration and info-tree traversal do not run.
+- `Unsupported`—the loaded capability dylib does not export `lean_rs_host_process_module_query`.
 
 Module-system headers keep the same import reporting policy as ordinary headers: `module`, `public import`, ordinary
 `import`, and `import all` report bare module names, without modifiers.

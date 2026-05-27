@@ -8,7 +8,7 @@
 //!
 //! It does not import `lean-dup` schemas. If `LEAN_RS_MATHLIB_ROOT` points at a
 //! mathlib checkout, the planner uses that module list as the workload shape;
-//! otherwise it uses a deterministic mathlib-shaped fallback.
+//! otherwise it uses a deterministic mathlib-style fallback.
 //!
 //! Run from the workspace root:
 //!

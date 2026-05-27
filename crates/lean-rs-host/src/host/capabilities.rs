@@ -1,4 +1,4 @@
-//! `LeanCapabilities` — loaded manifest-checked host shims and optional user
+//! `LeanCapabilities`—loaded manifest-checked host shims and optional user
 //! dylibs.
 //!
 //! [`LeanCapabilities`] owns the [`lean_rs::module::LeanLibrary`] handles and
@@ -15,8 +15,8 @@
 //!   the 28 mandatory + 9 optional `lean_rs_host_*` `@[export]` symbols that
 //!   every typed `LeanSession` method dispatches through. Lake does *not*
 //!   transitively bundle the shim's `@[export]` symbols into the user's dylib
-//!   (verified at carve-out time, 2026-05-18 — `LeanLib.sharedFacet` is a
-//!   per-package shared library, not a transitive merge), so the host stack
+//!   because `LeanLib.sharedFacet` emits a per-package shared library, not a
+//!   transitive merge, so the host stack
 //!   loads the host shim manifest, its generic interop dependency, and the
 //!   user dylib explicitly. All dylibs share one Lean runtime; each per-module
 //!   `initialize_<Module>` short-circuits idempotently on its own flag.
@@ -26,7 +26,7 @@
 //! degrades to a synthesised
 //! [`crate::host::meta::LeanMetaResponse::Unsupported`] at the
 //! [`crate::LeanSession::run_meta`] call site. Bindings are resolved once
-//! per session and then cached as typed call handles — no per-query `dlsym`.
+//! per session and then cached as typed call handles—no per-query `dlsym`.
 //!
 //! Construction goes through either [`crate::host::LeanHost::load_capabilities`]
 //! or [`crate::host::LeanHost::load_shims_only`]; [`LeanCapabilities::session`]
@@ -53,7 +53,7 @@ use crate::host::shim_bindings::host_shim_export_signatures;
 /// [`Sync`]: inherited from the contained `LeanLibrary` handles.
 pub struct LeanCapabilities<'lean, 'h> {
     host: &'h LeanHost<'lean>,
-    /// User's capability dylib — the one named in `load_capabilities`, absent
+    /// User's capability dylib—the one named in `load_capabilities`, absent
     /// for `load_shims_only`. Kept alive so initialized user modules remain
     /// loaded while sessions import and query their environments.
     _user_library: Option<LeanLibrary<'lean>>,

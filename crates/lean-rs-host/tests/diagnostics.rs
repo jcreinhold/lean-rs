@@ -71,7 +71,7 @@ fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> Lea
 
 #[test]
 fn module_init_code_on_missing_lake_project() {
-    let bogus = std::env::temp_dir().join("lean_rs_definitely_not_a_lake_project_for_prompt_25");
+    let bogus = std::env::temp_dir().join("lean_rs_definitely_not_a_lake_project_for_diagnostics");
     let err = LeanHost::from_lake_project(runtime(), &bogus).expect_err("missing project must fail");
     assert_eq!(err.code(), LeanDiagnosticCode::ModuleInit, "got {err:?}");
 }
@@ -81,7 +81,7 @@ fn module_init_code_on_missing_dylib() {
     let host = fixture_host();
     // The lib_name must not match anything Lake built; the dylib path
     // dispatch in `LakeProject::capability_dylib` produces a name that
-    // doesn't exist on disk, so `libloading::Library::new` fails — that
+    // doesn't exist on disk, so `libloading::Library::new` fails—that
     // is the `ModuleInit` family.
     let err = host
         .load_capabilities("lean_rs_fixture", "DefinitelyMissingLib")
@@ -151,7 +151,7 @@ fn unsupported_code_on_absent_meta_service() {
     // Import only `Meta` without `Handles`/`Elaboration`; the fixture
     // exports all three meta-service shims so the path is normally
     // available. To drive `Unsupported` we call with the inferType
-    // service against a capability that omitted the symbol — but the
+    // service against a capability that omitted the symbol—but the
     // fixture always provides it. Instead, use a session that lacks
     // the meta import: the service is still resolved at capability
     // load (compile-time symbol presence), so the host-stack synthesised
@@ -167,7 +167,7 @@ fn unsupported_code_on_absent_meta_service() {
     //
     // The test below verifies the `code()` projection on
     // `LeanMetaResponse::Unsupported` via the live `run_meta` happy
-    // path — the response is `Ok` here, but `code()` on `Ok` is
+    // path—the response is `Ok` here, but `code()` on `Ok` is
     // `None`, which is part of the contract surface this test pins.
     let mut session = caps
         .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None, None)
@@ -203,8 +203,8 @@ fn capture_records_runtime_init_span() {
     // Use it as the anchor that proves the capture infrastructure is
     // wired up end-to-end against the real `lean_rs` instrumentation.
     //
-    // The richer span coverage — `library.open`, `session.import`,
-    // bulk dispatch, pool acquire — is covered by single-test runs at
+    // The richer span coverage—`library.open`, `session.import`,
+    // bulk dispatch, pool acquire—is covered by single-test runs at
     // `RUST_LOG=lean_rs=trace cargo test -p lean-rs --test diagnostics`
     // and documented in `docs/diagnostics.md`. We do not assert it from
     // the parallel-`cargo test` happy path because callsite Interest
@@ -222,7 +222,7 @@ fn capture_records_runtime_init_span() {
 #[test]
 fn capture_records_explicit_diagnostic_event() {
     // Anchor the capture's `code` projection against an event we
-    // synthesise locally — this is independent of which Lean call
+    // synthesise locally—this is independent of which Lean call
     // sites happen to fire on this thread.
     let capture = DiagnosticCapture::install();
     tracing::error!(

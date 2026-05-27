@@ -31,8 +31,8 @@ to a C function pointer to use the safe surface.
 Checked export lookup is safe only when backed by trusted signature metadata, such as a build manifest generated for a
 known capability contract. `LeanModule::exported_unchecked::<Args, R>(name)` is unsafe because arbitrary dynamic export
 lookup cannot be validated from a raw symbol name plus caller-chosen `Args`/`R`. The call is memory-safe only if the
-symbol's compiled C ABI is known to match those Rust types. Raw dynamic-loader symbol addresses and `lean_rs_sys`
-remain implementation details of `lean-rs`.
+symbol's compiled C ABI is known to match those Rust types. Raw dynamic-loader symbol addresses and `lean_rs_sys` remain
+implementation details of `lean-rs`.
 
 Applications that genuinely need raw FFI opt in by depending on `lean-rs-sys` directly, accepting full `unsafe`
 discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and opaque public types—friendlier than forking the
@@ -85,7 +85,7 @@ Per-file opt-outs require, in order:
    is the unique owner per `Obj<'lean>`'s `Drop`" is.
 3. **A test that would fail under a plausible violation** when practical—Miri on the Rust side of the boundary (Miri
    cannot validate the Lean C runtime itself), a sanitizer build, a refcount stress test, or a focused unit test on the
-   unsafe seam.
+   unsafe boundary.
 4. **Reviewer sign-off from someone other than the author.** Self-merging a new `unsafe` block is not allowed.
 
 ## Panic discipline

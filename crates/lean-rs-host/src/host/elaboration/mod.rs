@@ -4,18 +4,18 @@
 //! Two session methods sit alongside the read-only environment-query
 //! surface:
 //!
-//! - [`crate::LeanSession::elaborate`] — parse + elaborate a single Lean
+//! - [`crate::LeanSession::elaborate`]—parse + elaborate a single Lean
 //!   term against an optional expected type, returning a
 //!   [`lean_rs::LeanExpr`] handle on success or a [`LeanElabFailure`]
 //!   carrying typed diagnostics on parse / type failures.
-//! - [`crate::LeanSession::kernel_check`] — parse + elaborate + kernel-
+//! - [`crate::LeanSession::kernel_check`]—parse + elaborate + kernel-
 //!   check a full Lean declaration, returning a
 //!   [`crate::host::evidence::LeanKernelOutcome`] that tags the result
 //!   as `Checked` (and carries a [`crate::LeanEvidence`] handle),
 //!   `Rejected`, `Unavailable`, or `Unsupported`.
 //!
 //! Both methods accept a [`LeanElabOptions`] bundle whose setters
-//! saturate at the published ceilings — there is no error path for
+//! saturate at the published ceilings—there is no error path for
 //! out-of-range option values; the bound exists as a safety rail.
 //!
 //! The capability contract names Lean-side fixture exports

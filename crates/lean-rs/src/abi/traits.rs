@@ -2,11 +2,11 @@
 //!
 //! Three sealed traits with distinct roles:
 //!
-//! - [`IntoLean`] / [`TryFromLean`] (`pub(crate)`) — convert between Rust
+//! - [`IntoLean`] / [`TryFromLean`] (`pub(crate)`)—convert between Rust
 //!   values and polymorphic-boxed [`Obj`]. Used for container elements,
 //!   structure fields, and any Lean position where the value lives behind
 //!   a `lean_object*`. The classic encoding/decoding direction.
-//! - [`LeanAbi`] (`pub`, sealed) — convert between Rust values and the
+//! - [`LeanAbi`] (`pub`, sealed)—convert between Rust values and the
 //!   *C-ABI representation* Lake emits for a top-level Lean export
 //!   parameter or return. The C representation varies: `uint8_t` for
 //!   `Bool`, `uint32_t` for `Char`, `double` for `Float`, scalar primitive
@@ -90,7 +90,7 @@ pub trait IntoLean<'lean>: Sized {
 
 /// Decode an owned Lean object into a Rust value.
 ///
-/// Consumes the [`Obj`] — even on failure, the refcount is released by
+/// Consumes the [`Obj`]—even on failure, the refcount is released by
 /// `obj`'s `Drop`. The function signature returns the error type without
 /// the Obj because the cases where the caller wants to recover the
 /// original `Obj` are rare; if they arise, we will add a `try_from_lean_ref`
@@ -125,24 +125,23 @@ pub fn conversion_error(message: impl Into<String>) -> LeanError {
 /// The module is `pub` (not `pub(crate)`) because Cargo has no "friend
 /// crate" visibility and the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
 /// crate genuinely needs to implement `LeanAbi` for its own
-/// host-defined types (`LeanEvidence` etc.) — that's exactly what the
-/// L1 → L2 seam is for. The pattern that holds is:
+/// host-defined types (`LeanEvidence` etc.). The pattern that holds is:
 ///
 /// - **External crates** (anyone other than `lean-rs-host`) cannot
 ///   implement `LeanAbi` for their own types: the orphan rule blocks
 ///   `impl LeanAbi for MyType` directly, and writing
 ///   `impl SealedAbi for MyType` is a transparent intent-to-bypass
-///   that any honest reviewer should reject — combined with the
-///   `#[doc(hidden)]` module marker on the parent module's seam
+///   that bypasses the intended API boundary. Combined with the
+///   `#[doc(hidden)]` module marker on the parent module's internal
 ///   re-exports, the signal is unambiguous.
 /// - **The sibling `lean-rs-host` crate** reaches `SealedAbi` directly
 ///   and implements both `SealedAbi` and `LeanAbi` for its host types.
 ///   This is intentional; the sealing is against accidental external
-///   impls, not the same-team L2 stack.
+///   impls, not the sibling service crate.
 #[doc(hidden)]
 pub mod sealed {
     /// Sealed supertrait for [`super::LeanAbi`]. See module-level docs
-    /// for the L1 → L2 sibling-crate seam discipline.
+    /// for the sibling-crate implementation boundary.
     pub trait SealedAbi {}
 }
 
@@ -155,13 +154,13 @@ pub mod sealed {
 ///
 /// `into_c` / `from_c` are paired: a type's `CRepr` is invariant between
 /// the encode and decode directions, so they live on one trait (Ousterhout
-/// ch 9 — combining concerns that share information).
+/// ch 9—combining concerns that share information).
 ///
 /// Sealed via [`sealed::SealedAbi`]. External crates cannot implement
 /// this trait for their own types (orphan rule + sealed supertrait
-/// rejection). The sibling `lean-rs-host` crate reaches the seam
+/// rejection). The sibling `lean-rs-host` crate reaches the internal trait
 /// intentionally and implements `LeanAbi` for its host-defined
-/// types — that's the documented L1 → L2 extension point, not a
+/// types—that is the documented service-layer extension point, not a
 /// stability violation.
 pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     /// The C-ABI type Lake emits for this Lean type at function
@@ -195,7 +194,7 @@ pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     #[doc(hidden)]
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — called only by LeanExported"
+        reason = "sealed trait—called only by LeanExported"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self>;
 }
@@ -216,7 +215,7 @@ impl<'lean> LeanAbi<'lean> for Obj<'lean> {
     }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — called only by LeanExported"
+        reason = "sealed trait—called only by LeanExported"
     )]
     fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned reference count returned from
@@ -233,7 +232,7 @@ impl<'lean> LeanAbi<'lean> for Obj<'lean> {
 // per-type helper (`nat::try_to_u64`, `ctor_tag`, …) when the value
 // shape doesn't fit a polymorphic-boxing `TryFromLean` impl.
 //
-// `Obj<'lean>` deliberately does NOT implement `IntoLean<'lean>` —
+// `Obj<'lean>` deliberately does NOT implement `IntoLean<'lean>`—
 // passing an `Obj` as an argument goes through `LeanAbi::into_c`
 // (identity), not through the polymorphic-boxing path.
 

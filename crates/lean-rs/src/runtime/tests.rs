@@ -4,7 +4,7 @@
 //! across the whole test binary thanks to the `OnceLock` cell in
 //! [`super::init`]. The tests below assert Rust-visible idempotence and
 //! exercise the worker-thread attach path; they do not (and cannot) prove
-//! that the underlying C-level state initialized exactly once — that
+//! that the underlying C-level state initialized exactly once—that
 //! property is delegated to `OnceLock`.
 
 #![allow(clippy::expect_used)]
@@ -45,7 +45,7 @@ fn worker_thread_can_attach_and_finalize() {
     let handle = thread::spawn(|| {
         let runtime = LeanRuntime::init().expect("worker init must succeed");
         let guard = LeanThreadGuard::attach(runtime);
-        // The guard's `Drop` is the property under test — letting it run
+        // The guard's `Drop` is the property under test—letting it run
         // at scope exit must not panic or abort.
         drop(guard);
     });

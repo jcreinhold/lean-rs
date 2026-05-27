@@ -1,4 +1,4 @@
-//! `LeanHost` — entry point for the host-side capability API.
+//! `LeanHost`—entry point for the host-side capability API.
 //!
 //! A [`LeanHost`] binds a [`lean_rs::LeanRuntime`] borrow to a Lake project
 //! on disk. From it, [`LeanHost::load_capabilities`] opens a compiled user

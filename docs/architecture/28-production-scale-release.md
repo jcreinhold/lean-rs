@@ -32,8 +32,7 @@ The worker crates do not own downstream semantics. Downstream crates still defin
 - ranking, reporting, and source provenance;
 - user-facing CLI or service policy.
 
-This is why the `lean-dup` readiness proof uses command-like fixture names but does not define `lean-dup` rows or cache
-policy.
+This is why the downstream worker fixture uses command-like names but does not define downstream rows or cache policy.
 
 ## Data Plane
 
@@ -47,8 +46,8 @@ surface.
 
 ## Callback Payload Decision
 
-L1 callbacks are same-process interop mechanisms in `lean-rs`. They are useful for trusted extensions that intentionally
-run in the same process as Lean. They are not the scale path for worker-class tools.
+`lean-rs` callbacks are same-process interop mechanisms. They are useful for trusted extensions that intentionally run
+in the same process as Lean. They are not the scale path for worker-class tools.
 
 Supported callback payloads are the sealed payloads already implemented: `LeanProgressTick` and `LeanStringEvent`. Byte
 callbacks are not exposed until a concrete same-process binary callback caller appears. Object callbacks are not exposed
@@ -60,8 +59,8 @@ The scale claim is backed by named workloads, not by intent:
 
 - pool API and lease tests cover reuse, death, cancellation, timeout, metadata mismatch, memory-policy invalidation, and
   typed command execution;
-- memory scheduling workloads record fixture import reuse, mathlib-shaped fallback imports, repeated cycle/reuse, parent
-  RSS, and child RSS or explicit RSS-unavailable status;
+- memory scheduling workloads record fixture import reuse, a deterministic mathlib-style fallback import set, repeated
+  cycle/reuse, parent RSS, and child RSS or explicit RSS-unavailable status;
 - row payload benches compare JSON tree rows, raw JSON, simulated batch frames, simulated binary envelopes, MessagePack,
   and CBOR;
 - Lean-side helper tests cover streaming envelopes, chunked streams, diagnostics, progress, terminal metadata, and error
@@ -69,8 +68,8 @@ The scale claim is backed by named workloads, not by intent:
 - the mathlib-scale fixture exercises planner, pool, lease, typed command, diagnostics, terminal summaries,
   cancellation, fatal-exit recovery, cycling, row throughput, and RSS sampling;
 - pool observability tests cover snapshots and bounded backpressure;
-- the readiness proof exercises generic `version`, `doctor`, `extract`, `features`, `index`, and `probe` command shapes
-  without importing downstream schemas.
+- the downstream worker fixture exercises generic `version`, `doctor`, `extract`, `features`, `index`, and `probe`
+  commands without importing downstream schemas.
 
 Numbers are machine-local. Any performance claim must name the workload, command, platform, row counts, throughput, RSS
 status, and caveats.

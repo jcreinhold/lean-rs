@@ -4,13 +4,13 @@
 //! [`LeanLibraryBundle`] internally. The lower-level surface has three RAII
 //! types:
 //!
-//! - [`LeanLibrary`] — a Lake-built native shared object opened through
+//! - [`LeanLibrary`]—a Lake-built native shared object opened through
 //!   the platform dynamic loader.
-//! - [`LeanLibraryBundle`] — a primary shared object plus dependent Lean
+//! - [`LeanLibraryBundle`]—a primary shared object plus dependent Lean
 //!   dylibs anchored for the same lifetime.
-//! - [`LeanModule`] — proof that a named Lean module hosted by a
+//! - [`LeanModule`]—proof that a named Lean module hosted by a
 //!   [`LeanLibrary`] has been initialized to `IO.ok(())`.
-//! - [`LeanCapabilityPreflight`] — manifest and artifact checks that turn
+//! - [`LeanCapabilityPreflight`]—manifest and artifact checks that turn
 //!   package/loader failures into stable repair hints before opening.
 //!
 //! Construction of either type requires a [`crate::LeanRuntime`]

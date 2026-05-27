@@ -1,16 +1,15 @@
-//! L1 curated-surface gate. Compile-only: asserts every item the
+//! Crate-root curated-surface gate. Compile-only: asserts every item the
 //! `lean-rs` crate root re-exports stays at `lean_rs::*` and keeps its
-//! shape. Imports use only `use lean_rs::{...}` — no module paths, no
+//! type. Imports use only `use lean_rs::{...}`—no module paths, no
 //! sibling-crate names. If the file fails to compile because an import
-//! resolves with a different shape (or fails to resolve), the curated L1
+//! resolves with a different type (or fails to resolve), the curated
 //! surface and `docs/api-review/lean-rs-public.txt` are out of sync and
 //! one must be brought into agreement before widening the imports here.
 //!
 //! There is no FFI in this test by design: `lean-rs` has no Lean-side
-//! fixture of its own (the L1 happy-path lives in the external
-//! `lean-rs-downstream` proof at the sibling repository); the structural
-//! compile-time gate is the in-tree CI signal. The L2 sibling crate has
-//! its own `tests/curated_surface.rs` that drives the host-stack happy
+//! fixture of its own; the structural compile-time gate is the in-tree CI
+//! signal. The service-layer sibling crate has its own
+//! `tests/curated_surface.rs` that drives the host-stack happy
 //! path against the workspace fixture.
 
 use lean_rs::{

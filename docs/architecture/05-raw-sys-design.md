@@ -1,6 +1,6 @@
 # `lean-rs-sys` Design Rationale
 
-The per-decision rationale behind the `lean-rs-sys` crate's shape. The charter and safety-model docs depend on it; the
+The design rationale behind the `lean-rs-sys` crate. The charter and safety-model docs depend on it; the
 version-compatibility doc references it for the semver story. Revisiting any decision below is a contract change, not a
 build fix.
 
@@ -211,7 +211,7 @@ is the sole runtime dependency; no `bindgen`, no `cc`, no `pkg-config`.
 
 The sections above describe the approved design. Implementation surfaced these deviations:
 
-- **Default features are `["mimalloc", "dynamic"]`, not `["mimalloc", "static"]`.** The prompt's static link set
+- **Default features are `["mimalloc", "dynamic"]`, not `["mimalloc", "static"]`.** The original static link set
   (`Lean`, `Init`, `leanrt`, `leancpp`, `Lake`) does not actually link a Lean stdlib symbol-using program without at
   least `libStd.a` and a specific archive order. The default switched to dynamic so the test binary links against
   `libleanshared` out of the box. The `static` feature is preserved for embedders who explicitly want it.
@@ -225,15 +225,15 @@ The sections above describe the approved design. Implementation surfaced these d
   in `lean.h`. They appear in `init.rs` as `extern "C"` declarations with the standard runtime signatures. The
   `LEAN_HEADER_DIGEST` check does not gate them (it guards layout, not runtime entry points); `REQUIRED_SYMBOLS` plus
   `tests/linkage.rs` covers them instead.
-- **`REQUIRED_SYMBOLS` has ~75 entries** (vs the ~50–80 estimate). Items the prompt prefigured as externs are actually
+- **`REQUIRED_SYMBOLS` has ~75 entries** (vs the ~50–80 estimate). Items initially expected to be externs are actually
   `static inline` in 4.29.1 (`lean_alloc_ctor_memory`, `lean_alloc_closure`, `lean_alloc_array`). Those are mirrored in
   Rust and dropped from the allowlist; `lean_alloc_object` / `lean_free_object` (the real externs) are listed instead.
 - **Layout assertions for `pub(crate) LeanObjectRepr` and friends live in `#[cfg(test)] mod tests` inside
   `src/repr.rs`**, not `tests/layout.rs`. Integration tests cannot see `pub(crate)` items; the unit-test module keeps
   internals internal without leaking a `#[doc(hidden)] pub mod __test` accessor.
-- **The digest-mismatch fixture test is documented, not automated.** Verification step 6 in the prompt called for a
-  build-time test that flips a `lean.h` byte and asserts failure. Automating it would require either an in-tree fixture
-  sysroot or a noisy subprocess test; the procedure is documented for manual exercise in the crate's `README.md`.
+- **The digest-mismatch fixture test is documented, not automated.** The planned verification called for a build-time
+  test that flips a `lean.h` byte and asserts failure. Automating it would require either an in-tree fixture sysroot or
+  a noisy subprocess test; the manual check is documented in the crate's `README.md`.
 - **MSRV is 1.91**, originally planned at `1.85` for `AtomicI32::from_ptr` (1.75). Bumped to use `strict_add` /
   `strict_sub` / `strict_mul` (1.91) so refcount or size overflow panics in debug and release instead of silent wrap.
 - **Lint discipline.** Doc lints (`doc_markdown`, `missing_safety_doc`, `undocumented_unsafe_blocks`,
@@ -248,6 +248,6 @@ The sections above describe the approved design. Implementation surfaced these d
 - Safety model: [`01-safety-model.md`](01-safety-model.md)—*Unsafe boundary*.
 - Version compatibility: [`02-versioning-and-compatibility.md`](02-versioning-and-compatibility.md)—*Header digest*,
   *Bumping the Lean version*.
-- L1 safe surface: the `lean-rs` crate (typed FFI primitive). Crate docs at <https://docs.rs/lean-rs>.
-- L2 service layer: [`03-host-stack.md`](03-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the L1
-  safe surface.
+- Typed FFI surface: the `lean-rs` crate. Crate docs at <https://docs.rs/lean-rs>.
+- Standard service layer: [`03-host-stack.md`](03-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the
+  typed FFI surface.

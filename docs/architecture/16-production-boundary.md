@@ -68,9 +68,9 @@ once.
 
 ## Callback Payloads Stay Below The Worker
 
-Callback payloads remain an L1 `lean-rs` concern. `LeanCallbackPayload` is sealed, and supported payloads are added only
-after the ABI, ownership, wrong-payload, stale-handle, reentrancy, and panic-boundary rules are proven. The worker
-should use those payloads; it should not create an arbitrary cross-process callback type system.
+Callback payloads remain a same-process `lean-rs` concern. `LeanCallbackPayload` is sealed, and supported payloads are
+added only after the ABI, ownership, wrong-payload, stale-handle, reentrancy, and panic-boundary rules are proven. The
+worker should use those payloads; it should not create an arbitrary cross-process callback type system.
 
 Byte streaming and Lean-object events are future callback payload work, not worker-protocol shortcuts. The worker may
 carry serialized effects over IPC, but the same deep-module rule applies: payload decoding and Lean object soundness

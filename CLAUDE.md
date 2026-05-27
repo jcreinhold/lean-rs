@@ -8,9 +8,9 @@ error and panic boundaries, scheduling, diagnostics, batching, and packaging.
 
 Before writing code, read the architecture charter and any topic-specific docs that govern the area you are touching:
 
-1. [`docs/architecture/00-charter.md`](docs/architecture/00-charter.md) — the design boundary between Lean and
-   `lean-rs`, hidden knowledge, preserved capability, and rejected alternatives.
-1. [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) — the workspace unsafe policy.
+1. [`docs/architecture/00-charter.md`](docs/architecture/00-charter.md)—the design boundary between Lean and `lean-rs`,
+   hidden knowledge, preserved capability, and rejected alternatives.
+1. [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md)—the workspace unsafe policy.
 1. The topic doc that owns the area you are changing (host stack, callbacks, worker, etc.). See the index in
    [`README.md`](README.md).
 

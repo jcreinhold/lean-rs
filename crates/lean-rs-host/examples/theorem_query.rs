@@ -50,14 +50,14 @@ fn run() -> LeanResult<()> {
 
     // The environment carries the full Lean prelude plus the
     // fixture's own declarations. Many thousands of entries even for
-    // a small project — print only the count, then ask about names
+    // a small project—print only the count, then ask about names
     // the caller already knows.
     let names = session.list_declarations(None)?;
     println!("total_declarations={}", names.len());
 
     // Contrast a definition and a theorem by name.
-    // `declaration_kind` returns the Lean-rendered tag —
-    // `"definition"`, `"theorem"`, `"axiom"`, etc. —
+    // `declaration_kind` returns the Lean-rendered tag—
+    // `"definition"`, `"theorem"`, `"axiom"`, etc.—
     // `declaration_name` round-trips a name through Lean's pretty
     // printer (diagnostic only, not a semantic key).
     for name in ["Nat.add", "Nat.add_zero"] {

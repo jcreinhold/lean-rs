@@ -1,9 +1,8 @@
 # lean-rs
 
-Safe Rust bindings for hosting Lean 4 capabilities. The single safe front door of the `lean-rs` project: runtime
-initialization, owned and borrowed object handles, typed first-order ABI conversions, module loading and exported
-functions, semantic handles (`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`), and a structured error/diagnostic
-boundary.
+Safe Rust bindings for hosting Lean 4 capabilities. This crate covers runtime initialization, owned and borrowed object
+handles, typed first-order ABI conversions, module loading and exported functions, semantic handles (`LeanName`,
+`LeanLevel`, `LeanExpr`, `LeanDeclaration`), and a structured error/diagnostic boundary.
 
 Ships the generic interop shim package used by same-process Lean-to-Rust callbacks, but no theorem-prover host shims. If
 you want sessions, `MetaM`, and kernel-checked evidence, add [`lean-rs-host`](https://docs.rs/lean-rs-host) on top.
@@ -112,9 +111,9 @@ Build and run:
 cargo run
 ```
 
-`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache, filename convention, trusted export
-signatures, and the artifact manifest handoff. `LeanCapability` reads that manifest and keeps the built path, dependency
-bundle, initializer names, and checked export metadata together at runtime. Use `build_lake_target`,
+`CargoLeanCapability` hides Lake's shared-library facet, Cargo rerun triggers, cache, filename convention, trusted
+export signatures, and the artifact manifest handoff. `LeanCapability` reads that manifest and keeps the built path,
+dependency bundle, initializer names, and checked export metadata together at runtime. Use `build_lake_target`,
 `LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
 
 See the complete shipping recipe at
@@ -127,8 +126,8 @@ For a complete advanced same-process example that also lets Lean call a Rust cal
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
 For a trusted same-process string callback example, run `cargo run -p lean-rs --example string_streaming` and read
 [`docs/recipes/string-callback-streaming.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/string-callback-streaming.md).
-Worker-style tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling
-should use `lean-rs-worker` typed commands instead of exposing callback handles.
+Worker tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling should
+use `lean-rs-worker` typed commands instead of exposing callback handles.
 
 The `Args` and `R` generics on `LeanModule::exported_unchecked` are sealed by the `LeanAbi` / `LeanArgs` /
 `DecodeCallResult` traits, so unsupported types fail at compile time rather than producing wrong decodes at runtime.

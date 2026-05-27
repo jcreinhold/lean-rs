@@ -52,7 +52,7 @@ where
 
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — called only by LeanExported"
+        reason = "sealed trait—called only by LeanExported"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned refcount returned from a Lean
@@ -102,7 +102,7 @@ where
 
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — called only by LeanExported"
+        reason = "sealed trait—called only by LeanExported"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned refcount returned from a Lean

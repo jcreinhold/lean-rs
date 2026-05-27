@@ -34,7 +34,7 @@ decode, row throughput, and allocation pressure. Two guards live alongside it: `
 compares per-row raw JSON frames with batched raw JSON frames so any future batch protocol must justify itself against
 the current per-row baseline. `worker::row_payload::data_plane` compares JSON, raw JSON, simulated binary envelopes,
 MessagePack, and CBOR so any future format change must show a measured win. `worker_capability` covers the
-downstream-shaped worker fixture: cold startup, first import, import-once streaming, cancellation latency, fatal-exit
+downstream-style worker fixture: cold startup, first import, import-once streaming, cancellation latency, fatal-exit
 recovery, worker cycling, row throughput, and memory growth.
 
 Progress changes must benchmark the no-progress path explicitly. The retained fast path for bulk introspection is:
@@ -76,7 +76,7 @@ The focused chunked-stream test prints the named helper workload as `helper_chun
 chunk_size=<n> parallelism=1 elapsed_ms=<n>`. Keep `parallelism=1`; Rust worker pools are the supported parallelism
 boundary. A safe Lean-side parallel chunk emitter would have to be proved out before raising this.
 
-Capability-layer changes should also run the downstream-shaped scenario bench:
+Capability-layer changes should also run the downstream-style scenario bench:
 
 ```sh
 cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
@@ -122,7 +122,7 @@ cargo run -p lean-rs-worker-child --example lean_dup_readiness
 ```
 
 It drives the planner, pool, session lease, and typed command facade for generic `version`, `doctor`, `extract`,
-`features`, `index`, and `probe` command shapes, and records row throughput, diagnostics, progress, terminal summaries,
+`features`, `index`, and `probe` commands, and records row throughput, diagnostics, progress, terminal summaries,
 timeout/cancellation/fatal-exit recovery, explicit cycling, backpressure, pool stats, parent/child RSS when available,
 and optional subprocess comparison status. Treat its rows as generic fixture data, not downstream schemas.
 

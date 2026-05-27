@@ -20,17 +20,17 @@ pub struct lean_object {
     _marker: PhantomData<(*mut u8, PhantomPinned)>,
 }
 
-/// "Standard" object argument — caller transfers ownership of one refcount.
+/// "Standard" object argument—caller transfers ownership of one refcount.
 pub type lean_obj_arg = *mut lean_object;
 
-/// "Borrowed" object argument — caller retains the refcount.
+/// "Borrowed" object argument—caller retains the refcount.
 pub type b_lean_obj_arg = *mut lean_object;
 
-/// "Unique" object argument — caller asserts the object is non-shared.
+/// "Unique" object argument—caller asserts the object is non-shared.
 pub type u_lean_obj_arg = *mut lean_object;
 
-/// "Standard" object result — callee returns a fresh owned refcount.
+/// "Standard" object result—callee returns a fresh owned refcount.
 pub type lean_obj_res = *mut lean_object;
 
-/// "Borrowed" object result — refcount belongs to a longer-lived owner.
+/// "Borrowed" object result—refcount belongs to a longer-lived owner.
 pub type b_lean_obj_res = *mut lean_object;

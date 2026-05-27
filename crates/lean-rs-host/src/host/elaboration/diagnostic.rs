@@ -50,7 +50,7 @@ impl LeanSeverity {
 ///
 /// `line` and `column` are 1-indexed (Lean convention). `end_line` /
 /// `end_column` are present when Lean attached an end position to the
-/// diagnostic — parser errors usually carry only a start position, while
+/// diagnostic—parser errors usually carry only a start position, while
 /// elaborator and kernel errors carry both.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct LeanPosition {
@@ -144,7 +144,7 @@ impl LeanDiagnostic {
 
     /// Construct a synthetic error-severity diagnostic without a source
     /// position. Used by the host stack when it must surface a
-    /// diagnostic that did not originate in Lean's `MessageLog` — for
+    /// diagnostic that did not originate in Lean's `MessageLog`—for
     /// example, the `LeanMetaResponse::Unsupported` branch built when a
     /// capability dylib does not export the requested meta service.
     /// The `message` is bounded at [`lean_rs::LEAN_ERROR_MESSAGE_LIMIT`]

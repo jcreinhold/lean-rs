@@ -4,7 +4,7 @@
 //! `pub(crate) abi` decoders with `Arbitrary`-generated Lean-shaped
 //! inputs constructed via `lean-rs-sys` public helpers. Those decoders
 //! are `pub(crate)`, so this module is the *only* place that exposes
-//! them for an external test harness — and only when the `fuzzing`
+//! them for an external test harness—and only when the `fuzzing`
 //! feature is enabled.
 //!
 //! Per `docs/architecture/01-safety-model.md`'s "fuzz arbitrary raw
@@ -72,7 +72,7 @@ pub unsafe fn decode_bytearray(runtime: &LeanRuntime, raw: *mut lean_object) -> 
 ///
 /// # Safety
 ///
-/// Same as [`decode_string`]; additionally the array's element type
+/// Same as [`decode_string`]; the array's element type
 /// must be polymorphic-boxed `u64` (Lake's `Array UInt64` encoding).
 pub unsafe fn decode_array_u64(runtime: &LeanRuntime, raw: *mut lean_object) -> LeanResult<Vec<u64>> {
     // SAFETY: caller's contract.

@@ -1,10 +1,10 @@
-# Lean-Dup Readiness Proof
+# Downstream Worker Replacement Fixture
 
-A boundary check showing that the generic worker foundation can replace the subprocess-worker shape used by a
-`lean-dup`-class tool. The worker crates pool hosts the operational responsibilities; downstream crates keep their
-schemas and semantic policy. This is not a `lean-dup` implementation and not a migration guide.
+A boundary check showing that the generic worker foundation can replace the subprocess worker used by a `lean-dup`-class
+tool. The worker crates pool hosts the operational responsibilities; downstream crates keep their schemas and semantic
+policy. This is not a `lean-dup` implementation and not a migration guide.
 
-## What The Proof Covers
+## What The Fixture Covers
 
 The readiness example runs:
 
@@ -18,7 +18,7 @@ The example uses the normal large-scale path:
 LeanWorkerImportPlanner -> LeanWorkerPool -> LeanWorkerSessionLease -> typed command
 ```
 
-It exercises six command shapes through generic typed commands:
+It exercises six commands through generic typed commands:
 
 - `version` as a typed JSON command;
 - `doctor` as a typed JSON command;
@@ -74,14 +74,14 @@ variable. The readiness example records the checkout revision when the path is s
 `LEAN_RS_WORKER_COMPARE_COMMAND` is also set, the example runs that command and prints its status and elapsed time. The
 comparison is optional because the worker crates should not depend on a local downstream checkout.
 
-Any comparison must name the command, revision, workload, and limits. Without that, the readiness proof only claims
-generic coverage and local worker-pool operating behavior.
+Any comparison must name the command, revision, workload, and limits. Without that, this fixture only claims generic
+coverage and local worker-pool operating behavior.
 
 ## Measured Local Envelope
 
 The example prints:
 
-- command-shape coverage and row counts;
+- command coverage and row counts;
 - diagnostic and progress counts;
 - terminal summary command names;
 - timeout, cancellation, fatal-exit recovery, explicit cycle, and backpressure outcomes;
@@ -89,6 +89,4 @@ The example prints:
 - parent and child RSS when the platform permits sampling;
 - optional subprocess comparison status.
 
-Do not treat the fixture rows as `lean-dup` rows. They are small generic test data used to prove that the worker
-substrate can carry the shape.
-
+Do not treat the fixture rows as `lean-dup` rows. They are small generic test data used to exercise the worker path.

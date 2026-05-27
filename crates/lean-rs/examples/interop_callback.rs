@@ -1,4 +1,4 @@
-//! L1 interop example using the generic Lean shim package.
+//! Same-process interop example using the generic Lean shim package.
 //!
 //! The example stays below `lean-rs-host`: it builds the generic interop shim
 //! package and a downstream-style Lake target through `lean-toolchain`, opens

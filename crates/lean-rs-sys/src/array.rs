@@ -1,4 +1,4 @@
-//! Object and scalar arrays — externs and inline accessors from
+//! Object and scalar arrays—externs and inline accessors from
 //! `lean.h:815–1028`.
 
 #![allow(clippy::inline_always)]
@@ -47,7 +47,7 @@ pub unsafe fn lean_alloc_array(size: usize, capacity: usize) -> lean_obj_res {
     // of uninitialised Lean-managed memory; we install the object-array
     // header before returning so the object is immediately well-formed for
     // every existing predicate (`lean_is_array`, `lean_array_*`). Element
-    // slots remain uninitialised — the caller's obligation per the docs
+    // slots remain uninitialised—the caller's obligation per the docs
     // above.
     unsafe {
         let o = lean_alloc_object(total);

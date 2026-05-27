@@ -2,7 +2,7 @@
 //!
 //! 1. Every `unsafe { ... }` block and `unsafe fn` carries a `// SAFETY:` or
 //!    `# Safety` comment in the surrounding source. The check is purely
-//!    lexical — it scans for the keyword and looks for the documentation
+//!    lexical—it scans for the keyword and looks for the documentation
 //!    marker in the file. Cheap, no new dev-deps.
 //! 2. No `pub fn` exists in `src/` without `unsafe`, except for explicit
 //!    safe-by-construction metadata helpers listed in [`KNOWN_SAFE_FNS`].
@@ -41,9 +41,9 @@ const SOURCE_FILES: &[&str] = &[
 /// These do not touch raw FFI: they are compile-time queries over the
 /// crate's metadata tables.
 const KNOWN_SAFE_FNS: &[&str] = &[
-    // src/lib.rs — convenience over REQUIRED_SYMBOLS + SUPPORTED_TOOLCHAINS.
+    // src/lib.rs—convenience over REQUIRED_SYMBOLS + SUPPORTED_TOOLCHAINS.
     "symbol_in_all",
-    // src/supported.rs — pure queries over SUPPORTED_TOOLCHAINS.
+    // src/supported.rs—pure queries over SUPPORTED_TOOLCHAINS.
     "supported_for",
     "supported_by_digest",
     "symbol_present_in_window",
@@ -86,7 +86,7 @@ fn every_unsafe_fn_has_safety_section() {
                         break;
                     }
                 } else if !line.starts_with("#[") && !line.is_empty() {
-                    // Crossed a real line of code — stop looking.
+                    // Crossed a real line of code—stop looking.
                     break;
                 }
             }
@@ -159,8 +159,8 @@ fn every_unsafe_block_has_safety_comment() {
 }
 
 fn is_unsafe_block(trimmed: &str) -> bool {
-    // Match `unsafe {`, `unsafe extern`, `unsafe trait`, etc. — but we only
-    // care about `unsafe { ... }` block expressions. The simplest robust
+    // Match `unsafe {`, `unsafe extern`, `unsafe trait`, etc.—but we only
+    // care about `unsafe { ... }` block expressions. The simplest stable
     // test is "the keyword `unsafe` is immediately followed by `{`".
     let mut chars = trimmed.chars();
     let mut buf = String::new();

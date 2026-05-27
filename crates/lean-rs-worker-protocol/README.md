@@ -12,7 +12,7 @@ public API.
 
 ## Cargo features
 
-- `harness` — exposes the in-process integration-test harness that spawns a child binary and exercises framed
+- `harness`—exposes the in-process integration-test harness that spawns a child binary and exercises framed
   request/response round-trips. Off by default.
 
 ## License

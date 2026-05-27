@@ -213,9 +213,9 @@ This example is intentionally not a Criterion bench. It answers a retained-memor
 boundaries; Criterion answers per-iteration latency questions. The measured model and consumer guidance live in
 [`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
-## L1 callback interop
+## Same-process callback interop
 
-Callbacks are an L1 `lean-rs` feature, not a `lean-rs-host` session feature. Run the generic interop example from the
+Callbacks are a `lean-rs` feature, not a `lean-rs-host` session feature. Run the generic interop example from the
 workspace root:
 
 ```sh

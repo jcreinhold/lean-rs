@@ -2,7 +2,7 @@
 //! environments.
 //!
 //! Re-importing the Lean prelude is the dominant FFI cost on the host
-//! stack — measured on a dev macOS rig at roughly 4×–5× the cost of
+//! stack—measured on a dev macOS rig at roughly 4×–5× the cost of
 //! reusing an existing session (see the `session_reuse_amortises_import`
 //! timing note in `host/tests.rs`). [`SessionPool`] keeps a bounded
 //! free-list of previously imported `Lean.Environment` values keyed by
@@ -31,7 +31,7 @@
 //! environment is dropped immediately (its `Obj<'lean>`
 //! `Drop` runs `lean_dec` and the underlying allocation is freed). The
 //! free list is FIFO on `take` and LRU on `push`, so the most
-//! recently-released environment is the next to be reused — hot OS
+//! recently-released environment is the next to be reused—hot OS
 //! caches stay warm. There is no eviction-by-age or eviction-by-distinct-key
 //! policy beyond the capacity bound.
 //!
@@ -46,7 +46,7 @@
 //! [`SessionPool`] is `!Send + !Sync` (inherited from the contained
 //! `Obj<'lean>` and the `RefCell` that wraps the free list). The pool
 //! is a per-thread reuse helper; cross-thread pooling is explicitly
-//! out of scope. Per-pool stats are `Cell<PoolStats>` —
+//! out of scope. Per-pool stats are `Cell<PoolStats>`—
 //! single-threaded but uniform with the per-session
 //! [`crate::host::session::SessionStats`] story.
 
@@ -65,7 +65,7 @@ use crate::host::session::LeanSession;
 
 /// Cumulative metrics for one [`SessionPool`].
 ///
-/// Snapshot via [`SessionPool::stats`]. Counters never reset — to
+/// Snapshot via [`SessionPool::stats`]. Counters never reset—to
 /// compute a delta, take two snapshots and subtract.
 ///
 /// `imports_performed + reused == acquired` by construction: every
@@ -102,7 +102,7 @@ pub struct PoolStats {
 /// Free-list key: the ordered imports list a pooled environment was
 /// imported with.
 ///
-/// Order matters because `Lean.importModules` is order-sensitive — a
+/// Order matters because `Lean.importModules` is order-sensitive—a
 /// later import can shadow an earlier one. Equality is structural and
 /// canonical (the same `&[&str]` always produces the same key).
 #[derive(Clone, Eq, PartialEq)]
@@ -127,7 +127,7 @@ struct PoolInner<'lean> {
     /// FIFO on take, LIFO on push (newest entries near the back; the
     /// most-recently-released entry matching a given imports key is the
     /// one acquire pops). The list scan is linear, which is fine for
-    /// the small capacities this pool is sized for — pooling is for
+    /// the small capacities this pool is sized for—pooling is for
     /// amortising imports across O(10s) of sessions, not for managing
     /// thousands.
     free: Vec<PooledEntry<'lean>>,
@@ -164,14 +164,14 @@ impl<'lean> SessionPool<'lean> {
     /// Build an empty pool with hard upper bound `capacity` on stored
     /// environments.
     ///
-    /// A `capacity` of 0 disables reuse — every [`Self::acquire`] call
+    /// A `capacity` of 0 disables reuse—every [`Self::acquire`] call
     /// imports fresh and every release drops the environment. This is
     /// useful for tests that want metrics without recycling, and as the
     /// degenerate point that proves the pool's metrics agree with
     /// repeated `caps.session(..., None, None)` calls.
     ///
     /// The `runtime` borrow witnesses `'lean` and is stored so the pool
-    /// itself outlives every entry on its free list — even after every
+    /// itself outlives every entry on its free list—even after every
     /// [`PooledSession`] has been dropped, the pool retains a usable
     /// runtime reference.
     #[must_use]
@@ -190,7 +190,7 @@ impl<'lean> SessionPool<'lean> {
     ///
     /// If a pooled environment was previously released with the same
     /// `imports` list (order-sensitive), it is rewrapped under the
-    /// supplied capability borrow and returned — no `Lean.importModules`
+    /// supplied capability borrow and returned—no `Lean.importModules`
     /// runs. Otherwise the pool calls
     /// [`LeanCapabilities::session`] internally to perform a fresh
     /// import. Either way, the resulting [`PooledSession`] returns the
@@ -375,7 +375,7 @@ impl core::fmt::Debug for SessionPool<'_> {
 /// A [`LeanSession`] borrowed from a [`SessionPool`].
 ///
 /// Behaves as a [`LeanSession`] through [`core::ops::Deref`] /
-/// [`core::ops::DerefMut`] — every session method is reachable directly:
+/// [`core::ops::DerefMut`]—every session method is reachable directly:
 ///
 /// ```ignore
 /// let pool = lean_rs::SessionPool::with_capacity(runtime, 4);
@@ -387,7 +387,7 @@ impl core::fmt::Debug for SessionPool<'_> {
 /// On `Drop`, the underlying imported environment is returned to the
 /// pool (or released if the pool is at capacity). Per-session
 /// [`crate::host::session::SessionStats`] are scoped to the lifetime of
-/// this checkout — they start at zero on every acquire and are
+/// this checkout—they start at zero on every acquire and are
 /// inaccessible after release.
 ///
 /// Three lifetimes: `'lean` (runtime), `'p` (pool borrow), `'c`

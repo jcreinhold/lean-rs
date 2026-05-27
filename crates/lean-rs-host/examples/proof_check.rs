@@ -77,7 +77,7 @@ fn run() -> LeanResult<()> {
     };
 
     // Re-validate the captured evidence against the (unchanged)
-    // session environment. `check_evidence` runs the kernel fresh —
+    // session environment. `check_evidence` runs the kernel fresh—
     // useful when you cached evidence and want to confirm it still
     // holds.
     let status = session.check_evidence(&evidence, None)?;

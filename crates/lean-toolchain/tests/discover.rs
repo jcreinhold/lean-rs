@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use lean_toolchain::{DiscoverOptions, DiscoverySource, LinkDiagnostics, ToolchainFingerprint, discover_toolchain};
 
 /// `<LEAN_HEADER_PATH>` is `<prefix>/include/lean/lean.h`. Three `parent()`
-/// hops recover `<prefix>` — the build-resolved Lean toolchain root.
+/// hops recover `<prefix>`—the build-resolved Lean toolchain root.
 fn baked_prefix() -> PathBuf {
     let header = Path::new(lean_toolchain::LEAN_HEADER_PATH);
     header
@@ -84,7 +84,7 @@ fn invalid_explicit_sysroot_with_all_probes_off_reports_missing_lean() {
 fn path_lookup_succeeds_when_lean_is_on_path() {
     // Gate: a Lean toolchain *must* be reachable through the env, otherwise
     // there's nothing to assert. `lean-rs-sys`'s build script also relies on
-    // this — running the test suite already requires a working toolchain.
+    // this—running the test suite already requires a working toolchain.
     let opts = DiscoverOptions {
         explicit_sysroot: None,
         allow_path_lookup: true,
