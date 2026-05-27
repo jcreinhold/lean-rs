@@ -21,7 +21,7 @@
 //! distinction invisible to callers, [`LeanLibrary::open`] reads the
 //! dylib's bytes once, walks the export table with the [`object`] crate,
 //! and records the names of data-section exports as `globals`.
-//! [`LeanModule::exported`](super::loaded::LeanModule::exported) consults
+//! [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked) consults
 //! the set to dispatch function-vs-global at call time.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
@@ -67,7 +67,7 @@ pub struct LeanLibrary<'lean> {
     /// normalised to what [`libloading::Library::get`] resolves with
     /// (Mach-O leading underscore stripped). Computed once at [`open`]
     /// and consulted by
-    /// [`LeanModule::exported`](super::loaded::LeanModule::exported) to
+    /// [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked) to
     /// dispatch function-vs-global at call time.
     ///
     /// [`open`]: Self::open
@@ -81,7 +81,7 @@ impl<'lean> LeanLibrary<'lean> {
     /// symbol as a function (text/code section) or a Lean
     /// nullary-constant global (data/rodata/bss section). The
     /// classification is consulted by
-    /// [`LeanModule::exported`](super::loaded::LeanModule::exported) so
+    /// [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked) so
     /// callers never write the function-vs-global distinction at the
     /// call site. The walk is cheap (a single `std::fs::read` plus an
     /// in-memory parse) and amortised across every later lookup.

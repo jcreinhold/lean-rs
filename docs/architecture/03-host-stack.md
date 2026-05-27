@@ -150,13 +150,13 @@ Each requires doc comments and `# Errors` / `# Panics` sections.
   `Result` mirrors `elaborate` exactly. No `expected_type` parameter; a concrete second caller would justify the
   per-source `&[Option<&LeanExpr>]` surface. With no token, this is one Lean-side bulk dispatch; with `Some(token)`,
   this loops per source to create cancellation check points.
-- `LeanSession::call_capability<Args, R>(&mut self, name: &str, args: Args, cancellation: Option<&LeanCancellationToken>) -> LeanResult<R::Output>`
+- `LeanSession::call_capability_unchecked<Args, R>(&mut self, name: &str, args: Args, cancellation: Option<&LeanCancellationToken>) -> LeanResult<R::Output>`
   where `Args: LeanArgs<'lean>` and `R: DecodeCallResult<'lean>`. Function-only escape hatch for capability-dylib
   exports beyond the twenty-seven session-fixed symbols; reuses the same `Args` / `R` bounds as
-  `lean_rs::LeanModule::exported`, including the `LeanIo<T>` IO marker. Adds session-level tracing
-  (`lean_rs.host.session.call_capability` span with `symbol` + `arity` fields) and a `SessionStats` counter bump—those
+  `lean_rs::LeanModule::exported_unchecked`, including the `LeanIo<T>` IO marker. Adds session-level tracing
+  (`lean_rs.host.session.call_capability_unchecked` span with `symbol` + `arity` fields) and a `SessionStats` counter bump—those
   L2 concerns are why it lives here rather than as a pass-through on `LeanModule`. Callers that don't want the
-  instrumentation use `module.exported::<Args, R>(name)?.call(args)` directly on the L1 handle.
+  instrumentation use `unsafe { module.exported_unchecked::<Args, R>(name) }?.call(args)` directly on the L1 handle.
 - `LeanSession::stats(&self) -> SessionStats`—snapshot of per-session dispatch metrics.
 - `SessionPool::with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self`
 - `SessionPool::acquire<'p, 'c>(&'p self, caps: &'c LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<PooledSession<'lean, 'p, 'c>>`—capability-agnostic
@@ -211,7 +211,7 @@ surface—they are listed so the L1 → L2 dependency is visible.
 - `LeanThreadGuard`—RAII attach for worker threads not started inside Lean.
 - `LeanLibrary`—RAII handle over the capability dylib `LeanCapabilities` opens.
 - `LeanModule`—initialized module handle the session reaches typed exports through.
-- `LeanExported`—cached typed function handle the session calls via `call_capability`.
+- `LeanExported`—cached typed function handle the session calls via `call_capability_unchecked`.
 - `LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi`—bounds and markers for typed dispatch generics.
 - `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`—opaque handles re-used as L2 method return shapes.
 - `lean_rs::error::*`—`LeanError`, `LeanResult`, `LeanException`, `LeanCancelled`, `HostFailure`, `HostStage`,

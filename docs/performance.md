@@ -14,7 +14,7 @@ cargo bench -p lean-rs-worker-child --bench worker_capability
 
 `hot_paths` covers `lean_rs::module` and `lean_rs::abi`: cached `LeanExported::call`
 (`module::scalar_dispatch_u32_add`) and the `String`/`Vec<String>` round-trip decoders. `session` covers
-`LeanSession::*`: `call_capability_lookup_u32_add` for dynamic per-call export lookup, `query_declarations_bulk`,
+`LeanSession::*`: `call_capability_unchecked_lookup_u32_add` for dynamic per-call export lookup, `query_declarations_bulk`,
 `query_declarations_bulk_progress/16` for progress callback delivery, the three `declaration_*_bulk` 5k-vs-loop
 comparisons, `elaborate_small`, `run_meta_whnf`, `host::process::module_query_batch_cached_decode` for host
 constructor/scalar decoding, and `SessionPool` hits.
@@ -22,7 +22,7 @@ constructor/scalar decoding, and `SessionPool` hits.
 For the safety-boundary migration, the numbers that matter are:
 
 - cached export floor: `cargo bench -p lean-rs --bench hot_paths -- module::scalar_dispatch_u32_add`;
-- dynamic lookup overhead: `cargo bench -p lean-rs-host --bench session -- host::session::call_capability_lookup_u32_add`;
+- dynamic lookup overhead: `cargo bench -p lean-rs-host --bench session -- host::session::call_capability_unchecked_lookup_u32_add`;
 - host shim dispatch: `cargo bench -p lean-rs-host --bench session -- host::session::query_declarations_bulk`;
 - host object decoding: `cargo bench -p lean-rs-host --bench session -- host::process::module_query_batch_cached_decode`;
 - progress callback delivery: `cargo bench -p lean-rs-host --bench session -- host::session::query_declarations_bulk_progress`.

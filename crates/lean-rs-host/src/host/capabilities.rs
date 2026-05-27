@@ -8,7 +8,7 @@
 //! - The **user's capability dylib**, when present, is the artefact the
 //!   consumer built with `lake build` and named in
 //!   [`crate::host::LeanHost::load_capabilities`]. It contains the user's own
-//!   `@[export]` symbols ([`crate::LeanSession::call_capability`] dispatches
+//!   `@[export]` symbols ([`crate::LeanSession::call_capability_unchecked`] dispatches
 //!   here).
 //! - The **generic interop dylib** is
 //!   `liblean__rs__interop__shims_LeanRsInterop.dylib`; it carries
@@ -58,7 +58,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// User's capability dylib — the one named in `load_capabilities`, absent
     /// for `load_shims_only`.
     /// `pub(crate)` accessor below exposes it to
-    /// [`crate::LeanSession::call_capability`] for ad-hoc dispatch on
+    /// [`crate::LeanSession::call_capability_unchecked`] for ad-hoc dispatch on
     /// user-authored `@[export]` symbols.
     user_library: Option<LeanLibrary<'lean>>,
     /// Generic interop shim dylib carrying reusable callback helpers used by
@@ -134,7 +134,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// host shim dylibs.
     ///
     /// Sessions opened from this value can use every shim-backed session
-    /// operation. [`crate::LeanSession::call_capability`] returns
+    /// operation. [`crate::LeanSession::call_capability_unchecked`] returns
     /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because no user dylib is
     /// attached.
     pub(crate) fn new_shims_only(host: &'h LeanHost<'lean>) -> LeanResult<Self> {
@@ -190,7 +190,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// The user's owned capability [`LeanLibrary`], if this capability was
     /// loaded with a user dylib.
     ///
-    /// `pub(crate)` so [`crate::LeanSession::call_capability`] can
+    /// `pub(crate)` so [`crate::LeanSession::call_capability_unchecked`] can
     /// resolve ad-hoc function symbols on the user's dylib without
     /// holding a separate library borrow. Ad-hoc calls always go to
     /// the user's dylib, not the shim dylib: the shim dylib hosts a

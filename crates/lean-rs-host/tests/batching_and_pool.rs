@@ -1,5 +1,5 @@
 //! Integration tests for bulk session methods,
-//! `LeanSession::call_capability`, and the `SessionPool` /
+//! `LeanSession::call_capability_unchecked`, and the `SessionPool` /
 //! `PooledSession` pair.
 //!
 //! These tests live in `tests/` (not in `src/host/tests.rs`) because
@@ -8,7 +8,7 @@
 //! resident-set budget. Integration tests run as a separate binary, so
 //! their imports do not compound with the lower-layer unit tests.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -415,12 +415,12 @@ fn elaborate_bulk_empty_input_is_no_op() {
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
 }
 
-// -- call_capability ----------------------------------------------------
+// -- call_capability_unchecked ----------------------------------------------------
 
 #[test]
 fn call_capability_dispatches_pure_fixture_export() {
     // `lean_rs_fixture_u64_mul : UInt64 -> UInt64 -> UInt64 := (·*·)` is
-    // not a session-fixed symbol; routing through `call_capability`
+    // not a session-fixed symbol; routing through `call_capability_unchecked`
     // proves the generic Args/R path resolves and dispatches against an
     // arbitrary capability-dylib export.
     let host = fixture_host();
@@ -430,21 +430,22 @@ fn call_capability_dispatches_pure_fixture_export() {
     let mut session = session_over_handles(&caps);
 
     let baseline = session.stats();
-    let product: u64 = session
-        .call_capability::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (3, 4), None)
-        .expect("call_capability dispatches the pure export");
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let product: u64 =
+        unsafe { session.call_capability_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (3, 4), None) }
+            .expect("call_capability_unchecked dispatches the pure export");
     assert_eq!(product, 12);
 
     let after = session.stats();
     assert_eq!(
         after.ffi_calls - baseline.ffi_calls,
         1,
-        "call_capability records exactly one FFI dispatch",
+        "call_capability_unchecked records exactly one FFI dispatch",
     );
     assert_eq!(
         after.batch_items - baseline.batch_items,
         0,
-        "call_capability is not a bulk operation",
+        "call_capability_unchecked is not a bulk operation",
     );
 }
 
@@ -462,9 +463,9 @@ fn call_capability_dispatches_io_fixture_export() {
         .expect("load caps");
     let mut session = session_over_handles(&caps);
 
-    session
-        .call_capability::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit", (), None)
-        .expect("call_capability dispatches the IO export");
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    unsafe { session.call_capability_unchecked::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit", (), None) }
+        .expect("call_capability_unchecked dispatches the IO export");
 }
 
 #[test]
@@ -475,9 +476,10 @@ fn call_capability_unknown_symbol_is_link_error() {
         .expect("load caps");
     let mut session = session_over_handles(&caps);
 
-    let err = session
-        .call_capability::<(), LeanIo<u64>>("lean_rs_fixture_no_such_export", (), None)
-        .expect_err("missing symbol must surface as a host link error");
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let err =
+        unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_no_such_export", (), None) }
+            .expect_err("missing symbol must surface as a host link error");
     match err {
         LeanError::Host(failure) => {
             assert_eq!(failure.stage(), HostStage::Link);

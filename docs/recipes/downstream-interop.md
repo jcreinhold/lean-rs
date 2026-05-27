@@ -52,7 +52,8 @@ let capability = LeanCapability::from_build_env(
         .module("MyCapability"),
 )?;
 let module = capability.module()?;
-let add = module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
+// SAFETY: the Lean export is compiled with C ABI `(UInt64, UInt64) -> UInt64`.
+let add = unsafe { module.exported_unchecked::<(u64, u64), u64>("lean_rs_interop_consumer_add") }?;
 let answer = add.call(20, 22)?;
 ```
 
@@ -81,7 +82,8 @@ let bundle = LeanLibraryBundle::open(
 )?;
 let module = bundle.initialize_module("my_package", "MyCapability")?;
 let callback_loop =
-    module.exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")?;
+    // SAFETY: the Lean export is compiled with C ABI `(USize, USize, UInt64) -> IO UInt8`.
+    unsafe { module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop") }?;
 
 let callback = LeanCallbackHandle::<LeanProgressTick>::register(|event| {
     eprintln!("{} / {}", event.current, event.total);

@@ -10,7 +10,7 @@ can scan it in a minute and reach for the matching crate API by analogy.
 | Example | What it teaches |
 | --- | --- |
 | [`theorem_query`](#theorem_query) | Open a session and contrast the kind of a Lean definition with a theorem. |
-| [`evaluate`](#evaluate) | Call a typed Lean export through `LeanSession::call_capability`. |
+| [`evaluate`](#evaluate) | Call a typed Lean export through `LeanSession::call_capability_unchecked`. |
 | [`proof_check`](#proof_check) | Kernel-check a theorem, re-validate the evidence, project a bounded summary. |
 | [`meta_query`](#meta_query) | Run a bounded `MetaM` service and branch on every status. |
 | [`progress`](#progress) | Observe structured progress and cooperative cancellation on long-running calls. |
@@ -89,7 +89,7 @@ The exact `total_declarations` count tracks the active Lean toolchain prelude an
 
 ### evaluate
 
-**Goal:** call a typed `@[export]` Lean function from Rust through `LeanSession::call_capability` with both a boxed
+**Goal:** call a typed `@[export]` Lean function from Rust through `LeanSession::call_capability_unchecked` with both a boxed
 (`String`) and an unboxed (`u32`) signature.
 
 **Run:**

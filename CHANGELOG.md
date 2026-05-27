@@ -43,7 +43,7 @@ other transitive Lake dependencies without requiring a user `:shared` dylib.
 Meta, elaboration, kernel, declaration, source-range, and info-tree services. It loads the bundled interop and
 `LeanRsHostShims` dylibs, resolves the existing session symbols from the shim library, and deliberately skips opening
 the user's `:shared` dylib. Sessions still import modules from the project's `.olean` search path; ad-hoc
-`LeanSession::call_capability` calls return `lean_rs.unsupported` because no user library is attached.
+`LeanSession::call_capability_unchecked` calls return `lean_rs.unsupported` because no user library is attached.
 
 ### Worker boundary: shims-only host handle
 

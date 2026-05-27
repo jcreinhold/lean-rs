@@ -365,6 +365,27 @@ impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 pub mod lean_rs_host::host::process
+pub enum lean_rs_host::host::process::DeclarationTargetResult
+pub lean_rs_host::host::process::DeclarationTargetResult::Ambiguous(alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>)
+pub lean_rs_host::host::process::DeclarationTargetResult::NotFound
+pub lean_rs_host::host::process::DeclarationTargetResult::Target(lean_rs_host::host::process::DeclarationTargetInfo)
+impl core::clone::Clone for lean_rs_host::host::process::DeclarationTargetResult
+pub fn lean_rs_host::host::process::DeclarationTargetResult::clone(&self) -> lean_rs_host::host::process::DeclarationTargetResult
+impl core::cmp::Eq for lean_rs_host::host::process::DeclarationTargetResult
+impl core::cmp::PartialEq for lean_rs_host::host::process::DeclarationTargetResult
+pub fn lean_rs_host::host::process::DeclarationTargetResult::eq(&self, &lean_rs_host::host::process::DeclarationTargetResult) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::DeclarationTargetResult
+pub fn lean_rs_host::host::process::DeclarationTargetResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::DeclarationTargetResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::DeclarationTargetResult
+pub fn lean_rs_host::host::process::DeclarationTargetResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::DeclarationTargetResult
+impl core::marker::Send for lean_rs_host::host::process::DeclarationTargetResult
+impl core::marker::Sync for lean_rs_host::host::process::DeclarationTargetResult
+impl core::marker::Unpin for lean_rs_host::host::process::DeclarationTargetResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::DeclarationTargetResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::DeclarationTargetResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationTargetResult
 pub enum lean_rs_host::host::process::GoalAtResult
 pub lean_rs_host::host::process::GoalAtResult::Goal
 pub lean_rs_host::host::process::GoalAtResult::Goal::goals_after: alloc::vec::Vec<alloc::string::String>
@@ -422,6 +443,125 @@ impl core::marker::Unpin for lean_rs_host::host::process::ModuleQuery
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQuery
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQuery
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQuery
+pub enum lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::HeaderParseFailed
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::HeaderParseFailed::facts: lean_rs_host::host::process::ModuleQueryCacheFacts
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::MissingImports
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::MissingImports::facts: lean_rs_host::host::process::ModuleQueryCacheFacts
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::MissingImports::result: lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::Ok
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::Ok::facts: lean_rs_host::host::process::ModuleQueryCacheFacts
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::Ok::result: lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::Unsupported
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::clone(&self) -> lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchCachedOutcome::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchCachedOutcome
+pub enum lean_rs_host::host::process::ModuleQueryBatchItem
+pub lean_rs_host::host::process::ModuleQueryBatchItem::BudgetExceeded
+pub lean_rs_host::host::process::ModuleQueryBatchItem::BudgetExceeded::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryBatchItem::BudgetExceeded::message: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Ok
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Ok::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Ok::result: alloc::boxed::Box<lean_rs_host::host::process::ModuleQueryBatchResult>
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Unavailable
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Unavailable::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryBatchItem::Unavailable::message: alloc::string::String
+impl lean_rs_host::host::process::ModuleQueryBatchItem
+pub fn lean_rs_host::host::process::ModuleQueryBatchItem::id(&self) -> &str
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryBatchItem
+pub fn lean_rs_host::host::process::ModuleQueryBatchItem::clone(&self) -> lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryBatchItem
+pub fn lean_rs_host::host::process::ModuleQueryBatchItem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryBatchItem
+pub fn lean_rs_host::host::process::ModuleQueryBatchItem::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchItem
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchItem
+pub enum lean_rs_host::host::process::ModuleQueryBatchOutcome
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::HeaderParseFailed
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::MissingImports
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::MissingImports::result: lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::Ok
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::Ok::result: lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub lean_rs_host::host::process::ModuleQueryBatchOutcome::Unsupported
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryBatchOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchOutcome::clone(&self) -> lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryBatchOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryBatchOutcome
+pub fn lean_rs_host::host::process::ModuleQueryBatchOutcome::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchOutcome
+pub enum lean_rs_host::host::process::ModuleQueryBatchResult
+pub lean_rs_host::host::process::ModuleQueryBatchResult::DeclarationTarget(lean_rs_host::host::process::DeclarationTargetResult)
+pub lean_rs_host::host::process::ModuleQueryBatchResult::Diagnostics(lean_rs_host::LeanElabFailure)
+pub lean_rs_host::host::process::ModuleQueryBatchResult::ProofState(lean_rs_host::host::process::ProofStateResult)
+pub lean_rs_host::host::process::ModuleQueryBatchResult::References(lean_rs_host::host::process::ReferencesResult)
+pub lean_rs_host::host::process::ModuleQueryBatchResult::SurroundingDeclaration(lean_rs_host::host::process::SurroundingDeclarationResult)
+pub lean_rs_host::host::process::ModuleQueryBatchResult::TypeAt(lean_rs_host::host::process::TypeAtResult)
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryBatchResult
+pub fn lean_rs_host::host::process::ModuleQueryBatchResult::clone(&self) -> lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryBatchResult
+pub fn lean_rs_host::host::process::ModuleQueryBatchResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryBatchResult
+pub fn lean_rs_host::host::process::ModuleQueryBatchResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchResult
+pub enum lean_rs_host::host::process::ModuleQueryCacheStatus
+pub lean_rs_host::host::process::ModuleQueryCacheStatus::Evicted
+pub lean_rs_host::host::process::ModuleQueryCacheStatus::Hit
+pub lean_rs_host::host::process::ModuleQueryCacheStatus::Miss
+pub lean_rs_host::host::process::ModuleQueryCacheStatus::Rebuilt
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryCacheStatus
+pub fn lean_rs_host::host::process::ModuleQueryCacheStatus::clone(&self) -> lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQueryCacheStatus
+pub fn lean_rs_host::host::process::ModuleQueryCacheStatus::eq(&self, &lean_rs_host::host::process::ModuleQueryCacheStatus) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryCacheStatus
+pub fn lean_rs_host::host::process::ModuleQueryCacheStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryCacheStatus
+pub fn lean_rs_host::host::process::ModuleQueryCacheStatus::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryCacheStatus
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryCacheStatus
 pub enum lean_rs_host::host::process::ModuleQueryOutcome
 pub lean_rs_host::host::process::ModuleQueryOutcome::HeaderParseFailed
 pub lean_rs_host::host::process::ModuleQueryOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
@@ -464,6 +604,94 @@ impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryResult
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryResult
+pub enum lean_rs_host::host::process::ModuleQuerySelector
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::column: core::option::Option<u32>
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::line: core::option::Option<u32>
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::name: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::process::ModuleQuerySelector::Diagnostics
+pub lean_rs_host::host::process::ModuleQuerySelector::Diagnostics::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::ProofState
+pub lean_rs_host::host::process::ModuleQuerySelector::ProofState::column: u32
+pub lean_rs_host::host::process::ModuleQuerySelector::ProofState::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::ProofState::line: u32
+pub lean_rs_host::host::process::ModuleQuerySelector::References
+pub lean_rs_host::host::process::ModuleQuerySelector::References::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::References::name: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::SurroundingDeclaration
+pub lean_rs_host::host::process::ModuleQuerySelector::SurroundingDeclaration::column: u32
+pub lean_rs_host::host::process::ModuleQuerySelector::SurroundingDeclaration::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::SurroundingDeclaration::line: u32
+pub lean_rs_host::host::process::ModuleQuerySelector::TypeAt
+pub lean_rs_host::host::process::ModuleQuerySelector::TypeAt::column: u32
+pub lean_rs_host::host::process::ModuleQuerySelector::TypeAt::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::TypeAt::line: u32
+impl lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::id(&self) -> &str
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::clone(&self) -> lean_rs_host::host::process::ModuleQuerySelector
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQuerySelector
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::eq(&self, &lean_rs_host::host::process::ModuleQuerySelector) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQuerySelector
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::host::process::ModuleQuerySelector
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::host::process::ModuleQuerySelector
+pub type lean_rs_host::host::process::ModuleQuerySelector::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQuerySelector
+pub fn lean_rs_host::host::process::ModuleQuerySelector::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQuerySelector
+impl core::marker::Send for lean_rs_host::host::process::ModuleQuerySelector
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQuerySelector
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQuerySelector
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQuerySelector
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQuerySelector
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQuerySelector
+pub enum lean_rs_host::host::process::ProofStateResult
+pub lean_rs_host::host::process::ProofStateResult::State(alloc::boxed::Box<lean_rs_host::host::process::ProofStateInfo>)
+pub lean_rs_host::host::process::ProofStateResult::Unavailable
+pub lean_rs_host::host::process::ProofStateResult::Unavailable::message: alloc::string::String
+impl core::clone::Clone for lean_rs_host::host::process::ProofStateResult
+pub fn lean_rs_host::host::process::ProofStateResult::clone(&self) -> lean_rs_host::host::process::ProofStateResult
+impl core::cmp::Eq for lean_rs_host::host::process::ProofStateResult
+impl core::cmp::PartialEq for lean_rs_host::host::process::ProofStateResult
+pub fn lean_rs_host::host::process::ProofStateResult::eq(&self, &lean_rs_host::host::process::ProofStateResult) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ProofStateResult
+pub fn lean_rs_host::host::process::ProofStateResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ProofStateResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ProofStateResult
+pub fn lean_rs_host::host::process::ProofStateResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ProofStateResult
+impl core::marker::Send for lean_rs_host::host::process::ProofStateResult
+impl core::marker::Sync for lean_rs_host::host::process::ProofStateResult
+impl core::marker::Unpin for lean_rs_host::host::process::ProofStateResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProofStateResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProofStateResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProofStateResult
+pub enum lean_rs_host::host::process::SurroundingDeclarationResult
+pub lean_rs_host::host::process::SurroundingDeclarationResult::Declaration(lean_rs_host::host::process::DeclarationTargetInfo)
+pub lean_rs_host::host::process::SurroundingDeclarationResult::None
+impl core::clone::Clone for lean_rs_host::host::process::SurroundingDeclarationResult
+pub fn lean_rs_host::host::process::SurroundingDeclarationResult::clone(&self) -> lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::cmp::Eq for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::cmp::PartialEq for lean_rs_host::host::process::SurroundingDeclarationResult
+pub fn lean_rs_host::host::process::SurroundingDeclarationResult::eq(&self, &lean_rs_host::host::process::SurroundingDeclarationResult) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::SurroundingDeclarationResult
+pub fn lean_rs_host::host::process::SurroundingDeclarationResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::SurroundingDeclarationResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::SurroundingDeclarationResult
+pub fn lean_rs_host::host::process::SurroundingDeclarationResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::marker::Send for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::marker::Sync for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::marker::Unpin for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::SurroundingDeclarationResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::SurroundingDeclarationResult
 pub enum lean_rs_host::host::process::TypeAtResult
 pub lean_rs_host::host::process::TypeAtResult::NoTerm
 pub lean_rs_host::host::process::TypeAtResult::Term
@@ -488,6 +716,183 @@ impl core::marker::Unpin for lean_rs_host::host::process::TypeAtResult
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::TypeAtResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::TypeAtResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::TypeAtResult
+pub struct lean_rs_host::host::process::DeclarationTargetInfo
+pub lean_rs_host::host::process::DeclarationTargetInfo::body_span: lean_rs_host::host::process::ModuleSourceSpan
+pub lean_rs_host::host::process::DeclarationTargetInfo::declaration_kind: alloc::string::String
+pub lean_rs_host::host::process::DeclarationTargetInfo::declaration_name: alloc::string::String
+pub lean_rs_host::host::process::DeclarationTargetInfo::declaration_span: lean_rs_host::host::process::ModuleSourceSpan
+pub lean_rs_host::host::process::DeclarationTargetInfo::name_span: lean_rs_host::host::process::ModuleSourceSpan
+pub lean_rs_host::host::process::DeclarationTargetInfo::namespace_name: alloc::string::String
+pub lean_rs_host::host::process::DeclarationTargetInfo::short_name: alloc::string::String
+impl core::clone::Clone for lean_rs_host::host::process::DeclarationTargetInfo
+pub fn lean_rs_host::host::process::DeclarationTargetInfo::clone(&self) -> lean_rs_host::host::process::DeclarationTargetInfo
+impl core::cmp::Eq for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::cmp::PartialEq for lean_rs_host::host::process::DeclarationTargetInfo
+pub fn lean_rs_host::host::process::DeclarationTargetInfo::eq(&self, &lean_rs_host::host::process::DeclarationTargetInfo) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::DeclarationTargetInfo
+pub fn lean_rs_host::host::process::DeclarationTargetInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::DeclarationTargetInfo
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::DeclarationTargetInfo
+pub fn lean_rs_host::host::process::DeclarationTargetInfo::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::marker::Send for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::marker::Sync for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::marker::Unpin for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::DeclarationTargetInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationTargetInfo
+pub struct lean_rs_host::host::process::LocalInfo
+pub lean_rs_host::host::process::LocalInfo::binder_info: alloc::string::String
+pub lean_rs_host::host::process::LocalInfo::name: alloc::string::String
+pub lean_rs_host::host::process::LocalInfo::type_str: lean_rs_host::host::process::RenderedInfo
+pub lean_rs_host::host::process::LocalInfo::value: core::option::Option<lean_rs_host::host::process::RenderedInfo>
+impl core::clone::Clone for lean_rs_host::host::process::LocalInfo
+pub fn lean_rs_host::host::process::LocalInfo::clone(&self) -> lean_rs_host::host::process::LocalInfo
+impl core::cmp::Eq for lean_rs_host::host::process::LocalInfo
+impl core::cmp::PartialEq for lean_rs_host::host::process::LocalInfo
+pub fn lean_rs_host::host::process::LocalInfo::eq(&self, &lean_rs_host::host::process::LocalInfo) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::LocalInfo
+pub fn lean_rs_host::host::process::LocalInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::LocalInfo
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::LocalInfo
+pub fn lean_rs_host::host::process::LocalInfo::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::LocalInfo
+impl core::marker::Send for lean_rs_host::host::process::LocalInfo
+impl core::marker::Sync for lean_rs_host::host::process::LocalInfo
+impl core::marker::Unpin for lean_rs_host::host::process::LocalInfo
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::LocalInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::LocalInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::LocalInfo
+pub struct lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub lean_rs_host::host::process::ModuleQueryBatchEnvelope::items: alloc::vec::Vec<lean_rs_host::host::process::ModuleQueryBatchItem>
+pub lean_rs_host::host::process::ModuleQueryBatchEnvelope::total_truncated: bool
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub fn lean_rs_host::host::process::ModuleQueryBatchEnvelope::clone(&self) -> lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub fn lean_rs_host::host::process::ModuleQueryBatchEnvelope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub fn lean_rs_host::host::process::ModuleQueryBatchEnvelope::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchEnvelope
+pub struct lean_rs_host::host::process::ModuleQueryCacheFacts
+pub lean_rs_host::host::process::ModuleQueryCacheFacts::cache_approx_bytes: core::option::Option<u64>
+pub lean_rs_host::host::process::ModuleQueryCacheFacts::cache_entry_count: core::option::Option<u64>
+pub lean_rs_host::host::process::ModuleQueryCacheFacts::cache_status: lean_rs_host::host::process::ModuleQueryCacheStatus
+pub lean_rs_host::host::process::ModuleQueryCacheFacts::output_bytes: u64
+pub lean_rs_host::host::process::ModuleQueryCacheFacts::timings: lean_rs_host::host::process::ModuleQueryTimings
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryCacheFacts
+pub fn lean_rs_host::host::process::ModuleQueryCacheFacts::clone(&self) -> lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQueryCacheFacts
+pub fn lean_rs_host::host::process::ModuleQueryCacheFacts::eq(&self, &lean_rs_host::host::process::ModuleQueryCacheFacts) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryCacheFacts
+pub fn lean_rs_host::host::process::ModuleQueryCacheFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryCacheFacts
+pub fn lean_rs_host::host::process::ModuleQueryCacheFacts::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryCacheFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryCacheFacts
+pub struct lean_rs_host::host::process::ModuleQueryCachePolicy
+pub lean_rs_host::host::process::ModuleQueryCachePolicy::file_identity: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryCachePolicy::key: alloc::string::String
+pub lean_rs_host::host::process::ModuleQueryCachePolicy::max_bytes: u64
+pub lean_rs_host::host::process::ModuleQueryCachePolicy::max_entries: u64
+pub lean_rs_host::host::process::ModuleQueryCachePolicy::ttl_millis: u64
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryCachePolicy
+pub fn lean_rs_host::host::process::ModuleQueryCachePolicy::clone(&self) -> lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQueryCachePolicy
+pub fn lean_rs_host::host::process::ModuleQueryCachePolicy::eq(&self, &lean_rs_host::host::process::ModuleQueryCachePolicy) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryCachePolicy
+pub fn lean_rs_host::host::process::ModuleQueryCachePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryCachePolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryCachePolicy
+pub struct lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub lean_rs_host::host::process::ModuleQueryOutputBudgets::per_field_bytes: u32
+pub lean_rs_host::host::process::ModuleQueryOutputBudgets::total_bytes: u32
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::clone(&self) -> lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::eq(&self, &lean_rs_host::host::process::ModuleQueryOutputBudgets) -> bool
+impl core::default::Default for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::default() -> Self
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl lean_rs::abi::traits::sealed::SealedAbi for &lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub type &lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = *mut lean_rs_sys::types::lean_object
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub type lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = *mut lean_rs_sys::types::lean_object
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryOutputBudgets
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub struct lean_rs_host::host::process::ModuleQueryTimings
+pub lean_rs_host::host::process::ModuleQueryTimings::elaboration_micros: u64
+pub lean_rs_host::host::process::ModuleQueryTimings::header_import_micros: u64
+pub lean_rs_host::host::process::ModuleQueryTimings::projection_micros: u64
+pub lean_rs_host::host::process::ModuleQueryTimings::rendering_micros: u64
+impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryTimings
+pub fn lean_rs_host::host::process::ModuleQueryTimings::clone(&self) -> lean_rs_host::host::process::ModuleQueryTimings
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryTimings
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleQueryTimings
+pub fn lean_rs_host::host::process::ModuleQueryTimings::eq(&self, &lean_rs_host::host::process::ModuleQueryTimings) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleQueryTimings
+pub fn lean_rs_host::host::process::ModuleQueryTimings::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleQueryTimings
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQueryTimings
+pub fn lean_rs_host::host::process::ModuleQueryTimings::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryTimings
+impl core::marker::Send for lean_rs_host::host::process::ModuleQueryTimings
+impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryTimings
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleQueryTimings
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryTimings
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryTimings
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryTimings
+pub struct lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+pub lean_rs_host::host::process::ModuleSnapshotCacheClearResult::approx_bytes_cleared: u64
+pub lean_rs_host::host::process::ModuleSnapshotCacheClearResult::entries_cleared: u64
+impl core::clone::Clone for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+pub fn lean_rs_host::host::process::ModuleSnapshotCacheClearResult::clone(&self) -> lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::cmp::Eq for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::cmp::PartialEq for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+pub fn lean_rs_host::host::process::ModuleSnapshotCacheClearResult::eq(&self, &lean_rs_host::host::process::ModuleSnapshotCacheClearResult) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+pub fn lean_rs_host::host::process::ModuleSnapshotCacheClearResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+pub fn lean_rs_host::host::process::ModuleSnapshotCacheClearResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::marker::Send for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::marker::Sync for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::marker::Unpin for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleSnapshotCacheClearResult
 pub struct lean_rs_host::host::process::ModuleSourceSpan
 pub lean_rs_host::host::process::ModuleSourceSpan::end_column: u32
 pub lean_rs_host::host::process::ModuleSourceSpan::end_line: u32
@@ -534,6 +939,33 @@ impl core::marker::Unpin for lean_rs_host::host::process::NameRefNode
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::NameRefNode
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::NameRefNode
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::NameRefNode
+pub struct lean_rs_host::host::process::ProofStateInfo
+pub lean_rs_host::host::process::ProofStateInfo::declaration_name: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::process::ProofStateInfo::expected_type: core::option::Option<lean_rs_host::host::process::RenderedInfo>
+pub lean_rs_host::host::process::ProofStateInfo::goals_after: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ProofStateInfo::goals_before: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::ProofStateInfo::locals: alloc::vec::Vec<lean_rs_host::host::process::LocalInfo>
+pub lean_rs_host::host::process::ProofStateInfo::namespace_name: alloc::string::String
+pub lean_rs_host::host::process::ProofStateInfo::safe_edit: core::option::Option<lean_rs_host::host::process::DeclarationTargetInfo>
+pub lean_rs_host::host::process::ProofStateInfo::span: lean_rs_host::host::process::ModuleSourceSpan
+pub lean_rs_host::host::process::ProofStateInfo::truncated: bool
+impl core::clone::Clone for lean_rs_host::host::process::ProofStateInfo
+pub fn lean_rs_host::host::process::ProofStateInfo::clone(&self) -> lean_rs_host::host::process::ProofStateInfo
+impl core::cmp::Eq for lean_rs_host::host::process::ProofStateInfo
+impl core::cmp::PartialEq for lean_rs_host::host::process::ProofStateInfo
+pub fn lean_rs_host::host::process::ProofStateInfo::eq(&self, &lean_rs_host::host::process::ProofStateInfo) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::ProofStateInfo
+pub fn lean_rs_host::host::process::ProofStateInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::ProofStateInfo
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ProofStateInfo
+pub fn lean_rs_host::host::process::ProofStateInfo::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::ProofStateInfo
+impl core::marker::Send for lean_rs_host::host::process::ProofStateInfo
+impl core::marker::Sync for lean_rs_host::host::process::ProofStateInfo
+impl core::marker::Unpin for lean_rs_host::host::process::ProofStateInfo
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ProofStateInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ProofStateInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ProofStateInfo
 pub struct lean_rs_host::host::process::ReferencesResult
 pub lean_rs_host::host::process::ReferencesResult::references: alloc::vec::Vec<lean_rs_host::host::process::NameRefNode>
 pub lean_rs_host::host::process::ReferencesResult::truncated: bool
@@ -670,8 +1102,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanProgressEvent
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanProgressEvent
 pub struct lean_rs_host::host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
+pub unsafe fn lean_rs_host::LeanSession<'lean, 'c>::call_capability_unchecked<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -689,6 +1122,8 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, &lean_rs::handle::name::LeanName<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, &[lean_rs::handle::name::LeanName<'lean>], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query(&mut self, &str, &lean_rs_host::host::process::ModuleQuery, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch_cached(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, &lean_rs_host::host::process::ModuleQueryCachePolicy, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchCachedOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
@@ -1178,8 +1613,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanProgressEvent
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanProgressEvent
 pub struct lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::call_capability<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
+pub unsafe fn lean_rs_host::LeanSession<'lean, 'c>::call_capability_unchecked<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -1197,6 +1633,8 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, &lean_rs::handle::name::LeanName<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, &[lean_rs::handle::name::LeanName<'lean>], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query(&mut self, &str, &lean_rs_host::host::process::ModuleQuery, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch_cached(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, &lean_rs_host::host::process::ModuleQueryCachePolicy, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchCachedOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>

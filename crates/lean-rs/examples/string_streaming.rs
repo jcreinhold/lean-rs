@@ -4,7 +4,7 @@
 //! the generic interop shim, and Rust receives them through
 //! `LeanCallbackHandle<LeanStringEvent>`.
 
-#![allow(clippy::print_stdout)]
+#![allow(unsafe_code, clippy::print_stdout)]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -54,8 +54,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .initializer("lean_rs_interop_shims", "LeanRsInterop")],
     )?;
     let consumer_module = consumer_bundle.initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")?;
-    let add = consumer_module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
-    let stream = consumer_module.exported::<(usize, usize), LeanIo<u8>>("lean_rs_interop_consumer_jsonl_stream")?;
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add = unsafe { consumer_module.exported_unchecked::<(u64, u64), u64>("lean_rs_interop_consumer_add") }?;
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let stream = unsafe {
+        consumer_module.exported_unchecked::<(usize, usize), LeanIo<u8>>("lean_rs_interop_consumer_jsonl_stream")
+    }?;
 
     let sum = add.call(20, 22)?;
     require(sum == 42, "ordinary Lean export returned an unexpected value")?;

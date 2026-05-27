@@ -8,7 +8,13 @@
 //! Criterion's repeated-sampling shape would measure the cached
 //! fast-path instead.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
+#![allow(
+    unsafe_code,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used
+)]
 
 use std::path::PathBuf;
 
@@ -72,9 +78,9 @@ fn open_fixture() -> LeanLibrary<'static> {
 // decode.
 
 fn bench_scalar_dispatch(c: &mut Criterion, module: &LeanModule<'_, '_>) {
-    let add: LeanExported<'_, '_, (u32, u32), u32> = module
-        .exported::<(u32, u32), u32>("lean_rs_fixture_u32_add")
-        .expect("lookup u32_add");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add: LeanExported<'_, '_, (u32, u32), u32> =
+        unsafe { module.exported_unchecked::<(u32, u32), u32>("lean_rs_fixture_u32_add") }.expect("lookup u32_add");
 
     c.bench_function("module::scalar_dispatch_u32_add", |b| {
         b.iter(|| {
@@ -98,9 +104,10 @@ fn bench_scalar_dispatch(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 // dispatch + decode, not `String::clone`.
 
 fn bench_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
-    let identity: LeanExported<'_, '_, (String,), String> = module
-        .exported::<(String,), String>("lean_rs_fixture_string_identity")
-        .expect("lookup string_identity");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity: LeanExported<'_, '_, (String,), String> =
+        unsafe { module.exported_unchecked::<(String,), String>("lean_rs_fixture_string_identity") }
+            .expect("lookup string_identity");
 
     let mut group = c.benchmark_group("abi::string_roundtrip");
     for &bytes in &[16_usize, 256, 4096] {
@@ -138,9 +145,10 @@ fn bench_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 // the same allocation patterns at the public surface.
 
 fn bench_array_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
-    let identity: LeanExported<'_, '_, (Vec<String>,), Vec<String>> = module
-        .exported::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity")
-        .expect("lookup array_string_identity");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity: LeanExported<'_, '_, (Vec<String>,), Vec<String>> =
+        unsafe { module.exported_unchecked::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity") }
+            .expect("lookup array_string_identity");
 
     let mut group = c.benchmark_group("abi::array_string_roundtrip");
     for &n in &[1_usize, 16, 256] {

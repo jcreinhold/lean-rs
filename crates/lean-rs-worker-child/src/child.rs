@@ -540,18 +540,22 @@ fn load_fixture_capability(runtime: &'static LeanRuntime, fixture_root: &Path) -
     Ok(())
 }
 
+#[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
 fn call_fixture_mul(runtime: &'static LeanRuntime, fixture_root: &Path, lhs: u64, rhs: u64) -> LeanResult<u64> {
     let host = LeanHost::from_lake_project(runtime, fixture_root)?;
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
     let mut session = caps.session(&["LeanRsFixture.Scalars"], None, None)?;
-    session.call_capability::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (lhs, rhs), None)
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    unsafe { session.call_capability_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (lhs, rhs), None) }
 }
 
+#[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
 fn trigger_lean_panic(runtime: &'static LeanRuntime, fixture_root: &Path) -> LeanResult<()> {
     let host = LeanHost::from_lake_project(runtime, fixture_root)?;
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
     let mut session = caps.session(&["LeanRsFixture.Effects"], None, None)?;
-    session.call_capability::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None)
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    unsafe { session.call_capability_unchecked::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None) }
 }
 
 fn error_response(err: &LeanError) -> Response {
@@ -708,6 +712,10 @@ impl HostSessionState {
         }
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "worker capability stream export lookup is intentionally unchecked"
+    )]
     fn run_data_stream(
         &mut self,
         export: &str,
@@ -811,10 +819,16 @@ impl HostSessionState {
         .map_err(StreamRunError::Host)?;
 
         let (handle, trampoline) = callback.abi_parts();
-        let status = self
-            .session
-            .call_capability::<(&str, usize, usize), LeanIo<u8>>(export, (request_json, handle, trampoline), None)
-            .map_err(StreamRunError::Host)?;
+        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
+        let status = unsafe {
+            self.session
+                .call_capability_unchecked::<(&str, usize, usize), LeanIo<u8>>(
+                    export,
+                    (request_json, handle, trampoline),
+                    None,
+                )
+        }
+        .map_err(StreamRunError::Host)?;
 
         if let Some(error) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
             return Err(match error {
@@ -837,33 +851,52 @@ impl HostSessionState {
         Ok(guard.summary(started.elapsed()))
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "worker capability metadata export lookup is intentionally unchecked"
+    )]
     fn capability_metadata(
         &mut self,
         export: &str,
         request_json: &str,
     ) -> Result<LeanWorkerCapabilityMetadata, CapabilityJsonError> {
-        let raw = self
-            .session
-            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
-            .map_err(CapabilityJsonError::Host)?;
+        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
+        let raw = unsafe {
+            self.session
+                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
+        }
+        .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "worker capability doctor export lookup is intentionally unchecked"
+    )]
     fn capability_doctor(
         &mut self,
         export: &str,
         request_json: &str,
     ) -> Result<LeanWorkerDoctorReport, CapabilityJsonError> {
-        let raw = self
-            .session
-            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
-            .map_err(CapabilityJsonError::Host)?;
+        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
+        let raw = unsafe {
+            self.session
+                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
+        }
+        .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "worker capability command export lookup is intentionally unchecked"
+    )]
     fn json_command(&mut self, export: &str, request_json: &str) -> LeanResult<String> {
-        self.session
-            .call_capability::<(&str,), LeanIo<String>>(export, (request_json,), None)
+        // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
+        unsafe {
+            self.session
+                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
+        }
     }
 
     fn infer_type(

@@ -19,7 +19,7 @@ The public `LeanSession` methods keep the existing typed contracts for ordinary 
 | ABI mismatch, missing symbol, malformed return value, or host invariant failure | `Err(LeanError::Host(_))` |
 | Lean internal panic, `panic!` with `LEAN_ABORT_ON_PANIC=1`, generated unreachable, C++ foreign unwind, `std::exit`, or `abort` | The process may terminate; no Rust error is guaranteed |
 
-The same rule applies to `LeanSession::call_capability`: if the called Lean export returns through its normal C ABI,
+The same rule applies to `LeanSession::call_capability_unchecked`: if the called Lean export returns through its normal C ABI,
 `lean-rs` decodes it. If the export terminates the process or unwinds as a foreign exception through the non-unwinding C
 ABI, `LeanSession` does not recover.
 

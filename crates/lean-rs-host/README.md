@@ -109,7 +109,9 @@ fn main() -> LeanResult<()> {
     println!("elaborate ok: {}", elaborated.is_ok());
 
     // Call your own typed @[export] through the instrumented session dispatch.
-    let n = session.call_capability::<(u64,), u64>("my_app_square", (7u64,), None)?;
+    // SAFETY: `my_app_square` is compiled from a Lean export with C ABI
+    // matching `UInt64 -> UInt64`.
+    let n = unsafe { session.call_capability_unchecked::<(u64,), u64>("my_app_square", (7u64,), None) }?;
     println!("square(7) = {n}");  // 49
 
     Ok(())
@@ -129,7 +131,7 @@ built dylib path at compile time. `load_capabilities` also builds and opens the 
 Hosts that only need the standard shim-backed session services can use `host.load_shims_only()?` instead. That path
 builds and opens only the bundled interop and host shim dylibs; it can import any `.olean` files on the Lake project's
 manifest-derived search path, including transitive Lake package dependencies, and run Meta, elaboration, kernel,
-info-tree, and declaration services, but `LeanSession::call_capability` returns
+info-tree, and declaration services, but `LeanSession::call_capability_unchecked` returns
 `lean_rs::LeanDiagnosticCode::Unsupported` because no user dylib is attached.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed `LeanProgressSink`
@@ -145,7 +147,7 @@ on top) lives at
 
 **Nullary unboxed-scalar globals trip the function-path dispatch.** A nullary `@[export]` returning an unboxed scalar
 (e.g., `def decideTrue : Bool := decide (1 + 1 = 2)`) is compiled by Lake as a persistent global, not a function symbol.
-`LeanModule::exported`'s function-path dispatch then reads the global's stored scalar-tagged value as if it were a
+`LeanModule::exported_unchecked`'s function-path dispatch then reads the global's stored scalar-tagged value as if it were a
 function pointer, and `.call(...)` panics with `misaligned pointer dereference`. Workaround: add a `Unit` argument so
 Lake emits a function symbol:
 
@@ -153,7 +155,8 @@ Lake emits a function symbol:
 def decideTrue (_ : Unit) : Bool := decide (1 + 1 = 2)
 ```
 
-The Rust call site then becomes `module.exported::<((),), bool>(...).call(())`.
+The Rust call site then becomes
+`unsafe { module.exported_unchecked::<((),), bool>(...) }?.call(())`.
 
 ## Worked examples
 
@@ -162,7 +165,7 @@ Eight runnable examples under
 `lean_rs_host::*` end to end against the in-tree fixture:
 
 - `theorem_query`—open a session, contrast a definition's `kind` with a theorem's.
-- `evaluate`—call a typed `@[export]` through `LeanSession::call_capability`.
+- `evaluate`—call a typed `@[export]` through `LeanSession::call_capability_unchecked`.
 - `proof_check`—kernel-check a theorem, re-validate the evidence, render the summary.
 - `meta_query`—run a bounded `MetaM` service and branch on every status.
 - `progress`—attach a `LeanProgressSink` and trigger cooperative cancellation.

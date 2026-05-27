@@ -30,10 +30,10 @@ state or fully enforce the needed ownership, lifetime, layout, and ABI-signature
 of `lean_rs::*` should not have to choose a refcount discipline, inspect a Lean object header, or cast a symbol address
 to a C function pointer to use the safe surface.
 
-`LeanModule::exported::<Args, R>(name)` is safe because `lean-rs` owns the lookup and dispatch machinery, but arbitrary
-dynamic export lookup is not inherently safe. A raw symbol name plus caller-chosen `Args`/`R` is memory-safe only if the
-symbol's compiled C ABI is known to match those Rust types. Until signature metadata is available and checked,
-function-address dispatch remains an unsafe construction point or trusted host-stack code.
+`LeanModule::exported_unchecked::<Args, R>(name)` is unsafe because arbitrary dynamic export lookup cannot be validated
+from a raw symbol name plus caller-chosen `Args`/`R`. The call is memory-safe only if the symbol's compiled C ABI is
+known to match those Rust types. Until signature metadata is available and checked, function-address dispatch remains
+an unsafe construction point or trusted host-stack code.
 
 Applications that genuinely need raw FFI opt in by depending on `lean-rs-sys` directly, accepting full `unsafe`
 discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and opaque public types—friendlier than forking the

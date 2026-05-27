@@ -6,7 +6,7 @@
 //! handle through the FFI boundary and nothing else. Construction and
 //! inspection — selecting the constructor, reading the declaration name
 //! or type, rendering a summary — live in Lean exports the caller
-//! reaches through [`crate::module::LeanModule::exported`]. Rust offers
+//! reaches through [`crate::module::LeanModule::exported_unchecked`]. Rust offers
 //! no constructor: building a `Declaration` outside Lean would either be
 //! wrong (lacking universe and type machinery) or duplicate Lean's
 //! responsibility for environment extension.
@@ -33,7 +33,7 @@ use crate::runtime::obj::Obj;
 /// [`Clone`] bumps the underlying refcount; [`Drop`] releases it. There
 /// are no public inherent methods: the handle is a pass-through that
 /// reaches Lean-authored operations through
-/// [`crate::module::LeanModule::exported`].
+/// [`crate::module::LeanModule::exported_unchecked`].
 pub struct LeanDeclaration<'lean> {
     obj: Obj<'lean>,
 }

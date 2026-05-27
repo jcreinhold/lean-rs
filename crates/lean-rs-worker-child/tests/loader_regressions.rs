@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -215,9 +215,11 @@ fn open_consumer_capability() -> LeanCapability<'static> {
 fn public_capability_bundle_keeps_transitive_dependency_after_opener_returns() {
     let capability = open_consumer_capability();
     let module = capability.module().expect("consumer module initializes");
-    let callback_loop = module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
-        .expect("callback loop export resolves");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let callback_loop = unsafe {
+        module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
+    }
+    .expect("callback loop export resolves");
 
     let seen = Arc::new(Mutex::new(Vec::new()));
     let callback_seen = Arc::clone(&seen);

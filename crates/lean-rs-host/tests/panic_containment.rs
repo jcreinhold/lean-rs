@@ -5,7 +5,7 @@
 //! the parent re-runs this same test binary as a child with
 //! `LEAN_ABORT_ON_PANIC=1`, then asserts that the child terminates.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -35,7 +35,8 @@ fn run_child_workload() {
         .session(&["LeanRsFixture.Effects"], None, None)
         .expect("session imports cleanly");
 
-    let returned = session.call_capability::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None);
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let returned = unsafe { session.call_capability_unchecked::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None) };
     panic!("Lean panic export returned instead of terminating: {returned:?}");
 }
 

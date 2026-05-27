@@ -8,7 +8,13 @@
 //! construction happens once outside `b.iter`, so the recorded numbers
 //! reflect the steady-state hot path, not import cost.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
+#![allow(
+    unsafe_code,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used
+)]
 
 use std::path::PathBuf;
 
@@ -89,8 +95,8 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
 
 // -- dynamic capability lookup ------------------------------------------
 //
-// Workload: `host::session::call_capability_lookup_u32_add` —
-// `LeanSession::call_capability` against a user fixture export. This is
+// Workload: `host::session::call_capability_unchecked_lookup_u32_add` —
+// `LeanSession::call_capability_unchecked` against a user fixture export. This is
 // the intentionally uncached escape hatch: each iteration resolves the
 // symbol by name before constructing a typed `LeanExported` and calling
 // it. Compare with `module::scalar_dispatch_u32_add` in the `lean-rs`
@@ -101,15 +107,17 @@ fn bench_call_capability_lookup(c: &mut Criterion, caps: &LeanCapabilities<'_, '
         .session(&["LeanRsFixture.Scalars"], None, None)
         .expect("Scalars imports cleanly");
 
-    c.bench_function("host::session::call_capability_lookup_u32_add", |b| {
+    c.bench_function("host::session::call_capability_unchecked_lookup_u32_add", |b| {
         b.iter(|| {
-            let result: u32 = session
-                .call_capability::<(u32, u32), u32>(
+            // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+            let result: u32 = unsafe {
+                session.call_capability_unchecked::<(u32, u32), u32>(
                     black_box("lean_rs_fixture_u32_add"),
                     (black_box(7_u32), black_box(35_u32)),
                     None,
                 )
-                .expect("capability call");
+            }
+            .expect("capability call");
             black_box(result);
         });
     });

@@ -5,7 +5,7 @@
 //! the handle through the FFI boundary and nothing else. Construction
 //! and inspection — `.bvar`, `.const`, `.app`, `toString`, `==` — live
 //! in Lean exports the caller reaches through
-//! [`crate::module::LeanModule::exported`]. Rust deliberately offers no
+//! [`crate::module::LeanModule::exported_unchecked`]. Rust deliberately offers no
 //! constructor for `Expr`: rebuilding the Lean term algebra outside the
 //! kernel would either be wrong (lacking elaboration / type checking)
 //! or duplicate Lean's responsibility.
@@ -45,7 +45,7 @@ use crate::runtime::obj::Obj;
 /// [`Clone`] bumps the underlying refcount; [`Drop`] releases it. There
 /// are no public inherent methods: the handle is a pass-through that
 /// reaches Lean-authored operations through
-/// [`crate::module::LeanModule::exported`].
+/// [`crate::module::LeanModule::exported_unchecked`].
 pub struct LeanExpr<'lean> {
     obj: Obj<'lean>,
 }

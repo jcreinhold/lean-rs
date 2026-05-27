@@ -210,7 +210,7 @@ Service-layer session and pool spans. Fire only if the caller opted into `lean-r
 | `lean_rs.host.session.check_evidence` | debug |—|
 | `lean_rs.host.session.summarize_evidence` | debug |—|
 | `lean_rs.host.session.run_meta` | debug | `service` (name), `heartbeats`, `diagnostic_byte_limit` |
-| `lean_rs.host.session.call_capability` | debug | `symbol`, `arity` |
+| `lean_rs.host.session.call_capability_unchecked` | debug | `symbol`, `arity` |
 | `lean_rs.host.session.query_declarations_bulk` | debug | `batch_size` |
 | `lean_rs.host.session.elaborate_bulk` | debug | `batch_size`, `heartbeats`, `diagnostic_byte_limit` |
 | `lean_rs.host.pool.acquire` | debug | `imports_len` |

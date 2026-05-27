@@ -24,7 +24,9 @@
 //!     lean_rs::LeanBuiltCapability::manifest_path(env!("MY_CAPABILITY_MANIFEST")),
 //! )?;
 //! let module  = capability.module()?;
-//! let add     = module.exported::<(u64, u64), u64>("my_export_add")?;
+//! // SAFETY: `my_export_add` is compiled from a Lean export with C ABI
+//! // matching `(UInt64, UInt64) -> UInt64`.
+//! let add     = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_export_add") }?;
 //! let sum     = add.call(3, 4)?;
 //! ```
 //!
@@ -59,7 +61,7 @@
 //! - [`handle`] — opaque, lifetime-bound receipts for the four core
 //!   Lean semantic values ([`LeanName`], [`LeanLevel`], [`LeanExpr`],
 //!   [`LeanDeclaration`]). Construction and inspection happen Lean-side
-//!   through [`LeanModule::exported`] against caller-authored shims.
+//!   through [`LeanModule::exported_unchecked`] against caller-authored shims.
 //! - [`callback`] — RAII callback registrations for Lean-to-Rust calls.
 //!   [`LeanCallbackHandle`] hides the registry id, payload decoder, and
 //!   trampoline while still producing the two `USize` ABI values generic

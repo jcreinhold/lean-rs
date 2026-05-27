@@ -6,7 +6,7 @@
 //! invokes a Lean loop that calls a Rust callback registered through
 //! `LeanCallbackHandle`.
 
-#![allow(clippy::print_stdout)]
+#![allow(unsafe_code, clippy::print_stdout)]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -71,9 +71,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .initializer("lean_rs_interop_shims", "LeanRsInterop")],
     )?;
     let consumer_module = consumer_bundle.initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")?;
-    let add = consumer_module.exported::<(u64, u64), u64>("lean_rs_interop_consumer_add")?;
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add = unsafe { consumer_module.exported_unchecked::<(u64, u64), u64>("lean_rs_interop_consumer_add") }?;
     let callback_loop =
-        consumer_module.exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")?;
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { consumer_module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop") }?;
 
     let sum = add.call(20, 22)?;
     require(sum == 42, "ordinary Lean export returned an unexpected value")?;

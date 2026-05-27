@@ -7,7 +7,7 @@
 //! symbols — five `MetaM` services and the info-tree projection), starts a session over an import list, and
 //! exercises the typed query methods.
 
-#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -251,8 +251,8 @@ fn load_shims_only_opens_session_against_user_oleans() {
         .expect("kernel_check dispatch succeeds");
     assert_eq!(checked.status(), EvidenceStatus::Checked);
 
-    let err = session
-        .call_capability::<(), LeanIo<()>>("demo_shims_no_user_export", (), None)
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let err = unsafe { session.call_capability_unchecked::<(), LeanIo<()>>("demo_shims_no_user_export", (), None) }
         .expect_err("shims-only capabilities do not dispatch user exports");
     assert_eq!(err.code(), LeanDiagnosticCode::Unsupported);
 }
@@ -1001,8 +1001,8 @@ fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) ->
 }
 
 fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, symbol: &str) -> lean_rs::LeanExpr<'lean> {
-    session
-        .call_capability::<((),), lean_rs::LeanExpr<'lean>>(symbol, ((),), None)
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    unsafe { session.call_capability_unchecked::<((),), lean_rs::LeanExpr<'lean>>(symbol, ((),), None) }
         .expect("fixture expression export dispatches cleanly")
 }
 

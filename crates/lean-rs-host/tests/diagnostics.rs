@@ -12,7 +12,7 @@
 //! resolved relative to the workspace root the same way every other
 //! integration test does it.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 
@@ -123,9 +123,10 @@ fn symbol_lookup_code_on_missing_capability_export() {
     let mut session = session_over_handles(&caps);
     // No symbol with this name is exported by the fixture; the
     // `resolve_function_symbol` path tags it as `SymbolLookup`.
-    let err = session
-        .call_capability::<(), LeanIo<u64>>("lean_rs_no_such_capability_export", (), None)
-        .expect_err("missing capability symbol must fail");
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let err =
+        unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_no_such_capability_export", (), None) }
+            .expect_err("missing capability symbol must fail");
     assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup, "got {err:?}");
 }
 
@@ -150,8 +151,8 @@ fn lean_exception_code_from_lean_throw() {
     let mut session = caps
         .session(&["LeanRsFixture.Effects"], None, None)
         .expect("session imports cleanly");
-    let err = session
-        .call_capability::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", (), None)
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let err = unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", (), None) }
         .expect_err("fixture export raises through IO");
     assert_eq!(err.code(), LeanDiagnosticCode::LeanException, "got {err:?}");
     let LeanError::LeanException(exc) = err else {

@@ -7,7 +7,8 @@
 //! 2. Build a Rust value, marshal it through [`IntoLean`] (or a `from_*`
 //!    helper) into a Lean object — done implicitly by `LeanExported::call`
 //!    for typed-handle round trips.
-//! 3. Look up the fixture export by name through `module.exported::<Args, R>(...)`
+//! 3. Look up the fixture export by name through
+//!    `unsafe { module.exported_unchecked::<Args, R>(...) }`
 //!    and call it.
 //! 4. Compare the decoded Rust value against the input.
 //!
@@ -17,6 +18,7 @@
 //! reliance on the throwaway `lean_rs_test_support::fixture` loader.
 
 #![allow(
+    unsafe_code,
     clippy::expect_used,
     clippy::float_cmp,
     clippy::panic,
@@ -94,48 +96,48 @@ fn unboxed_scalar_identity_round_trips() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
     assert_eq!(
-        module
-            .exported::<(u8,), u8>("lean_rs_fixture_u8_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity") }
             .expect("lookup")
             .call(0)
             .expect("call"),
         0,
     );
     assert_eq!(
-        module
-            .exported::<(u8,), u8>("lean_rs_fixture_u8_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity") }
             .expect("lookup")
             .call(u8::MAX)
             .expect("call"),
         u8::MAX,
     );
     assert_eq!(
-        module
-            .exported::<(u16,), u16>("lean_rs_fixture_u16_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(u16,), u16>("lean_rs_fixture_u16_identity") }
             .expect("lookup")
             .call(u16::MAX)
             .expect("call"),
         u16::MAX,
     );
     assert_eq!(
-        module
-            .exported::<(u32,), u32>("lean_rs_fixture_u32_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(u32,), u32>("lean_rs_fixture_u32_identity") }
             .expect("lookup")
             .call(u32::MAX)
             .expect("call"),
         u32::MAX,
     );
     assert_eq!(
-        module
-            .exported::<(u64,), u64>("lean_rs_fixture_u64_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(u64,), u64>("lean_rs_fixture_u64_identity") }
             .expect("lookup")
             .call(u64::MAX)
             .expect("call"),
         u64::MAX,
     );
     assert_eq!(
-        module
-            .exported::<(usize,), usize>("lean_rs_fixture_usize_identity")
+        // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+        unsafe { module.exported_unchecked::<(usize,), usize>("lean_rs_fixture_usize_identity") }
             .expect("lookup")
             .call(usize::MAX)
             .expect("call"),
@@ -149,13 +151,11 @@ fn unboxed_scalar_multi_argument_calls() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let add = module
-        .exported::<(u32, u32), u32>("lean_rs_fixture_u32_add")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add = unsafe { module.exported_unchecked::<(u32, u32), u32>("lean_rs_fixture_u32_add") }.expect("lookup");
     assert_eq!(add.call(7, 35).expect("call"), 42);
-    let mul = module
-        .exported::<(u64, u64), u64>("lean_rs_fixture_u64_mul")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mul = unsafe { module.exported_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul") }.expect("lookup");
     assert_eq!(mul.call(u64::from(u32::MAX), 2).expect("call"), u64::from(u32::MAX) * 2);
 }
 
@@ -165,9 +165,9 @@ fn float_identity_round_trip_includes_nan() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(f64,), f64>("lean_rs_fixture_float_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(f64,), f64>("lean_rs_fixture_float_identity") }.expect("lookup");
     assert_eq!(identity.call(0.0).expect("call"), 0.0);
     assert_eq!(identity.call(-1.5).expect("call"), -1.5);
     assert_eq!(
@@ -175,9 +175,8 @@ fn float_identity_round_trip_includes_nan() {
         core::f64::consts::PI,
     );
     assert!(identity.call(f64::NAN).expect("call").is_nan());
-    let add = module
-        .exported::<(f64, f64), f64>("lean_rs_fixture_float_add")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add = unsafe { module.exported_unchecked::<(f64, f64), f64>("lean_rs_fixture_float_add") }.expect("lookup");
     assert_eq!(add.call(0.1, 0.2).expect("call"), 0.1 + 0.2);
 }
 
@@ -187,9 +186,9 @@ fn char_identity_round_trip_preserves_non_ascii() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(char,), char>("lean_rs_fixture_char_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(char,), char>("lean_rs_fixture_char_identity") }.expect("lookup");
     for c in ['a', '🦀', '\0', char::MAX] {
         assert_eq!(identity.call(c).expect("call"), c);
     }
@@ -203,9 +202,8 @@ fn bool_round_trip_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let bool_not = module
-        .exported::<(bool,), bool>("lean_rs_fixture_bool_not")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let bool_not = unsafe { module.exported_unchecked::<(bool,), bool>("lean_rs_fixture_bool_not") }.expect("lookup");
     assert!(bool_not.call(false).expect("call"));
     assert!(!bool_not.call(true).expect("call"));
 }
@@ -216,7 +214,8 @@ fn unit_round_trip_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let unit_id = module.exported::<((),), ()>("lean_rs_fixture_unit_id").expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let unit_id = unsafe { module.exported_unchecked::<((),), ()>("lean_rs_fixture_unit_id") }.expect("lookup");
     unit_id.call(()).expect("Unit round-trips");
 }
 
@@ -237,9 +236,9 @@ fn nat_identity_round_trips_small_values() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity") }.expect("lookup");
     for &n in &[0_u64, 1, 42, 1_000, u64::from(u32::MAX)] {
         let input = nat::from_u64(runtime, n);
         let echoed = identity.call(input).expect("call");
@@ -254,9 +253,8 @@ fn nat_succ_of_zero_round_trips_through_u64() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let succ = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let succ = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ") }.expect("lookup");
     let echoed = succ.call(nat::from_u64(runtime, 0)).expect("call");
     assert_eq!(nat::try_to_u64(echoed).expect("scalar Nat decodes"), 1);
 }
@@ -268,9 +266,8 @@ fn nat_succ_of_max_small_returns_bignum_that_does_not_fit_u64() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let succ = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let succ = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ") }.expect("lookup");
     let input = nat::from_usize(runtime, lean_rs_sys::nat_int::LEAN_MAX_SMALL_NAT);
     let echoed = succ.call(input).expect("call");
     match nat::try_to_u64(echoed) {
@@ -293,9 +290,9 @@ fn int_identity_round_trips_signed_values() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity") }.expect("lookup");
     for &n in &[0_i64, 1, -1, 42, -42, i64::from(i32::MAX), i64::from(i32::MIN)] {
         let input = int::from_i64(runtime, n);
         let echoed = identity.call(input).expect("call");
@@ -310,16 +307,16 @@ fn isize_and_usize_helpers_round_trip_through_int_and_nat_fixtures() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let nat_identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let nat_identity =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity") }.expect("lookup");
     let n: usize = 12345;
     let echoed = nat_identity.call(nat::from_usize(runtime, n)).expect("call");
     assert_eq!(nat::try_to_usize(echoed).expect("scalar Nat decodes"), n);
 
-    let int_identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let int_identity =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity") }.expect("lookup");
     for &v in &[0_isize, 1, -1, 42, -42] {
         let echoed = int_identity.call(int::from_isize(runtime, v)).expect("call");
         assert_eq!(int::try_to_isize(echoed).expect("scalar Int decodes"), v);
@@ -333,9 +330,8 @@ fn int_neg_round_trips_through_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let neg = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_neg")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let neg = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_neg") }.expect("lookup");
     for &n in &[0_i64, 1, -1, 42, -42, i64::from(i32::MAX)] {
         let echoed = neg.call(int::from_i64(runtime, n)).expect("call");
         let decoded = int::try_to_i64(echoed).expect("scalar Int decodes");
@@ -350,9 +346,9 @@ fn string_identity_helper(s: &str) {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(String,), String>("lean_rs_fixture_string_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(String,), String>("lean_rs_fixture_string_identity") }.expect("lookup");
     assert_eq!(identity.call(s.to_owned()).expect("call"), s);
 }
 
@@ -366,9 +362,9 @@ fn borrowed_str_arg_round_trips_through_string_identity() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(&str,), String>("lean_rs_fixture_string_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(&str,), String>("lean_rs_fixture_string_identity") }.expect("lookup");
     for &s in &["", "hello, world", "héllo 🦀", "a\0b\0c"] {
         assert_eq!(identity.call(s).expect("call"), s);
     }
@@ -406,9 +402,9 @@ fn string_length_returns_utf8_codepoint_count_as_nat() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let length = module
-        .exported::<(String,), Obj<'_>>("lean_rs_fixture_string_length")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let length =
+        unsafe { module.exported_unchecked::<(String,), Obj<'_>>("lean_rs_fixture_string_length") }.expect("lookup");
     let s = "héllo 🦀";
     let len_obj = length.call(s.to_owned()).expect("call");
     let len = nat::try_to_u64(len_obj).expect("string length fits scalar");
@@ -427,8 +423,8 @@ fn bytearray_identity_helper(bytes: &[u8]) {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_identity")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_identity") }
         .expect("lookup");
     let echoed = identity.call(bytearray::from_bytes(runtime, bytes)).expect("call");
     let view = echoed.borrow();
@@ -472,9 +468,9 @@ fn bytearray_size_returns_byte_count_as_nat() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let size_fn = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_size")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let size_fn =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_size") }.expect("lookup");
     let bytes: &[u8] = b"hello\0world";
     let size_obj = size_fn.call(bytearray::from_bytes(runtime, bytes)).expect("call");
     let size = nat::try_to_u64(size_obj).expect("byte-count fits scalar");
@@ -604,9 +600,10 @@ fn array_string_round_trip(xs: Vec<String>) {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity") }
+            .expect("lookup");
     let expected = xs.clone();
     let decoded = identity.call(xs).expect("call");
     assert_eq!(decoded, expected);
@@ -638,9 +635,10 @@ fn array_string_push_round_trips_added_element() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let push = module
-        .exported::<(Vec<String>, String), Vec<String>>("lean_rs_fixture_array_string_push")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let push =
+        unsafe { module.exported_unchecked::<(Vec<String>, String), Vec<String>>("lean_rs_fixture_array_string_push") }
+            .expect("lookup");
     let decoded = push
         .call(vec!["one".to_owned(), "two".to_owned()], "three".to_owned())
         .expect("call");
@@ -673,8 +671,8 @@ fn option_nat_identity_round_trips_none() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_identity")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_identity") }
         .expect("lookup");
     let input_obj = alloc_ctor_with_objects::<0>(runtime, 0, []);
     let echoed = identity.call(input_obj).expect("call");
@@ -690,8 +688,8 @@ fn option_nat_identity_round_trips_some() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_identity")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_identity") }
         .expect("lookup");
     let n: u64 = 42;
     let input_obj = alloc_ctor_with_objects(runtime, 1, [nat::from_u64(runtime, n)]);
@@ -709,9 +707,9 @@ fn option_nat_some_constructed_lean_side() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let some_fn = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_some")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let some_fn =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_some") }.expect("lookup");
     let n: u64 = 7;
     let some_obj = some_fn.call(nat::from_u64(runtime, n)).expect("call");
     let tag = ctor_tag(&some_obj).expect("Option ctor");
@@ -763,8 +761,8 @@ fn except_string_nat_ok_round_trips_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let ok_fn = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_except_string_nat_ok")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let ok_fn = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_except_string_nat_ok") }
         .expect("lookup");
     let n: u64 = 99;
     let obj = ok_fn.call(nat::from_u64(runtime, n)).expect("call");
@@ -780,8 +778,8 @@ fn except_string_nat_err_round_trips_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let err_fn = module
-        .exported::<(String,), Obj<'_>>("lean_rs_fixture_except_string_nat_err")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let err_fn = unsafe { module.exported_unchecked::<(String,), Obj<'_>>("lean_rs_fixture_except_string_nat_err") }
         .expect("lookup");
     let s = "boom".to_owned();
     let obj = err_fn.call(s.clone()).expect("call");
@@ -835,8 +833,8 @@ fn pair_make_round_trips_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let pair_fn = module
-        .exported::<(Obj<'_>, String), Obj<'_>>("lean_rs_fixture_pair_make")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let pair_fn = unsafe { module.exported_unchecked::<(Obj<'_>, String), Obj<'_>>("lean_rs_fixture_pair_make") }
         .expect("lookup");
     let n: u64 = 1234;
     let s = "pair-field".to_owned();
@@ -854,9 +852,10 @@ fn bundle_make_round_trips_via_fixture() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let bundle_fn = module
-        .exported::<(String, Vec<String>), Obj<'_>>("lean_rs_fixture_bundle_make")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let bundle_fn =
+        unsafe { module.exported_unchecked::<(String, Vec<String>), Obj<'_>>("lean_rs_fixture_bundle_make") }
+            .expect("lookup");
     let name = "release".to_owned();
     let items: Vec<String> = vec!["x86_64".to_owned(), "aarch64".to_owned()];
     let bundle = bundle_fn.call(name.clone(), items.clone()).expect("call");
@@ -872,9 +871,9 @@ fn bundle_identity_round_trips_through_lean() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let identity = module
-        .exported::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bundle_identity")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bundle_identity") }.expect("lookup");
     let name = "alpha".to_owned();
     let items: Vec<String> = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
     let bundle = alloc_ctor_with_objects(
@@ -923,9 +922,8 @@ fn io_success_unit_decodes_via_lean_io_marker() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let f = module
-        .exported::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let f = unsafe { module.exported_unchecked::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit") }.expect("lookup");
     f.call().expect("io_success_unit");
 }
 
@@ -935,9 +933,9 @@ fn io_success_nat_decodes_payload() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let f = module
-        .exported::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_success_nat")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let f =
+        unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_success_nat") }.expect("lookup");
     // `IO Nat` returns a scalar-tagged Nat payload, decoded via the
     // `nat::*` helpers (not the polymorphic-UInt64 `TryFromLean` impl).
     let nat_obj = f.call().expect("io_success_nat");
@@ -953,9 +951,8 @@ fn io_failure_decodes_inner_except() {
         .expect("init");
     // `IO (Except String Nat)` — outer IO succeeds, inner Except carries
     // the failure. We get the inner `Obj<'_>` then walk the ctor.
-    let f = module
-        .exported::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_failure")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let f = unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_failure") }.expect("lookup");
     let inner = f.call().expect("io_failure outer IO succeeds");
     let tag = ctor_tag(&inner).expect("Except ctor");
     assert_eq!(tag, 0, "expected inner error");
@@ -970,9 +967,8 @@ fn io_throw_surfaces_lean_exception_with_user_error_kind() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let f = module
-        .exported::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_throw")
-        .expect("lookup");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let f = unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_throw") }.expect("lookup");
     match f.call() {
         Err(LeanError::LeanException(exc)) => {
             assert_eq!(exc.kind(), LeanExceptionKind::UserError);
@@ -999,8 +995,8 @@ fn option_nat_none_resolves_as_global_and_decodes_via_arity_zero() {
     // Option.none). The typed handle reads the global's stored value,
     // lean_inc's it (no-op on a scalar), and decodes through
     // `Option::<u64>::try_from_lean` which handles both none and some.
-    let none_handle = module
-        .exported::<(), Option<u64>>("lean_rs_fixture_option_nat_none")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let none_handle = unsafe { module.exported_unchecked::<(), Option<u64>>("lean_rs_fixture_option_nat_none") }
         .expect("arity-0 lookup against the global succeeds");
     let decoded = none_handle.call().expect("call returns the persistent none value");
     assert_eq!(decoded, None, "Option::none decodes to Rust None");
@@ -1012,8 +1008,8 @@ fn arity_one_lookup_against_global_rejects_with_link_diagnostic() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let err = module
-        .exported::<(u64,), u64>("lean_rs_fixture_option_nat_none")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let err = unsafe { module.exported_unchecked::<(u64,), u64>("lean_rs_fixture_option_nat_none") }
         .expect_err("arity 1 against a global must fail at lookup");
     match err {
         LeanError::Host(failure) => {
@@ -1039,8 +1035,8 @@ fn lean_io_against_global_rejects_at_lookup() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let err = module
-        .exported::<(), LeanIo<u64>>("lean_rs_fixture_option_nat_none")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let err = unsafe { module.exported_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_option_nat_none") }
         .expect_err("LeanIo against a global must fail at lookup");
     match err {
         LeanError::Host(failure) => {
@@ -1062,8 +1058,8 @@ fn unknown_symbol_lookup_surfaces_host_link_diagnostic() {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init");
-    let err = module
-        .exported::<(), u64>("lean_rs_fixture_does_not_exist")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let err = unsafe { module.exported_unchecked::<(), u64>("lean_rs_fixture_does_not_exist") }
         .expect_err("unknown symbol must surface at lookup");
     match err {
         LeanError::Host(failure) => {

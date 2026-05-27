@@ -46,7 +46,7 @@
 //!
 //! Construction or inspection of the handle types in [`lean_rs::handle`]
 //! outside of a session goes through Lean fixture exports reached via
-//! [`lean_rs::module::LeanModule::exported`].
+//! [`lean_rs::module::LeanModule::exported_unchecked`].
 
 pub mod elaboration;
 pub mod evidence;

@@ -38,7 +38,7 @@ libloading = "0.8"
 # globals (compiled by Lake as persistent `lean_object*` data-section
 # symbols) from callable functions. One-shot at `LeanLibrary::open` so the
 # function-vs-global distinction stays invisible to callers of
-# `LeanModule::exported`.
+# `LeanModule::exported_unchecked`.
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 serde_json = { workspace = true }
 # Structured spans + events around runtime init, module load + dispatch,

@@ -85,7 +85,7 @@ impl<'lean> LeanHost<'lean> {
     /// Sessions opened from the returned capabilities can import modules from
     /// this Lake project's `.olean` search path and use the standard
     /// shim-backed Meta, elaboration, kernel, info-tree, declaration, and
-    /// source-range services. [`crate::LeanSession::call_capability`] returns
+    /// source-range services. [`crate::LeanSession::call_capability_unchecked`] returns
     /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because there is no user
     /// library to dispatch arbitrary `@[export]` symbols through.
     ///

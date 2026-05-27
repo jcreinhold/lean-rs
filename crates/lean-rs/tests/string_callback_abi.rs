@@ -188,9 +188,13 @@ fn string_callback_loop<'lean, 'lib>(
     let module = library
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    module
-        .exported::<(usize, usize, Vec<String>), LeanIo<u8>>("lean_rs_interop_consumer_string_callback_loop")
-        .expect("string callback loop export resolves")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    unsafe {
+        module.exported_unchecked::<(usize, usize, Vec<String>), LeanIo<u8>>(
+            "lean_rs_interop_consumer_string_callback_loop",
+        )
+    }
+    .expect("string callback loop export resolves")
 }
 
 fn tick_callback_loop<'lean, 'lib>(
@@ -199,8 +203,8 @@ fn tick_callback_loop<'lean, 'lib>(
     let module = library
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    unsafe { module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop") }
         .expect("tick callback loop export resolves")
 }
 

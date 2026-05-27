@@ -19,7 +19,13 @@
 //! cargo run --release -p lean-rs --example alloc_probe -- array_string_256
 //! ```
 
-#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::print_stderr)]
+#![allow(
+    unsafe_code,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::print_stderr
+)]
 
 use std::path::PathBuf;
 
@@ -57,8 +63,8 @@ fn run_string_identity(library: &LeanLibrary<'_>, bytes: usize) {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("module initialiser succeeds");
-    let identity = module
-        .exported::<(String,), String>("lean_rs_fixture_string_identity")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity = unsafe { module.exported_unchecked::<(String,), String>("lean_rs_fixture_string_identity") }
         .expect("lookup string_identity");
     let template = "a".repeat(bytes);
     for _ in 0..ITERS {
@@ -71,9 +77,10 @@ fn run_array_string(library: &LeanLibrary<'_>, n: usize) {
     let module = library
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("module initialiser succeeds");
-    let identity = module
-        .exported::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity")
-        .expect("lookup array_string_identity");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let identity =
+        unsafe { module.exported_unchecked::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity") }
+            .expect("lookup array_string_identity");
     let template: Vec<String> = (0..n).map(|i| format!("elt{i:04}")).collect();
     for _ in 0..ITERS {
         let echoed = identity.call(template.clone()).expect("call");

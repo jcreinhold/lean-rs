@@ -25,7 +25,7 @@ the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](a
 5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not
    require or initialize host shims.
 6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer
-   dylib's `LeanSession::call_capability` route stays open for user-authored `@[export]` symbols.
+   dylib's `LeanSession::call_capability_unchecked` route stays open for user-authored `@[export]` symbols.
 
 `LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
 `lean_rs_host_shims`.

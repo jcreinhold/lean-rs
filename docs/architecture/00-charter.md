@@ -113,7 +113,7 @@ item in `lean-rs-host`'s, the wrong layer has taken ownership.
 
 - Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order, imports cache, capability
   refresh, the 28 + 6 `lean_rs_host_*` Lean shim contract.
-- Capability dispatch: `SessionSymbols` cached address tables, `Args` / `R` propagation through `call_capability`,
+- Capability dispatch: `SessionSymbols` cached address tables, `Args` / `R` propagation through `call_capability_unchecked`,
   tracing-span shape and metrics.
 - Batching: per-source result aggregation, `N + 1` vs `2N` FFI-cost analysis behind bulk methods, strict / skip-missing
   semantics.

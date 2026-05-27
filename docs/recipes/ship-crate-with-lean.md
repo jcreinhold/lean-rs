@@ -88,7 +88,9 @@ let capability = lean_rs::LeanCapability::from_build_manifest(
 )?;
 
 let module = capability.module()?;
-let add = module.exported::<(u64, u64), u64>("my_app_add")?;
+// SAFETY: `my_app_add` is compiled from a Lean export with C ABI
+// matching `(UInt64, UInt64) -> UInt64`.
+let add = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_app_add") }?;
 let answer = add.call(40, 2)?;
 ```
 

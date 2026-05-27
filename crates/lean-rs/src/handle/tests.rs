@@ -1,11 +1,11 @@
 //! Round-trip tests for the four semantic handles.
 //!
 //! Each handle is exercised through the
-//! [`crate::module::LeanModule::exported`] dispatch path against the
+//! [`crate::module::LeanModule::exported_unchecked`] dispatch path against the
 //! `LeanRsFixture.Handles` capability. Construction and inspection happen
 //! exclusively in Lean code; the Rust side only carries the handle.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 
@@ -64,14 +64,15 @@ fn name_round_trips_through_lean_authored_display() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let mk_anon = module
-        .exported::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_anon = unsafe { module.exported_unchecked::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous") }
         .expect("lookup name_anonymous");
-    let mk_str = module
-        .exported::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str")
-        .expect("lookup name_mk_str");
-    let to_str = module
-        .exported::<(LeanName<'_>,), String>("lean_rs_fixture_name_to_string")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_str =
+        unsafe { module.exported_unchecked::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str") }
+            .expect("lookup name_mk_str");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let to_str = unsafe { module.exported_unchecked::<(LeanName<'_>,), String>("lean_rs_fixture_name_to_string") }
         .expect("lookup name_to_string");
 
     let root = mk_anon.call(()).expect("call name_anonymous");
@@ -91,14 +92,15 @@ fn name_equality_via_fixture_export() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let mk_anon = module
-        .exported::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_anon = unsafe { module.exported_unchecked::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous") }
         .expect("lookup name_anonymous");
-    let mk_str = module
-        .exported::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str")
-        .expect("lookup name_mk_str");
-    let beq = module
-        .exported::<(LeanName<'_>, LeanName<'_>), bool>("lean_rs_fixture_name_beq")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_str =
+        unsafe { module.exported_unchecked::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str") }
+            .expect("lookup name_mk_str");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let beq = unsafe { module.exported_unchecked::<(LeanName<'_>, LeanName<'_>), bool>("lean_rs_fixture_name_beq") }
         .expect("lookup name_beq");
 
     let a = mk_str
@@ -124,14 +126,14 @@ fn level_round_trips_succ_zero() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let zero = module
-        .exported::<((),), LeanLevel<'_>>("lean_rs_fixture_level_zero")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let zero = unsafe { module.exported_unchecked::<((),), LeanLevel<'_>>("lean_rs_fixture_level_zero") }
         .expect("lookup level_zero");
-    let succ = module
-        .exported::<(LeanLevel<'_>,), LeanLevel<'_>>("lean_rs_fixture_level_succ")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let succ = unsafe { module.exported_unchecked::<(LeanLevel<'_>,), LeanLevel<'_>>("lean_rs_fixture_level_succ") }
         .expect("lookup level_succ");
-    let to_str = module
-        .exported::<(LeanLevel<'_>,), String>("lean_rs_fixture_level_to_string")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let to_str = unsafe { module.exported_unchecked::<(LeanLevel<'_>,), String>("lean_rs_fixture_level_to_string") }
         .expect("lookup level_to_string");
 
     let one = succ.call(zero.call(()).expect("zero")).expect("succ zero");
@@ -153,14 +155,14 @@ fn level_equality_via_fixture_export() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let zero = module
-        .exported::<((),), LeanLevel<'_>>("lean_rs_fixture_level_zero")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let zero = unsafe { module.exported_unchecked::<((),), LeanLevel<'_>>("lean_rs_fixture_level_zero") }
         .expect("lookup level_zero");
-    let succ = module
-        .exported::<(LeanLevel<'_>,), LeanLevel<'_>>("lean_rs_fixture_level_succ")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let succ = unsafe { module.exported_unchecked::<(LeanLevel<'_>,), LeanLevel<'_>>("lean_rs_fixture_level_succ") }
         .expect("lookup level_succ");
-    let beq = module
-        .exported::<(LeanLevel<'_>, LeanLevel<'_>), bool>("lean_rs_fixture_level_beq")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let beq = unsafe { module.exported_unchecked::<(LeanLevel<'_>, LeanLevel<'_>), bool>("lean_rs_fixture_level_beq") }
         .expect("lookup level_beq");
 
     let a = succ.call(zero.call(()).expect("zero a")).expect("succ a");
@@ -180,11 +182,11 @@ fn expr_const_nat_round_trips() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let const_nat = module
-        .exported::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let const_nat = unsafe { module.exported_unchecked::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat") }
         .expect("lookup expr_const_nat");
-    let to_str = module
-        .exported::<(LeanExpr<'_>,), String>("lean_rs_fixture_expr_to_string")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let to_str = unsafe { module.exported_unchecked::<(LeanExpr<'_>,), String>("lean_rs_fixture_expr_to_string") }
         .expect("lookup expr_to_string");
 
     let rendered = to_str
@@ -204,14 +206,15 @@ fn expr_app_round_trips() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let const_nat = module
-        .exported::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let const_nat = unsafe { module.exported_unchecked::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat") }
         .expect("lookup expr_const_nat");
-    let app = module
-        .exported::<(LeanExpr<'_>, LeanExpr<'_>), LeanExpr<'_>>("lean_rs_fixture_expr_app")
-        .expect("lookup expr_app");
-    let bvar = module
-        .exported::<(u64,), LeanExpr<'_>>("lean_rs_fixture_expr_bvar")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let app =
+        unsafe { module.exported_unchecked::<(LeanExpr<'_>, LeanExpr<'_>), LeanExpr<'_>>("lean_rs_fixture_expr_app") }
+            .expect("lookup expr_app");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let bvar = unsafe { module.exported_unchecked::<(u64,), LeanExpr<'_>>("lean_rs_fixture_expr_bvar") }
         .expect("lookup expr_bvar");
 
     let f = const_nat.call(()).expect("f");
@@ -232,14 +235,14 @@ fn expr_equality_via_fixture_export() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let const_nat = module
-        .exported::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let const_nat = unsafe { module.exported_unchecked::<((),), LeanExpr<'_>>("lean_rs_fixture_expr_const_nat") }
         .expect("lookup expr_const_nat");
-    let bvar = module
-        .exported::<(u64,), LeanExpr<'_>>("lean_rs_fixture_expr_bvar")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let bvar = unsafe { module.exported_unchecked::<(u64,), LeanExpr<'_>>("lean_rs_fixture_expr_bvar") }
         .expect("lookup expr_bvar");
-    let beq = module
-        .exported::<(LeanExpr<'_>, LeanExpr<'_>), bool>("lean_rs_fixture_expr_beq")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let beq = unsafe { module.exported_unchecked::<(LeanExpr<'_>, LeanExpr<'_>), bool>("lean_rs_fixture_expr_beq") }
         .expect("lookup expr_beq");
 
     let a = const_nat.call(()).expect("a");
@@ -259,18 +262,23 @@ fn declaration_demo_axiom_round_trips() {
         .initialize_module("lean_rs_fixture", "LeanRsFixture")
         .expect("init root module");
 
-    let mk_anon = module
-        .exported::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_anon = unsafe { module.exported_unchecked::<((),), LeanName<'_>>("lean_rs_fixture_name_anonymous") }
         .expect("lookup name_anonymous");
-    let mk_str = module
-        .exported::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str")
-        .expect("lookup name_mk_str");
-    let demo_axiom = module
-        .exported::<(LeanName<'_>,), LeanDeclaration<'_>>("lean_rs_fixture_declaration_demo_axiom")
-        .expect("lookup declaration_demo_axiom");
-    let render = module
-        .exported::<(LeanDeclaration<'_>,), String>("lean_rs_fixture_declaration_name_to_string")
-        .expect("lookup declaration_name_to_string");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let mk_str =
+        unsafe { module.exported_unchecked::<(LeanName<'_>, String), LeanName<'_>>("lean_rs_fixture_name_mk_str") }
+            .expect("lookup name_mk_str");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let demo_axiom = unsafe {
+        module.exported_unchecked::<(LeanName<'_>,), LeanDeclaration<'_>>("lean_rs_fixture_declaration_demo_axiom")
+    }
+    .expect("lookup declaration_demo_axiom");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let render = unsafe {
+        module.exported_unchecked::<(LeanDeclaration<'_>,), String>("lean_rs_fixture_declaration_name_to_string")
+    }
+    .expect("lookup declaration_name_to_string");
 
     let name = mk_str
         .call(mk_anon.call(()).expect("anon"), "DemoAxiom".to_owned())

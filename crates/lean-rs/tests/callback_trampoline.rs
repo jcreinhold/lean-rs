@@ -152,9 +152,11 @@ fn lean_loop_invokes_rust_trampoline_in_order() {
         .library()
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    let callback_loop = module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
-        .expect("callback loop export resolves");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let callback_loop = unsafe {
+        module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
+    }
+    .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(None);
     let status = callback_loop
@@ -185,9 +187,11 @@ fn rust_callback_panic_is_caught_before_returning_to_lean() {
         .library()
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    let callback_loop = module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
-        .expect("callback loop export resolves");
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let callback_loop = unsafe {
+        module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
+    }
+    .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(Some(2));
     let status = callback_loop

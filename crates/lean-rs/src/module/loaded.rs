@@ -8,7 +8,7 @@
 //! module is live in the Lean runtime.
 //!
 //! Typed exported-function handles attach to this type via
-//! [`LeanModule::exported`], which returns a
+//! [`LeanModule::exported_unchecked`], which returns a
 //! [`crate::module::LeanExported`] parameterised by the argument tuple
 //! and return-type marker.
 

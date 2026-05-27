@@ -665,7 +665,7 @@ impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBund
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
 pub struct lean_rs::module::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
-pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub unsafe fn lean_rs::LeanModule<'lean, 'lib>::exported_unchecked<Args, R>(&self, &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::module_name(&self) -> &str
 impl core::fmt::Debug for lean_rs::LeanModule<'_, '_>
@@ -1270,7 +1270,7 @@ impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanLibraryBund
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanLibraryBundle<'lean>
 pub struct lean_rs::LeanModule<'lean, 'lib>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
-pub fn lean_rs::LeanModule<'lean, 'lib>::exported<Args, R>(&self, &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
+pub unsafe fn lean_rs::LeanModule<'lean, 'lib>::exported_unchecked<Args, R>(&self, &str) -> lean_rs::error::LeanResult<lean_rs::LeanExported<'lean, 'lib, Args, R>> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 impl<'lean, 'lib> lean_rs::LeanModule<'lean, 'lib>
 pub fn lean_rs::LeanModule<'lean, 'lib>::module_name(&self) -> &str
 impl core::fmt::Debug for lean_rs::LeanModule<'_, '_>

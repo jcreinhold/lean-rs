@@ -12,18 +12,23 @@
 //!
 //! ## How to use a handle
 //!
-//! Reach into Lean through [`crate::module::LeanModule::exported`]; the
+//! Reach into Lean through [`crate::module::LeanModule::exported_unchecked`]; the
 //! handle types already implement the (sealed) [`crate::module::LeanAbi`]
 //! trait so they can appear as argument or return types in the typed
 //! dispatch:
 //!
 //! ```ignore
-//! let n: LeanName = module
-//!     .exported::<((),), LeanName>("lean_rs_fixture_name_anonymous")?
-//!     .call(())?;
-//! let s: String = module
-//!     .exported::<(LeanName,), String>("lean_rs_fixture_name_to_string")?
-//!     .call(n)?;
+//! // SAFETY: the Lean fixture pins this export as `Unit -> Name`.
+//! let mk_name = unsafe {
+//!     module.exported_unchecked::<((),), LeanName>("lean_rs_fixture_name_anonymous")
+//! }?;
+//! let n: LeanName = mk_name.call(())?;
+//!
+//! // SAFETY: the Lean fixture pins this export as `Name -> String`.
+//! let name_to_string = unsafe {
+//!     module.exported_unchecked::<(LeanName,), String>("lean_rs_fixture_name_to_string")
+//! }?;
+//! let s: String = name_to_string.call(n)?;
 //! ```
 //!
 //! ## Display text is diagnostic, not a semantic key

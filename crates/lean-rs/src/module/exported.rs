@@ -11,13 +11,13 @@
 //!   [`crate::abi::traits::LeanAbi`] type (pure call) and by [`LeanIo<T>`] for
 //!   `T: crate::abi::traits::TryFromLean` (IO-returning Lean export).
 //! - [`LeanIo<T>`] — return-type marker for Lean exports declared
-//!   `IO α`. Writing `exported::<Args, LeanIo<T>>(name)` tells the
+//!   `IO α`. Writing `exported_unchecked::<Args, LeanIo<T>>(name)` tells the
 //!   handle to compose `decode_io` before
 //!   [`crate::abi::traits::TryFromLean::try_from_lean`]. The `.call(...)` method
 //!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`) — the marker
 //!   only lives in the type signature.
-//! - [`LeanModule::exported<Args, R>(name)`](super::loaded::LeanModule::exported)
-//!   — the single lookup. Distinguishes function-symbol resolution from
+//! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
+//!   — the single unchecked lookup. Distinguishes function-symbol resolution from
 //!   Lean nullary-constant global reads transparently, using the
 //!   `globals` set computed at [`super::library::LeanLibrary::open`].
 //!
@@ -29,11 +29,13 @@
 //! let module  = library.initialize_module("foo_pkg", "Foo.Bar")?;
 //!
 //! // Pure, arity 1:
-//! let f = module.exported::<(String,), String>("foo_string_identity")?;
+//! // SAFETY: the Lean export's C ABI is known to be `String -> String`.
+//! let f = unsafe { module.exported_unchecked::<(String,), String>("foo_string_identity") }?;
 //! let s = f.call("abc".to_owned())?;
 //!
 //! // IO, arity 0; return type carries the marker, .call returns T directly:
-//! let g = module.exported::<(), lean_rs::module::LeanIo<u64>>("foo_io_seven")?;
+//! // SAFETY: the Lean export's C ABI is known to be `IO UInt64`.
+//! let g = unsafe { module.exported_unchecked::<(), lean_rs::module::LeanIo<u64>>("foo_io_seven") }?;
 //! let n: u64 = g.call()?;
 //! ```
 //!
@@ -79,8 +81,8 @@
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
-// single safe-front-door site that resolves and dispatches user-typed
-// Lean exports, per `docs/architecture/01-safety-model.md`.
+// single unchecked-front-door site that resolves and dispatches
+// user-typed Lean exports, per `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
 // The public surface intentionally references `pub(crate)` items
 // (`Obj`) inside trait method signatures. Soundness is enforced by
@@ -111,7 +113,7 @@ use crate::runtime::obj::Obj;
 /// Holds a resolved symbol address (function or persistent global) and
 /// the runtime borrow that anchors any `Obj` it produces. Construction
 /// goes exclusively through
-/// [`LeanModule::exported`](super::loaded::LeanModule::exported); the
+/// [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked); the
 /// handle borrows from its source [`LeanModule`] via `'lib` so neither
 /// the library nor the runtime can be dropped while a handle is live.
 ///
@@ -130,14 +132,14 @@ pub struct LeanExported<'lean, 'lib, Args, R> {
 
 /// Return-type marker for Lean exports declared `IO α`.
 ///
-/// Writing `exported::<Args, LeanIo<T>>(name)` makes [`LeanExported`]'s
+/// Writing `exported_unchecked::<Args, LeanIo<T>>(name)` makes [`LeanExported`]'s
 /// `.call` method compose `decode_io` before
 /// `TryFromLean::try_from_lean`, so the handle returns `LeanResult<T>`.
 /// The marker has no value — it is a pure type-level switch.
 ///
 /// `LeanIo<T>` cannot be constructed from outside the crate (its single
 /// field is private); it appears only in `R` positions on
-/// [`LeanModule::exported`](super::loaded::LeanModule::exported).
+/// [`LeanModule::exported_unchecked`](super::loaded::LeanModule::exported_unchecked).
 pub struct LeanIo<T>(PhantomData<fn() -> T>);
 
 /// Internal: which symbol shape the handle dispatches.
@@ -191,7 +193,7 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
     /// takes its arguments destructured (one per parameter) because
     /// that is the natural ergonomic form for hand-written call sites.
     /// Generic callers — most importantly
-    /// [`crate::LeanSession::call_capability`] — cannot destructure a
+    /// [`crate::LeanSession::call_capability_unchecked`] — cannot destructure a
     /// generic `Args` tuple, so they reach `.call(...)` through this
     /// associated function instead. Macro-stamped per arity to forward
     /// to the existing destructured impl.
@@ -294,13 +296,13 @@ impl<'lean, Args, R> LeanExported<'lean, '_, Args, R> {
     /// Build a function-targeted typed handle from a pre-resolved symbol
     /// address.
     ///
-    /// `LeanModule::exported` is the normal lookup path; this constructor
+    /// `LeanModule::exported_unchecked` is the normal lookup path; this constructor
     /// exists so external opinionated host stacks (e.g. `lean-rs-host`'s
     /// `LeanCapabilities`) can pre-resolve a capability dylib's function
     /// symbols once at load time via [`LeanLibrary::resolve_function_symbol`]
     /// and then dispatch through cached addresses without re-`dlsym`-ing
     /// per call. It always produces a `Function`-targeted handle — global
-    /// symbols still go through `LeanModule::exported`.
+    /// symbols still go through `LeanModule::exported_unchecked`.
     ///
     /// # Safety
     ///
@@ -347,18 +349,36 @@ unsafe fn read_global_pointer(ptr: *mut *mut lean_object) -> *mut lean_object {
     }
 }
 
-// -- LeanModule::exported lookup -----------------------------------------
+// -- LeanModule::exported_unchecked lookup -----------------------------------------
 
 // Both lifetimes flow into the returned `LeanExported<'lean, 'lib, ...>`.
 #[allow(single_use_lifetimes, reason = "'lean and 'lib both anchor the returned handle")]
 impl<'lean, 'lib> LeanModule<'lean, 'lib> {
-    /// Look up a typed handle for the named exported symbol.
+    /// Look up a typed handle for the named exported symbol without ABI
+    /// metadata checks.
     ///
     /// `Args` is a tuple of Rust argument types whose arity matches the
     /// Lean export's parameter count (use `()` for nullary exports);
     /// each element must implement [`LeanAbi`]. `R` is the return
     /// decoder: either a [`LeanAbi`] type (pure path) or [`LeanIo<T>`]
     /// for an `IO α`-returning export.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that `name` resolves to a Lean export whose
+    /// emitted C ABI and ownership behavior exactly match the requested
+    /// Rust `Args` and `R`:
+    ///
+    /// - each argument slot must have the C representation selected by
+    ///   that slot's [`LeanAbi::CRepr`], in the same order and arity;
+    /// - the return slot must have the C representation expected by
+    ///   [`DecodeCallResult::CRepr`], including `LeanIo<T>` only for
+    ///   exports that return Lean `IO α`;
+    /// - object arguments and results must follow Lake's ownership and
+    ///   refcount transfer rules for the chosen signature.
+    ///
+    /// Passing a Rust signature that does not match the Lean export's
+    /// actual C ABI is undefined behavior.
     ///
     /// # Errors
     ///
@@ -371,7 +391,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     /// - the symbol is a Lean nullary-constant global and `R` is
     ///   [`LeanIo<_>`] — globals are never IO-returning in Lean, so the
     ///   decoder cannot apply.
-    pub fn exported<Args, R>(&self, name: &str) -> LeanResult<LeanExported<'lean, 'lib, Args, R>>
+    pub unsafe fn exported_unchecked<Args, R>(&self, name: &str) -> LeanResult<LeanExported<'lean, 'lib, Args, R>>
     where
         Args: LeanArgs<'lean>,
         R: DecodeCallResult<'lean>,
@@ -381,7 +401,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
             if Args::ARITY > 0 {
                 return Err(LeanError::symbol_lookup(format!(
                     "exported symbol '{}' in '{}' is a Lean nullary-constant global, not a function; \
-                     look it up with `exported::<(), R>(name)` instead (lookup arity is {})",
+                     look it up with `exported_unchecked::<(), R>(name)` instead (lookup arity is {})",
                     name,
                     library.path().display(),
                     Args::ARITY,

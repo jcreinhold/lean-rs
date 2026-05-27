@@ -51,7 +51,7 @@ pub use preflight::{
 };
 
 // `LeanAbi` lives in `crate::abi::traits` but appears in the public
-// signature of [`LeanModule::exported`] (as a per-arg bound) and in the
+// signature of [`LeanModule::exported_unchecked`] (as a per-arg bound) and in the
 // docstrings for [`LeanExported`]/[`LeanIo`]. Re-export it at the
 // `module` boundary so rustdoc resolves intra-crate links and so a
 // downstream crate that wants to inspect the bound has a single import

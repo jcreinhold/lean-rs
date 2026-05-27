@@ -2110,13 +2110,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     }
 
     /// Look up and invoke a capability-exported function by name with a
-    /// typed argument tuple and a typed result decoder.
+    /// caller-provided ABI signature.
     ///
     /// This is the transport-neutral escape hatch for capability dylibs
     /// that export Lean functions beyond the twenty-eight session-fixed
     /// symbols. The conversion bounds — [`LeanArgs`] on the argument
     /// tuple and [`DecodeCallResult`] on the result — are the same
-    /// bounds [`lean_rs::module::LeanModule::exported`] uses, so an
+    /// bounds [`lean_rs::module::LeanModule::exported_unchecked`] uses, so an
     /// IO-returning Lean capability is invoked with `R = LeanIo<T>`
     /// (fused `decode_io` + `T::try_from_lean`) and a pure capability
     /// with `R = T` for `T: LeanAbi`. The sealed traits stay invisible
@@ -2124,11 +2124,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ///
     /// Function-only: nullary-constant globals are not capabilities.
     /// Reach a Lean nullary-constant global directly through
-    /// [`lean_rs::module::LeanModule::exported`] if you need one. The
+    /// [`lean_rs::module::LeanModule::exported_unchecked`] if you need one. The
     /// symbol address is resolved on every call (one `dlsym` per
     /// invocation); for hot capabilities, prefer pre-resolving via
-    /// `LeanModule::exported` and caching the [`lean_rs::module::LeanExported`]
+    /// `LeanModule::exported_unchecked` and caching the [`lean_rs::module::LeanExported`]
     /// handle.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that `name` resolves to a Lean export whose
+    /// emitted C ABI matches the requested Rust `Args` and `R` exactly,
+    /// including argument arity/order, each slot's `LeanAbi::CRepr`,
+    /// the return `DecodeCallResult::CRepr`, and the Lean ownership /
+    /// refcount behavior for every object argument and result.
+    ///
+    /// Passing a Rust call signature that does not match the Lean export
+    /// symbol's actual C ABI is undefined behavior.
     ///
     /// # Errors
     ///
@@ -2139,7 +2150,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// `R = LeanIo<_>`). Returns [`lean_rs::LeanError::Host`] with stage
     /// [`HostStage::Conversion`] when the return value does not decode
     /// into the declared `R::Output`.
-    pub fn call_capability<Args, R>(
+    pub unsafe fn call_capability_unchecked<Args, R>(
         &mut self,
         name: &str,
         args: Args,
@@ -2151,7 +2162,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     {
         let _span = tracing::debug_span!(
             target: "lean_rs",
-            "lean_rs.host.session.call_capability",
+            "lean_rs.host.session.call_capability_unchecked",
             symbol = name,
             arity = Args::ARITY,
         )
@@ -2159,7 +2170,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let Some(library) = self.capabilities.user_library() else {
             return Err(lean_rs::__host_internals::host_unsupported(format!(
-                "call_capability('{name}') requires a user capability dylib; this LeanCapabilities was loaded with load_shims_only",
+                "call_capability_unchecked('{name}') requires a user capability dylib; this LeanCapabilities was loaded with load_shims_only",
             )));
         };
         let address = library.resolve_function_symbol(name)?;

@@ -5,7 +5,7 @@
 //! the handle through the FFI boundary and nothing else. Construction
 //! and inspection — `.zero`, `.succ`, `.max`, `toString`, `==` — live in
 //! Lean exports the caller reaches through
-//! [`crate::module::LeanModule::exported`].
+//! [`crate::module::LeanModule::exported_unchecked`].
 //!
 //! Display text obtained from a Lean export is diagnostic, not a
 //! semantic key; use a Lean-authored equality export when semantics
@@ -30,7 +30,7 @@ use crate::runtime::obj::Obj;
 /// [`Clone`] bumps the underlying refcount; [`Drop`] releases it. There
 /// are no public inherent methods: the handle is a pass-through that
 /// reaches Lean-authored operations through
-/// [`crate::module::LeanModule::exported`].
+/// [`crate::module::LeanModule::exported_unchecked`].
 pub struct LeanLevel<'lean> {
     obj: Obj<'lean>,
 }

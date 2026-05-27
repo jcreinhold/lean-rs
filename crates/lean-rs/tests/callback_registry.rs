@@ -4,7 +4,7 @@
 //! spike, but the Rust side goes through the public RAII registry
 //! instead of passing a stack pointer and test-local trampoline.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -113,8 +113,8 @@ fn callback_loop<'lean, 'lib>(
     let module = library
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    module
-        .exported::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    unsafe { module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop") }
         .expect("callback loop export resolves")
 }
 
@@ -124,9 +124,13 @@ fn string_callback_loop<'lean, 'lib>(
     let module = library
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
         .expect("consumer root module initializes");
-    module
-        .exported::<(usize, usize, Vec<String>), LeanIo<u8>>("lean_rs_interop_consumer_string_callback_loop")
-        .expect("string callback loop export resolves")
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    unsafe {
+        module.exported_unchecked::<(usize, usize, Vec<String>), LeanIo<u8>>(
+            "lean_rs_interop_consumer_string_callback_loop",
+        )
+    }
+    .expect("string callback loop export resolves")
 }
 
 #[test]

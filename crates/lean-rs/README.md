@@ -85,7 +85,8 @@ fn main() -> LeanResult<()> {
     )?;
     let module = capability.module()?;
 
-    let add = module.exported::<(u64, u64), u64>("my_app_add")?;
+    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
+    let add = unsafe { module.exported_unchecked::<(u64, u64), u64>("my_app_add") }?;
     println!("{}", add.call(40, 2)?);  // 42
     Ok(())
 }
@@ -115,7 +116,7 @@ For a trusted same-process string callback example, run `cargo run -p lean-rs --
 Worker-style tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling
 should use `lean-rs-worker` typed commands instead of exposing callback handles.
 
-The `Args` and `R` generics on `LeanModule::exported` are sealed by the `LeanAbi` / `LeanArgs` / `DecodeCallResult`
+The `Args` and `R` generics on `LeanModule::exported_unchecked` are sealed by the `LeanAbi` / `LeanArgs` / `DecodeCallResult`
 traits, so unsupported types fail at compile time rather than producing wrong decodes at runtime.
 
 ## See also

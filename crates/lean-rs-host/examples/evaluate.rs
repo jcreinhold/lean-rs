@@ -1,7 +1,7 @@
 //! Call a typed Lean export through the curated session surface and
 //! print the result.
 //!
-//! `LeanSession::call_capability` is the transport-neutral escape hatch
+//! `LeanSession::call_capability_unchecked` is the transport-neutral escape hatch
 //! for any `@[export]` Lean function that isn't one of the
 //! session-fixed symbols (`query_declaration`, `elaborate`, …). The
 //! call site spells the argument tuple type and the return decoder;
@@ -11,7 +11,7 @@
 //! Run with: `cargo run -p lean-rs --example evaluate`.
 //! See `crates/lean-rs/examples/README.md` for expected output.
 
-#![allow(clippy::print_stdout)]
+#![allow(unsafe_code, clippy::print_stdout)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,7 +47,7 @@ fn run() -> LeanResult<()> {
     let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
 
-    // call_capability is a session method; we still need a session to
+    // call_capability_unchecked is a session method; we still need a session to
     // dispatch through. The import list affects what's in the Lean
     // environment, not which dylib symbols are reachable, so a small
     // import keeps the cold path fast.
@@ -61,7 +61,8 @@ fn run() -> LeanResult<()> {
     // wires the typed FFI through borrowed-string marshalling (no
     // Rust-side copy on the way in).
     let echoed: String =
-        session.call_capability::<(&str,), String>("lean_rs_fixture_string_identity", (input,), None)?;
+        // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+        unsafe { session.call_capability_unchecked::<(&str,), String>("lean_rs_fixture_string_identity", (input,), None) }?;
     println!("string_identity({input:?}) = {echoed:?}");
 
     // Non-trivial computation on unboxed scalars:
@@ -69,7 +70,10 @@ fn run() -> LeanResult<()> {
     // parameters and the return as unboxed C `uint32_t`, so the
     // `u32` `LeanAbi` impl carries the raw values across without
     // boxing.
-    let sum: u32 = session.call_capability::<(u32, u32), u32>("lean_rs_fixture_u32_add", (1_000, 2_500), None)?;
+    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
+    let sum: u32 = unsafe {
+        session.call_capability_unchecked::<(u32, u32), u32>("lean_rs_fixture_u32_add", (1_000, 2_500), None)
+    }?;
     println!("u32_add(1000, 2500) = {sum}");
 
     Ok(())
