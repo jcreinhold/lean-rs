@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 use std::slice;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -27,11 +28,14 @@ use lean_rs_sys::lean_object;
 use lean_rs_sys::object::{lean_is_scalar, lean_is_string};
 use lean_rs_sys::string::{lean_string_cstr, lean_string_size};
 
+use crate::abi::traits::{TryFromLean, conversion_error};
 use crate::error::panic::catch_callback_panic;
 use crate::error::{LeanError, LeanResult};
+use crate::runtime::obj::Obj;
 
 type ProgressCallbackFn = dyn Fn(LeanProgressTick) -> LeanCallbackFlow + Send + Sync + 'static;
 type StringCallbackFn = dyn Fn(LeanStringEvent) -> LeanCallbackFlow + Send + Sync + 'static;
+type ScopedProgressCallbackFn<'a> = dyn Fn(LeanProgressTick) -> LeanCallbackFlow + Send + Sync + 'a;
 
 const PAYLOAD_PROGRESS_TICK: u8 = 0;
 const PAYLOAD_STRING: u8 = 1;
@@ -158,6 +162,31 @@ pub struct LeanCallbackHandle<P: LeanCallbackPayload> {
     _payload: PhantomData<fn(P)>,
 }
 
+/// Scoped progress callback registration for one synchronous Lean call.
+///
+/// Unlike [`LeanCallbackHandle<LeanProgressTick>`], the registered closure may
+/// borrow from the caller. `lean-rs` keeps that borrowed context alive until
+/// after the callback handle is unregistered, so host crates do not need raw
+/// context pointers or stack-lifetime trampolines to report progress.
+///
+/// Lean must not store the `(handle, trampoline)` pair or invoke it after the
+/// synchronous export call has returned. A stale call after drop returns
+/// [`LeanCallbackStatus::StaleHandle`], but retaining the values beyond the
+/// call violates the scoped callback contract.
+pub struct LeanProgressCallback<'a> {
+    handle: LeanCallbackHandle<LeanProgressTick>,
+    #[allow(
+        dead_code,
+        reason = "keeps the borrowed callback context alive until after handle drop"
+    )]
+    context: Box<ScopedProgressContext<'a>>,
+    _not_send_or_sync: PhantomData<Rc<()>>,
+}
+
+struct ScopedProgressContext<'a> {
+    callback: Box<ScopedProgressCallbackFn<'a>>,
+}
+
 impl<P: LeanCallbackPayload> std::fmt::Debug for LeanCallbackHandle<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LeanCallbackHandle")
@@ -199,6 +228,101 @@ impl LeanCallbackHandle<LeanStringEvent> {
         F: Fn(LeanStringEvent) -> LeanCallbackFlow + Send + Sync + 'static,
     {
         register_entry(CallbackEntry::new_string(callback))
+    }
+}
+
+impl<'a> LeanProgressCallback<'a> {
+    /// Register a progress callback whose closure may borrow from the caller.
+    ///
+    /// The returned value must stay alive until Lean can no longer invoke the
+    /// callback. Dropping it unregisters the handle before releasing the
+    /// borrowed callback context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanError::Host`] with diagnostic code
+    /// [`crate::LeanDiagnosticCode::Internal`] if the callback registry cannot
+    /// allocate a fresh nonzero id.
+    pub fn register<F>(callback: F) -> LeanResult<Self>
+    where
+        F: Fn(LeanProgressTick) -> LeanCallbackFlow + Send + Sync + 'a,
+    {
+        let context = Box::new(ScopedProgressContext {
+            callback: Box::new(callback),
+        });
+        let context_addr = std::ptr::from_ref(&*context).addr();
+        let handle = LeanCallbackHandle::<LeanProgressTick>::register(move |event| {
+            // SAFETY: `context_addr` points at the `ScopedProgressContext`
+            // owned by the `LeanProgressCallback` being constructed. The
+            // struct declares `handle` before `context`, so drop unregisters
+            // the callback id before the borrowed context is released. Safe
+            // callers cannot move the scoped registration across threads, and
+            // Lean may invoke the handle only during the synchronous call for
+            // which this value is alive.
+            let context = unsafe { &*(context_addr as *const ScopedProgressContext<'_>) };
+            (context.callback)(event)
+        })?;
+        Ok(Self {
+            handle,
+            context,
+            _not_send_or_sync: PhantomData,
+        })
+    }
+
+    /// Return `(handle, trampoline)` for Lean progress exports using the
+    /// standard two-`USize` callback ABI.
+    #[must_use]
+    pub fn abi_parts(&self) -> (usize, usize) {
+        self.handle.abi_parts()
+    }
+
+    /// Decode a Lean progress-shim result.
+    ///
+    /// Host progress shims return `Except UInt8 T`, with `Except.ok` carrying
+    /// the real result and `Except.error` carrying a [`LeanCallbackStatus`]
+    /// byte. This method maps callback panic, stale-handle, wrong-payload, and
+    /// stop statuses into `LeanError` while the callback handle is still live,
+    /// so callers do not need to inspect raw status bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a conversion error if the object is not a Lean `Except UInt8 T`
+    /// shape, or a host error if the callback status reports a contained panic
+    /// or callback invariant failure.
+    pub fn decode_result<'lean, T>(&self, obj: Obj<'lean>) -> LeanResult<T>
+    where
+        T: TryFromLean<'lean>,
+    {
+        match Result::<T, u8>::try_from_lean(obj)? {
+            Ok(value) => Ok(value),
+            Err(status) => {
+                self.progress_status_to_result(status)?;
+                Err(LeanError::internal(
+                    "progress shim returned Except.error with successful callback status",
+                ))
+            }
+        }
+    }
+
+    fn progress_status_to_result(&self, status: u8) -> LeanResult<()> {
+        match LeanCallbackStatus::from_abi(status) {
+            Some(LeanCallbackStatus::Ok) => Ok(()),
+            Some(LeanCallbackStatus::StaleHandle) => {
+                Err(LeanError::internal("Lean progress shim called a stale callback handle"))
+            }
+            Some(LeanCallbackStatus::WrongPayload) => Err(LeanError::internal(
+                "Lean progress shim called a callback handle through the wrong payload trampoline",
+            )),
+            Some(LeanCallbackStatus::Stopped) => Err(LeanError::internal(
+                "progress callback asked Lean to stop, but progress callbacks do not define stop semantics",
+            )),
+            Some(LeanCallbackStatus::Panic) => Err(self.handle.last_error().unwrap_or_else(|| {
+                LeanError::internal("progress callback panicked without recording a callback error")
+            })),
+            None => Err(conversion_error(format!(
+                "Lean progress shim returned unknown callback status byte {status}"
+            ))),
+        }
     }
 }
 

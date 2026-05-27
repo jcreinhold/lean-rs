@@ -123,7 +123,8 @@ pub mod fuzz_entry;
 
 pub use crate::abi::traits::LeanAbi;
 pub use crate::callback::{
-    LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanProgressTick, LeanStringEvent,
+    LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanProgressCallback,
+    LeanProgressTick, LeanStringEvent,
 };
 pub use crate::error::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,

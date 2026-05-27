@@ -1,19 +1,20 @@
 # Structured Progress
 
 `lean-rs-host` progress is a host-level observation channel for long-running `LeanSession` calls. It is built on the L1
-callback registry from `lean-rs` and the generic `lean-rs-interop-shims` callback helper. The host crate owns the
-policy: phase names, totals, cancellation checkpoints, and which session methods report events.
+scoped progress callback from `lean-rs` and the generic `lean-rs-interop-shims` callback helper. `lean-rs` owns the raw
+callback handle, trampoline, scoped borrowed context, panic containment, status decoding, and deterministic teardown.
+The host crate owns the policy: phase names, totals, cancellation checkpoints, and which session methods report events.
 
 ## Public Contract
 
 Long-running host methods accept a final `progress: Option<&dyn LeanProgressSink>` after their existing cancellation
 parameter. `None` is the fast path: no callback handle is allocated, no progress shim is called, and bulk methods keep
-their single-dispatch shape. `Some(sink)` registers a temporary callback handle for the one call and drops it before the
-method returns.
+their single-dispatch shape. `Some(sink)` registers a temporary `lean_rs::LeanProgressCallback` for the one call and
+drops it before the method returns.
 
-The temporary handle is `LeanCallbackHandle<LeanProgressTick>`. The bridge converts that L1 tick payload into a host
-`LeanProgressEvent`; it does not expose `LeanStringEvent` or any downstream streaming policy through the host progress
-surface.
+The scoped callback converts the raw Lean callback payload into `LeanProgressTick` before host code runs. The host
+bridge maps that L1 tick into `LeanProgressEvent`; it does not expose `LeanStringEvent`, raw status bytes, context
+pointers, or any downstream streaming policy through the host progress surface.
 
 `LeanProgressEvent` contains:
 
@@ -63,10 +64,10 @@ shared `LeanCancellationToken`; the method observes that token at the next host-
 ## ABI Boundary
 
 The host shims expose additive progress variants returning `IO (Except UInt8 α)`. The `UInt8` is the L1
-`LeanCallbackStatus` byte. Rust decodes `Except.ok` as the method result, maps `Panic` through the callback handle's
-stored error, and maps `StaleHandle`, `WrongPayload`, and `Stopped` to internal host invariant failures. Host progress
-is one-way: unlike a generic L1 callback loop, a progress sink does not define stop semantics. Existing no-progress shim
-symbols and signatures are unchanged.
+`LeanCallbackStatus` byte. `LeanProgressCallback::decode_result` decodes `Except.ok` as the method result, maps `Panic`
+through the callback handle's stored error, and maps `StaleHandle`, `WrongPayload`, and `Stopped` to internal invariant
+failures. Host progress is one-way: unlike a generic L1 callback loop, a progress sink does not define stop semantics.
+Existing no-progress shim symbols and signatures are unchanged.
 
 `LeanCapabilities` builds the crate-bundled generic interop and host shim Lake targets on demand, then opens the generic
 interop shim dylib globally before opening the host shim dylib. This anchors the generated `LeanRsInterop.Callback.Tick`

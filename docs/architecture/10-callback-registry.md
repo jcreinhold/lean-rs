@@ -67,6 +67,12 @@ The handle is `Send + Sync`. The registered closure must be `Fn(P) -> LeanCallba
 Lean may invoke it on the Lean-bound worker thread, and registry lookup clones an internal `Arc` before running the
 callback.
 
+`LeanProgressCallback<'a>` is the scoped progress specialization used by `lean-rs-host`. Its closure may borrow from
+the caller, so the value is not `Send` or `Sync`; it must stay alive for exactly the synchronous Lean call that receives
+its `(handle, trampoline)` pair. The type owns the borrowed context and unregisters the callback handle before releasing
+that context. It also decodes host progress shim results of shape `Except UInt8 T`, so host code does not inspect raw
+callback status bytes.
+
 ## Panic And Reentrancy
 
 Rust panics must not cross Lean or C frames. The registry trampoline catches unwinding Rust panics, records a

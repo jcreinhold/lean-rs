@@ -8,11 +8,11 @@ This is a Rust memory-safety claim for safe Rust APIs. It is not a claim that Le
 proof term proves what the user intended, that user-authored Lean code terminates, or that Lean's kernel/elaborator never
 rejects the input.
 
-The current host stack is still partly inside the trusted boundary. `lean-rs-host` pre-resolves shim symbols, calls
-`LeanExported::from_function_address`, and owns a temporary context pointer for progress callbacks. That is intentional
-debt in this pre-1.0 migration series, not the final boundary. The target state is for `lean-rs-host` to become a safe
-consumer of `lean-rs`: host-specific symbol dispatch should be checked or explicitly unsafe, Lean object layout reads
-should sit behind safe `lean-rs` view APIs, and callback/context-pointer handling should go through a safe callback API.
+The current host stack is still partly inside the trusted boundary. `lean-rs-host` pre-resolves shim symbols and calls
+`LeanExported::from_function_address`. That is intentional debt in this pre-1.0 migration series, not the final
+boundary. The target state is for `lean-rs-host` to become a safe consumer of `lean-rs`: host-specific symbol dispatch
+should be checked or explicitly unsafe, Lean object layout reads should sit behind safe `lean-rs` view APIs, and
+callback/context-pointer handling should go through safe `lean-rs` callback APIs.
 
 Every change that adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
 below. An API that cannot be made consistent does not ship as safe.

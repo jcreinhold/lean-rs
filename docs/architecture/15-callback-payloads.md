@@ -45,10 +45,11 @@ pub struct LeanStringEvent {
 }
 ```
 
-`LeanProgressTick` carries the existing counter payload. `lean-rs-host` continues to own progress policy: phase names,
-elapsed time, cancellation checkpoints, and which `LeanSession` methods emit events. The host layer may map a
-`LeanProgressTick` into `LeanProgressEvent`, but progress is not the L1 callback abstraction. It is an
-observability/control signal, not a data row.
+`LeanProgressTick` carries the existing counter payload. `LeanProgressCallback<'a>` is the scoped progress registration
+that lets host code borrow its sink without owning raw context pointers. `lean-rs-host` continues to own progress
+policy: phase names, elapsed time, cancellation checkpoints, and which `LeanSession` methods emit events. The host
+layer maps a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the general L1 callback abstraction. It is
+an observability/control signal, not a data row.
 
 `LeanStringEvent` is the next useful L1 payload. It supports downstream same-process line-oriented protocols: Lean can
 emit one encoded line at a time, Rust receives owned strings, and neither side has to tunnel through subprocess stdout.
@@ -79,7 +80,7 @@ Wrong-payload handling belongs in `lean-rs` because the registry knows the paylo
 `LeanProgressTick`, and string callbacks use `LeanCallbackHandle<LeanStringEvent>`.
 
 [`13-structured-progress.md`](13-structured-progress.md) remains host policy. Its progress sink is implemented over
-`LeanProgressTick`, not a general callback event.
+`LeanProgressCallback` and `LeanProgressTick`, not a general callback event.
 
 [`14-interop-release-contract.md`](14-interop-release-contract.md) remains useful for the interop stack as a whole:
 explicit exports, build helpers, callback handles, bundled shims, and examples. The callback payload part of that

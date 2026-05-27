@@ -9,10 +9,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use lean_rs::abi::traits::IntoLean;
 use lean_rs::module::{LeanIo, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency};
 use lean_rs::{
     HostStage, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanCapability, LeanDiagnosticCode, LeanError,
-    LeanProgressTick, LeanRuntime, LeanStringEvent,
+    LeanProgressCallback, LeanProgressTick, LeanRuntime, LeanStringEvent,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +165,113 @@ fn registered_callback_runs_through_typed_lean_export() {
             SeenEvent { current: 3, total: 4 },
         ],
     );
+}
+
+#[test]
+fn scoped_progress_callback_can_borrow_stack_context() {
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
+    let events = Mutex::new(Vec::new());
+    let callback = LeanProgressCallback::register(|event| {
+        events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(SeenEvent::from(event));
+        LeanCallbackFlow::Continue
+    })
+    .expect("scoped progress callback registration succeeds");
+
+    let (handle, trampoline) = callback.abi_parts();
+    let status = callback_loop
+        .call(handle, trampoline, 3)
+        .expect("callback loop returns");
+
+    assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Ok));
+    assert_eq!(
+        events.lock().expect("callback events lock is not poisoned").as_slice(),
+        &[
+            SeenEvent { current: 0, total: 3 },
+            SeenEvent { current: 1, total: 3 },
+            SeenEvent { current: 2, total: 3 },
+        ],
+    );
+}
+
+#[test]
+fn scoped_progress_callback_drop_unregisters_before_context_cleanup() {
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
+    let events = Mutex::new(Vec::new());
+    let callback = LeanProgressCallback::register(|event| {
+        events
+            .lock()
+            .expect("callback events lock is not poisoned")
+            .push(SeenEvent::from(event));
+        LeanCallbackFlow::Continue
+    })
+    .expect("scoped progress callback registration succeeds");
+    let (handle, trampoline) = callback.abi_parts();
+    drop(callback);
+
+    let status = callback_loop
+        .call(handle, trampoline, 1)
+        .expect("callback loop returns");
+
+    assert_eq!(
+        LeanCallbackStatus::from_abi(status),
+        Some(LeanCallbackStatus::StaleHandle),
+    );
+    assert!(events.lock().expect("callback events lock is not poisoned").is_empty());
+}
+
+#[test]
+fn scoped_progress_callback_decodes_progress_shim_statuses() {
+    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
+    let callback = LeanProgressCallback::register(|_| {
+        panic!("lean-rs scoped progress callback deliberate panic");
+    })
+    .expect("scoped progress callback registration succeeds");
+    let (handle, trampoline) = callback.abi_parts();
+    let bundle = consumer_bundle();
+    let callback_loop = callback_loop(bundle.library());
+
+    let status = callback_loop
+        .call(handle, trampoline, 1)
+        .expect("callback loop returns after contained callback panic");
+    assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Panic));
+
+    let raw = Err::<(), u8>(status).into_lean(runtime);
+    let err = callback
+        .decode_result::<()>(raw)
+        .expect_err("panic status decodes to stored callback error");
+
+    assert_eq!(err.code(), LeanDiagnosticCode::Internal);
+    let LeanError::Host(host) = err else {
+        panic!("expected progress callback panic to decode as a host failure");
+    };
+    assert_eq!(host.stage(), HostStage::CallbackPanic);
+    assert!(
+        host.message()
+            .contains("lean-rs scoped progress callback deliberate panic")
+    );
+}
+
+#[test]
+fn scoped_progress_callback_rejects_stop_status_for_progress_shims() {
+    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
+    let callback = LeanProgressCallback::register(|_| LeanCallbackFlow::Stop)
+        .expect("scoped progress callback registration succeeds");
+    let raw = Err::<(), u8>(LeanCallbackStatus::Stopped.as_abi()).into_lean(runtime);
+
+    let err = callback
+        .decode_result::<()>(raw)
+        .expect_err("progress shims do not define stop semantics");
+
+    assert_eq!(err.code(), LeanDiagnosticCode::Internal);
+    let LeanError::Host(host) = err else {
+        panic!("expected stop status to decode as a host failure");
+    };
+    assert!(host.message().contains("do not define stop semantics"));
 }
 
 #[test]

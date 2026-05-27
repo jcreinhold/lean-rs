@@ -17,8 +17,8 @@ use lean_rs::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DecodeCallResult, DiagnosticCapture, HostFailure, HostStage,
     LEAN_ERROR_MESSAGE_LIMIT, LeanAbi, LeanArgs, LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload,
     LeanCallbackStatus, LeanDeclaration, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind, LeanExported,
-    LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanProgressTick, LeanResult, LeanRuntime,
-    LeanStringEvent, LeanThreadGuard, Obj, ObjRef, VERSION,
+    LeanExpr, LeanIo, LeanLevel, LeanLibrary, LeanModule, LeanName, LeanProgressCallback, LeanProgressTick, LeanResult,
+    LeanRuntime, LeanStringEvent, LeanThreadGuard, Obj, ObjRef, VERSION,
 };
 
 #[test]
@@ -54,6 +54,7 @@ fn l1_curated_surface_is_reachable_from_crate_root() {
         _callback_flow: LeanCallbackFlow,
         _callback_handle: LeanCallbackHandle<LeanProgressTick>,
         _string_callback_handle: LeanCallbackHandle<LeanStringEvent>,
+        _progress_callback: LeanProgressCallback<'_>,
         _callback_status: LeanCallbackStatus,
         _progress_tick: LeanProgressTick,
         _string_event: LeanStringEvent,

@@ -268,6 +268,18 @@ impl<P> core::marker::Unpin for lean_rs::callback::LeanCallbackHandle<P>
 impl<P> core::marker::UnsafeUnpin for lean_rs::callback::LeanCallbackHandle<P>
 impl<P> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
 impl<P> !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanCallbackHandle<P>
+pub struct lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> lean_rs::callback::LeanProgressCallback<'a>
+pub fn lean_rs::callback::LeanProgressCallback<'a>::abi_parts(&self) -> (usize, usize)
+pub fn lean_rs::callback::LeanProgressCallback<'a>::decode_result<'lean, T>(&self, lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs::callback::LeanProgressCallback<'a>::register<F>(F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'a
+impl<'a> core::marker::Freeze for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::marker::Send for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::marker::Sync for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> core::marker::Unpin for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> core::marker::UnsafeUnpin for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanProgressCallback<'a>
 pub struct lean_rs::callback::LeanProgressTick
 pub lean_rs::callback::LeanProgressTick::current: u64
 pub lean_rs::callback::LeanProgressTick::total: u64
@@ -1331,6 +1343,18 @@ impl<'lean> core::marker::Unpin for lean_rs::LeanName<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs::LeanName<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs::LeanName<'lean>
+pub struct lean_rs::LeanProgressCallback<'a>
+impl<'a> lean_rs::callback::LeanProgressCallback<'a>
+pub fn lean_rs::callback::LeanProgressCallback<'a>::abi_parts(&self) -> (usize, usize)
+pub fn lean_rs::callback::LeanProgressCallback<'a>::decode_result<'lean, T>(&self, lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<T> where T: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs::callback::LeanProgressCallback<'a>::register<F>(F) -> lean_rs::error::LeanResult<Self> where F: core::ops::function::Fn(lean_rs::callback::LeanProgressTick) -> lean_rs::callback::LeanCallbackFlow + core::marker::Send + core::marker::Sync + 'a
+impl<'a> core::marker::Freeze for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::marker::Send for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::marker::Sync for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> core::marker::Unpin for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> core::marker::UnsafeUnpin for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for lean_rs::callback::LeanProgressCallback<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for lean_rs::callback::LeanProgressCallback<'a>
 pub struct lean_rs::LeanProgressTick
 pub lean_rs::LeanProgressTick::current: u64
 pub lean_rs::LeanProgressTick::total: u64
