@@ -41,6 +41,22 @@ fn shipped_template_manifest() -> PathBuf {
     shipped_template_root().join("Cargo.toml")
 }
 
+fn shipped_template_target_dir() -> PathBuf {
+    static TARGET_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    TARGET_DIR
+        .get_or_init(|| {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock is after Unix epoch")
+                .as_nanos();
+            std::env::temp_dir().join(format!(
+                "lean-rs-shipped-template-target-{}-{nonce}",
+                std::process::id(),
+            ))
+        })
+        .clone()
+}
+
 fn build_shipped_template() {
     // Memoize: see the matching note in `loader_regressions::build_template`.
     // Each invocation of `cargo build` spawns its own rustc swarm; with
@@ -54,6 +70,7 @@ fn build_shipped_template() {
             .args(["build", "--jobs", "2", "--manifest-path"])
             .arg(shipped_template_manifest())
             .args(["--bins", "--examples"])
+            .env("CARGO_TARGET_DIR", shipped_template_target_dir())
             .output()
             .expect("template cargo build starts");
         assert!(
@@ -67,12 +84,22 @@ fn build_shipped_template() {
 
 fn shipped_manifest_path() -> PathBuf {
     build_shipped_template();
-    let build_dir = shipped_template_root().join("target").join("debug").join("build");
+    let build_dir = shipped_template_target_dir().join("debug").join("build");
     let mut candidates = std::fs::read_dir(&build_dir)
         .expect("template build directory exists")
         .filter_map(Result::ok)
-        .map(|entry| entry.path().join("out").join("ShipLeanDemo.lean-rs-capability.json"))
-        .filter(|path| path.is_file())
+        .flat_map(|entry| {
+            std::fs::read_dir(entry.path().join("out"))
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|candidate| candidate.path())
+        })
+        .filter(|path| {
+            path.file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .is_some_and(|name| name.starts_with("ShipLeanDemo") && name.ends_with(".lean-rs-capability.json"))
+        })
         .filter(|path| {
             let bytes = std::fs::read(path).expect("read emitted capability manifest");
             let json: serde_json::Value = serde_json::from_slice(&bytes).expect("capability manifest is JSON");
@@ -94,8 +121,7 @@ fn env_exe_name(name: &str) -> String {
 
 fn shipped_worker_binary() -> PathBuf {
     build_shipped_template();
-    shipped_template_root()
-        .join("target")
+    shipped_template_target_dir()
         .join("debug")
         .join(env_exe_name("shipped-lean-crate-worker"))
 }
