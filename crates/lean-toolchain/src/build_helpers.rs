@@ -39,9 +39,10 @@ use crate::diagnostics::LinkDiagnostics;
 use crate::discover::{DiscoverOptions, ToolchainInfo, discover_toolchain};
 use crate::fingerprint::ToolchainFingerprint;
 use crate::lakefile_toml::parse_lakefile_toml;
+use crate::loader::LeanExportSignature;
 
 /// Current JSON schema version for `CargoLeanCapability` artifact manifests.
-pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// Set once after a successful link-directive emission to make repeat calls
 /// (e.g. multiple `build.rs` invocations within one process) cheap and
@@ -181,6 +182,7 @@ pub struct CargoLeanCapability {
     module: Option<String>,
     env_var: Option<String>,
     manifest_env_var: Option<String>,
+    export_signatures: Vec<LeanExportSignature>,
 }
 
 impl CargoLeanCapability {
@@ -194,6 +196,7 @@ impl CargoLeanCapability {
             module: None,
             env_var: None,
             manifest_env_var: None,
+            export_signatures: Vec::new(),
         }
     }
 
@@ -235,6 +238,16 @@ impl CargoLeanCapability {
     #[must_use]
     pub fn manifest_env_var(mut self, env_var: impl Into<String>) -> Self {
         self.manifest_env_var = Some(env_var.into());
+        self
+    }
+
+    /// Add trusted ABI metadata for one exported Lean symbol.
+    ///
+    /// The runtime checked-lookup API accepts a Rust call shape only when it
+    /// exactly matches one of these manifest entries.
+    #[must_use]
+    pub fn export_signature(mut self, signature: LeanExportSignature) -> Self {
+        self.export_signatures.push(signature);
         self
     }
 
@@ -296,6 +309,7 @@ impl CargoLeanCapability {
             &module,
             &dylib_path,
             &manifest_env_var,
+            &self.export_signatures,
         )?;
         cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
         cargo_metadata.println(format_args!(
@@ -825,6 +839,7 @@ fn write_capability_manifest(
     module: &str,
     dylib_path: &Path,
     manifest_env_var: &str,
+    export_signatures: &[LeanExportSignature],
 ) -> Result<PathBuf, LinkDiagnostics> {
     let manifest_path = capability_manifest_path(project_root, target_name);
     let dependencies = capability_dependencies(project_root, target_name)?;
@@ -852,6 +867,10 @@ fn write_capability_manifest(
             .map(|path| path.display().to_string())
             .collect::<Vec<_>>(),
         "dependencies": dependencies,
+        "exports": export_signatures
+            .iter()
+            .map(LeanExportSignature::to_json)
+            .collect::<Vec<_>>(),
     });
     let bytes = serde_json::to_vec_pretty(&manifest).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root: project_root.to_path_buf(),
@@ -1051,6 +1070,10 @@ mod tests {
         build_lake_target_with_runner, capability_env_var, capability_manifest_env_var, command_detail,
     };
     use crate::LinkDiagnostics;
+    use crate::{
+        LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+        LeanExportSignature,
+    };
     use std::cell::Cell;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1360,6 +1383,15 @@ mod tests {
             .module("MyCapability")
             .env_var("MY_CAPABILITY_DYLIB")
             .manifest_env_var("MY_CAPABILITY_MANIFEST")
+            .export_signature(LeanExportSignature::function(
+                "my_capability_u8_identity",
+                vec![LeanExportArgAbi::new(LeanExportAbiRepr::U8, LeanExportOwnership::None)],
+                LeanExportReturnAbi::new(
+                    LeanExportAbiRepr::U8,
+                    LeanExportOwnership::None,
+                    LeanExportResultConvention::Pure,
+                ),
+            ))
             .build_quiet()
             .expect("cargo helper build");
 
@@ -1395,5 +1427,14 @@ mod tests {
             Some(dylib.as_path()),
         );
         assert!(manifest.get("toolchain_fingerprint").is_some());
+        assert_eq!(
+            manifest
+                .get("exports")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|exports| exports.first())
+                .and_then(|export| export.get("symbol"))
+                .and_then(serde_json::Value::as_str),
+            Some("my_capability_u8_identity"),
+        );
     }
 }

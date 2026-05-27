@@ -10,9 +10,14 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::initializer::InitializerName;
-use super::{LeanLibrary, LeanModule};
+use super::{
+    LeanCapability, LeanCheckedExportError, LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership,
+    LeanExportResultConvention, LeanExportReturnAbi, LeanExportSignature, LeanLibrary, LeanModule,
+};
+use crate::LeanBuiltCapability;
 use crate::error::{HostStage, LeanError};
 use crate::runtime::LeanRuntime;
 
@@ -53,6 +58,57 @@ fn open_fixture(runtime: &LeanRuntime) -> LeanLibrary<'_> {
         path.display(),
     );
     LeanLibrary::open(runtime, &path).expect("fixture dylib opens cleanly")
+}
+
+fn fixture_manifest_path(name: &str, exports: &[LeanExportSignature]) -> PathBuf {
+    static NEXT_MANIFEST_ID: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT_MANIFEST_ID.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("lean-rs-checked-export-{}-{name}-{id}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(&dir).expect("create checked-export manifest dir");
+    let path = dir.join("capability.json");
+    let manifest = serde_json::json!({
+        "schema_version": lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION,
+        "target_name": "LeanRsFixture",
+        "package": "lean_rs_fixture",
+        "module": "LeanRsFixture",
+        "primary_dylib": fixture_dylib_path().display().to_string(),
+        "exports": exports.iter().map(LeanExportSignature::to_json).collect::<Vec<_>>(),
+        "dependencies": [],
+        "toolchain_fingerprint": {
+            "lean_version": lean_rs_sys::LEAN_VERSION,
+            "resolved_version": lean_rs_sys::LEAN_RESOLVED_VERSION,
+            "header_sha256": lean_rs_sys::LEAN_HEADER_DIGEST,
+        },
+    });
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&manifest).expect("encode checked-export manifest"),
+    )
+    .expect("write checked-export manifest");
+    path
+}
+
+fn checked_fixture(exports: &[LeanExportSignature]) -> LeanCapability<'static> {
+    let manifest = fixture_manifest_path("fixture", exports);
+    LeanCapability::from_build_manifest(runtime(), LeanBuiltCapability::manifest_path(manifest))
+        .expect("fixture capability opens")
+}
+
+fn arg(repr: LeanExportAbiRepr) -> LeanExportArgAbi {
+    LeanExportArgAbi::new(repr, ownership(repr))
+}
+
+fn ret(repr: LeanExportAbiRepr) -> LeanExportReturnAbi {
+    LeanExportReturnAbi::new(repr, ownership(repr), LeanExportResultConvention::Pure)
+}
+
+fn ownership(repr: LeanExportAbiRepr) -> LeanExportOwnership {
+    if repr == LeanExportAbiRepr::LeanObject {
+        LeanExportOwnership::Owned
+    } else {
+        LeanExportOwnership::None
+    }
 }
 
 #[test]
@@ -191,6 +247,85 @@ fn mangling_matches_fixture_symbols() {
         b"initialize_lean__rs__fixture_LeanRsFixture_Scalars\0",
     );
     assert_eq!(scalars.display(), "lean_rs_fixture::LeanRsFixture.Scalars");
+}
+
+#[test]
+fn checked_export_lookup_succeeds_with_matching_manifest_signature() {
+    let capability = checked_fixture(&[LeanExportSignature::function(
+        "lean_rs_fixture_u8_identity",
+        vec![arg(LeanExportAbiRepr::U8)],
+        ret(LeanExportAbiRepr::U8),
+    )]);
+
+    let identity = capability
+        .exported::<(u8,), u8>("lean_rs_fixture_u8_identity")
+        .expect("checked lookup succeeds");
+
+    assert_eq!(identity.call(17).expect("checked call succeeds"), 17);
+}
+
+#[test]
+fn checked_export_lookup_reports_missing_signature_metadata() {
+    let capability = checked_fixture(&[]);
+
+    let err = capability
+        .exported::<(u8,), u8>("lean_rs_fixture_u8_identity")
+        .expect_err("safe lookup requires manifest metadata");
+
+    assert!(matches!(
+        err,
+        LeanCheckedExportError::MissingSignatureMetadata { symbol }
+            if symbol == "lean_rs_fixture_u8_identity"
+    ));
+}
+
+#[test]
+fn checked_export_lookup_rejects_wrong_argument_shape() {
+    let capability = checked_fixture(&[LeanExportSignature::function(
+        "lean_rs_fixture_u8_identity",
+        vec![arg(LeanExportAbiRepr::U8)],
+        ret(LeanExportAbiRepr::U8),
+    )]);
+
+    let err = capability
+        .exported::<(u16,), u8>("lean_rs_fixture_u8_identity")
+        .expect_err("argument ABI mismatch must fail before dispatch");
+
+    assert!(matches!(err, LeanCheckedExportError::SignatureMismatch { .. }));
+}
+
+#[test]
+fn checked_export_lookup_rejects_wrong_return_shape() {
+    let capability = checked_fixture(&[LeanExportSignature::function(
+        "lean_rs_fixture_u8_identity",
+        vec![arg(LeanExportAbiRepr::U8)],
+        ret(LeanExportAbiRepr::U8),
+    )]);
+
+    let err = capability
+        .exported::<(u8,), u16>("lean_rs_fixture_u8_identity")
+        .expect_err("return ABI mismatch must fail before dispatch");
+
+    assert!(matches!(err, LeanCheckedExportError::SignatureMismatch { .. }));
+}
+
+#[test]
+fn checked_export_lookup_reports_manifest_symbol_missing_from_dylib() {
+    let capability = checked_fixture(&[LeanExportSignature::function(
+        "lean_rs_fixture_no_such_export",
+        vec![arg(LeanExportAbiRepr::U8)],
+        ret(LeanExportAbiRepr::U8),
+    )]);
+
+    let err = capability
+        .exported::<(u8,), u8>("lean_rs_fixture_no_such_export")
+        .expect_err("manifest metadata cannot invent a dylib symbol");
+
+    assert!(matches!(
+        err,
+        LeanCheckedExportError::MissingSymbol { symbol, .. }
+            if symbol == "lean_rs_fixture_no_such_export"
+    ));
 }
 
 /// `LeanLibrary<'_>` and `LeanModule<'_, '_>` must be `!Send` and

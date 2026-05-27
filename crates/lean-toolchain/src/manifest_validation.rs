@@ -7,7 +7,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::loader::{LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport};
+use std::collections::HashSet;
+
+use crate::loader::{
+    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+    LeanExportSignature, LeanExportSymbolKind, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode,
+    LeanLoaderReport,
+};
 
 /// Parsed Lean capability manifest.
 ///
@@ -31,6 +37,8 @@ pub struct CapabilityManifest {
     pub resolved_lean_version: Option<String>,
     /// SHA-256 of the Lean header used to build the capability, if any.
     pub lean_header_sha256: Option<String>,
+    /// Trusted ABI signatures for safe exported-symbol lookup.
+    pub exports: Vec<LeanExportSignature>,
 }
 
 impl CapabilityManifest {
@@ -77,6 +85,7 @@ impl CapabilityManifest {
         let package = required_string(&value, "package", path)?;
         let module = required_string(&value, "module", path)?;
         let dependencies = dependencies_from_manifest(&value, path)?;
+        let exports = exports_from_manifest(&value, path)?;
         let fingerprint = value.get("toolchain_fingerprint").unwrap_or(&serde_json::Value::Null);
         let lean_version =
             optional_string(fingerprint, "lean_version").or_else(|| optional_string(&value, "lean_version"));
@@ -92,6 +101,7 @@ impl CapabilityManifest {
             lean_version,
             resolved_lean_version,
             lean_header_sha256,
+            exports,
         })
     }
 }
@@ -252,6 +262,197 @@ fn dependencies_from_manifest(
     Ok(out)
 }
 
+fn exports_from_manifest(value: &serde_json::Value, path: &Path) -> Result<Vec<LeanExportSignature>, LeanLoaderCheck> {
+    let raw_exports = value.get("exports").ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            format!(
+                "Lean capability manifest '{}' is missing required array field `exports`",
+                path.display()
+            ),
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })?;
+    let exports = raw_exports.as_array().ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            format!(
+                "Lean capability manifest '{}' field `exports` must be an array",
+                path.display()
+            ),
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })?;
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(exports.len());
+    for export in exports {
+        let symbol = required_string(export, "symbol", path)?;
+        if !seen.insert(symbol.clone()) {
+            return Err(LeanLoaderCheck::error(
+                LeanLoaderDiagnosticCode::MalformedManifest,
+                symbol,
+                "Lean capability manifest contains duplicate export signature metadata",
+                "emit at most one signature entry for each exported symbol",
+            ));
+        }
+        let kind = parse_export_kind(export, path)?;
+        let args = export_args_from_manifest(export, path)?;
+        let result = export_return_from_manifest(export, path)?;
+        if kind == LeanExportSymbolKind::Global && !args.is_empty() {
+            return Err(LeanLoaderCheck::error(
+                LeanLoaderDiagnosticCode::MalformedManifest,
+                symbol,
+                "Lean capability manifest describes a global export with function arguments",
+                "record globals with an empty `args` array",
+            ));
+        }
+        if kind == LeanExportSymbolKind::Global && result.convention() == LeanExportResultConvention::IoResult {
+            return Err(LeanLoaderCheck::error(
+                LeanLoaderDiagnosticCode::MalformedManifest,
+                symbol,
+                "Lean capability manifest describes a global export as an IO result",
+                "record globals with a pure return convention",
+            ));
+        }
+        out.push(match kind {
+            LeanExportSymbolKind::Function => LeanExportSignature::function(symbol, args, result),
+            LeanExportSymbolKind::Global => LeanExportSignature::global(symbol, result),
+        });
+    }
+    Ok(out)
+}
+
+fn parse_export_kind(value: &serde_json::Value, path: &Path) -> Result<LeanExportSymbolKind, LeanLoaderCheck> {
+    let kind = required_string(value, "kind", path)?;
+    LeanExportSymbolKind::from_str(&kind).ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            kind,
+            "Lean capability manifest export `kind` must be `function` or `global`",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })
+}
+
+fn export_args_from_manifest(value: &serde_json::Value, path: &Path) -> Result<Vec<LeanExportArgAbi>, LeanLoaderCheck> {
+    let raw_args = value.get("args").ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            "Lean capability manifest export is missing required array field `args`",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })?;
+    let args = raw_args.as_array().ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            "Lean capability manifest export field `args` must be an array",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })?;
+    args.iter().map(|arg| export_arg_from_manifest(arg, path)).collect()
+}
+
+fn export_arg_from_manifest(value: &serde_json::Value, path: &Path) -> Result<LeanExportArgAbi, LeanLoaderCheck> {
+    let repr = parse_export_repr(value, path)?;
+    let ownership = parse_export_ownership(value, path)?;
+    validate_ownership(repr, ownership, path)?;
+    Ok(LeanExportArgAbi::new(repr, ownership))
+}
+
+fn export_return_from_manifest(value: &serde_json::Value, path: &Path) -> Result<LeanExportReturnAbi, LeanLoaderCheck> {
+    let raw_return = value.get("return").ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            "Lean capability manifest export is missing required object field `return`",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })?;
+    let repr = parse_export_repr(raw_return, path)?;
+    let ownership = parse_export_ownership(raw_return, path)?;
+    validate_ownership(repr, ownership, path)?;
+    let convention = parse_export_result_convention(raw_return, path)?;
+    if convention == LeanExportResultConvention::IoResult
+        && (repr != LeanExportAbiRepr::LeanObject || ownership != LeanExportOwnership::Owned)
+    {
+        return Err(LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            path.display().to_string(),
+            "Lean capability manifest IO result must use owned `lean_object` return ABI",
+            "record IO exports with `repr: lean_object`, `ownership: owned`, and `convention: io_result`",
+        ));
+    }
+    Ok(LeanExportReturnAbi::new(repr, ownership, convention))
+}
+
+fn parse_export_repr(value: &serde_json::Value, path: &Path) -> Result<LeanExportAbiRepr, LeanLoaderCheck> {
+    let repr = required_string(value, "repr", path)?;
+    LeanExportAbiRepr::from_str(&repr).ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            repr,
+            "Lean capability manifest ABI `repr` is not supported",
+            "use a supported Lean export ABI representation",
+        )
+    })
+}
+
+fn parse_export_ownership(value: &serde_json::Value, path: &Path) -> Result<LeanExportOwnership, LeanLoaderCheck> {
+    let ownership = required_string(value, "ownership", path)?;
+    LeanExportOwnership::from_str(&ownership).ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            ownership,
+            "Lean capability manifest ABI `ownership` must be `none` or `owned`",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })
+}
+
+fn parse_export_result_convention(
+    value: &serde_json::Value,
+    path: &Path,
+) -> Result<LeanExportResultConvention, LeanLoaderCheck> {
+    let convention = required_string(value, "convention", path)?;
+    LeanExportResultConvention::from_str(&convention).ok_or_else(|| {
+        LeanLoaderCheck::error(
+            LeanLoaderDiagnosticCode::MalformedManifest,
+            convention,
+            "Lean capability manifest return `convention` must be `pure` or `io_result`",
+            "rebuild the Lean capability through CargoLeanCapability",
+        )
+    })
+}
+
+fn validate_ownership(
+    repr: LeanExportAbiRepr,
+    ownership: LeanExportOwnership,
+    path: &Path,
+) -> Result<(), LeanLoaderCheck> {
+    let expected = if repr == LeanExportAbiRepr::LeanObject {
+        LeanExportOwnership::Owned
+    } else {
+        LeanExportOwnership::None
+    };
+    if ownership == expected {
+        return Ok(());
+    }
+    Err(LeanLoaderCheck::error(
+        LeanLoaderDiagnosticCode::MalformedManifest,
+        path.display().to_string(),
+        format!(
+            "Lean capability manifest ABI ownership `{}` does not match representation `{}`",
+            ownership.as_str(),
+            repr.as_str()
+        ),
+        "use `owned` for `lean_object` slots and `none` for scalar slots",
+    ))
+}
+
 fn required_string(value: &serde_json::Value, field: &str, path: &Path) -> Result<String, LeanLoaderCheck> {
     value
         .get(field)
@@ -291,4 +492,71 @@ fn required_u64(value: &serde_json::Value, field: &str, path: &Path) -> Result<u
             "rebuild the Lean capability through CargoLeanCapability",
         )
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::CapabilityManifest;
+    use crate::{
+        CAPABILITY_MANIFEST_SCHEMA_VERSION, LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership,
+        LeanExportResultConvention, LeanExportReturnAbi, LeanExportSignature, LeanExportSymbolKind,
+        LeanLoaderDiagnosticCode,
+    };
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn manifest_round_trips_export_signatures() {
+        let path = temp_manifest_path("manifest_round_trips_export_signatures");
+        let signature = LeanExportSignature::function(
+            "cap_u8_identity",
+            vec![LeanExportArgAbi::new(LeanExportAbiRepr::U8, LeanExportOwnership::None)],
+            LeanExportReturnAbi::new(
+                LeanExportAbiRepr::U8,
+                LeanExportOwnership::None,
+                LeanExportResultConvention::Pure,
+            ),
+        );
+        write_manifest(&path, CAPABILITY_MANIFEST_SCHEMA_VERSION, &[signature.to_json()]);
+
+        let manifest = CapabilityManifest::read(&path).expect("manifest parses");
+
+        assert_eq!(manifest.exports, vec![signature]);
+        let Some(parsed) = manifest.exports.first() else {
+            panic!("expected export signature");
+        };
+        assert_eq!(parsed.symbol(), "cap_u8_identity");
+        assert_eq!(parsed.kind(), LeanExportSymbolKind::Function);
+        assert_eq!(parsed.args().len(), 1);
+    }
+
+    #[test]
+    fn old_manifest_schema_is_rejected() {
+        let path = temp_manifest_path("old_manifest_schema_is_rejected");
+        write_manifest(&path, 1, &[]);
+
+        let err = CapabilityManifest::read(&path).expect_err("schema v1 is obsolete");
+
+        assert_eq!(err.code(), LeanLoaderDiagnosticCode::UnsupportedManifestSchema);
+    }
+
+    fn temp_manifest_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lean-toolchain-manifest-{}-{name}", std::process::id()));
+        drop(std::fs::remove_dir_all(&dir));
+        std::fs::create_dir_all(&dir).expect("create manifest test dir");
+        dir.join("capability.json")
+    }
+
+    fn write_manifest(path: &Path, schema_version: u32, exports: &[serde_json::Value]) {
+        let manifest = serde_json::json!({
+            "schema_version": schema_version,
+            "target_name": "Cap",
+            "package": "pkg",
+            "module": "Cap",
+            "primary_dylib": "/tmp/libcap.so",
+            "dependencies": [],
+            "exports": exports,
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&manifest).expect("encode manifest")).expect("write manifest");
+    }
 }

@@ -97,10 +97,13 @@ use core::marker::PhantomData;
 
 use lean_rs_sys::lean_object;
 use lean_rs_sys::refcount::lean_inc;
+use lean_toolchain::{
+    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+};
 
 use super::library::LeanLibrary;
 use super::loaded::LeanModule;
-use crate::abi::traits::{LeanAbi, TryFromLean};
+use crate::abi::traits::{LeanAbi, LeanCReprAbi, TryFromLean};
 #[cfg(doc)]
 use crate::error::HostStage;
 use crate::error::io::decode_io;
@@ -187,6 +190,10 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
     /// Number of arguments the tuple represents.
     const ARITY: usize;
 
+    /// ABI metadata for this argument tuple.
+    #[doc(hidden)]
+    fn export_abi_args() -> Vec<LeanExportArgAbi>;
+
     /// Destructure `args` and dispatch through `handle`.
     ///
     /// The per-arity `.call(a1, a2, ...)` method on [`LeanExported`]
@@ -233,6 +240,9 @@ pub trait DecodeCallResult<'lean>: Sized + sealed::SealedResult {
     /// (which is never IO-typed in Lean's compilation).
     #[doc(hidden)]
     const EXPECTS_IO_RESULT: bool;
+    /// ABI metadata for this return decoder.
+    #[doc(hidden)]
+    fn export_abi_return() -> LeanExportReturnAbi;
     /// Decode the owned C-ABI return value into [`Output`](Self::Output).
     ///
     /// # Errors
@@ -252,6 +262,9 @@ where
     type Output = T;
     type CRepr = T::CRepr;
     const EXPECTS_IO_RESULT: bool = false;
+    fn export_abi_return() -> LeanExportReturnAbi {
+        export_abi_return_for::<T::CRepr>(LeanExportResultConvention::Pure)
+    }
     fn decode_c(c: T::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<T> {
         T::from_c(c, runtime)
     }
@@ -265,6 +278,13 @@ where
     type Output = T;
     type CRepr = *mut lean_object;
     const EXPECTS_IO_RESULT: bool = true;
+    fn export_abi_return() -> LeanExportReturnAbi {
+        LeanExportReturnAbi::new(
+            LeanExportAbiRepr::LeanObject,
+            LeanExportOwnership::Owned,
+            LeanExportResultConvention::IoResult,
+        )
+    }
     #[allow(
         clippy::not_unsafe_ptr_arg_deref,
         reason = "sealed trait — caller invariant documented on DecodeCallResult::decode_c"
@@ -275,6 +295,24 @@ where
         let result_obj = unsafe { Obj::from_owned_raw(runtime, c) };
         let payload = decode_io(runtime, result_obj)?;
         T::try_from_lean(payload)
+    }
+}
+
+pub(crate) fn export_abi_arg_for<T: LeanCReprAbi>() -> LeanExportArgAbi {
+    let repr = T::EXPORT_ABI_REPR;
+    LeanExportArgAbi::new(repr, ownership_for_repr(repr))
+}
+
+fn export_abi_return_for<T: LeanCReprAbi>(convention: LeanExportResultConvention) -> LeanExportReturnAbi {
+    let repr = T::EXPORT_ABI_REPR;
+    LeanExportReturnAbi::new(repr, ownership_for_repr(repr), convention)
+}
+
+fn ownership_for_repr(repr: LeanExportAbiRepr) -> LeanExportOwnership {
+    if repr == LeanExportAbiRepr::LeanObject {
+        LeanExportOwnership::Owned
+    } else {
+        LeanExportOwnership::None
     }
 }
 
@@ -458,6 +496,10 @@ macro_rules! impl_arity {
             $($A: LeanAbi<'lean>,)*
         {
             const ARITY: usize = $arity;
+
+            fn export_abi_args() -> Vec<LeanExportArgAbi> {
+                vec![$(export_abi_arg_for::<<$A as LeanAbi<'lean>>::CRepr>()),*]
+            }
 
             #[allow(
                 clippy::unused_unit,

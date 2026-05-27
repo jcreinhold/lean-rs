@@ -32,12 +32,51 @@
 //! `LeanAbi` arg-tuple bound.
 
 use lean_rs_sys::lean_object;
+use lean_toolchain::LeanExportAbiRepr;
 
 #[cfg(doc)]
 use crate::error::{HostStage, LeanDiagnosticCode};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
+
+/// C representation types supported by manifest-backed export signatures.
+///
+/// This is deliberately narrower than Rust FFI in general: Lean exports use
+/// either `lean_object*` or the scalar shapes Lake emits for first-order Lean
+/// values.
+pub trait LeanCReprAbi: Copy + 'static {
+    /// Manifest ABI representation for this C slot.
+    const EXPORT_ABI_REPR: LeanExportAbiRepr;
+}
+
+impl LeanCReprAbi for *mut lean_object {
+    const EXPORT_ABI_REPR: LeanExportAbiRepr = LeanExportAbiRepr::LeanObject;
+}
+
+macro_rules! impl_c_repr_abi {
+    ($($ty:ty => $repr:ident),* $(,)?) => {
+        $(
+            impl LeanCReprAbi for $ty {
+                const EXPORT_ABI_REPR: LeanExportAbiRepr = LeanExportAbiRepr::$repr;
+            }
+        )*
+    };
+}
+
+impl_c_repr_abi! {
+    u8 => U8,
+    u16 => U16,
+    u32 => U32,
+    u64 => U64,
+    usize => USize,
+    i8 => I8,
+    i16 => I16,
+    i32 => I32,
+    i64 => I64,
+    isize => ISize,
+    f64 => F64,
+}
 
 /// Move a Rust value into a freshly owned Lean object.
 ///
@@ -127,7 +166,7 @@ pub mod sealed {
 pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     /// The C-ABI type Lake emits for this Lean type at function
     /// signatures.
-    type CRepr: Copy;
+    type CRepr: LeanCReprAbi;
 
     /// Encode `self` into the C-ABI representation. The returned value
     /// is suitable for passing as a function argument; ownership of any

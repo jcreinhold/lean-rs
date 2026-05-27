@@ -121,7 +121,7 @@ pub mod __host_internals {
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_entry;
 
-pub use crate::abi::traits::LeanAbi;
+pub use crate::abi::traits::{LeanAbi, LeanCReprAbi};
 pub use crate::callback::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackPayload, LeanCallbackStatus, LeanProgressCallback,
     LeanProgressTick, LeanStringEvent,
@@ -133,9 +133,11 @@ pub use crate::error::{
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{
-    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCapabilityPreflight, LeanExported, LeanIo,
-    LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport,
-    LeanLoaderSeverity, LeanModule, LeanModuleInitializer, LeanRuntimePreflight,
+    DecodeCallResult, LeanArgs, LeanBuiltCapability, LeanCapability, LeanCapabilityPreflight, LeanCheckedExportError,
+    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+    LeanExportSignature, LeanExportSymbolKind, LeanExported, LeanIo, LeanLibrary, LeanLibraryBundle,
+    LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModule,
+    LeanModuleInitializer, LeanRuntimePreflight,
 };
 pub use crate::runtime::obj::{Obj, ObjRef};
 pub use crate::runtime::{LeanRuntime, LeanThreadGuard};

@@ -334,7 +334,8 @@ mod tests {
   "target_name": "Cap",
   "package": "pkg",
   "module": "Cap",
-  "primary_dylib": "/tmp/libcap.so"
+  "primary_dylib": "/tmp/libcap.so",
+  "exports": []
 }"#,
         )
         .expect("write unsupported manifest schema");
@@ -395,11 +396,12 @@ mod tests {
             &manifest,
             format!(
                 r#"{{
-  "schema_version": 1,
+  "schema_version": 2,
   "target_name": "Cap",
   "package": "pkg",
   "module": "Cap",
   "primary_dylib": "{}",
+  "exports": [],
   "toolchain_fingerprint": {{
     "lean_version": "0.0.0",
     "resolved_version": "0.0.0",
@@ -463,6 +465,7 @@ mod tests {
             lean_version: None,
             resolved_lean_version: None,
             lean_header_sha256: None,
+            exports: Vec::new(),
         };
         let mut checks = Vec::new();
 
@@ -514,11 +517,12 @@ mod tests {
         let contents = format!(
             r#"{{
   {extra}
-  "schema_version": 1,
+  "schema_version": 2,
   "target_name": "Cap",
   "package": "pkg",
   "module": "Cap",
   "primary_dylib": "{}",
+  "exports": [],
   {dependencies}
   "toolchain_fingerprint": {{
     "lean_version": "{}",

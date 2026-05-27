@@ -41,8 +41,14 @@ pub(crate) mod loaded;
 pub(crate) mod preflight;
 
 pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
-pub use capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError, LeanCapability};
+pub use capability::{
+    BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError, LeanCapability, LeanCheckedExportError,
+};
 pub use exported::{DecodeCallResult, LeanArgs, LeanExported, LeanIo};
+pub use lean_toolchain::{
+    LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
+    LeanExportSignature, LeanExportSymbolKind,
+};
 pub use library::LeanLibrary;
 pub use loaded::LeanModule;
 pub use preflight::{
@@ -57,7 +63,7 @@ pub use preflight::{
 // downstream crate that wants to inspect the bound has a single import
 // path. The trait remains sealed; the re-export only widens the doc
 // surface, not the impl surface.
-pub use crate::abi::traits::LeanAbi;
+pub use crate::abi::traits::{LeanAbi, LeanCReprAbi};
 
 #[cfg(test)]
 mod tests;

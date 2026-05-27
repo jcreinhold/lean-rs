@@ -9,12 +9,22 @@
 //! `lean-toolchain` so the worker parent crate can consume it without
 //! relinking `libleanshared`. It is re-exported here for source compatibility.
 
+// SAFETY DOC: the only unsafe block in this file is the final transition from
+// manifest-checked ABI metadata to `LeanModule::exported_unchecked`. The safe
+// public method validates the manifest signature and function/global kind
+// before reaching that constructor.
+#![allow(unsafe_code)]
+
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::preflight::{CapabilityManifest, LeanRuntimePreflight, manifest_error_to_lean_error, report_into_error};
-use super::{LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule};
+use super::{
+    DecodeCallResult, LeanArgs, LeanExported, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency, LeanModule,
+};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
+use lean_toolchain::{LeanExportSignature, LeanExportSymbolKind};
 
 // Build-script descriptor lives in `lean-toolchain` (below `lean-rs`) so the
 // worker parent crate can construct and consume it without relinking
@@ -32,6 +42,74 @@ pub struct LeanCapability<'lean> {
     bundle: LeanLibraryBundle<'lean>,
     package: String,
     module: String,
+    export_signatures: HashMap<String, LeanExportSignature>,
+}
+
+/// Typed failure from manifest-backed checked export lookup.
+#[derive(Debug)]
+pub enum LeanCheckedExportError {
+    /// The manifest has no trusted signature entry for the requested symbol.
+    MissingSignatureMetadata { symbol: String },
+    /// The manifest signature does not match the requested Rust call shape.
+    SignatureMismatch {
+        symbol: String,
+        expected: Box<LeanExportSignature>,
+        manifest: Box<LeanExportSignature>,
+    },
+    /// The manifest's function/global classification does not match the dylib.
+    SymbolKindMismatch {
+        symbol: String,
+        manifest: LeanExportSymbolKind,
+        actual: LeanExportSymbolKind,
+    },
+    /// The manifest entry exists, but the symbol is absent from the loaded library.
+    MissingSymbol { symbol: String, source: LeanError },
+    /// The initialized module could not be reopened before lookup.
+    Module(LeanError),
+}
+
+impl std::fmt::Display for LeanCheckedExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSignatureMetadata { symbol } => {
+                write!(f, "missing trusted export signature metadata for symbol '{symbol}'")
+            }
+            Self::SignatureMismatch {
+                symbol,
+                expected,
+                manifest,
+            } => write!(
+                f,
+                "export signature mismatch for symbol '{symbol}': requested {expected:?}, manifest has {manifest:?}"
+            ),
+            Self::SymbolKindMismatch {
+                symbol,
+                manifest,
+                actual,
+            } => write!(
+                f,
+                "export symbol kind mismatch for symbol '{symbol}': manifest has {manifest:?}, dylib has {actual:?}"
+            ),
+            Self::MissingSymbol { symbol, source } => {
+                write!(
+                    f,
+                    "manifest-backed export symbol '{symbol}' is missing from the loaded library: {source}"
+                )
+            }
+            Self::Module(err) => write!(f, "failed to initialize module before checked export lookup: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for LeanCheckedExportError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingSymbol { source, .. } | Self::Module(source) => Some(source),
+            Self::MissingSignatureMetadata { .. }
+            | Self::SignatureMismatch { .. }
+            | Self::SymbolKindMismatch { .. } => None,
+        }
+    }
 }
 
 impl<'lean> LeanCapability<'lean> {
@@ -53,12 +131,13 @@ impl<'lean> LeanCapability<'lean> {
             .resolved_manifest_path()
             .map_err(|err| built_capability_error_to_lean_error(&err))?;
         let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;
-        Self::open_with_dependencies(
+        Self::open_with_dependencies_and_exports(
             runtime,
             manifest.primary_dylib,
             manifest.package,
             manifest.module,
             manifest.dependencies,
+            manifest.exports,
         )
     }
 
@@ -84,7 +163,7 @@ impl<'lean> LeanCapability<'lean> {
             LeanError::linking("LeanBuiltCapability is missing the root Lean module name; call `.module(...)`")
         })?;
         let dependencies = spec.take_dependencies();
-        Self::open_with_dependencies(runtime, dylib_path, package, module, dependencies)
+        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, [])
     }
 
     /// Open and initialize a capability from an explicit dylib path and
@@ -102,7 +181,7 @@ impl<'lean> LeanCapability<'lean> {
     ) -> LeanResult<Self> {
         let package = package.into();
         let module = module.into();
-        Self::open_with_dependencies(runtime, dylib_path, package, module, [])
+        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, [], [])
     }
 
     /// Open and initialize a capability with explicitly described dependency
@@ -123,14 +202,95 @@ impl<'lean> LeanCapability<'lean> {
         module: impl Into<String>,
         dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
     ) -> LeanResult<Self> {
+        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, [])
+    }
+
+    fn open_with_dependencies_and_exports(
+        runtime: &'lean LeanRuntime,
+        dylib_path: impl AsRef<Path>,
+        package: impl Into<String>,
+        module: impl Into<String>,
+        dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
+        export_signatures: impl IntoIterator<Item = LeanExportSignature>,
+    ) -> LeanResult<Self> {
         let package = package.into();
         let module = module.into();
         let bundle = LeanLibraryBundle::open(runtime, dylib_path, dependencies)?;
         let _module = bundle.initialize_module(&package, &module)?;
+        let export_signatures = export_signatures
+            .into_iter()
+            .map(|signature| (signature.symbol().to_owned(), signature))
+            .collect();
         Ok(Self {
             bundle,
             package,
             module,
+            export_signatures,
+        })
+    }
+
+    /// Look up an exported symbol only if trusted manifest ABI metadata
+    /// exactly matches the requested Rust call shape.
+    ///
+    /// Unlike [`LeanModule::exported_unchecked`], this method is safe: the
+    /// caller supplies only a symbol name and Rust `Args`/`R` types. The ABI
+    /// assertion comes from the capability manifest parsed at load time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeanCheckedExportError`] when metadata is missing, the Rust
+    /// shape disagrees with the manifest, the manifest's function/global kind
+    /// disagrees with the loaded dylib, or the symbol cannot be resolved.
+    pub fn exported<Args, R>(&self, name: &str) -> Result<LeanExported<'lean, '_, Args, R>, LeanCheckedExportError>
+    where
+        Args: LeanArgs<'lean>,
+        R: DecodeCallResult<'lean>,
+    {
+        let manifest =
+            self.export_signatures
+                .get(name)
+                .ok_or_else(|| LeanCheckedExportError::MissingSignatureMetadata {
+                    symbol: name.to_owned(),
+                })?;
+        let expected = match manifest.kind() {
+            LeanExportSymbolKind::Function => {
+                LeanExportSignature::function(name, Args::export_abi_args(), R::export_abi_return())
+            }
+            LeanExportSymbolKind::Global if Args::ARITY == 0 && !R::EXPECTS_IO_RESULT => {
+                LeanExportSignature::global(name, R::export_abi_return())
+            }
+            LeanExportSymbolKind::Global => {
+                LeanExportSignature::function(name, Args::export_abi_args(), R::export_abi_return())
+            }
+        };
+        if &expected != manifest {
+            return Err(LeanCheckedExportError::SignatureMismatch {
+                symbol: name.to_owned(),
+                expected: Box::new(expected),
+                manifest: Box::new(manifest.clone()),
+            });
+        }
+
+        let actual_kind = if self.library().globals().contains(name) {
+            LeanExportSymbolKind::Global
+        } else {
+            LeanExportSymbolKind::Function
+        };
+        if manifest.kind() != actual_kind {
+            return Err(LeanCheckedExportError::SymbolKindMismatch {
+                symbol: name.to_owned(),
+                manifest: manifest.kind(),
+                actual: actual_kind,
+            });
+        }
+
+        let module = self.module().map_err(LeanCheckedExportError::Module)?;
+        // SAFETY: the manifest signature matched `Args`/`R` exactly, and the
+        // function/global classification matched the loaded dylib before this
+        // unchecked constructor was reached.
+        unsafe { module.exported_unchecked::<Args, R>(name) }.map_err(|source| LeanCheckedExportError::MissingSymbol {
+            symbol: name.to_owned(),
+            source,
         })
     }
 
@@ -169,6 +329,11 @@ impl<'lean> LeanCapability<'lean> {
     #[must_use]
     pub fn module_name(&self) -> &str {
         &self.module
+    }
+
+    /// Trusted export signatures parsed from the capability manifest.
+    pub fn export_signatures(&self) -> impl Iterator<Item = &LeanExportSignature> {
+        self.export_signatures.values()
     }
 }
 
@@ -238,11 +403,12 @@ mod tests {
         write_manifest(
             &path,
             r#"{
-  "schema_version": 1,
+  "schema_version": 2,
   "target_name": "Cap",
   "package": "pkg",
   "module": "Cap",
   "primary_dylib": "/tmp/libcap.so",
+  "exports": [],
   "dependencies": [
     {
       "dylib_path": "/tmp/libdep.so",
@@ -282,7 +448,8 @@ mod tests {
   "schema_version": 999,
   "package": "pkg",
   "module": "Cap",
-  "primary_dylib": "/tmp/libcap.so"
+  "primary_dylib": "/tmp/libcap.so",
+  "exports": []
 }"#,
         );
 

@@ -36,6 +36,318 @@ pub enum LeanLoaderDiagnosticCode {
     MissingImportedSymbol,
 }
 
+/// Whether an exported symbol is callable code or a Lean persistent global.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanExportSymbolKind {
+    /// Symbol resolves to a function entry point.
+    Function,
+    /// Symbol resolves to a data-section `lean_object*` slot.
+    Global,
+}
+
+impl LeanExportSymbolKind {
+    /// Stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Global => "global",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "function" => Some(Self::Function),
+            "global" => Some(Self::Global),
+            _ => None,
+        }
+    }
+}
+
+/// C ABI representation for one exported argument or result slot.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanExportAbiRepr {
+    /// `lean_object*`.
+    LeanObject,
+    /// `uint8_t`.
+    U8,
+    /// `uint16_t`.
+    U16,
+    /// `uint32_t`.
+    U32,
+    /// `uint64_t`.
+    U64,
+    /// `size_t`.
+    USize,
+    /// `int8_t`.
+    I8,
+    /// `int16_t`.
+    I16,
+    /// `int32_t`.
+    I32,
+    /// `int64_t`.
+    I64,
+    /// `ssize_t`/Rust `isize`.
+    ISize,
+    /// `double`.
+    F64,
+}
+
+impl LeanExportAbiRepr {
+    /// Stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LeanObject => "lean_object",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::USize => "usize",
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::ISize => "isize",
+            Self::F64 => "f64",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "lean_object" => Some(Self::LeanObject),
+            "u8" => Some(Self::U8),
+            "u16" => Some(Self::U16),
+            "u32" => Some(Self::U32),
+            "u64" => Some(Self::U64),
+            "usize" => Some(Self::USize),
+            "i8" => Some(Self::I8),
+            "i16" => Some(Self::I16),
+            "i32" => Some(Self::I32),
+            "i64" => Some(Self::I64),
+            "isize" => Some(Self::ISize),
+            "f64" => Some(Self::F64),
+            _ => None,
+        }
+    }
+}
+
+/// Ownership convention for one ABI slot.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanExportOwnership {
+    /// Scalar slot with no Lean refcount transfer.
+    None,
+    /// Owned `lean_object*` reference is transferred.
+    Owned,
+}
+
+impl LeanExportOwnership {
+    /// Stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Owned => "owned",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "owned" => Some(Self::Owned),
+            _ => None,
+        }
+    }
+}
+
+/// ABI shape of one exported function argument.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct LeanExportArgAbi {
+    repr: LeanExportAbiRepr,
+    ownership: LeanExportOwnership,
+}
+
+impl LeanExportArgAbi {
+    /// Construct the ABI shape for a function argument slot.
+    #[must_use]
+    pub const fn new(repr: LeanExportAbiRepr, ownership: LeanExportOwnership) -> Self {
+        Self { repr, ownership }
+    }
+
+    /// C representation for this argument.
+    #[must_use]
+    pub const fn repr(self) -> LeanExportAbiRepr {
+        self.repr
+    }
+
+    /// Ownership convention for this argument.
+    #[must_use]
+    pub const fn ownership(self) -> LeanExportOwnership {
+        self.ownership
+    }
+
+    /// Encode as a manifest JSON object.
+    #[must_use]
+    pub fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "repr": self.repr.as_str(),
+            "ownership": self.ownership.as_str(),
+        })
+    }
+}
+
+/// How an exported result is decoded.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LeanExportResultConvention {
+    /// Direct Lean return value.
+    Pure,
+    /// `lean_io_result_*` wrapper returned by an `IO α` export.
+    IoResult,
+}
+
+impl LeanExportResultConvention {
+    /// Stable manifest spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::IoResult => "io_result",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "pure" => Some(Self::Pure),
+            "io_result" => Some(Self::IoResult),
+            _ => None,
+        }
+    }
+}
+
+/// ABI shape of an exported result.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct LeanExportReturnAbi {
+    repr: LeanExportAbiRepr,
+    ownership: LeanExportOwnership,
+    convention: LeanExportResultConvention,
+}
+
+impl LeanExportReturnAbi {
+    /// Construct the ABI shape for an exported result slot.
+    #[must_use]
+    pub const fn new(
+        repr: LeanExportAbiRepr,
+        ownership: LeanExportOwnership,
+        convention: LeanExportResultConvention,
+    ) -> Self {
+        Self {
+            repr,
+            ownership,
+            convention,
+        }
+    }
+
+    /// C representation for this result.
+    #[must_use]
+    pub const fn repr(self) -> LeanExportAbiRepr {
+        self.repr
+    }
+
+    /// Ownership convention for this result.
+    #[must_use]
+    pub const fn ownership(self) -> LeanExportOwnership {
+        self.ownership
+    }
+
+    /// IO/result convention for this result.
+    #[must_use]
+    pub const fn convention(self) -> LeanExportResultConvention {
+        self.convention
+    }
+
+    /// Encode as a manifest JSON object.
+    #[must_use]
+    pub fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "repr": self.repr.as_str(),
+            "ownership": self.ownership.as_str(),
+            "convention": self.convention.as_str(),
+        })
+    }
+}
+
+/// Trusted manifest signature for one Lean export.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanExportSignature {
+    symbol: String,
+    kind: LeanExportSymbolKind,
+    args: Vec<LeanExportArgAbi>,
+    result: LeanExportReturnAbi,
+}
+
+impl LeanExportSignature {
+    /// Construct a manifest signature for a function export.
+    #[must_use]
+    pub fn function(
+        symbol: impl Into<String>,
+        args: impl Into<Vec<LeanExportArgAbi>>,
+        result: LeanExportReturnAbi,
+    ) -> Self {
+        Self {
+            symbol: symbol.into(),
+            kind: LeanExportSymbolKind::Function,
+            args: args.into(),
+            result,
+        }
+    }
+
+    /// Construct a manifest signature for a global export.
+    #[must_use]
+    pub fn global(symbol: impl Into<String>, result: LeanExportReturnAbi) -> Self {
+        Self {
+            symbol: symbol.into(),
+            kind: LeanExportSymbolKind::Global,
+            args: Vec::new(),
+            result,
+        }
+    }
+
+    /// Exported symbol name.
+    #[must_use]
+    pub fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    /// Function/global classification.
+    #[must_use]
+    pub const fn kind(&self) -> LeanExportSymbolKind {
+        self.kind
+    }
+
+    /// Argument ABI slots.
+    #[must_use]
+    pub fn args(&self) -> &[LeanExportArgAbi] {
+        &self.args
+    }
+
+    /// Result ABI slot.
+    #[must_use]
+    pub const fn result(&self) -> LeanExportReturnAbi {
+        self.result
+    }
+
+    /// Encode as a manifest JSON object.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "symbol": self.symbol,
+            "kind": self.kind.as_str(),
+            "args": self.args.iter().map(|arg| arg.to_json()).collect::<Vec<_>>(),
+            "return": self.result.to_json(),
+        })
+    }
+}
+
 impl LeanLoaderDiagnosticCode {
     /// Stable string identifier suitable for logs and support reports.
     #[must_use]

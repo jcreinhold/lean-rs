@@ -47,8 +47,9 @@ pub use limits::{
     LEAN_HEARTBEAT_LIMIT_MAX,
 };
 pub use loader::{
-    LOADER_DIAGNOSTIC_TEXT_LIMIT, LeanLibraryDependency, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport,
-    LeanLoaderSeverity, LeanModuleInitializer, bound_loader_text,
+    LOADER_DIAGNOSTIC_TEXT_LIMIT, LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention,
+    LeanExportReturnAbi, LeanExportSignature, LeanExportSymbolKind, LeanLibraryDependency, LeanLoaderCheck,
+    LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity, LeanModuleInitializer, bound_loader_text,
 };
 pub use manifest_validation::CapabilityManifest;
 pub use modules::{
