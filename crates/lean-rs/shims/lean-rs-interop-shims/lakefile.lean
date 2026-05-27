@@ -1,6 +1,12 @@
 import Lake
 open System Lake DSL
 
+abbrev leanRsLeanOptions : Array LeanOption := #[
+  ⟨`autoImplicit, false⟩,
+  ⟨`maxSynthPendingDepth, .ofNat 3⟩,
+  ⟨`pp.unicode.fun, true⟩,
+]
+
 /-! Generic Lean/Rust interop helpers for `lean-rs`.
 
     This package contains reusable ABI support shared by downstream Lean
@@ -26,5 +32,6 @@ target libleanrsinterop_callback pkg : FilePath := do
 
 @[default_target]
 lean_lib «LeanRsInterop» where
+  leanOptions := leanRsLeanOptions
   defaultFacets := #[LeanLib.sharedFacet]
   moreLinkObjs := #[libleanrsinterop_callback]

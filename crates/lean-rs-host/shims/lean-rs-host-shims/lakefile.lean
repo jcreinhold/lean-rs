@@ -1,6 +1,12 @@
 import Lake
 open System Lake DSL
 
+abbrev leanRsLeanOptions : Array LeanOption := #[
+  ⟨`autoImplicit, false⟩,
+  ⟨`maxSynthPendingDepth, .ofNat 3⟩,
+  ⟨`pp.unicode.fun, true⟩,
+]
+
 /-! Bundled Lake package shipping the 28 mandatory + 6 optional
     `lean_rs_host_*` `@[export]` Lean shims that the `lean-rs-host` Rust
     crate loads at runtime.
@@ -29,5 +35,6 @@ target libleanrsinterop_callback pkg : FilePath := do
 
 @[default_target]
 lean_lib «LeanRsHostShims» where
+  leanOptions := leanRsLeanOptions
   defaultFacets := #[LeanLib.sharedFacet]
   moreLinkObjs := #[libleanrsinterop_callback]

@@ -12,13 +12,14 @@
 //! from [`crate::host::elaboration`] — the underlying Lean machinery
 //! (`Lean.maxHeartbeats`) and the failure-bytes invariant are the same.
 
+use lean_rs::abi::traits::{IntoLean, TryFromLean, conversion_error};
+use lean_rs::error::{LeanResult, bound_message};
+use lean_rs::{LeanRuntime, Obj};
+
 use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,
 };
-use lean_rs::abi::traits::{IntoLean, TryFromLean, conversion_error};
-use lean_rs::error::{LeanResult, bound_message};
-use lean_rs::{LeanRuntime, Obj};
 
 /// Reducibility setting threaded into the bounded `MetaM` runner.
 ///

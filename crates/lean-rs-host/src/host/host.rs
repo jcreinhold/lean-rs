@@ -14,11 +14,12 @@
 use core::fmt;
 use std::path::Path;
 
-use crate::host::capabilities::LeanCapabilities;
-use crate::host::lake::LakeProject;
 use lean_rs::LeanRuntime;
 use lean_rs::error::LeanResult;
 use lean_rs::module::LeanLibrary;
+
+use crate::host::capabilities::LeanCapabilities;
+use crate::host::lake::LakeProject;
 
 /// Entry point for hosting Lean capabilities from a Lake project.
 ///

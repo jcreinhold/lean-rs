@@ -15,13 +15,13 @@
 
 use core::fmt;
 
-use lean_rs_sys::ctor::lean_ctor_get_uint8;
-
-use crate::host::elaboration::diagnostic::{LeanDiagnostic, LeanSeverity};
 use lean_rs::Obj;
 use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::{LeanDiagnosticCode, LeanResult};
+use lean_rs_sys::ctor::lean_ctor_get_uint8;
+
+use crate::host::elaboration::diagnostic::{LeanDiagnostic, LeanSeverity};
 
 /// Failure payload carrying typed diagnostics from a Lean elaboration
 /// or kernel-check call.

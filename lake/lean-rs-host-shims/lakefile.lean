@@ -1,6 +1,12 @@
 import Lake
 open System Lake DSL
 
+abbrev leanRsLeanOptions : Array LeanOption := #[
+  ⟨`autoImplicit, false⟩,
+  ⟨`maxSynthPendingDepth, .ofNat 3⟩,
+  ⟨`pp.unicode.fun, true⟩,
+]
+
 /-! Development mirror of the bundled host shim package.
 
     The packaged copy lives under `crates/lean-rs-host/shims/lean-rs-host-shims`
@@ -26,5 +32,6 @@ target libleanrsinterop_callback pkg : FilePath := do
 
 @[default_target]
 lean_lib «LeanRsHostShims» where
+  leanOptions := leanRsLeanOptions
   defaultFacets := #[LeanLib.sharedFacet]
   moreLinkObjs := #[libleanrsinterop_callback]

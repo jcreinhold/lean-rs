@@ -13,8 +13,8 @@
 
 #[cfg(test)]
 use lean_rs::error::LEAN_ERROR_MESSAGE_LIMIT;
-use lean_rs::error::bound_message;
 
+use lean_rs::error::bound_message;
 pub use lean_toolchain::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,

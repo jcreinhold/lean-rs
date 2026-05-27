@@ -13,11 +13,12 @@
 //! [`LeanMetaResponse::status`] and read the typed payload on the `Ok`
 //! branch (or the structured diagnostics on the other three).
 
-use crate::host::elaboration::LeanElabFailure;
 use lean_rs::Obj;
 use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::{LeanDiagnosticCode, LeanResult};
+
+use crate::host::elaboration::LeanElabFailure;
 
 /// Classification tag for a meta-service call.
 ///

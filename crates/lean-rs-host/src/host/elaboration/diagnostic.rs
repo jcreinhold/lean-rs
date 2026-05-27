@@ -24,14 +24,13 @@
 // `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
 
-use lean_rs_sys::ctor::lean_ctor_get_uint8;
-use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag, lean_unbox};
-
 use lean_rs::Obj;
 use lean_rs::abi::nat;
 use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::{LeanResult, bound_message};
+use lean_rs_sys::ctor::lean_ctor_get_uint8;
+use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag, lean_unbox};
 
 /// Severity classification attached to each [`LeanDiagnostic`]. Mirrors
 /// Lean's `MessageSeverity` constructors at 4.29.1.

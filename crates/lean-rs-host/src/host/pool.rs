@@ -52,13 +52,14 @@
 
 use core::cell::{Cell, RefCell};
 
+use lean_rs::LeanRuntime;
+use lean_rs::Obj;
+use lean_rs::error::LeanResult;
+
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::progress::LeanProgressSink;
 use crate::host::session::LeanSession;
-use lean_rs::LeanRuntime;
-use lean_rs::Obj;
-use lean_rs::error::LeanResult;
 
 // -- PoolStats: pool-level reuse metrics ---------------------------------
 

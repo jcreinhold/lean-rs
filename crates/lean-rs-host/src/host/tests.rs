@@ -15,6 +15,9 @@ use std::process::Command;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lean_rs::error::{HostStage, LeanError};
+use lean_rs::{LeanDiagnosticCode, LeanIo, LeanRuntime};
+
 use crate::host::meta::{
     LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
     infer_type, is_def_eq, pp_expr, whnf,
@@ -23,8 +26,6 @@ use crate::{
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
     LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
 };
-use lean_rs::error::{HostStage, LeanError};
-use lean_rs::{LeanDiagnosticCode, LeanIo, LeanRuntime};
 
 // -- fixture setup -------------------------------------------------------
 

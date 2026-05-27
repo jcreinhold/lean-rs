@@ -2,12 +2,11 @@
 
 use core::fmt;
 
-use lean_rs_sys::lean_object;
-
 use lean_rs::LeanRuntime;
 use lean_rs::Obj;
 use lean_rs::abi::traits::{LeanAbi, TryFromLean, sealed};
 use lean_rs::error::LeanResult;
+use lean_rs_sys::lean_object;
 
 /// Opaque receipt for a piece of Lean evidence the kernel accepted.
 ///

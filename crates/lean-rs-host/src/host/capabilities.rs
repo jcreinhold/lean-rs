@@ -38,12 +38,13 @@
 
 use core::fmt;
 
+use lean_rs::error::LeanResult;
+use lean_rs::module::LeanLibrary;
+
 use crate::host::cancellation::LeanCancellationToken;
 use crate::host::host::LeanHost;
 use crate::host::progress::LeanProgressSink;
 use crate::host::session::{LeanSession, SessionSymbols};
-use lean_rs::error::LeanResult;
-use lean_rs::module::LeanLibrary;
 
 /// Loaded generic interop, host shim, and optional user dylibs with session
 /// symbol addresses pre-resolved.

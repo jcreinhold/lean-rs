@@ -8,14 +8,14 @@
 //! tags are 0..=3 in declaration order; the [`TryFromLean`] impl below
 //! does the dispatch.
 
-use lean_rs_sys::object::{lean_is_scalar, lean_unbox};
-
-use crate::host::elaboration::LeanElabFailure;
-use crate::host::evidence::handle::LeanEvidence;
 use lean_rs::Obj;
 use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::LeanResult;
+use lean_rs_sys::object::{lean_is_scalar, lean_unbox};
+
+use crate::host::elaboration::LeanElabFailure;
+use crate::host::evidence::handle::LeanEvidence;
 
 /// What the kernel-check capability concluded about a piece of Lean
 /// source.
