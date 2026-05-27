@@ -13,8 +13,9 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling r
 
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The L1 FFI primitive `lean-rs` ships the typed
 `@[export]`-calling machinery and the structured error boundary; this L2 crate adds standard Lean services through
-`LeanHost`, `LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 6 `lean_rs_host_*`
-`@[export]` Lean shims bundled with `lean-rs-host` and loaded alongside consumer capability dylibs.
+`LeanHost`, `LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 9 `lean_rs_host_*`
+`@[export]` Lean shims bundled with `lean-rs-host`, resolved from manifest-backed trusted signature metadata, and
+loaded alongside consumer capability dylibs.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed arguments—the norm for Rust
 bindings to GC-hosted languages—depend on `lean-rs` directly and skip this crate.
@@ -52,13 +53,13 @@ needed.
 The crate root names mandatory session capabilities and entry points only. Sub-module paths host **specialised or
 optional** capabilities so the layer difference is visible at the import site: different layer, different abstraction.
 
-- **`lean_rs_host::meta`**—the bounded `MetaM` capability. Five of the thirty-four `SessionSymbols` (`meta_infer_type`,
+- **`lean_rs_host::meta`**—the bounded `MetaM` capability. Five host-shim bindings (`meta_infer_type`,
   `meta_whnf`, `meta_heartbeat_burn`, `meta_is_def_eq`, `meta_pp_expr`) are optional, and `run_meta` is the only call
   site that touches the meta types. Surfacing `LeanMetaOptions`, `LeanMetaResponse`, `LeanMetaService`,
   `LeanMetaTransparency`, `MetaCallStatus`, and the five factories at the crate root would pollute the namespace of
   every caller for the benefit of the subset that opts into `MetaM`. Meta callers write `use lean_rs_host::meta::{...}`;
   everyone else is undisturbed.
-- **`lean_rs_host::process`**—the optional module-query projection capability. One additional `SessionSymbols` slot
+- **`lean_rs_host::process`**—the optional module-query projection capability. Optional checked bindings
   (`process_module_query`) and the query/result types for diagnostics, cursor type lookup, cursor goal lookup, and name
   references live under `process` rather than at the crate root. The public boundary is one query-shaped operation, so
   callers do not pay for whole-file raw info-tree rendering when they only need one bounded projection.
@@ -150,13 +151,6 @@ Each requires doc comments and `# Errors` / `# Panics` sections.
   `Result` mirrors `elaborate` exactly. No `expected_type` parameter; a concrete second caller would justify the
   per-source `&[Option<&LeanExpr>]` surface. With no token, this is one Lean-side bulk dispatch; with `Some(token)`,
   this loops per source to create cancellation check points.
-- `LeanSession::call_capability_unchecked<Args, R>(&mut self, name: &str, args: Args, cancellation: Option<&LeanCancellationToken>) -> LeanResult<R::Output>`
-  where `Args: LeanArgs<'lean>` and `R: DecodeCallResult<'lean>`. Function-only escape hatch for capability-dylib
-  exports beyond the twenty-seven session-fixed symbols; reuses the same `Args` / `R` bounds as
-  `lean_rs::LeanModule::exported_unchecked`, including the `LeanIo<T>` IO marker. Adds session-level tracing
-  (`lean_rs.host.session.call_capability_unchecked` span with `symbol` + `arity` fields) and a `SessionStats` counter bump—those
-  L2 concerns are why it lives here rather than as a pass-through on `LeanModule`. Callers that don't want the
-  instrumentation use `unsafe { module.exported_unchecked::<Args, R>(name) }?.call(args)` directly on the L1 handle.
 - `LeanSession::stats(&self) -> SessionStats`—snapshot of per-session dispatch metrics.
 - `SessionPool::with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self`
 - `SessionPool::acquire<'p, 'c>(&'p self, caps: &'c LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<PooledSession<'lean, 'p, 'c>>`—capability-agnostic
@@ -210,9 +204,11 @@ surface—they are listed so the L1 → L2 dependency is visible.
 - `LeanRuntime`—process-once init; lifetime anchor for every L2 type.
 - `LeanThreadGuard`—RAII attach for worker threads not started inside Lean.
 - `LeanLibrary`—RAII handle over the capability dylib `LeanCapabilities` opens.
-- `LeanModule`—initialized module handle the session reaches typed exports through.
-- `LeanExported`—cached typed function handle the session calls via `call_capability_unchecked`.
-- `LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi`—bounds and markers for typed dispatch generics.
+- `LeanModule`—initialized module handle used behind the closed host-shim binding table.
+- `LeanExported`—cached typed function handle stored inside private `HostShimBindings`, never exposed as a
+  session-level arbitrary dispatcher.
+- `LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi`—bounds and markers used by internal checked host bindings and
+  host-defined ABI records.
 - `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`—opaque handles re-used as L2 method return shapes.
 - `lean_rs::error::*`—`LeanError`, `LeanResult`, `LeanException`, `LeanCancelled`, `HostFailure`, `HostStage`,
   `LeanExceptionKind`, `LeanDiagnosticCode`, `LEAN_ERROR_MESSAGE_LIMIT`, `DiagnosticCapture`, `CapturedEvent`,
@@ -220,9 +216,10 @@ surface—they are listed so the L1 → L2 dependency is visible.
 
 Two `#[doc(hidden)] pub` seams substitute for Cargo's missing "friend crate" visibility:
 
-- `lean_rs::__host_internals::{host_module_init,host_cancelled}`—the narrow constructor wrappers this crate calls from
+- `lean_rs::__host_internals::{host_module_init,host_cancelled}`—the narrow support facade this crate calls from
   `host/lake.rs` and `host/cancellation.rs`. They preserve the bounding invariant (external callers receive `LeanError`
   values but cannot mint one with an unbounded message) without forcing this crate to re-implement error construction.
+  It is not raw Lean runtime binding access.
   Re-add wrappers the same way (single-call `#[doc(hidden)] pub fn` + re-export) if a future call site needs one.
 - `lean_rs::error::bound_message`—UTF-8-boundary truncation helper used at six sites in
   `host/{elaboration,meta}/options.rs` and `host/elaboration/diagnostic.rs` to bound Lean-authored strings before they
@@ -246,7 +243,7 @@ its own host-defined types (`LeanEvidence`, etc.); external crates are blocked b
   `lean-rs::module` visible at module paths preserves the middle tier: typed handles, no raw `lean_*` symbols.
 - **Keep `LeanHost` / `LeanCapabilities` / `LeanSession` in `lean-rs` itself.** Conflated two layers behind one default
   entry point and made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without satisfying
-  the 28 + 6 `lean_rs_host_*` shim contract.
+  the 28 + 9 `lean_rs_host_*` shim contract.
 
 ## Naming convention
 

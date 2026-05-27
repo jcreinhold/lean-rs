@@ -19,11 +19,11 @@ the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](a
    the generated `lean_rs_host_*` export signatures.
 2. `LeanCapability::from_build_manifest(...)` opens the host shim dylib and its generic interop dependency from that
    manifest, then initializes `LeanRsHostShims`.
-3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not
-   require or initialize host shims.
+3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer and keeps the user
+   dylib loaded as the session's project anchor. The consumer does not require or initialize host shims.
 4. `HostShimBindings::resolve(&shim_capability)` constructs typed checked bindings for every bundled shim symbol used by
-   `LeanSession`. The consumer dylib's `LeanSession::call_capability_unchecked` route stays open only for user-authored
-   `@[export]` symbols and remains unsafe.
+   `LeanSession`. User-authored arbitrary `@[export]` dispatch is not a host-session surface; use lower-level
+   `lean-rs` for custom same-process ABI calls.
 
 `LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
 `lean_rs_host_shims`.

@@ -7,9 +7,9 @@
 //!
 //! - The **user's capability dylib**, when present, is the artefact the
 //!   consumer built with `lake build` and named in
-//!   [`crate::host::LeanHost::load_capabilities`]. It contains the user's own
-//!   `@[export]` symbols ([`crate::LeanSession::call_capability_unchecked`] dispatches
-//!   here).
+//!   [`crate::host::LeanHost::load_capabilities`]. The host stack initializes
+//!   it so imported modules can depend on it; arbitrary user export dispatch
+//!   stays in the lower-level `lean-rs` crate.
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
 //!   built from the `lean-rs-host` crate's bundled shim sources. It contains
 //!   the 28 mandatory + 9 optional `lean_rs_host_*` `@[export]` symbols that
@@ -54,13 +54,9 @@ use crate::host::shim_bindings::host_shim_export_signatures;
 pub struct LeanCapabilities<'lean, 'h> {
     host: &'h LeanHost<'lean>,
     /// User's capability dylib — the one named in `load_capabilities`, absent
-    /// for `load_shims_only`.
-    /// `pub(crate)` accessor below exposes it to
-    /// [`crate::LeanSession::call_capability_unchecked`] for ad-hoc dispatch on
-    /// user-authored `@[export]` symbols.
-    user_library: Option<LeanLibrary<'lean>>,
-    user_package: Option<String>,
-    user_module: Option<String>,
+    /// for `load_shims_only`. Kept alive so initialized user modules remain
+    /// loaded while sessions import and query their environments.
+    _user_library: Option<LeanLibrary<'lean>>,
     /// Manifest-backed bundled host shim capability. Session construction
     /// resolves typed bindings from this checked surface.
     shim_capability: LeanCapability<'lean>,
@@ -106,9 +102,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
 
         Ok(Self {
             host,
-            user_library: Some(user_library),
-            user_package: Some(package.to_owned()),
-            user_module: Some(lib_name.to_owned()),
+            _user_library: Some(user_library),
             shim_capability,
         })
     }
@@ -117,16 +111,12 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// host shim dylibs.
     ///
     /// Sessions opened from this value can use every shim-backed session
-    /// operation. [`crate::LeanSession::call_capability_unchecked`] returns
-    /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because no user dylib is
-    /// attached.
+    /// operation without loading a user capability dylib.
     pub(crate) fn new_shims_only(host: &'h LeanHost<'lean>) -> LeanResult<Self> {
         let shim_capability = load_shim_capability(host)?;
         Ok(Self {
             host,
-            user_library: None,
-            user_package: None,
-            user_module: None,
+            _user_library: None,
             shim_capability,
         })
     }
@@ -166,14 +156,6 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         &self.shim_capability
     }
 
-    /// User dylib identity for unsafe ad-hoc export dispatch.
-    pub(crate) fn user_module(&self) -> Option<(&LeanLibrary<'lean>, &str, &str)> {
-        Some((
-            self.user_library.as_ref()?,
-            self.user_package.as_deref()?,
-            self.user_module.as_deref()?,
-        ))
-    }
 }
 
 fn load_shim_capability<'lean>(host: &LeanHost<'lean>) -> LeanResult<LeanCapability<'lean>> {

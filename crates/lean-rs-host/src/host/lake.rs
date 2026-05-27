@@ -6,7 +6,7 @@
 //! where the bundled `lean-rs-host-shims` and `lean-rs-interop-shims`
 //! packages compile their dylibs so the host stack can load them
 //! alongside the user's capability dylib. The layouts are stable
-//! across the supported toolchain range (Lean 4.29.x); paths are built
+//! across the supported toolchain range; paths are built
 //! by concatenation and the bundled shims are built on demand through
 //! `lean-toolchain`.
 //!
@@ -75,8 +75,8 @@ impl LakeProject {
     /// the library name); 4.27+ emit
     /// `.lake/build/lib/lib{escaped_package}_{lib_name}.{dylib,so}` where
     /// `escaped_package` doubles every underscore. Both conventions are
-    /// part of the supported window (see
-    /// [`lean_rs_sys::SUPPORTED_TOOLCHAINS`]); this method returns
+    /// part of the supported window (see `docs/version-matrix.md`);
+    /// this method returns
     /// whichever candidate exists so the Rust loader is naming-convention-
     /// agnostic. Returns the new-style path as a fallback for diagnostics
     /// when neither candidate exists on disk; the caller surfaces the

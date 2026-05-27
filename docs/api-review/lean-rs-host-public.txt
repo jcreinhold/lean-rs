@@ -162,7 +162,7 @@ impl core::fmt::Debug for lean_rs_host::LeanEvidence<'_>
 pub fn lean_rs_host::LeanEvidence<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanEvidence<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanEvidence<'lean>
-pub type lean_rs_host::LeanEvidence<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::LeanEvidence<'lean>::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanEvidence<'lean>
 pub fn lean_rs_host::LeanEvidence<'lean>::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs_host::LeanEvidence<'lean>
@@ -433,9 +433,9 @@ impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::host::process::Mo
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::host::process::ModuleQuery
 pub fn lean_rs_host::host::process::ModuleQuery::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::host::process::ModuleQuery
-pub type &lean_rs_host::host::process::ModuleQuery::CRepr = *mut lean_rs_sys::types::lean_object
+pub type &lean_rs_host::host::process::ModuleQuery::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::host::process::ModuleQuery
-pub type lean_rs_host::host::process::ModuleQuery::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::host::process::ModuleQuery::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl core::marker::Freeze for lean_rs_host::host::process::ModuleQuery
 impl core::marker::Send for lean_rs_host::host::process::ModuleQuery
 impl core::marker::Sync for lean_rs_host::host::process::ModuleQuery
@@ -641,7 +641,7 @@ impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::host::process::Mo
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::host::process::ModuleQuerySelector
 pub fn lean_rs_host::host::process::ModuleQuerySelector::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::host::process::ModuleQuerySelector
-pub type lean_rs_host::host::process::ModuleQuerySelector::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::host::process::ModuleQuerySelector::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::ModuleQuerySelector
 pub fn lean_rs_host::host::process::ModuleQuerySelector::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::host::process::ModuleQuerySelector
@@ -841,9 +841,9 @@ impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::host::process::Mo
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::host::process::ModuleQueryOutputBudgets
 pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::host::process::ModuleQueryOutputBudgets
-pub type &lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = *mut lean_rs_sys::types::lean_object
+pub type &lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::host::process::ModuleQueryOutputBudgets
-pub type lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::host::process::ModuleQueryOutputBudgets::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl core::marker::Freeze for lean_rs_host::host::process::ModuleQueryOutputBudgets
 impl core::marker::Send for lean_rs_host::host::process::ModuleQueryOutputBudgets
 impl core::marker::Sync for lean_rs_host::host::process::ModuleQueryOutputBudgets
@@ -1055,7 +1055,7 @@ impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanDeclarationFi
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::LeanDeclarationFilter
 pub fn lean_rs_host::LeanDeclarationFilter::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanDeclarationFilter
-pub type lean_rs_host::LeanDeclarationFilter::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::LeanDeclarationFilter::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanDeclarationFilter
 pub fn lean_rs_host::LeanDeclarationFilter::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::LeanDeclarationFilter
@@ -1102,7 +1102,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanProgressEvent
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanProgressEvent
 pub struct lean_rs_host::host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub unsafe fn lean_rs_host::LeanSession<'lean, 'c>::call_capability_unchecked<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -1126,7 +1125,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch(&mut sel
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch_cached(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, &lean_rs_host::host::process::ModuleQueryCachePolicy, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchCachedOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where lean_rs_host::meta::LeanMetaService<Req, Resp>: HostMetaDispatch<'lean, Req, Resp>, Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>
@@ -1465,7 +1464,7 @@ impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanDeclarationFi
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::LeanDeclarationFilter
 pub fn lean_rs_host::LeanDeclarationFilter::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanDeclarationFilter
-pub type lean_rs_host::LeanDeclarationFilter::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::LeanDeclarationFilter::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanDeclarationFilter
 pub fn lean_rs_host::LeanDeclarationFilter::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::LeanDeclarationFilter
@@ -1542,7 +1541,7 @@ impl core::fmt::Debug for lean_rs_host::LeanEvidence<'_>
 pub fn lean_rs_host::LeanEvidence<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanEvidence<'_>
 impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanEvidence<'lean>
-pub type lean_rs_host::LeanEvidence<'lean>::CRepr = *mut lean_rs_sys::types::lean_object
+pub type lean_rs_host::LeanEvidence<'lean>::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
 impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanEvidence<'lean>
 pub fn lean_rs_host::LeanEvidence<'lean>::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl<'lean> core::marker::Freeze for lean_rs_host::LeanEvidence<'lean>
@@ -1613,7 +1612,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanProgressEvent
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanProgressEvent
 pub struct lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
-pub unsafe fn lean_rs_host::LeanSession<'lean, 'c>::call_capability_unchecked<Args, R>(&mut self, &str, Args, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<<R as lean_rs::module::exported::DecodeCallResult>::Output> where Args: lean_rs::module::exported::LeanArgs<'lean>, R: lean_rs::module::exported::DecodeCallResult<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -1637,7 +1635,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch(&mut sel
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query_batch_cached(&mut self, &str, &[lean_rs_host::host::process::ModuleQuerySelector], &lean_rs_host::host::process::ModuleQueryOutputBudgets, &lean_rs_host::LeanElabOptions, &lean_rs_host::host::process::ModuleQueryCachePolicy, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryBatchCachedOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declaration(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs::handle::declaration::LeanDeclaration<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::query_declarations_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::declaration::LeanDeclaration<'lean>>>
-pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::run_meta<Req, Resp>(&mut self, &lean_rs_host::meta::LeanMetaService<Req, Resp>, Req, &lean_rs_host::meta::LeanMetaOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::meta::LeanMetaResponse<Resp>> where lean_rs_host::meta::LeanMetaService<Req, Resp>: HostMetaDispatch<'lean, Req, Resp>, Req: lean_rs::abi::traits::LeanAbi<'lean>, Resp: lean_rs::abi::traits::TryFromLean<'lean>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>

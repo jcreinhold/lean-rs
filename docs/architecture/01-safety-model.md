@@ -8,11 +8,10 @@ This is a Rust memory-safety claim for safe Rust APIs. It is not a claim that Le
 proof term proves what the user intended, that user-authored Lean code terminates, or that Lean's kernel/elaborator never
 rejects the input.
 
-The current host stack is still partly inside the trusted boundary. `lean-rs-host` pre-resolves shim symbols and calls
-`LeanExported::from_function_address`. That is intentional debt in this pre-1.0 migration series, not the final
-boundary. The target state is for `lean-rs-host` to become a safe consumer of `lean-rs`: host-specific symbol dispatch
-should be checked or explicitly unsafe, Lean object layout reads should sit behind safe `lean-rs` view APIs, and
-callback/context-pointer handling should go through safe `lean-rs` callback APIs.
+`lean-rs-host` is outside that trusted implementation boundary. It forbids unsafe Rust code crate-wide and consumes
+`lean-rs` through safe handles, safe ABI conversion/view APIs, and manifest-checked host-shim bindings. Bundled host
+shims are resolved once through trusted export signature metadata and cached as typed `HostShimBindings`; public
+`LeanSession` methods dispatch only those closed host operations.
 
 Every change that adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
 below. An API that cannot be made consistent does not ship as safe.
@@ -29,10 +28,11 @@ state or fully enforce the needed ownership, lifetime, layout, and ABI-signature
 of `lean_rs::*` should not have to choose a refcount discipline, inspect a Lean object header, or cast a symbol address
 to a C function pointer to use the safe surface.
 
-`LeanModule::exported_unchecked::<Args, R>(name)` is unsafe because arbitrary dynamic export lookup cannot be validated
-from a raw symbol name plus caller-chosen `Args`/`R`. The call is memory-safe only if the symbol's compiled C ABI is
-known to match those Rust types. Until signature metadata is available and checked, function-address dispatch remains
-an unsafe construction point or trusted host-stack code.
+Checked export lookup is safe only when backed by trusted signature metadata, such as a build manifest generated for a
+known capability contract. `LeanModule::exported_unchecked::<Args, R>(name)` is unsafe because arbitrary dynamic export
+lookup cannot be validated from a raw symbol name plus caller-chosen `Args`/`R`. The call is memory-safe only if the
+symbol's compiled C ABI is known to match those Rust types. Raw symbol lookup,
+`LeanExported::from_function_address`, and `lean_rs_sys` remain implementation details of `lean-rs`.
 
 Applications that genuinely need raw FFI opt in by depending on `lean-rs-sys` directly, accepting full `unsafe`
 discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and opaque public types—friendlier than forking the

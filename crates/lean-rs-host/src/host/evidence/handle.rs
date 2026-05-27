@@ -50,13 +50,16 @@ impl<'lean> LeanAbi<'lean> for LeanEvidence<'lean> {
         self.obj.into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
-        Obj::from_c(c, runtime).map(|obj| Self { obj })
+        evidence_from_c(c, runtime)
     }
+}
+
+fn evidence_from_c<'lean>(
+    c: <Obj<'lean> as LeanAbi<'lean>>::CRepr,
+    runtime: &'lean LeanRuntime,
+) -> LeanResult<LeanEvidence<'lean>> {
+    Obj::from_c(c, runtime).map(|obj| LeanEvidence { obj })
 }
 
 impl<'lean> TryFromLean<'lean> for LeanEvidence<'lean> {

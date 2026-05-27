@@ -19,13 +19,13 @@ The public `LeanSession` methods keep the existing typed contracts for ordinary 
 | ABI mismatch, missing symbol, malformed return value, or host invariant failure | `Err(LeanError::Host(_))` |
 | Lean internal panic, `panic!` with `LEAN_ABORT_ON_PANIC=1`, generated unreachable, C++ foreign unwind, `std::exit`, or `abort` | The process may terminate; no Rust error is guaranteed |
 
-The same rule applies to `LeanSession::call_capability_unchecked`: if the called Lean export returns through its normal C ABI,
-`lean-rs` decodes it. If the export terminates the process or unwinds as a foreign exception through the non-unwinding C
-ABI, `LeanSession` does not recover.
+The same rule applies to lower-level arbitrary export calls through `lean-rs`: if the called Lean export returns through
+its normal C ABI, `lean-rs` decodes it. If the export terminates the process or unwinds as a foreign exception through
+the non-unwinding C ABI, the in-process caller does not recover.
 
 ## Why The Boundary Is The Process
 
-`LeanSession` dispatches through `unsafe extern "C"` function pointers resolved from Lake-built shared libraries. Rust's
+Lean dispatch ultimately reaches `extern "C"` function pointers resolved from Lake-built shared libraries. Rust's
 `std::panic::catch_unwind` catches unwinding Rust panics in the same Rust runtime; it does not catch aborting panics,
 and it does not provide a sound recovery contract for foreign exceptions crossing a non-unwinding C ABI. The Rust
 Reference also classifies unwinding into Rust through the wrong FFI ABI as undefined behavior.
@@ -85,10 +85,10 @@ the lifetime argument.
 
 ## Verification Fixture
 
-`crates/lean-rs-host/tests/panic_containment.rs` re-runs its own test binary as a child process with
-`LEAN_ABORT_ON_PANIC=1` and `LEAN_BACKTRACE=0`, then calls the fixture export `lean_rs_fixture_panic_unit`. The parent
-asserts that the child exits unsuccessfully. This keeps the normal test runner alive while pinning the documented
-process-level behavior.
+The worker child panic-containment tests re-run the fixture workload in a child process with `LEAN_ABORT_ON_PANIC=1` and
+`LEAN_BACKTRACE=0`, then call the fixture export `lean_rs_fixture_panic_unit` through lower-level `lean-rs` dispatch.
+The parent asserts that the child exits unsuccessfully. This keeps the normal test runner alive while pinning the
+documented process-level behavior.
 
 The sanitizer workflow also runs this fixture under Linux AddressSanitizer.
 

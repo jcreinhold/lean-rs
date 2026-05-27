@@ -44,7 +44,7 @@ Rust-side registry contracts; see [`10-callback-registry.md`](10-callback-regist
 
 ## Relationship To Host Shims
 
-`lean-rs-host-shims` still owns the 28 + 6 `lean_rs_host_*` theorem-prover policy symbols. Host-specific environment
+`lean-rs-host-shims` still owns the 28 + 9 `lean_rs_host_*` theorem-prover policy symbols. Host-specific environment
 queries, elaboration, kernel checking, and `MetaM` services stay out of `LeanRsInterop`.
 
 The host compatibility export is loaded from the host dylib directly, so it keeps a local Lean loop and compiles the

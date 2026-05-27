@@ -1,5 +1,4 @@
-//! Integration tests for bulk session methods,
-//! `LeanSession::call_capability_unchecked`, and the `SessionPool` /
+//! Integration tests for bulk session methods and the `SessionPool` /
 //! `PooledSession` pair.
 //!
 //! These tests live in `tests/` (not in `src/host/tests.rs`) because
@@ -8,14 +7,13 @@
 //! resident-set budget. Integration tests run as a separate binary, so
 //! their imports do not compound with the lower-layer unit tests.
 
-#![allow(unsafe_code, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use lean_rs::module::LeanIo;
 use lean_rs::{HostStage, LeanDiagnosticCode, LeanError, LeanRuntime};
 use lean_rs_host::{LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool};
 
@@ -413,85 +411,6 @@ fn elaborate_bulk_empty_input_is_no_op() {
         .expect("empty input returns empty vec");
     assert!(outcomes.is_empty(), "empty input yields empty output");
     assert_eq!(session.stats(), baseline, "empty bulk must not record an FFI call");
-}
-
-// -- call_capability_unchecked ----------------------------------------------------
-
-#[test]
-fn call_capability_dispatches_pure_fixture_export() {
-    // `lean_rs_fixture_u64_mul : UInt64 -> UInt64 -> UInt64 := (·*·)` is
-    // not a session-fixed symbol; routing through `call_capability_unchecked`
-    // proves the generic Args/R path resolves and dispatches against an
-    // arbitrary capability-dylib export.
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_handles(&caps);
-
-    let baseline = session.stats();
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    let product: u64 =
-        unsafe { session.call_capability_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (3, 4), None) }
-            .expect("call_capability_unchecked dispatches the pure export");
-    assert_eq!(product, 12);
-
-    let after = session.stats();
-    assert_eq!(
-        after.ffi_calls - baseline.ffi_calls,
-        1,
-        "call_capability_unchecked records exactly one FFI dispatch",
-    );
-    assert_eq!(
-        after.batch_items - baseline.batch_items,
-        0,
-        "call_capability_unchecked is not a bulk operation",
-    );
-}
-
-#[test]
-fn call_capability_dispatches_io_fixture_export() {
-    // `lean_rs_fixture_io_success_unit : IO Unit := pure ()` exercises
-    // the `R = LeanIo<T>` path end-to-end: fused decode_io +
-    // T::try_from_lean. Unit instead of Nat because Lean's `Nat`
-    // encoding is `lean_object`-boxed and the `Obj` decoder lives
-    // pub(crate); the simpler IO Unit return covers the same fused
-    // decoding path the bulk and singular IO methods rely on.
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_handles(&caps);
-
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    unsafe { session.call_capability_unchecked::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit", (), None) }
-        .expect("call_capability_unchecked dispatches the IO export");
-}
-
-#[test]
-fn call_capability_unknown_symbol_is_link_error() {
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_handles(&caps);
-
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    let err =
-        unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_no_such_export", (), None) }
-            .expect_err("missing symbol must surface as a host link error");
-    match err {
-        LeanError::Host(failure) => {
-            assert_eq!(failure.stage(), HostStage::Link);
-            assert!(
-                failure.message().contains("lean_rs_fixture_no_such_export"),
-                "diagnostic must name the missing symbol, got: {:?}",
-                failure.message(),
-            );
-        }
-        LeanError::LeanException(exc) => panic!("expected Host(Link) failure, got LeanException {exc:?}"),
-        LeanError::Cancelled(cancelled) => panic!("expected Host(Link), got cancellation {cancelled:?}"),
-    }
 }
 
 // -- SessionPool / PooledSession ----------------------------------------

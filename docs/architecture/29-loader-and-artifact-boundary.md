@@ -54,7 +54,7 @@ different abstraction and hides a distinct kind of complexity.
 
 Lean runtime initialization, imported modules, interned names, persistent objects, allocator state, and module
 initializers are process-scoped. Dropping a Rust wrapper does not necessarily undo those effects. `lean-rs-host` exposes
-trusted in-process work; the worker crates remain the production boundary for panic containment and memory reset.
+checked in-process services; the worker crates remain the production boundary for panic containment and memory reset.
 
 ### Dynamic-Loader Symbol Visibility
 

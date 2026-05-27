@@ -4,17 +4,16 @@
 end to end against the in-tree fixture; reading them is the fastest path from a blank consumer project to a working
 integration.
 
-Six focused examples, one end-to-end tour, and one RSS reproducer. Each focused example sticks to one verb so a reader
+Five focused examples, one end-to-end tour, and one RSS reproducer. Each focused example sticks to one verb so a reader
 can scan it in a minute and reach for the matching crate API by analogy.
 
 | Example | What it teaches |
 | --- | --- |
 | [`theorem_query`](#theorem_query) | Open a session and contrast the kind of a Lean definition with a theorem. |
-| [`evaluate`](#evaluate) | Call a typed Lean export through `LeanSession::call_capability_unchecked`. |
 | [`proof_check`](#proof_check) | Kernel-check a theorem, re-validate the evidence, project a bounded summary. |
 | [`meta_query`](#meta_query) | Run a bounded `MetaM` service and branch on every status. |
 | [`progress`](#progress) | Observe structured progress and cooperative cancellation on long-running calls. |
-| [`tour`](#tour) | All four flows composed end to end in one process. |
+| [`tour`](#tour) | Core host flows composed end to end in one process. |
 | [`lake_build_helper`](#lake_build_helper) | Build a Lake shared-library target through `lean-toolchain` without hand-written dylib path mangling. |
 | [`long_session_memory`](#long_session_memory) | RSS checkpoints for a long-lived process using fresh imports, pooled reuse, introspection, and elaboration. |
 
@@ -86,32 +85,6 @@ The exact `total_declarations` count tracks the active Lean toolchain prelude an
 - `[lean_rs.module_init] ... failed to open Lean library`—the Lake fixture has not been built. See *Prerequisites*.
 - `[lean_rs.abi_conversion] declaration 'Nat.add_zero' not found in imported environment`—the imported module set
   excludes the prelude; only happens if the example's import list is edited.
-
-### evaluate
-
-**Goal:** call a typed `@[export]` Lean function from Rust through `LeanSession::call_capability_unchecked` with both a boxed
-(`String`) and an unboxed (`u32`) signature.
-
-**Run:**
-
-```sh
-cargo run -p lean-rs --example evaluate
-```
-
-**Expected output:**
-
-```text
-string_identity("hello, lean") = "hello, lean"
-u32_add(1000, 2500) = 3500
-ok
-```
-
-**Common failures:**
-
-- `[lean_rs.symbol_lookup] unknown exported symbol 'lean_rs_fixture_string_identity' in ...`—the capability dylib was
-  built without the `LeanRsFixture.Strings` module's `@[export]`. Re-run `lake build`.
-- `[lean_rs.abi_conversion] ...`—the example's hardcoded argument type drifted from the Lean signature. Re-check the
-  Rust `(args), R` triple against `fixtures/lean/LeanRsFixture/Strings.lean` and `Scalars.lean`.
 
 ### proof_check
 

@@ -1,9 +1,9 @@
 //! End-to-end tour of the curated `lean_rs::*` surface — every stage
 //! composed in one process.
 //!
-//! The four focused examples (`theorem_query`, `evaluate`,
-//! `proof_check`, `meta_query`) each demonstrate one concern. This
-//! tour shows how they compose: host open → capability load →
+//! The focused examples (`theorem_query`, `proof_check`, `meta_query`,
+//! `progress`) each demonstrate one concern. This tour shows how the
+//! core session services compose: host open → capability load →
 //! environment import → two elaborate calls → one `kernel_check` →
 //! one bulk declaration query → one `Meta.whnf`. Read it after the
 //! focused examples when you want to see how a real workload threads

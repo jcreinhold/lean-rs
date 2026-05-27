@@ -49,6 +49,6 @@ do not choose workers, spawn tasks, or define session keys.
 Use these helpers when authoring a Lean capability that will be run through the worker crates. They remove repeated
 worker-envelope boilerplate while keeping downstream schemas and algorithms downstream-owned.
 
-Use direct L1 callbacks only for trusted same-process interop. Use `lean-rs-host` for trusted in-process theorem-prover
-sessions. Use the worker crates or `LeanWorkerPool` when the caller needs process isolation, timeouts, memory cycling,
-row streaming, diagnostics, or pool orchestration.
+Use direct L1 callbacks only for same-process interop that accepts the in-process Lean failure model. Use `lean-rs-host`
+for checked in-process theorem-prover sessions. Use the worker crates or `LeanWorkerPool` when the caller needs process
+isolation, timeouts, memory cycling, row streaming, diagnostics, or pool orchestration.

@@ -2,7 +2,7 @@
 //!
 //! A [`LeanHost`] binds a [`lean_rs::LeanRuntime`] borrow to a Lake project
 //! on disk. From it, [`LeanHost::load_capabilities`] opens a compiled user
-//! capability dylib for ad-hoc `@[export]` calls, while
+//! capability dylib for its module initializers and imports, while
 //! [`LeanHost::load_shims_only`] opens only the bundled host shims for the
 //! standard session services. Both paths return a [`LeanCapabilities`] whose
 //! sessions resolve checked host-shim bindings once and dispatch subsequent
@@ -82,9 +82,7 @@ impl<'lean> LeanHost<'lean> {
     /// Sessions opened from the returned capabilities can import modules from
     /// this Lake project's `.olean` search path and use the standard
     /// shim-backed Meta, elaboration, kernel, info-tree, declaration, and
-    /// source-range services. [`crate::LeanSession::call_capability_unchecked`] returns
-    /// [`lean_rs::LeanDiagnosticCode::Unsupported`] because there is no user
-    /// library to dispatch arbitrary `@[export]` symbols through.
+    /// source-range services.
     ///
     /// # Errors
     ///

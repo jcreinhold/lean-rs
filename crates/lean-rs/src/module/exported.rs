@@ -199,11 +199,10 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
     /// The per-arity `.call(a1, a2, ...)` method on [`LeanExported`]
     /// takes its arguments destructured (one per parameter) because
     /// that is the natural ergonomic form for hand-written call sites.
-    /// Generic callers — most importantly
-    /// [`crate::LeanSession::call_capability_unchecked`] — cannot destructure a
-    /// generic `Args` tuple, so they reach `.call(...)` through this
-    /// associated function instead. Macro-stamped per arity to forward
-    /// to the existing destructured impl.
+    /// Generic callers cannot destructure a generic `Args` tuple, so
+    /// they reach `.call(...)` through this associated function instead.
+    /// Macro-stamped per arity to forward to the existing destructured
+    /// impl.
     #[doc(hidden)]
     fn invoke<R>(handle: &LeanExported<'lean, '_, Self, R>, args: Self) -> LeanResult<R::Output>
     where

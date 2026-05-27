@@ -119,11 +119,6 @@
 //!   capability owned by `LeanCapabilities`; its typed call handles live
 //!   exactly as long as the session borrow.
 
-// SAFETY DOC: every `unsafe { ... }` block in this file carries its own
-// `// SAFETY:` comment naming the precondition. The blanket allow is
-// scoped to this single dispatch site, per
-// `docs/architecture/01-safety-model.md`.
-#![allow(unsafe_code)]
 // `run_meta` is `pub` but bounded on `lean_rs::abi::traits::{LeanAbi, TryFromLean}`.
 // `LeanAbi` is sealed-public; `TryFromLean` is `pub(crate)`. The bound is a
 // crate-internal compatibility requirement, not a downstream extension point
@@ -152,7 +147,6 @@ use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sea
 #[cfg(doc)]
 use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
-use lean_rs::module::{DecodeCallResult, LeanArgs};
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionStats: per-session dispatch metrics --------------------------
@@ -284,16 +278,10 @@ impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
         self.into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — called only by LeanExported"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean lean_rs::LeanRuntime) -> LeanResult<Self> {
-        if c.is_null() {
-            return Err(conversion_error("Lean DeclarationFilter returned a null pointer"));
-        }
-        let obj = Obj::from_c(c, runtime)?;
-        Self::try_from_lean(obj)
+    fn from_c(_c: Self::CRepr, _runtime: &'lean lean_rs::LeanRuntime) -> LeanResult<Self> {
+        Err(conversion_error(
+            "LeanDeclarationFilter cannot decode a Lean call result; it is an argument-only type",
+        ))
     }
 }
 
@@ -1768,83 +1756,6 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             self.record_call(batch_len, t.elapsed());
             result
         }
-    }
-
-    /// Look up and invoke a capability-exported function by name with a
-    /// caller-provided ABI signature.
-    ///
-    /// This is the transport-neutral escape hatch for capability dylibs
-    /// that export Lean functions beyond the twenty-eight session-fixed
-    /// symbols. The conversion bounds — [`LeanArgs`] on the argument
-    /// tuple and [`DecodeCallResult`] on the result — are the same
-    /// bounds [`lean_rs::module::LeanModule::exported_unchecked`] uses, so an
-    /// IO-returning Lean capability is invoked with `R = LeanIo<T>`
-    /// (fused `decode_io` + `T::try_from_lean`) and a pure capability
-    /// with `R = T` for `T: LeanAbi`. The sealed traits stay invisible
-    /// at the call site; the bound is satisfied automatically.
-    ///
-    /// Function-only: nullary-constant globals are not capabilities.
-    /// Reach a Lean nullary-constant global directly through
-    /// [`lean_rs::module::LeanModule::exported_unchecked`] if you need one. The
-    /// the unchecked export handle is resolved on every call (one `dlsym` per
-    /// invocation); for hot user capabilities, prefer pre-resolving via
-    /// `LeanModule::exported_unchecked` and caching the [`lean_rs::module::LeanExported`]
-    /// handle in caller-owned code.
-    ///
-    /// # Safety
-    ///
-    /// The caller must prove that `name` resolves to a Lean export whose
-    /// emitted C ABI matches the requested Rust `Args` and `R` exactly,
-    /// including argument arity/order, each slot's `LeanAbi::CRepr`,
-    /// the return `DecodeCallResult::CRepr`, and the Lean ownership /
-    /// refcount behavior for every object argument and result.
-    ///
-    /// Passing a Rust call signature that does not match the Lean export
-    /// symbol's actual C ABI is undefined behavior.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`lean_rs::LeanError::Host`] with stage [`HostStage::Link`] if
-    /// `name` does not resolve as a function symbol in the capability
-    /// dylib. Returns [`lean_rs::LeanError::LeanException`] when the underlying
-    /// Lean export raises through `IO` (only possible when
-    /// `R = LeanIo<_>`). Returns [`lean_rs::LeanError::Host`] with stage
-    /// [`HostStage::Conversion`] when the return value does not decode
-    /// into the declared `R::Output`.
-    pub unsafe fn call_capability_unchecked<Args, R>(
-        &mut self,
-        name: &str,
-        args: Args,
-        cancellation: Option<&LeanCancellationToken>,
-    ) -> LeanResult<R::Output>
-    where
-        Args: LeanArgs<'lean>,
-        R: DecodeCallResult<'lean>,
-    {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.call_capability_unchecked",
-            symbol = name,
-            arity = Args::ARITY,
-        )
-        .entered();
-        check_cancellation(cancellation)?;
-        let Some((library, package, module_name)) = self.capabilities.user_module() else {
-            return Err(lean_rs::__host_internals::host_unsupported(format!(
-                "call_capability_unchecked('{name}') requires a user capability dylib; this LeanCapabilities was loaded with load_shims_only",
-            )));
-        };
-        let module = library.initialize_module(package, module_name)?;
-        check_cancellation(cancellation)?;
-        // SAFETY: this method's caller proves the named user export's C ABI
-        // matches `Args` and `R`. `LeanModule::exported_unchecked` still
-        // performs function-vs-global and symbol-presence checks before
-        // constructing the typed handle.
-        let call = unsafe { module.exported_unchecked::<Args, R>(name) }?;
-        let t = Instant::now();
-        let result = Args::invoke(&call, args);
-        self.record_call(0, t.elapsed());
-        result
     }
 
     /// Build a `LeanName` from a dotted Rust string via the capability's

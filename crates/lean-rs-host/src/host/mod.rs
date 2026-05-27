@@ -45,8 +45,7 @@
 //! session services and will not call ad-hoc user `@[export]` symbols.
 //!
 //! Construction or inspection of the handle types in [`lean_rs::handle`]
-//! outside of a session goes through Lean fixture exports reached via
-//! [`lean_rs::module::LeanModule::exported_unchecked`].
+//! outside of a session belongs to the lower-level `lean-rs` crate.
 
 pub mod elaboration;
 pub mod evidence;

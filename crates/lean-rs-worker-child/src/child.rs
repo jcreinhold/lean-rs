@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use lean_rs::error::host_internal;
-use lean_rs::module::LeanIo;
+use lean_rs::module::{LeanIo, LeanLibrary, LeanModule};
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
@@ -540,22 +540,39 @@ fn load_fixture_capability(runtime: &'static LeanRuntime, fixture_root: &Path) -
     Ok(())
 }
 
+fn capability_dylib_path(project_root: &Path, package: &str, lib_name: &str) -> PathBuf {
+    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    let lib_dir = project_root.join(".lake").join("build").join("lib");
+    let escaped_package = package.replace('_', "__");
+    let new_style = lib_dir.join(format!("lib{escaped_package}_{lib_name}.{dylib_extension}"));
+    let old_style = lib_dir.join(format!("lib{lib_name}.{dylib_extension}"));
+    if old_style.is_file() && !new_style.is_file() {
+        old_style
+    } else {
+        new_style
+    }
+}
+
 #[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
 fn call_fixture_mul(runtime: &'static LeanRuntime, fixture_root: &Path, lhs: u64, rhs: u64) -> LeanResult<u64> {
-    let host = LeanHost::from_lake_project(runtime, fixture_root)?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
-    let mut session = caps.session(&["LeanRsFixture.Scalars"], None, None)?;
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    unsafe { session.call_capability_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul", (lhs, rhs), None) }
+    let library = LeanLibrary::open(
+        runtime,
+        capability_dylib_path(fixture_root, "lean_rs_fixture", "LeanRsFixture"),
+    )?;
+    let module = library.initialize_module("lean_rs_fixture", "LeanRsFixture")?;
+    // SAFETY: the requested Lean export signature is pinned by the fixture source.
+    unsafe { module.exported_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul") }?.call(lhs, rhs)
 }
 
 #[allow(unsafe_code, reason = "dynamic fixture export lookup is intentionally unchecked")]
 fn trigger_lean_panic(runtime: &'static LeanRuntime, fixture_root: &Path) -> LeanResult<()> {
-    let host = LeanHost::from_lake_project(runtime, fixture_root)?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
-    let mut session = caps.session(&["LeanRsFixture.Effects"], None, None)?;
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    unsafe { session.call_capability_unchecked::<(u8,), ()>("lean_rs_fixture_panic_unit", (0,), None) }
+    let library = LeanLibrary::open(
+        runtime,
+        capability_dylib_path(fixture_root, "lean_rs_fixture", "LeanRsFixture"),
+    )?;
+    let module = library.initialize_module("lean_rs_fixture", "LeanRsFixture")?;
+    // SAFETY: the requested Lean export signature is pinned by the fixture source.
+    unsafe { module.exported_unchecked::<(u8,), ()>("lean_rs_fixture_panic_unit") }?.call(0)
 }
 
 fn error_response(err: &LeanError) -> Response {
@@ -577,6 +594,9 @@ struct HostSessionState {
     host: &'static LeanHost<'static>,
     #[allow(dead_code, reason = "leaked capabilities anchor the session borrow")]
     capabilities: &'static LeanCapabilities<'static, 'static>,
+    user_library: Option<LeanLibrary<'static>>,
+    user_package: Option<String>,
+    user_lib_name: Option<String>,
     session: LeanSession<'static, 'static>,
     imports: Vec<String>,
 }
@@ -589,11 +609,21 @@ impl HostSessionState {
         imports: &[String],
     ) -> LeanResult<Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let capabilities = match mode {
+        let (capabilities, user_library, user_package, user_lib_name) = match mode {
             HostSessionMode::Capability { package, lib_name } => {
-                Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
+                let capabilities = Box::leak(Box::new(host.load_capabilities(package, lib_name)?));
+                let library = LeanLibrary::open(
+                    runtime,
+                    capability_dylib_path(Path::new(project_root), package, lib_name),
+                )?;
+                (
+                    capabilities,
+                    Some(library),
+                    Some(package.clone()),
+                    Some(lib_name.clone()),
+                )
             }
-            HostSessionMode::ShimsOnly => Box::leak(Box::new(host.load_shims_only()?)),
+            HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None, None, None),
             _ => {
                 return Err(host_internal(
                     "worker child received an unsupported host session loading mode".to_owned(),
@@ -605,9 +635,29 @@ impl HostSessionState {
         Ok(Self {
             host,
             capabilities,
+            user_library,
+            user_package,
+            user_lib_name,
             session,
             imports: imports.to_vec(),
         })
+    }
+
+    fn user_module(&self) -> LeanResult<LeanModule<'static, '_>> {
+        let Some(library) = &self.user_library else {
+            return Err(host_internal(
+                "worker request requires a user capability dylib, but this host session was opened shims-only",
+            ));
+        };
+        let package = self
+            .user_package
+            .as_deref()
+            .ok_or_else(|| host_internal("worker session is missing its user package name"))?;
+        let lib_name = self
+            .user_lib_name
+            .as_deref()
+            .ok_or_else(|| host_internal("worker session is missing its user library name"))?;
+        library.initialize_module(package, lib_name)
     }
 
     fn elaborate(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerElabResult> {
@@ -717,7 +767,7 @@ impl HostSessionState {
         reason = "worker capability stream export lookup is intentionally unchecked"
     )]
     fn run_data_stream(
-        &mut self,
+        &self,
         export: &str,
         request_json: &str,
         progress: bool,
@@ -819,16 +869,11 @@ impl HostSessionState {
         .map_err(StreamRunError::Host)?;
 
         let (handle, trampoline) = callback.abi_parts();
+        let module = self.user_module().map_err(StreamRunError::Host)?;
         // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let status = unsafe {
-            self.session
-                .call_capability_unchecked::<(&str, usize, usize), LeanIo<u8>>(
-                    export,
-                    (request_json, handle, trampoline),
-                    None,
-                )
-        }
-        .map_err(StreamRunError::Host)?;
+        let status = unsafe { module.exported_unchecked::<(&str, usize, usize), LeanIo<u8>>(export) }
+            .and_then(|call| call.call(request_json, handle, trampoline))
+            .map_err(StreamRunError::Host)?;
 
         if let Some(error) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
             return Err(match error {
@@ -856,16 +901,15 @@ impl HostSessionState {
         reason = "worker capability metadata export lookup is intentionally unchecked"
     )]
     fn capability_metadata(
-        &mut self,
+        &self,
         export: &str,
         request_json: &str,
     ) -> Result<LeanWorkerCapabilityMetadata, CapabilityJsonError> {
+        let module = self.user_module().map_err(CapabilityJsonError::Host)?;
         // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let raw = unsafe {
-            self.session
-                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
-        }
-        .map_err(CapabilityJsonError::Host)?;
+        let raw = unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }
+            .and_then(|call| call.call(request_json))
+            .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
@@ -874,16 +918,15 @@ impl HostSessionState {
         reason = "worker capability doctor export lookup is intentionally unchecked"
     )]
     fn capability_doctor(
-        &mut self,
+        &self,
         export: &str,
         request_json: &str,
     ) -> Result<LeanWorkerDoctorReport, CapabilityJsonError> {
+        let module = self.user_module().map_err(CapabilityJsonError::Host)?;
         // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        let raw = unsafe {
-            self.session
-                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
-        }
-        .map_err(CapabilityJsonError::Host)?;
+        let raw = unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }
+            .and_then(|call| call.call(request_json))
+            .map_err(CapabilityJsonError::Host)?;
         serde_json::from_str(&raw).map_err(|err| CapabilityJsonError::Malformed(err.to_string()))
     }
 
@@ -891,12 +934,10 @@ impl HostSessionState {
         unsafe_code,
         reason = "worker capability command export lookup is intentionally unchecked"
     )]
-    fn json_command(&mut self, export: &str, request_json: &str) -> LeanResult<String> {
+    fn json_command(&self, export: &str, request_json: &str) -> LeanResult<String> {
+        let module = self.user_module()?;
         // SAFETY: the requested Lean export signature is pinned by the worker capability contract.
-        unsafe {
-            self.session
-                .call_capability_unchecked::<(&str,), LeanIo<String>>(export, (request_json,), None)
-        }
+        unsafe { module.exported_unchecked::<(&str,), LeanIo<String>>(export) }?.call(request_json)
     }
 
     fn infer_type(

@@ -1,9 +1,8 @@
 # Production Boundary
 
-`lean-rs-host` is the fast in-process theorem-prover API. It is the right surface for trusted workloads where the caller
-accepts Lean's process-scoped failure and memory contracts. It is not the containment boundary for production systems
-that must survive Lean internal panics, aborts, foreign unwinds, or long-running import sweeps that retain
-process-global memory.
+`lean-rs-host` is the fast in-process theorem-prover API. It is the right surface for workloads where the caller accepts
+Lean's process-scoped failure and memory contracts. It is not the containment boundary for production systems that must
+survive Lean internal panics, aborts, foreign unwinds, or long-running import sweeps that retain process-global memory.
 
 The production boundary is a worker process. The worker crates own child processes, framed IPC, restart policy,
 fatal-exit diagnostics, request timeouts, live row streaming, typed command facades, and memory cycling. `lean-rs-host`
@@ -79,10 +78,10 @@ belong below the process supervisor.
 
 ## Consumer Guidance
 
-Compose at the highest layer that matches the operational requirement. Direct `lean-rs` callbacks are for trusted
-same-process ABI work. `lean-rs-host` is for trusted in-process theorem-prover sessions. The worker crates are for
-worker-style tools where process lifecycle, IPC, fatal exits, request timeouts, row streaming, and memory reset should
-be owned by the library rather than every downstream caller.
+Compose at the highest layer that matches the operational requirement. Direct `lean-rs` callbacks are for same-process
+ABI work that accepts the in-process Lean failure model. `lean-rs-host` is for checked in-process theorem-prover
+sessions. The worker crates are for worker-style tools where process lifecycle, IPC, fatal exits, request timeouts, row
+streaming, and memory reset should be owned by the library rather than every downstream caller.
 
 Use `lean-rs-host` directly when the process can trust the Lean workload, when latency is the primary concern, and when
 process-level memory retention is acceptable.

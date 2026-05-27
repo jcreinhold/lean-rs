@@ -37,9 +37,10 @@ Five published crates plus one workspace-internal helper:
   callers. It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts
   here.
 - **`lean-rs-host`** (published, **L2**). The standard Lean service layer built on `lean-rs`: `LeanHost`,
-  `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 6
-  `lean_rs_host_*` `@[export]` Lean shim contract it loads alongside consumer capability dylibs. Batch and session-pool
-  operations are methods on `LeanSession` rather than a separate `batch` module. Downstreams that need common Lean
+  `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 9
+  `lean_rs_host_*` `@[export]` Lean shim contract it loads through manifest-checked `HostShimBindings` alongside
+  consumer capability dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate
+  `batch` module. Downstreams that need common Lean
   services add it on top of `lean-rs`; downstreams that only need typed FFI do not pay for it.
 - **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
   process-boundary layer). The parent supervises a child process around the standard Lean service layer. They own
@@ -54,7 +55,7 @@ Five published crates plus one workspace-internal helper:
 Compose at the highest layer that fits the workload:
 
 - use `lean-rs` for custom same-process ABI calls, module loading, and advanced callbacks;
-- use `lean-rs-host` for trusted in-process theorem-prover work such as imports, elaboration, kernel checks, declaration
+- use `lean-rs-host` for checked in-process theorem-prover work such as imports, elaboration, kernel checks, declaration
   queries, progress, cancellation, and pooling;
 - use the worker crates when the application needs a process boundary for fatal Lean exits, request watchdogs, worker
   cycling, live row streams, diagnostics, or typed downstream commands.
@@ -112,9 +113,8 @@ item in `lean-rs-host`'s, the wrong layer has taken ownership.
 **Hidden by `lean-rs-host` (L2):**
 
 - Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order, imports cache, capability
-  refresh, the 28 + 6 `lean_rs_host_*` Lean shim contract.
-- Capability dispatch: `SessionSymbols` cached address tables, `Args` / `R` propagation through `call_capability_unchecked`,
-  tracing-span shape and metrics.
+  refresh, the 28 + 9 `lean_rs_host_*` Lean shim contract.
+- Host-shim dispatch: manifest-backed `HostShimBindings`, typed cached handles, tracing-span shape, and metrics.
 - Batching: per-source result aggregation, `N + 1` vs `2N` FFI-cost analysis behind bulk methods, strict / skip-missing
   semantics.
 - Pool capacity: FIFO-take / LIFO-push reuse, capability-agnostic storage (entries are bare `Obj<'lean>` environments
@@ -137,9 +137,9 @@ Implementation details. Changing them is allowed; surfacing them in the public A
 Rust applications using `lean-rs` can call Lean code, ask the elaborator and kernel semantic questions through bounded
 host capabilities, and receive typed results. They can load compiled Lean modules, invoke exported functions, batch
 calls, and reuse sessions. None of this requires reaching into `lean-rs-sys` or knowing any item in the hidden-knowledge
-table. Applications that legitimately need raw FFI—for example, to call a Lean capability not yet wrapped in
-`lean-rs`—can opt in by depending on `lean-rs-sys` directly, accepting full `unsafe` discipline. This is friendlier than
-a workspace fork.
+table. Applications that need arbitrary typed `@[export]` calls use `lean-rs` directly. Applications that legitimately
+need raw FFI can opt in by depending on `lean-rs-sys` directly, accepting full `unsafe` discipline. This is friendlier
+than a workspace fork.
 
 ## Discarded behaviour
 

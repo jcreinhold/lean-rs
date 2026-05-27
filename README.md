@@ -44,7 +44,7 @@ cargo run -p lean-rs-host --example tour
 `tour` composes the standard Lean service flow in one process: open the runtime, load capabilities, open an import
 session, elaborate, kernel-check, run a bulk query, and call `Meta.whnf`.
 
-Browse the eight examples and walkthroughs at
+Browse the service-layer examples and walkthroughs at
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the service-layer tour path
 for sessions, kernel checks, and `MetaM`.
 
@@ -66,15 +66,19 @@ Choose by job:
 | Bind raw Lean C symbols directly (advanced, `unsafe`) | `lean-rs-sys` |
 
 Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. In plain terms: raw Lean C ABI, toolchain and
-build helpers, typed Rust FFI, then standard Lean services. The safety boundary is still migrating: `lean-rs` owns the
-raw Lean ABI and safe APIs must enforce their own invariants, while `lean-rs-host` still contains trusted shim dispatch,
-host-specific Lean layout decoding, and progress callback plumbing that will move behind safer `lean-rs` APIs before
-1.0. The worker boundary is three sibling crates:
+build helpers, typed Rust FFI, then standard Lean services. `lean-rs` owns the trusted unsafe implementation for Lean
+runtime interaction: runtime initialization, object ownership, ABI decoding, dynamic symbol loading, checked
+manifest-backed export lookup, and the explicitly unsafe `LeanModule::exported_unchecked` path for arbitrary symbols.
+`lean-rs-host` is a safe consumer of that layer. It exposes closed host operations backed by manifest-checked
+`HostShimBindings`; it does not rewrap arbitrary export dispatch or expose raw Lean runtime bindings. Safe APIs in
+`lean-rs` and `lean-rs-host` do not require callers to uphold Rust memory-safety invariants manually. That claim is
+only about Rust memory safety, not Lean proof correctness, semantic correctness, termination, or resource exhaustion.
+The worker boundary is three sibling crates:
 `lean-rs-worker-protocol` (wire types only, no Lean dependency), `lean-rs-worker-parent` (parent-side supervisor and
 pool; does not link `libleanshared`), and `lean-rs-worker-child` (child runtime and the `lean-rs-worker-child` binary;
 the only worker crate that links `libleanshared`). Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`;
 the higher layers do not re-export them. Lower layers are escape hatches, not steps every downstream caller should
-hand-compose. See [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) for the current trusted
+hand-compose. See [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) for the safety
 boundary and [`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the service-layer
 classification table.
 

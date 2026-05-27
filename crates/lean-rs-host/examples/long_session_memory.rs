@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use lean_rs::{LeanResult, LeanRuntime};
 use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, PoolStats, SessionPool};
+use lean_toolchain::LEAN_VERSION;
 
 const DEFAULT_IMPORTS: usize = 192;
 const DEFAULT_BULK: usize = 512;
@@ -65,8 +66,7 @@ fn main() -> ExitCode {
     println!("workload=long_session_memory");
     println!("pid={}", std::process::id());
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
-    println!("lean_version={}", lean_rs_sys::LEAN_VERSION);
-    println!("lean_resolved_version={}", lean_rs_sys::LEAN_RESOLVED_VERSION);
+    println!("lean_version={LEAN_VERSION}");
     println!("imports_n={}", config.imports);
     println!("bulk_m={}", config.bulk);
     println!("elab_k={}", config.elab);

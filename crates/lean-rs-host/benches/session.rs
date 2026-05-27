@@ -8,13 +8,7 @@
 //! construction happens once outside `b.iter`, so the recorded numbers
 //! reflect the steady-state hot path, not import cost.
 
-#![allow(
-    unsafe_code,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
+#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
 
 use std::path::PathBuf;
 
@@ -91,36 +85,6 @@ fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, 
         });
     }
     group.finish();
-}
-
-// -- dynamic capability lookup ------------------------------------------
-//
-// Workload: `host::session::call_capability_unchecked_lookup_u32_add` —
-// `LeanSession::call_capability_unchecked` against a user fixture export. This is
-// the intentionally uncached escape hatch: each iteration resolves the
-// symbol by name before constructing a typed `LeanExported` and calling
-// it. Compare with `module::scalar_dispatch_u32_add` in the `lean-rs`
-// `hot_paths` bench for the cached-handle floor.
-
-fn bench_call_capability_lookup(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
-    let mut session = caps
-        .session(&["LeanRsFixture.Scalars"], None, None)
-        .expect("Scalars imports cleanly");
-
-    c.bench_function("host::session::call_capability_unchecked_lookup_u32_add", |b| {
-        b.iter(|| {
-            // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-            let result: u32 = unsafe {
-                session.call_capability_unchecked::<(u32, u32), u32>(
-                    black_box("lean_rs_fixture_u32_add"),
-                    (black_box(7_u32), black_box(35_u32)),
-                    None,
-                )
-            }
-            .expect("capability call");
-            black_box(result);
-        });
-    });
 }
 
 // -- progress callback delivery -----------------------------------------
@@ -430,7 +394,6 @@ fn criterion_benchmarks(c: &mut Criterion) {
         .expect("capabilities load");
 
     bench_query_declarations_bulk(c, &caps);
-    bench_call_capability_lookup(c, &caps);
     bench_query_declarations_bulk_progress(c, &caps);
     bench_declaration_type_bulk_vs_loop(c, &caps);
     bench_declaration_kind_bulk_vs_loop(c, &caps);

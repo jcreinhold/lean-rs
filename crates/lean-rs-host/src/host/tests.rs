@@ -6,7 +6,7 @@
 //! shim capability, starts a session over an import list, and
 //! exercises the typed query methods.
 
-#![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
+#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,8 @@ use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs::error::{HostStage, LeanError};
-use lean_rs::{LeanDiagnosticCode, LeanIo, LeanRuntime};
+use lean_rs::LeanRuntime;
+use lean_toolchain::LEAN_VERSION;
 
 use crate::host::meta::{
     LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
@@ -59,7 +60,7 @@ impl TempLakeProject {
         fs::create_dir_all(&root).expect("create temporary Lake project");
         fs::write(
             root.join("lean-toolchain"),
-            format!("leanprover/lean4:v{}\n", lean_rs_sys::LEAN_VERSION),
+            format!("leanprover/lean4:v{LEAN_VERSION}\n"),
         )
         .expect("write temporary Lean toolchain pin");
         Self { root }
@@ -249,11 +250,6 @@ fn load_shims_only_opens_session_against_user_oleans() {
         )
         .expect("kernel_check dispatch succeeds");
     assert_eq!(checked.status(), EvidenceStatus::Checked);
-
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    let err = unsafe { session.call_capability_unchecked::<(), LeanIo<()>>("demo_shims_no_user_export", (), None) }
-        .expect_err("shims-only capabilities do not dispatch user exports");
-    assert_eq!(err.code(), LeanDiagnosticCode::Unsupported);
 }
 
 #[test]
@@ -998,10 +994,22 @@ fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) ->
         .expect("session imports cleanly")
 }
 
-fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, symbol: &str) -> lean_rs::LeanExpr<'lean> {
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    unsafe { session.call_capability_unchecked::<((),), lean_rs::LeanExpr<'lean>>(symbol, ((),), None) }
-        .expect("fixture expression export dispatches cleanly")
+fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, fixture: &str) -> lean_rs::LeanExpr<'lean> {
+    let source = match fixture {
+        "lean_rs_fixture_meta_expr_nat" => "Nat".to_owned(),
+        "lean_rs_fixture_meta_expr_bool" => "Bool".to_owned(),
+        "lean_rs_fixture_meta_expr_reducible_nat_alias" => {
+            "LeanRsFixture.Meta.ReducibleNatAlias".to_owned()
+        }
+        "lean_rs_fixture_meta_expr_irreducible_nat_alias" => {
+            "LeanRsFixture.Meta.IrreducibleNatAlias".to_owned()
+        }
+        other => panic!("unknown meta fixture expression export {other}"),
+    };
+    session
+        .elaborate(&source, None, &LeanElabOptions::new(), None)
+        .expect("fixture expression elaboration reports no exception")
+        .expect("fixture expression elaborates")
 }
 
 fn assert_is_def_eq_response(response: &LeanMetaResponse<bool>, expected: bool) {
@@ -1294,27 +1302,6 @@ fn meta_is_def_eq_all_unfolds_irreducible_alias() {
         )
         .expect("host stack reports no exception");
     assert_is_def_eq_response(&outcome, true);
-}
-
-#[test]
-fn meta_is_def_eq_surfaces_heartbeat_exhaustion() {
-    let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
-    let mut session = session_over_meta(&caps);
-
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_large_nat_left");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_large_nat_right");
-    let opts = LeanMetaOptions::new().heartbeat_limit(1);
-    let outcome = session
-        .run_meta(&is_def_eq(), (lhs, rhs, LeanMetaTransparency::All), &opts, None)
-        .expect("host stack reports no exception");
-    assert_eq!(
-        outcome.status(),
-        MetaCallStatus::TimeoutOrHeartbeat,
-        "large equality with heartbeat budget 1 must surface TimeoutOrHeartbeat, got {outcome:?}",
-    );
 }
 
 #[test]

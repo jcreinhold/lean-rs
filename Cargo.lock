@@ -355,7 +355,6 @@ version = "0.1.15"
 dependencies = [
  "criterion",
  "lean-rs",
- "lean-rs-sys",
  "lean-toolchain",
  "serde_json",
  "tracing",

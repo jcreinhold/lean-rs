@@ -18,6 +18,8 @@
 //! `@[export]` Lean function with typed arguments, no shim contract —
 //! should depend on `lean-rs` directly and skip this crate.
 
+#![forbid(unsafe_code)]
+
 pub mod host;
 
 /// Bounded `MetaM` service surface. Reachable only at this sub-module

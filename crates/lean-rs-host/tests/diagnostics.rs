@@ -12,12 +12,12 @@
 //! resolved relative to the workspace root the same way every other
 //! integration test does it.
 
-#![allow(unsafe_code, clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 
-use lean_rs::module::{LeanIo, LeanLibrary};
-use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanError, LeanRuntime};
+use lean_rs::module::LeanLibrary;
+use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
 use lean_rs_host::meta::{MetaCallStatus, infer_type};
 use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanSession};
 
@@ -117,20 +117,6 @@ fn linking_code_on_missing_initializer_symbol() {
 }
 
 #[test]
-fn symbol_lookup_code_on_missing_capability_export() {
-    let host = fixture_host();
-    let caps = fixture_caps(&host);
-    let mut session = session_over_handles(&caps);
-    // No symbol with this name is exported by the fixture; the
-    // `resolve_function_symbol` path tags it as `SymbolLookup`.
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    let err =
-        unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_no_such_capability_export", (), None) }
-            .expect_err("missing capability symbol must fail");
-    assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup, "got {err:?}");
-}
-
-#[test]
 fn abi_conversion_code_on_missing_declaration() {
     let host = fixture_host();
     let caps = fixture_caps(&host);
@@ -139,30 +125,6 @@ fn abi_conversion_code_on_missing_declaration() {
         .query_declaration("LeanRsFixture.Handles.definitely_does_not_exist", None)
         .expect_err("unknown name must fail at the conversion boundary");
     assert_eq!(err.code(), LeanDiagnosticCode::AbiConversion, "got {err:?}");
-}
-
-#[test]
-fn lean_exception_code_from_lean_throw() {
-    let host = fixture_host();
-    let caps = fixture_caps(&host);
-    // `LeanRsFixture.Effects.ioThrow` raises through Lean's IO error
-    // channel; `call_capability` projects the `IO Nat` return as
-    // `LeanIo<u64>` so the failure surfaces as `LeanError::LeanException`.
-    let mut session = caps
-        .session(&["LeanRsFixture.Effects"], None, None)
-        .expect("session imports cleanly");
-    // SAFETY: the requested Lean export signature is pinned by the fixture or caller contract.
-    let err = unsafe { session.call_capability_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_io_throw", (), None) }
-        .expect_err("fixture export raises through IO");
-    assert_eq!(err.code(), LeanDiagnosticCode::LeanException, "got {err:?}");
-    let LeanError::LeanException(exc) = err else {
-        panic!("expected LeanException variant");
-    };
-    assert!(
-        exc.message().contains("deliberate IO exception"),
-        "got message {:?}",
-        exc.message()
-    );
 }
 
 #[test]

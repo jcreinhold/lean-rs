@@ -70,6 +70,12 @@ fn shipped_manifest_path() -> PathBuf {
         .filter_map(Result::ok)
         .map(|entry| entry.path().join("out").join("ShipLeanDemo.lean-rs-capability.json"))
         .filter(|path| path.is_file())
+        .filter(|path| {
+            let bytes = std::fs::read(path).expect("read emitted capability manifest");
+            let json: serde_json::Value = serde_json::from_slice(&bytes).expect("capability manifest is JSON");
+            json.get("schema_version").and_then(serde_json::Value::as_u64)
+                == Some(u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION))
+        })
         .collect::<Vec<_>>();
     candidates.sort();
     candidates.pop().expect("template build emitted a capability manifest")

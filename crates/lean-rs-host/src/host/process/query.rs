@@ -138,12 +138,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQueryOutputBudgets {
         self.into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        drop(Obj::from_c(c, runtime)?);
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "ModuleQueryOutputBudgets cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -159,12 +154,7 @@ impl<'lean> LeanAbi<'lean> for &ModuleQueryOutputBudgets {
         self.clone().into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        drop(Obj::from_c(c, runtime)?);
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "&ModuleQueryOutputBudgets cannot decode a Lean call result; use ModuleQueryOutputBudgets for owned values",
         ))
@@ -237,12 +227,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuerySelector {
         self.into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        drop(Obj::from_c(c, runtime)?);
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "ModuleQuerySelector cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -258,12 +243,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuery {
         self.into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        drop(Obj::from_c(c, runtime)?);
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "ModuleQuery cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -279,12 +259,7 @@ impl<'lean> LeanAbi<'lean> for &ModuleQuery {
         self.clone().into_lean(runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        drop(Obj::from_c(c, runtime)?);
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "&ModuleQuery cannot decode a Lean call result; use ModuleQuery for owned values",
         ))
