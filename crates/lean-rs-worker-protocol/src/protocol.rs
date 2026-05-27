@@ -26,7 +26,8 @@ use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerRendered,
 };
 
 /// Wire protocol version negotiated between parent and child during the
@@ -204,6 +205,13 @@ pub enum Request {
         query: LeanWorkerModuleQuery,
         options: LeanWorkerElabOptions,
     },
+    ProcessModuleQueryBatch {
+        source: String,
+        selectors: Vec<LeanWorkerModuleQuerySelector>,
+        budgets: LeanWorkerOutputBudgets,
+        options: LeanWorkerElabOptions,
+    },
+    ClearModuleSnapshotCache,
     // Private harness requests that exercise streaming frame behavior.
     // Not part of the public row sink API.
     EmitTestRows {
@@ -293,6 +301,12 @@ pub enum Response {
     },
     ProcessModuleQuery {
         outcome: LeanWorkerModuleQueryOutcome,
+    },
+    ProcessModuleQueryBatch {
+        outcome: LeanWorkerModuleQueryBatchOutcome,
+    },
+    ModuleSnapshotCacheCleared {
+        result: crate::types::LeanWorkerModuleSnapshotCacheClearResult,
     },
     RowsComplete {
         count: u64,
@@ -622,8 +636,11 @@ mod tests {
         Request, Response, read_frame, write_frame,
     };
     use crate::types::{
-        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome,
-        LeanWorkerModuleQueryResult, LeanWorkerModuleSourceSpan, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
+        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery,
+        LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+        LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
+        LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
+        LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -833,5 +850,55 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn module_query_batch_request_and_response_round_trip() {
+        let request = Message::Request(Request::ProcessModuleQueryBatch {
+            source: "theorem t : True := by\n  trivial\n".to_owned(),
+            selectors: vec![
+                LeanWorkerModuleQuerySelector::Diagnostics {
+                    id: "diagnostics".to_owned(),
+                },
+                LeanWorkerModuleQuerySelector::ProofState {
+                    id: "state".to_owned(),
+                    line: 2,
+                    column: 4,
+                },
+            ],
+            budgets: LeanWorkerOutputBudgets::default(),
+            options: LeanWorkerElabOptions::default(),
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("module query batch request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query batch request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::ProcessModuleQueryBatch {
+            outcome: LeanWorkerModuleQueryBatchOutcome::Ok {
+                imports: Vec::new(),
+                result: LeanWorkerModuleQueryBatchEnvelope {
+                    items: vec![LeanWorkerModuleQueryBatchItem::Ok {
+                        id: "diagnostics".to_owned(),
+                        result: Box::new(LeanWorkerModuleQueryBatchResult::Diagnostics(LeanWorkerElabFailure {
+                            diagnostics: Vec::new(),
+                            truncated: false,
+                        })),
+                    }],
+                    total_truncated: false,
+                },
+                facts: LeanWorkerModuleQueryCacheFacts {
+                    cache_status: LeanWorkerModuleCacheStatus::Miss,
+                    timings: LeanWorkerModuleQueryTimings::zero(),
+                    output_bytes: 0,
+                    cache_entry_count: Some(1),
+                    cache_approx_bytes: Some(1024),
+                },
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("module query batch response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query batch response reads");
+        assert_eq!(frame.message, response);
     }
 }

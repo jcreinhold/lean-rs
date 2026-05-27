@@ -11,9 +11,9 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-eight **mandatory** `@[export]` symbols and may export six
+//! exports twenty-eight **mandatory** `@[export]` symbols and may export nine
 //! **optional** symbols (matched at `LeanCapabilities::load_capabilities` time) —
-//! five bounded `MetaM` services plus one bounded module-query entry point:
+//! five bounded `MetaM` services plus module-query entry points and cache control:
 //!
 //! | C symbol                                       | Mandatory? | Lean signature                                                                                                |
 //! | ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -51,6 +51,9 @@
 //! | `lean_rs_host_meta_is_def_eq`                  | optional   | `Environment -> (Expr × Expr × UInt8) -> UInt64 -> USize -> UInt8 -> IO (MetaResponse Bool)`                  |
 //! | `lean_rs_host_meta_pp_expr`                    | optional   | `Environment -> Expr -> UInt64 -> USize -> UInt8 -> IO (MetaResponse String)`                                 |
 //! | `lean_rs_host_process_module_query`            | optional   | `Environment -> String -> ModuleQuery -> String -> String -> UInt64 -> USize -> IO ModuleQueryOutcome`        |
+//! | `lean_rs_host_process_module_query_batch`      | optional   | `Environment -> String -> Array ModuleQuerySelector -> ModuleQueryOutputBudgets -> String -> String -> UInt64 -> USize -> IO ModuleQueryBatchOutcome` |
+//! | `lean_rs_host_process_module_query_batch_cached` | optional | `Environment -> String -> Array ModuleQuerySelector -> ModuleQueryOutputBudgets -> String -> String -> UInt64 -> USize -> String -> IO ModuleQueryBatchCachedOutcome` |
+//! | `lean_rs_host_clear_module_snapshot_cache`     | optional   | `Unit -> IO ModuleSnapshotCacheClearResult`                                                                   |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
 //! [`lean_rs::HostStage::Link`] — failures bind to the capability's load,
@@ -139,7 +142,10 @@ use crate::host::capabilities::LeanCapabilities;
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
-use crate::host::process::{ModuleQuery, ModuleQueryOutcome};
+use crate::host::process::{
+    ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome, ModuleQueryCachePolicy, ModuleQueryOutcome,
+    ModuleQueryOutputBudgets, ModuleQuerySelector, ModuleSnapshotCacheClearResult,
+};
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
 use lean_rs::Obj;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
@@ -343,12 +349,15 @@ pub(crate) struct SessionSymbols {
     pub(crate) meta_is_def_eq: Option<*mut c_void>,
     pub(crate) meta_pp_expr: Option<*mut c_void>,
     pub(crate) process_module_query: Option<*mut c_void>,
+    pub(crate) process_module_query_batch: Option<*mut c_void>,
+    pub(crate) process_module_query_batch_cached: Option<*mut c_void>,
+    pub(crate) clear_module_snapshot_cache: Option<*mut c_void>,
 }
 
 impl SessionSymbols {
     /// Resolve session function symbols from `library`. The twenty-eight
-    /// baseline symbols are mandatory; the six optional symbols (five
-    /// bounded `MetaM` services and the info-tree projection) degrade
+    /// baseline symbols are mandatory; the nine optional symbols (five
+    /// bounded `MetaM` services and the info-tree projections) degrade
     /// to per-call `Unsupported` returns if missing.
     ///
     /// # Errors
@@ -403,6 +412,12 @@ impl SessionSymbols {
             meta_is_def_eq: library.resolve_optional_function_symbol("lean_rs_host_meta_is_def_eq"),
             meta_pp_expr: library.resolve_optional_function_symbol("lean_rs_host_meta_pp_expr"),
             process_module_query: library.resolve_optional_function_symbol("lean_rs_host_process_module_query"),
+            process_module_query_batch: library
+                .resolve_optional_function_symbol("lean_rs_host_process_module_query_batch"),
+            process_module_query_batch_cached: library
+                .resolve_optional_function_symbol("lean_rs_host_process_module_query_batch_cached"),
+            clear_module_snapshot_cache: library
+                .resolve_optional_function_symbol("lean_rs_host_clear_module_snapshot_cache"),
         })
     }
 
@@ -1359,6 +1374,186 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
+        self.record_call(0, t.elapsed());
+        result
+    }
+
+    /// Parse and elaborate a Lean module once, returning several bounded
+    /// projections keyed by selector id.
+    ///
+    /// This is the proof-agent path: Lean owns header handling, one body
+    /// elaboration, info-tree traversal, and selector projection. Rust sends
+    /// a small selector array and receives per-selector outcomes; whole-file
+    /// info-tree arrays never cross the boundary.
+    ///
+    /// The shim is optional. When the loaded capability dylib does not
+    /// export `lean_rs_host_process_module_query_batch`, the method returns
+    /// [`ModuleQueryBatchOutcome::Unsupported`] without an FFI call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is
+    /// already cancelled before dispatch. Returns
+    /// [`lean_rs::LeanError::LeanException`] if the Lean-side shim raises
+    /// through `IO`. Returns [`lean_rs::LeanError::Host`] with stage
+    /// [`HostStage::Conversion`] if the Lean return value does not decode
+    /// into [`ModuleQueryBatchOutcome`].
+    pub fn process_module_query_batch(
+        &mut self,
+        source: &str,
+        selectors: &[ModuleQuerySelector],
+        budgets: &ModuleQueryOutputBudgets,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<ModuleQueryBatchOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.process_module_query_batch",
+            source_len = source.len(),
+            selectors = selectors.len(),
+            per_field_bytes = budgets.per_field_bytes,
+            total_bytes = budgets.total_bytes,
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(address) = self.capabilities.symbols().process_module_query_batch else {
+            return Ok(ModuleQueryBatchOutcome::Unsupported);
+        };
+        let selectors_owned = selectors.to_vec();
+        // SAFETY: per the SessionSymbols::resolve invariant; signature
+        // is `(Environment, String, Array ModuleQuerySelector,
+        // ModuleQueryOutputBudgets, String, String, UInt64, USize) ->
+        // IO ModuleQueryBatchOutcome`.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (
+                Obj<'lean>,
+                &str,
+                Vec<ModuleQuerySelector>,
+                &ModuleQueryOutputBudgets,
+                &str,
+                &str,
+                u64,
+                usize,
+            ),
+            LeanIo<ModuleQueryBatchOutcome>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            source,
+            selectors_owned,
+            budgets,
+            options.namespace_context_str(),
+            options.file_label_str(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
+        result
+    }
+
+    /// Parse/elaborate a Lean module through the shim-owned module snapshot
+    /// cache, then return bounded selector projections plus cache facts.
+    ///
+    /// The snapshot cache remains private to the loaded shim. Rust provides
+    /// the stable cache key and conservative policy, but never receives raw
+    /// info trees.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cancellation is already requested, if the shim
+    /// raises an `IO` exception, or if the Lean result cannot be decoded into
+    /// the expected cached batch outcome.
+    pub fn process_module_query_batch_cached(
+        &mut self,
+        source: &str,
+        selectors: &[ModuleQuerySelector],
+        budgets: &ModuleQueryOutputBudgets,
+        options: &LeanElabOptions,
+        policy: &ModuleQueryCachePolicy,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<ModuleQueryBatchCachedOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.process_module_query_batch_cached",
+            source_len = source.len(),
+            selectors = selectors.len(),
+            per_field_bytes = budgets.per_field_bytes,
+            total_bytes = budgets.total_bytes,
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(address) = self.capabilities.symbols().process_module_query_batch_cached else {
+            return Ok(ModuleQueryBatchCachedOutcome::Unsupported);
+        };
+        let selectors_owned = selectors.to_vec();
+        // SAFETY: per the SessionSymbols::resolve invariant; signature is
+        // `(Environment, String, Array ModuleQuerySelector,
+        // ModuleQueryOutputBudgets, String, String, UInt64, USize, String)
+        // -> IO ModuleQueryBatchCachedOutcome`. The final string is a
+        // private cache-policy envelope decoded by the shim.
+        let call: LeanExported<
+            'lean,
+            '_,
+            (
+                Obj<'lean>,
+                &str,
+                Vec<ModuleQuerySelector>,
+                &ModuleQueryOutputBudgets,
+                &str,
+                &str,
+                u64,
+                usize,
+                &str,
+            ),
+            LeanIo<ModuleQueryBatchCachedOutcome>,
+        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let policy_text = format!(
+            "{}\n{}\n{}\n{}\n{}",
+            policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
+        );
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            source,
+            selectors_owned,
+            budgets,
+            options.namespace_context_str(),
+            options.file_label_str(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+            policy_text.as_str(),
+        );
+        self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
+        result
+    }
+
+    /// Clear the shim-owned module snapshot cache when the loaded capability
+    /// supports it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shim raises an `IO` exception or if the Lean
+    /// clear result cannot be decoded.
+    pub fn clear_module_snapshot_cache(&mut self) -> LeanResult<ModuleSnapshotCacheClearResult> {
+        let Some(address) = self.capabilities.symbols().clear_module_snapshot_cache else {
+            return Ok(ModuleSnapshotCacheClearResult {
+                entries_cleared: 0,
+                approx_bytes_cleared: 0,
+            });
+        };
+        // SAFETY: per the SessionSymbols::resolve invariant; signature is
+        // `Unit -> IO ModuleSnapshotCacheClearResult`.
+        let call: LeanExported<'lean, '_, (), LeanIo<ModuleSnapshotCacheClearResult>> =
+            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let t = Instant::now();
+        let result = call.call();
         self.record_call(0, t.elapsed());
         result
     }

@@ -1,6 +1,6 @@
 //! Per-method coverage for the typed `LeanWorkerSession` surface added in
 //! 0.1.6: `infer_type`, `whnf`, `is_def_eq`, `describe`,
-//! `list_declarations_strings`, `describe_bulk`, and `process_module_query`.
+//! `list_declarations_strings`, `describe_bulk`, and module queries.
 //! Each test exercises the full worker → child → host
 //! dispatch path and asserts response shape against the fixture.
 
@@ -14,12 +14,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationSearch, LeanWorkerElabOptions,
-    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
+    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -47,6 +51,10 @@ fn worker_config() -> LeanWorkerConfig {
     LeanWorkerConfig::new(worker_binary())
 }
 
+fn cache_worker_config() -> LeanWorkerConfig {
+    worker_config().env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", "0")
+}
+
 fn handles_session_config() -> LeanWorkerSessionConfig {
     LeanWorkerSessionConfig::new(
         fixture_root(),
@@ -63,6 +71,42 @@ fn elaboration_session_config() -> LeanWorkerSessionConfig {
         "LeanRsFixture",
         ["LeanRsHostShims.Elaboration"],
     )
+}
+
+fn cache_probe_selectors() -> Vec<LeanWorkerModuleQuerySelector> {
+    vec![LeanWorkerModuleQuerySelector::ProofState {
+        id: "state".to_owned(),
+        line: 2,
+        column: 4,
+    }]
+}
+
+fn batch_facts(outcome: &LeanWorkerModuleQueryBatchOutcome) -> &LeanWorkerModuleQueryCacheFacts {
+    match outcome {
+        LeanWorkerModuleQueryBatchOutcome::Ok { facts, .. }
+        | LeanWorkerModuleQueryBatchOutcome::MissingImports { facts, .. }
+        | LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed { facts, .. } => facts,
+        LeanWorkerModuleQueryBatchOutcome::Unsupported => panic!("batch cache facts unavailable on unsupported outcome"),
+        _ => panic!("unexpected batch outcome variant"),
+    }
+}
+
+fn assert_batch_has_state(outcome: &LeanWorkerModuleQueryBatchOutcome) {
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(
+        result.items.iter().any(|item| {
+            matches!(
+                item,
+                LeanWorkerModuleQueryBatchItem::Ok { id, result }
+                    if id == "state"
+                        && matches!(result.as_ref(), LeanWorkerModuleQueryBatchResult::ProofState(_))
+            )
+        }),
+        "expected proof-state selector item, got {:?}",
+        result.items,
+    );
 }
 
 struct TempLakeProject {
@@ -539,6 +583,417 @@ fn process_module_query_references_through_worker() {
         }
         other => panic!("expected Ok references outcome, got {other:?}"),
     }
+}
+
+#[test]
+fn process_module_query_batch_returns_diagnostics_and_proof_state_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[
+                LeanWorkerModuleQuerySelector::Diagnostics {
+                    id: "diagnostics".to_owned(),
+                },
+                LeanWorkerModuleQuerySelector::ProofState {
+                    id: "state".to_owned(),
+                    line: 2,
+                    column: 4,
+                },
+                LeanWorkerModuleQuerySelector::DeclarationTarget {
+                    id: "target".to_owned(),
+                    name: Some("t".to_owned()),
+                    line: None,
+                    column: None,
+                },
+            ],
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query_batch dispatch succeeds");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only source should not report imports");
+    assert_eq!(result.items.len(), 3);
+    assert!(!result.total_truncated, "small fixture should fit default budget");
+
+    let diagnostics = result
+        .items
+        .iter()
+        .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "diagnostics"))
+        .expect("diagnostics item present");
+    match diagnostics {
+        LeanWorkerModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            LeanWorkerModuleQueryBatchResult::Diagnostics(failure) => assert!(
+                failure.diagnostics.iter().all(|d| d.severity != "error"),
+                "valid proof should not produce error diagnostics, got {failure:?}",
+            ),
+            other => panic!("expected diagnostics result, got {other:?}"),
+        },
+        other => panic!("expected diagnostics result, got {other:?}"),
+    }
+
+    let proof_state = result
+        .items
+        .iter()
+        .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "state"))
+        .expect("proof-state item present");
+    match proof_state {
+        LeanWorkerModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            LeanWorkerModuleQueryBatchResult::ProofState(LeanWorkerProofStateResult::State { info }) => {
+                assert!(
+                    info.goals_before.iter().any(|goal| goal.contains("True")),
+                    "goal before `exact h` should mention True, got {:?}",
+                    info.goals_before,
+                );
+                assert!(
+                    info.locals.iter().any(|local| local.name == "h"),
+                    "local context should include hypothesis h, got {:?}",
+                    info.locals,
+                );
+                assert!(
+                    info.safe_edit.is_some(),
+                    "proof state should include a safe edit declaration span"
+                );
+            }
+            other => panic!("expected proof-state result, got {other:?}"),
+        },
+        other => panic!("expected proof-state result, got {other:?}"),
+    }
+}
+
+#[test]
+fn process_module_query_batch_obeys_total_budget_without_killing_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[LeanWorkerModuleQuerySelector::ProofState {
+                id: "state".to_owned(),
+                line: 2,
+                column: 4,
+            }],
+            &LeanWorkerOutputBudgets {
+                per_field_bytes: 128,
+                total_bytes: 0,
+            },
+            &opts,
+            None,
+            None,
+        )
+        .expect("budget exhaustion is a normal batch outcome");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome with budgeted item, got {outcome:?}");
+    };
+    assert!(result.total_truncated, "batch should report total truncation");
+    assert!(
+        matches!(
+            result.items.as_slice(),
+            [LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. }] if id == "state"
+        ),
+        "expected budget-exceeded selector item, got {:?}",
+        result.items,
+    );
+
+    let rendered = session
+        .infer_type("(Nat.succ 0 : Nat)", &LeanWorkerElabOptions::new(), None, None)
+        .expect("worker should still accept later requests");
+    assert!(
+        matches!(rendered, LeanWorkerMetaResult::Ok { .. }),
+        "worker should survive budgeted batch output: {rendered:?}"
+    );
+}
+
+#[test]
+fn process_module_query_batch_reuses_snapshot_for_same_file_content() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/reuse.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let selectors = cache_probe_selectors();
+
+    let first = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("first batch succeeds");
+    assert_batch_has_state(&first);
+    assert_eq!(batch_facts(&first).cache_status, LeanWorkerModuleCacheStatus::Miss);
+
+    let second = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("second batch succeeds");
+    assert_batch_has_state(&second);
+    let facts = batch_facts(&second);
+    assert_eq!(facts.cache_status, LeanWorkerModuleCacheStatus::Hit);
+    assert!(facts.cache_entry_count.is_some());
+    assert!(facts.cache_approx_bytes.is_some());
+}
+
+#[test]
+fn process_module_query_batch_rebuilds_when_content_changes() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/rebuild.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let selectors = cache_probe_selectors();
+
+    let first = session
+        .process_module_query_batch(
+            "theorem t (h : True) : True := by\n  exact h\n",
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("first batch succeeds");
+    assert_eq!(batch_facts(&first).cache_status, LeanWorkerModuleCacheStatus::Miss);
+
+    let changed = session
+        .process_module_query_batch(
+            "theorem t (h : True) : True := by\n  trivial\n",
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("changed-content batch succeeds");
+    assert_batch_has_state(&changed);
+    assert_eq!(
+        batch_facts(&changed).cache_status,
+        LeanWorkerModuleCacheStatus::Rebuilt
+    );
+}
+
+#[test]
+fn process_module_query_batch_clear_evicts_snapshot() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/clear.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let selectors = cache_probe_selectors();
+
+    session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("populate cache");
+    let cleared = session
+        .clear_module_snapshot_cache(None, None)
+        .expect("manual clear succeeds");
+    assert!(cleared.entries_cleared >= 1, "expected at least one cache entry cleared");
+
+    let after_clear = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("batch after clear succeeds");
+    assert_ne!(batch_facts(&after_clear).cache_status, LeanWorkerModuleCacheStatus::Hit);
+}
+
+#[test]
+fn process_module_query_batch_changed_session_imports_miss() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/imports.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let selectors = cache_probe_selectors();
+    {
+        let mut session = worker
+            .open_session(&elaboration_session_config(), None, None)
+            .expect("worker session opens");
+        session
+            .process_module_query_batch(
+                source,
+                &selectors,
+                &LeanWorkerOutputBudgets::default(),
+                &opts,
+                None,
+                None,
+            )
+            .expect("first session batch succeeds");
+    }
+
+    let changed_imports = LeanWorkerSessionConfig::new(
+        fixture_root(),
+        "lean_rs_fixture",
+        "LeanRsFixture",
+        ["LeanRsHostShims.Elaboration", "Lean"],
+    );
+    let mut session = worker
+        .open_session(&changed_imports, None, None)
+        .expect("worker session with changed imports opens");
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("changed-import batch succeeds");
+    assert_eq!(batch_facts(&outcome).cache_status, LeanWorkerModuleCacheStatus::Miss);
+}
+
+#[test]
+fn process_module_query_batch_ttl_evicts_idle_snapshot() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/ttl.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", "1"))
+        .expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+    let selectors = cache_probe_selectors();
+
+    session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("populate cache");
+    std::thread::sleep(Duration::from_millis(5));
+    let after_ttl = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("batch after ttl succeeds");
+    assert_eq!(batch_facts(&after_ttl).cache_status, LeanWorkerModuleCacheStatus::Evicted);
+}
+
+#[test]
+fn process_module_query_batch_entry_limit_evicts_old_entries() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", "1"))
+        .expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let selectors = cache_probe_selectors();
+    let source = "theorem t (h : True) : True := by\n  exact h\n";
+
+    let first_opts = LeanWorkerElabOptions::new().file_label("/cache/entry-a.lean");
+    session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &first_opts,
+            None,
+            None,
+        )
+        .expect("first file populates cache");
+    let second_opts = LeanWorkerElabOptions::new().file_label("/cache/entry-b.lean");
+    let second = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &second_opts,
+            None,
+            None,
+        )
+        .expect("second file populates cache");
+    assert!(batch_facts(&second).cache_entry_count <= Some(1));
+
+    let first_again = session
+        .process_module_query_batch(
+            source,
+            &selectors,
+            &LeanWorkerOutputBudgets::default(),
+            &first_opts,
+            None,
+            None,
+        )
+        .expect("first file after entry eviction succeeds");
+    assert_ne!(batch_facts(&first_again).cache_status, LeanWorkerModuleCacheStatus::Hit);
+}
+
+#[test]
+fn process_module_query_batch_tiny_cache_still_returns_correct_query() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/tiny.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_BYTES", "1"))
+        .expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let outcome = session
+        .process_module_query_batch(
+            "theorem t (h : True) : True := by\n  exact h\n",
+            &cache_probe_selectors(),
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("tiny-cache batch succeeds");
+    assert_batch_has_state(&outcome);
+    let facts = batch_facts(&outcome);
+    assert_eq!(facts.cache_status, LeanWorkerModuleCacheStatus::Miss);
+    assert!(facts.output_bytes > 0);
 }
 
 #[test]

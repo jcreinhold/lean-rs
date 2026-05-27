@@ -350,6 +350,57 @@ pub enum LeanWorkerModuleQuery {
     References { name: String },
 }
 
+/// Explicit byte budgets for batched module projections.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerOutputBudgets {
+    pub per_field_bytes: u32,
+    pub total_bytes: u32,
+}
+
+impl Default for LeanWorkerOutputBudgets {
+    fn default() -> Self {
+        Self {
+            per_field_bytes: 8 * 1024,
+            total_bytes: 64 * 1024,
+        }
+    }
+}
+
+/// One selector in a batched module-processing request.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "selector", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQuerySelector {
+    Diagnostics {
+        id: String,
+    },
+    ProofState {
+        id: String,
+        line: u32,
+        column: u32,
+    },
+    TypeAt {
+        id: String,
+        line: u32,
+        column: u32,
+    },
+    References {
+        id: String,
+        name: String,
+    },
+    DeclarationTarget {
+        id: String,
+        name: Option<String>,
+        line: Option<u32>,
+        column: Option<u32>,
+    },
+    SurroundingDeclaration {
+        id: String,
+        line: u32,
+        column: u32,
+    },
+}
+
 /// Source span in the original file. Positions are 1-based.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerModuleSourceSpan {
@@ -401,6 +452,73 @@ pub struct LeanWorkerReferencesResult {
     pub truncated: bool,
 }
 
+/// One local declaration in a proof-state result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerLocalInfo {
+    pub name: String,
+    pub binder_info: String,
+    pub type_str: LeanWorkerRenderedInfo,
+    pub value: Option<LeanWorkerRenderedInfo>,
+}
+
+/// Source metadata for the declaration surrounding a proof-agent query.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationTargetInfo {
+    pub short_name: String,
+    pub declaration_name: String,
+    pub namespace_name: String,
+    pub declaration_kind: String,
+    pub declaration_span: LeanWorkerModuleSourceSpan,
+    pub name_span: LeanWorkerModuleSourceSpan,
+    pub body_span: LeanWorkerModuleSourceSpan,
+}
+
+/// Result for `LeanWorkerModuleQuerySelector::DeclarationTarget`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationTargetResult {
+    Target {
+        info: LeanWorkerDeclarationTargetInfo,
+    },
+    NotFound,
+    Ambiguous {
+        candidates: Vec<LeanWorkerDeclarationTargetInfo>,
+    },
+}
+
+/// Proof-state payload for one cursor.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofStateInfo {
+    pub declaration_name: Option<String>,
+    pub namespace_name: String,
+    pub safe_edit: Option<LeanWorkerDeclarationTargetInfo>,
+    pub span: LeanWorkerModuleSourceSpan,
+    pub goals_before: Vec<String>,
+    pub goals_after: Vec<String>,
+    pub locals: Vec<LeanWorkerLocalInfo>,
+    pub expected_type: Option<LeanWorkerRenderedInfo>,
+    pub truncated: bool,
+}
+
+/// Result for `LeanWorkerModuleQuerySelector::ProofState`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerProofStateResult {
+    State { info: Box<LeanWorkerProofStateInfo> },
+    Unavailable { message: String },
+}
+
+/// Result for `LeanWorkerModuleQuerySelector::SurroundingDeclaration`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerSurroundingDeclarationResult {
+    Declaration { info: LeanWorkerDeclarationTargetInfo },
+    None,
+}
+
 /// Typed payload returned by a successful module query.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "result", content = "body", rename_all = "snake_case")]
@@ -410,6 +528,107 @@ pub enum LeanWorkerModuleQueryResult {
     TypeAt(LeanWorkerTypeAtResult),
     GoalAt(LeanWorkerGoalAtResult),
     References(LeanWorkerReferencesResult),
+}
+
+/// Typed payload returned by one successful batch selector.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "result", content = "body", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQueryBatchResult {
+    Diagnostics(LeanWorkerElabFailure),
+    ProofState(LeanWorkerProofStateResult),
+    TypeAt(LeanWorkerTypeAtResult),
+    References(LeanWorkerReferencesResult),
+    DeclarationTarget(LeanWorkerDeclarationTargetResult),
+    SurroundingDeclaration(LeanWorkerSurroundingDeclarationResult),
+}
+
+/// One selector result in a batched module query.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQueryBatchItem {
+    Ok {
+        id: String,
+        result: Box<LeanWorkerModuleQueryBatchResult>,
+    },
+    Unavailable {
+        id: String,
+        message: String,
+    },
+    BudgetExceeded {
+        id: String,
+        message: String,
+    },
+}
+
+/// Successful batch selector envelope.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerModuleQueryBatchEnvelope {
+    pub items: Vec<LeanWorkerModuleQueryBatchItem>,
+    pub total_truncated: bool,
+}
+
+/// Worker-side module snapshot cache status for a batched module query.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleCacheStatus {
+    Hit,
+    Miss,
+    Rebuilt,
+    Evicted,
+}
+
+/// Phase timings for a batched module query, measured in the worker child.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerModuleQueryTimings {
+    pub header_import_micros: u64,
+    pub elaboration_micros: u64,
+    pub projection_micros: u64,
+    pub rendering_micros: u64,
+}
+
+impl LeanWorkerModuleQueryTimings {
+    #[must_use]
+    pub fn zero() -> Self {
+        Self {
+            header_import_micros: 0,
+            elaboration_micros: 0,
+            projection_micros: 0,
+            rendering_micros: 0,
+        }
+    }
+}
+
+/// Cache and timing facts attached to a batched module query outcome.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerModuleQueryCacheFacts {
+    pub cache_status: LeanWorkerModuleCacheStatus,
+    pub timings: LeanWorkerModuleQueryTimings,
+    pub output_bytes: u64,
+    pub cache_entry_count: Option<u64>,
+    pub cache_approx_bytes: Option<u64>,
+}
+
+impl LeanWorkerModuleQueryCacheFacts {
+    #[must_use]
+    pub fn uncached(output_bytes: u64) -> Self {
+        Self {
+            cache_status: LeanWorkerModuleCacheStatus::Miss,
+            timings: LeanWorkerModuleQueryTimings::zero(),
+            output_bytes,
+            cache_entry_count: None,
+            cache_approx_bytes: None,
+        }
+    }
+}
+
+/// Result of manually clearing the worker-side module snapshot cache.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerModuleSnapshotCacheClearResult {
+    pub entries_cleared: u64,
+    pub approx_bytes_cleared: u64,
 }
 
 /// Outcome of `LeanWorkerSession::process_module_query`.
@@ -435,6 +654,31 @@ pub enum LeanWorkerModuleQueryOutcome {
     HeaderParseFailed { diagnostics: LeanWorkerElabFailure },
     /// The capability dylib does not export
     /// `lean_rs_host_process_module_query`.
+    Unsupported,
+}
+
+/// Outcome of `LeanWorkerSession::process_module_query_batch`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerModuleQueryBatchOutcome {
+    Ok {
+        result: LeanWorkerModuleQueryBatchEnvelope,
+        imports: Vec<String>,
+        facts: LeanWorkerModuleQueryCacheFacts,
+    },
+    MissingImports {
+        result: LeanWorkerModuleQueryBatchEnvelope,
+        imports: Vec<String>,
+        missing: Vec<String>,
+        facts: LeanWorkerModuleQueryCacheFacts,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanWorkerElabFailure,
+        facts: LeanWorkerModuleQueryCacheFacts,
+    },
+    /// The loaded capability dylib does not export
+    /// `lean_rs_host_process_module_query_batch`.
     Unsupported,
 }
 

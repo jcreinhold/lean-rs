@@ -24,6 +24,26 @@ inductive ModuleQuery where
   | references (name : String)
   deriving Inhabited
 
+/-- One selector in a batched module-processing request. Each selector carries
+    a caller-chosen id so the result can be correlated without relying on
+    ordering. -/
+inductive ModuleQuerySelector where
+  | diagnostics (id : String)
+  | proofState (id : String) (line : Nat) (column : Nat)
+  | typeAt (id : String) (line : Nat) (column : Nat)
+  | references (id : String) (name : String)
+  | declarationTarget (id : String) (name? : Option String) (line? column? : Option Nat)
+  | surroundingDeclaration (id : String) (line : Nat) (column : Nat)
+  deriving Inhabited
+
+/-- Explicit byte budgets for batch projections. `perFieldBytes` caps individual
+    rendered fields; `totalBytes` is a conservative budget for the combined
+    selector payloads before serialization. -/
+structure ModuleQueryOutputBudgets where
+  perFieldBytes : Nat
+  totalBytes : Nat
+  deriving Inhabited
+
 /-- Source span in the original file. Lines and columns follow Lean's
     `FileMap.toPosition` convention. -/
 structure ModuleSourceSpan where
@@ -74,6 +94,51 @@ structure ReferencesResult where
   truncated : Bool
   deriving Inhabited
 
+structure LocalInfo where
+  name : String
+  binderInfo : String
+  typeStr : RenderedInfo
+  value : Option RenderedInfo
+  deriving Inhabited
+
+structure DeclarationTargetInfo where
+  shortName : String
+  declarationName : String
+  namespaceName : String
+  declarationKind : String
+  declarationSpan : ModuleSourceSpan
+  nameSpan : ModuleSourceSpan
+  bodySpan : ModuleSourceSpan
+  deriving Inhabited
+
+inductive DeclarationTargetResult where
+  | target (info : DeclarationTargetInfo)
+  | notFound
+  | ambiguous (candidates : Array DeclarationTargetInfo)
+  deriving Inhabited
+
+structure ProofStateInfo where
+  declarationName : Option String
+  namespaceName : String
+  safeEdit : Option DeclarationTargetInfo
+  span : ModuleSourceSpan
+  goalsBefore : Array String
+  goalsAfter : Array String
+  locals : Array LocalInfo
+  expectedType : Option RenderedInfo
+  truncated : Bool
+  deriving Inhabited
+
+inductive ProofStateResult where
+  | state (info : ProofStateInfo)
+  | unavailable (message : String)
+  deriving Inhabited
+
+inductive SurroundingDeclarationResult where
+  | declaration (info : DeclarationTargetInfo)
+  | none
+  deriving Inhabited
+
 inductive ModuleQueryResult where
   | diagnostics (failure : LeanRsFixture.Elaboration.ElabFailure)
   | typeAt (result : TypeAtResult)
@@ -91,6 +156,88 @@ inductive ModuleQueryOutcome where
       (missing : Array String)
   | headerParseFailed
       (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  deriving Inhabited
+
+inductive ModuleQueryBatchResult where
+  | diagnostics (failure : LeanRsFixture.Elaboration.ElabFailure)
+  | proofState (result : ProofStateResult)
+  | typeAt (result : TypeAtResult)
+  | references (result : ReferencesResult)
+  | declarationTarget (result : DeclarationTargetResult)
+  | surroundingDeclaration (result : SurroundingDeclarationResult)
+  deriving Inhabited
+
+inductive ModuleQueryBatchItem where
+  | ok (id : String) (result : ModuleQueryBatchResult)
+  | unavailable (id message : String)
+  | budgetExceeded (id message : String)
+  deriving Inhabited
+
+structure ModuleQueryBatchEnvelope where
+  items : Array ModuleQueryBatchItem
+  totalTruncated : Bool
+  deriving Inhabited
+
+inductive ModuleQueryBatchOutcome where
+  | ok
+      (result : ModuleQueryBatchEnvelope)
+      (imports : Array String)
+  | missingImports
+      (result : ModuleQueryBatchEnvelope)
+      (imports : Array String)
+      (missing : Array String)
+  | headerParseFailed
+      (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  deriving Inhabited
+
+inductive ModuleQueryCacheStatus where
+  | hit
+  | miss
+  | rebuilt
+  | evicted
+  deriving Inhabited
+
+structure ModuleQueryTimings where
+  headerImportMicros : UInt64
+  elaborationMicros : UInt64
+  projectionMicros : UInt64
+  renderingMicros : UInt64
+  deriving Inhabited
+
+structure ModuleQueryCacheFacts where
+  cacheStatus : ModuleQueryCacheStatus
+  timings : ModuleQueryTimings
+  outputBytes : UInt64
+  cacheEntryCount : Option Nat
+  cacheApproxBytes : Option Nat
+  deriving Inhabited
+
+structure ModuleQueryCachePolicy where
+  fileIdentity : String
+  key : String
+  maxEntries : UInt64
+  ttlMillis : UInt64
+  maxBytes : UInt64
+  deriving Inhabited
+
+inductive ModuleQueryBatchCachedOutcome where
+  | ok
+      (result : ModuleQueryBatchEnvelope)
+      (imports : Array String)
+      (facts : ModuleQueryCacheFacts)
+  | missingImports
+      (result : ModuleQueryBatchEnvelope)
+      (imports : Array String)
+      (missing : Array String)
+      (facts : ModuleQueryCacheFacts)
+  | headerParseFailed
+      (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+      (facts : ModuleQueryCacheFacts)
+  deriving Inhabited
+
+structure ModuleSnapshotCacheClearResult where
+  entriesCleared : UInt64
+  approxBytesCleared : UInt64
   deriving Inhabited
 
 private def rangeOfStx (fileMap : FileMap) (stx : Syntax) : Option ModuleSourceSpan :=
@@ -120,6 +267,7 @@ private def rangeArea (span : ModuleSourceSpan) : Nat :=
   lineSpan * 1000000 + colSpan
 
 private structure RenderState where
+  limit : Nat := renderByteLimit
   out : String := ""
   bytes : Nat := 0
   truncated : Bool := false
@@ -129,7 +277,7 @@ private def appendBounded (s : String) (st : RenderState) : RenderState :=
     st
   else
     let b := s.utf8ByteSize
-    if st.bytes + b > renderByteLimit then
+    if st.bytes + b > st.limit then
       { st with out := st.out ++ "<truncated>", truncated := true }
     else
       { st with out := st.out ++ s, bytes := st.bytes + b }
@@ -192,6 +340,10 @@ private partial def renderExprInto (e : Expr) (st : RenderState) : RenderState :
 
 private def renderExprBounded (e : Expr) : RenderedInfo :=
   let st := renderExprInto e {}
+  { value := st.out, truncated := st.truncated }
+
+private def renderExprBoundedWith (limit : Nat) (e : Expr) : RenderedInfo :=
+  let st := renderExprInto e { limit := limit }
   { value := st.out, truncated := st.truncated }
 
 private def emptyFailure : LeanRsFixture.Elaboration.ElabFailure :=
@@ -286,6 +438,23 @@ private def runTypeAt (fileMap : FileMap) (trees : PersistentArray InfoTree) (li
         pure { value := "", truncated := false }
     pure <| .term (offsetSpan lineOffset candidate.span) (renderExprBounded candidate.expr) typeInfo
       (candidate.expectedType?.map renderExprBounded)
+
+private def runTypeAtWith (fileMap : FileMap) (trees : PersistentArray InfoTree) (line column lineOffset : Nat)
+    (limit : Nat) : IO TypeAtResult := do
+  let mut acc : TypeAtAcc := { line := bodyLine line lineOffset, column := column }
+  for tree in trees do
+    acc ← tree.foldInfoM (init := acc) (collectTypeAt fileMap)
+  match acc.best? with
+  | none => pure .noTerm
+  | some candidate =>
+    let typeInfo ← candidate.ctx.runMetaM candidate.lctx do
+      try
+        let ty ← Meta.inferType candidate.expr
+        pure (renderExprBoundedWith limit ty)
+      catch _ =>
+        pure { value := "", truncated := false }
+    pure <| .term (offsetSpan lineOffset candidate.span) (renderExprBoundedWith limit candidate.expr) typeInfo
+      (candidate.expectedType?.map (renderExprBoundedWith limit))
 
 private structure TacticCandidate where
   span : ModuleSourceSpan
@@ -382,6 +551,228 @@ private def runReferences (fileMap : FileMap) (trees : PersistentArray InfoTree)
       break
   pure { references := acc.refs, truncated := acc.truncated }
 
+private def lemmaSyntaxKind : SyntaxNodeKind :=
+  Name.mkSimple "lemma"
+
+private partial def firstIdent? (stx : Syntax) : Option Syntax :=
+  if stx.isIdent then
+    some stx
+  else
+    stx.getArgs.findSome? firstIdent?
+
+private def declIdNameStx (stx : Syntax) : Syntax :=
+  if stx.getKind == ``Lean.Parser.Command.instance then
+    if let some identStx := firstIdent? stx[3] then
+      identStx
+    else
+      stx[1]
+  else if let some identStx := firstIdent? stx[1] then
+    identStx
+  else
+    stx[0]
+
+private def declarationKeyword (stx : Syntax) : String :=
+  if stx.getKind == lemmaSyntaxKind then
+    "lemma"
+  else if stx.getKind == ``Lean.Parser.Command.instance then
+    "instance"
+  else if stx.getNumArgs > 0 && stx[0].isAtom then
+    stx[0].getAtomVal
+  else
+    "theorem"
+
+private def catalogDeclarationSyntax? (stx : Syntax) : Option Syntax :=
+  if stx.getKind == ``Lean.Parser.Command.declaration then
+    let inner := stx[1]
+    if inner.getKind == ``Lean.Parser.Command.theorem ||
+        inner.getKind == ``Lean.Parser.Command.definition ||
+        inner.getKind == ``Lean.Parser.Command.abbrev ||
+        inner.getKind == ``Lean.Parser.Command.opaque ||
+        inner.getKind == ``Lean.Parser.Command.instance then
+      some inner
+    else
+      none
+  else if stx.getKind == lemmaSyntaxKind then
+    some stx
+  else
+    none
+
+private partial def declarationBodySyntax? (stx : Syntax) : Option Syntax :=
+  if stx.getKind == ``Lean.Parser.Command.instance && stx.getNumArgs >= 6 then
+    some stx[5]
+  else if stx.getKind == ``Lean.Parser.Command.declValSimple && stx.getNumArgs >= 2 then
+    some stx[1]
+  else
+    stx.getArgs.findSome? declarationBodySyntax?
+
+private structure DeclarationCandidate where
+  info : DeclarationTargetInfo
+  bodySpanBodyCoords : ModuleSourceSpan
+  declarationSpanBodyCoords : ModuleSourceSpan
+
+private def fullDeclarationName (namespaceName shortName : Name) : Name :=
+  if namespaceName.isAnonymous then shortName else namespaceName ++ shortName
+
+private def commandDeclaration? (fileMap : FileMap) (lineOffset : Nat) (ctx : ContextInfo) (stx : Syntax) :
+    Option DeclarationCandidate := do
+  let declStx ← catalogDeclarationSyntax? stx
+  let nameStx := declIdNameStx declStx
+  guard nameStx.isIdent
+  let bodyStx ← declarationBodySyntax? declStx
+  let declarationSpanBody ← rangeOfStx fileMap declStx
+  let nameSpanBody ← rangeOfStx fileMap nameStx
+  let bodySpanBody ← rangeOfStx fileMap bodyStx
+  let shortName := nameStx.getId
+  let namespaceName := ctx.currNamespace
+  let fullName := fullDeclarationName namespaceName shortName
+  let info : DeclarationTargetInfo := {
+    shortName := shortName.toString
+    declarationName := fullName.toString
+    namespaceName := namespaceName.toString
+    declarationKind := declarationKeyword declStx
+    declarationSpan := offsetSpan lineOffset declarationSpanBody
+    nameSpan := offsetSpan lineOffset nameSpanBody
+    bodySpan := offsetSpan lineOffset bodySpanBody
+  }
+  some { info, bodySpanBodyCoords := bodySpanBody, declarationSpanBodyCoords := declarationSpanBody }
+
+private def collectDeclarations (fileMap : FileMap) (lineOffset : Nat) (ctx : ContextInfo) (info : Info)
+    (acc : Array DeclarationCandidate) : IO (Array DeclarationCandidate) := do
+  match info with
+  | .ofCommandInfo ci =>
+    match commandDeclaration? fileMap lineOffset ctx ci.stx with
+    | some candidate => pure (acc.push candidate)
+    | none => pure acc
+  | _ => pure acc
+
+private def declarationCandidates (fileMap : FileMap) (trees : PersistentArray InfoTree) (lineOffset : Nat) :
+    IO (Array DeclarationCandidate) := do
+  let mut out : Array DeclarationCandidate := #[]
+  for tree in trees do
+    out ← tree.foldInfoM (init := out) (collectDeclarations fileMap lineOffset)
+  pure out
+
+private def declarationTargetByName (candidates : Array DeclarationCandidate) (name : String) :
+    DeclarationTargetResult :=
+  let matched := candidates.filter fun candidate =>
+    candidate.info.declarationName == name || candidate.info.shortName == name
+  match matched with
+  | #[] => .notFound
+  | #[candidate] => .target candidate.info
+  | many => .ambiguous (many.map (·.info))
+
+private def declarationAt? (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) :
+    Option DeclarationCandidate :=
+  let bodyCursorLine := bodyLine line lineOffset
+  let containing := candidates.filter fun candidate =>
+    rangeContains candidate.declarationSpanBodyCoords bodyCursorLine column
+  containing.foldl
+    (init := none)
+    fun best? candidate =>
+      match best? with
+      | none => some candidate
+      | some best =>
+        if rangeArea candidate.declarationSpanBodyCoords < rangeArea best.declarationSpanBodyCoords then
+          some candidate
+        else
+          best?
+
+private def declarationTargetByPosition (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) :
+    DeclarationTargetResult :=
+  match declarationAt? candidates line column lineOffset with
+  | some candidate => .target candidate.info
+  | none => .notFound
+
+private def selectorDeclarationTarget (candidates : Array DeclarationCandidate) (name? : Option String)
+    (line? column? : Option Nat) (lineOffset : Nat) : DeclarationTargetResult :=
+  match name?, line?, column? with
+  | some name, _, _ => declarationTargetByName candidates name
+  | none, some line, some column => declarationTargetByPosition candidates line column lineOffset
+  | _, _, _ => .notFound
+
+private def collectLocalContextMeta (limit : Nat) (lctx : LocalContext) : MetaM (Array LocalInfo) :=
+  lctx.foldlM (init := #[]) fun acc localDecl => do
+    if localDecl.isImplementationDetail then
+      pure acc
+    else
+      let value := localDecl.value?.map (renderExprBoundedWith limit)
+      pure <| acc.push {
+        name := localDecl.userName.toString
+        binderInfo := (repr localDecl.binderInfo).pretty
+        typeStr := renderExprBoundedWith limit localDecl.type
+        value
+      }
+
+private def collectTermLocals (limit : Nat) (ctx : ContextInfo) (lctx : LocalContext) : IO (Array LocalInfo) :=
+  ctx.runMetaM lctx (collectLocalContextMeta limit lctx)
+
+private def collectGoalLocals (limit : Nat) (ctx : ContextInfo) (mctx : MetavarContext) (goals : List MVarId) :
+    IO (Array LocalInfo) := do
+  let ctx := { ctx with mctx := mctx }
+  ctx.runMetaM {} do
+    match goals with
+    | goal :: _ =>
+      goal.withContext do
+        let decl ← goal.getDecl
+        collectLocalContextMeta limit decl.lctx
+    | [] => pure #[]
+
+private def runProofState (fileMap : FileMap) (trees : PersistentArray InfoTree)
+    (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) (budgets : ModuleQueryOutputBudgets) :
+    IO ProofStateResult := do
+  let mut goalAcc : GoalAtAcc := { line := bodyLine line lineOffset, column := column }
+  for tree in trees do
+    goalAcc ← tree.foldInfoM (init := goalAcc) (collectGoalAt fileMap)
+  let safeEdit := (declarationAt? candidates line column lineOffset).map (·.info)
+  match goalAcc.best? with
+  | some candidate =>
+    let (before, bytesAfterBefore, truncBefore) ←
+      renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
+    let (after, _, truncAfter) ←
+      renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
+    let locals ← collectGoalLocals budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
+    let declName := candidate.ctx.parentDecl?.map (·.toString)
+    pure <| .state {
+      declarationName := declName
+      namespaceName := candidate.ctx.currNamespace.toString
+      safeEdit
+      span := offsetSpan lineOffset candidate.span
+      goalsBefore := before
+      goalsAfter := after
+      locals
+      expectedType := none
+      truncated := truncBefore || truncAfter
+    }
+  | none =>
+    let mut termAcc : TypeAtAcc := { line := bodyLine line lineOffset, column := column }
+    for tree in trees do
+      termAcc ← tree.foldInfoM (init := termAcc) (collectTypeAt fileMap)
+    match termAcc.best? with
+    | none => pure <| .unavailable "no tactic or term context covers the requested cursor"
+    | some candidate =>
+      let expectedType ← candidate.ctx.runMetaM candidate.lctx do
+        try
+          match candidate.expectedType? with
+          | some expected => pure (some (renderExprBoundedWith budgets.perFieldBytes expected))
+          | none =>
+            let ty ← Meta.inferType candidate.expr
+            pure (some (renderExprBoundedWith budgets.perFieldBytes ty))
+        catch _ =>
+          pure none
+      let locals ← collectTermLocals budgets.perFieldBytes candidate.ctx candidate.lctx
+      let declName := candidate.ctx.parentDecl?.map (·.toString)
+      pure <| .state {
+        declarationName := declName
+        namespaceName := candidate.ctx.currNamespace.toString
+        safeEdit
+        span := offsetSpan lineOffset candidate.span
+        goalsBefore := #[]
+        goalsAfter := #[]
+        locals
+        expectedType
+        truncated := expectedType.any (·.truncated)
+      }
+
 private def emptyResultFor (query : ModuleQuery) : ModuleQueryResult :=
   match query with
   | .diagnostics => .diagnostics emptyFailure
@@ -425,6 +816,354 @@ private def resultFor (query : ModuleQuery) (fileMap : FileMap) (messages : Mess
     pure <| .goalAt (← runGoalAt fileMap trees line column lineOffset diagBytes)
   | .references name =>
     pure <| .references (← runReferences fileMap trees name lineOffset)
+
+private def selectorId : ModuleQuerySelector → String
+  | .diagnostics id => id
+  | .proofState id .. => id
+  | .typeAt id .. => id
+  | .references id .. => id
+  | .declarationTarget id .. => id
+  | .surroundingDeclaration id .. => id
+
+private def renderedBytes (info : RenderedInfo) : Nat :=
+  info.value.utf8ByteSize
+
+private def failureBytes (failure : LeanRsFixture.Elaboration.ElabFailure) : Nat :=
+  failure.diagnostics.foldl (init := 0) fun bytes diagnostic =>
+    let severityBytes :=
+      match diagnostic.severity with
+      | .info => 4
+      | .warning => 7
+      | .error => 5
+    bytes + diagnostic.message.utf8ByteSize + diagnostic.fileLabel.utf8ByteSize + severityBytes
+
+private def localInfoBytes (info : LocalInfo) : Nat :=
+  info.name.utf8ByteSize + info.binderInfo.utf8ByteSize + renderedBytes info.typeStr +
+    match info.value with
+    | some value => renderedBytes value
+    | none => 0
+
+private def spanBytes (_span : ModuleSourceSpan) : Nat := 32
+
+private def declarationTargetInfoBytes (info : DeclarationTargetInfo) : Nat :=
+  info.shortName.utf8ByteSize + info.declarationName.utf8ByteSize + info.namespaceName.utf8ByteSize +
+    info.declarationKind.utf8ByteSize + spanBytes info.declarationSpan + spanBytes info.nameSpan + spanBytes info.bodySpan
+
+private def typeAtBytes : TypeAtResult → Nat
+  | .noTerm => 0
+  | .term span expr typeStr expectedType =>
+    spanBytes span + renderedBytes expr + renderedBytes typeStr +
+      match expectedType with
+      | some expected => renderedBytes expected
+      | none => 0
+
+private def goalAtBytes : GoalAtResult → Nat
+  | .noTacticContext => 0
+  | .goal span before after _ =>
+    spanBytes span + before.foldl (init := 0) (· + ·.utf8ByteSize) +
+      after.foldl (init := 0) (· + ·.utf8ByteSize)
+
+private def referencesBytes (result : ReferencesResult) : Nat :=
+  result.references.foldl (init := 0) fun bytes node =>
+    bytes + node.name.utf8ByteSize + 32
+
+private def proofStateBytes : ProofStateResult → Nat
+  | .unavailable message => message.utf8ByteSize
+  | .state info =>
+    (match info.declarationName with | some name => name.utf8ByteSize | none => 0) +
+      info.namespaceName.utf8ByteSize +
+      (match info.safeEdit with | some target => declarationTargetInfoBytes target | none => 0) +
+      spanBytes info.span +
+      info.goalsBefore.foldl (init := 0) (· + ·.utf8ByteSize) +
+      info.goalsAfter.foldl (init := 0) (· + ·.utf8ByteSize) +
+      info.locals.foldl (init := 0) (fun bytes localInfo => bytes + localInfoBytes localInfo) +
+      (match info.expectedType with | some expected => renderedBytes expected | none => 0)
+
+private def declarationTargetBytes : DeclarationTargetResult → Nat
+  | .target info => declarationTargetInfoBytes info
+  | .notFound => 0
+  | .ambiguous candidates =>
+    candidates.foldl (init := 0) fun bytes candidate => bytes + declarationTargetInfoBytes candidate
+
+private def surroundingDeclarationBytes : SurroundingDeclarationResult → Nat
+  | .none => 0
+  | .declaration info => declarationTargetInfoBytes info
+
+private def batchResultBytes : ModuleQueryBatchResult → Nat
+  | .diagnostics failure => failureBytes failure
+  | .proofState result => proofStateBytes result
+  | .typeAt result => typeAtBytes result
+  | .references result => referencesBytes result
+  | .declarationTarget result => declarationTargetBytes result
+  | .surroundingDeclaration result => surroundingDeclarationBytes result
+
+private def batchResultFor (selector : ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
+    (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+    IO ModuleQueryBatchResult := do
+  match selector with
+  | .diagnostics _ =>
+    let failure ← failureFromMessages messages budgets.perFieldBytes.toUSize fileLabel
+    pure <| .diagnostics (offsetFailure lineOffset failure)
+  | .proofState _ line column =>
+    pure <| .proofState (← runProofState fileMap trees candidates line column lineOffset budgets)
+  | .typeAt _ line column =>
+    pure <| .typeAt (← runTypeAtWith fileMap trees line column lineOffset budgets.perFieldBytes)
+  | .references _ name =>
+    pure <| .references (← runReferences fileMap trees name lineOffset)
+  | .declarationTarget _ name? line? column? =>
+    pure <| .declarationTarget (selectorDeclarationTarget candidates name? line? column? lineOffset)
+  | .surroundingDeclaration _ line column =>
+    let result :=
+      match declarationAt? candidates line column lineOffset with
+      | some candidate => .declaration candidate.info
+      | none => .none
+    pure <| .surroundingDeclaration result
+
+private def emptyBatchResultFor (selector : ModuleQuerySelector) : ModuleQueryBatchResult :=
+  match selector with
+  | .diagnostics _ => .diagnostics emptyFailure
+  | .proofState _ .. => .proofState (.unavailable "module processing did not reach the requested context")
+  | .typeAt _ .. => .typeAt .noTerm
+  | .references _ .. => .references { references := #[], truncated := false }
+  | .declarationTarget _ .. => .declarationTarget .notFound
+  | .surroundingDeclaration _ .. => .surroundingDeclaration .none
+
+private def batchEnvelopeFromFailure (selectors : Array ModuleQuerySelector)
+    (failure : LeanRsFixture.Elaboration.ElabFailure) : ModuleQueryBatchEnvelope :=
+  let items := selectors.map fun selector =>
+    match selector with
+    | .diagnostics id => .ok id (.diagnostics failure)
+    | _ => .ok (selectorId selector) (emptyBatchResultFor selector)
+  { items, totalTruncated := false }
+
+private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
+    (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+    IO ModuleQueryBatchEnvelope := do
+  let totalLimit := budgets.totalBytes
+  let mut items : Array ModuleQueryBatchItem := #[]
+  let mut spent : Nat := 0
+  let mut totalTruncated := false
+  for selector in selectors do
+    let id := selectorId selector
+    if spent >= totalLimit then
+      items := items.push (.budgetExceeded id "module query batch total byte budget exhausted")
+      totalTruncated := true
+    else
+      try
+        let result ← batchResultFor selector fileMap messages trees candidates budgets fileLabel lineOffset
+        let bytes := batchResultBytes result
+        if spent + bytes > totalLimit then
+          items := items.push (.budgetExceeded id "module query selector would exceed the batch total byte budget")
+          totalTruncated := true
+        else
+          items := items.push (.ok id result)
+          spent := spent + bytes
+      catch ex =>
+        items := items.push (.unavailable id (toString ex))
+  pure { items, totalTruncated }
+
+private def runBatchSelectors (selectors : Array ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
+    (trees : PersistentArray InfoTree) (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+    IO ModuleQueryBatchEnvelope := do
+  let candidates ← declarationCandidates fileMap trees lineOffset
+  runBatchSelectorsWithCandidates selectors fileMap messages trees candidates budgets fileLabel lineOffset
+
+private def batchEnvelopeBytes (envelope : ModuleQueryBatchEnvelope) : Nat :=
+  envelope.items.foldl (init := 0) fun bytes item =>
+    bytes +
+      match item with
+      | .ok id result => id.utf8ByteSize + batchResultBytes result
+      | .unavailable id message => id.utf8ByteSize + message.utf8ByteSize
+      | .budgetExceeded id message => id.utf8ByteSize + message.utf8ByteSize
+
+private def elapsedMicrosSince (startMs : Nat) : IO Nat := do
+  let nowMs ← IO.monoMsNow
+  pure ((nowMs - startMs) * 1000)
+
+private def u64 (n : Nat) : UInt64 :=
+  n.toUInt64
+
+private structure ModuleSnapshot where
+  fileIdentity : String
+  key : String
+  fileMap : FileMap
+  messages : MessageLog
+  trees : PersistentArray InfoTree
+  candidates : Array DeclarationCandidate
+  imports : Array String
+  missing : Array String
+  lineOffset : Nat
+  approxBytes : Nat
+  lastUsedMs : Nat
+
+private structure ModuleSnapshotCacheState where
+  entries : Array ModuleSnapshot := #[]
+  approxBytes : Nat := 0
+  deriving Inhabited
+
+private instance : Nonempty (IO.Ref ModuleSnapshotCacheState) :=
+  inferInstanceAs <| Nonempty (IO.Ref _)
+
+initialize moduleSnapshotCache : IO.Ref ModuleSnapshotCacheState ← IO.mkRef {}
+
+private def approxSnapshotBytes (source : String) (_messages : MessageLog) (trees : PersistentArray InfoTree)
+    (candidates : Array DeclarationCandidate) : Nat :=
+  source.utf8ByteSize * 8 + trees.size * 4096 + candidates.size * 256 + 65536
+
+private def cacheFacts (status : ModuleQueryCacheStatus) (timings : ModuleQueryTimings) (outputBytes : Nat)
+    (cache : ModuleSnapshotCacheState) : ModuleQueryCacheFacts :=
+  {
+    cacheStatus := status
+    timings
+    outputBytes := u64 outputBytes
+    cacheEntryCount := some cache.entries.size
+    cacheApproxBytes := some cache.approxBytes
+  }
+
+private def wrapCachedOutcome (snapshot : ModuleSnapshot) (envelope : ModuleQueryBatchEnvelope)
+    (facts : ModuleQueryCacheFacts) : ModuleQueryBatchCachedOutcome :=
+  if snapshot.missing.isEmpty then
+    .ok envelope snapshot.imports facts
+  else
+    .missingImports envelope snapshot.imports snapshot.missing facts
+
+private def headerFailureCachedOutcome (failure : LeanRsFixture.Elaboration.ElabFailure)
+    (status : ModuleQueryCacheStatus) (headerMicros : Nat) (cache : ModuleSnapshotCacheState) :
+    ModuleQueryBatchCachedOutcome :=
+  let timings : ModuleQueryTimings := {
+    headerImportMicros := u64 headerMicros
+    elaborationMicros := 0
+    projectionMicros := 0
+    renderingMicros := 0
+  }
+  .headerParseFailed failure (cacheFacts status timings (failureBytes failure) cache)
+
+private def pruneExpired (nowMs : Nat) (ttlMillis : Nat) (entries : Array ModuleSnapshot) :
+    Array ModuleSnapshot × Nat × Bool :=
+  if ttlMillis == 0 then
+    (#[], entries.foldl (init := 0) (fun bytes e => bytes + e.approxBytes), !entries.isEmpty)
+  else
+    entries.foldl (init := (#[], 0, false)) fun (kept, removedBytes, removedAny) entry =>
+      if nowMs - entry.lastUsedMs >= ttlMillis then
+        (kept, removedBytes + entry.approxBytes, true)
+      else
+        (kept.push entry, removedBytes, removedAny)
+
+private partial def enforceCacheLimits (maxEntries maxBytes : Nat) (entries : Array ModuleSnapshot) :
+    Array ModuleSnapshot × Nat × Bool :=
+  let totalBytes := entries.foldl (init := 0) (fun bytes e => bytes + e.approxBytes)
+  if entries.size <= maxEntries && totalBytes <= maxBytes then
+    (entries, totalBytes, false)
+  else
+    match entries with
+    | #[] => (#[], 0, false)
+    | arr =>
+      let oldest? := arr.foldl (init := none) fun best? entry =>
+        match best? with
+        | none => some entry
+        | some best => if entry.lastUsedMs < best.lastUsedMs then some entry else some best
+      match oldest? with
+      | none => (#[], 0, false)
+      | some oldest =>
+        enforceCacheLimits maxEntries maxBytes (arr.filter (fun entry => entry.key != oldest.key))
+
+private def pruneCache (policy : ModuleQueryCachePolicy) (nowMs : Nat) (cache : ModuleSnapshotCacheState) :
+    ModuleSnapshotCacheState × Bool :=
+  let maxEntries := policy.maxEntries.toNat.max 1
+  let maxBytes := policy.maxBytes.toNat.max 1
+  let (ttlEntries, _ttlBytes, ttlRemoved) := pruneExpired nowMs policy.ttlMillis.toNat cache.entries
+  let (boundedEntries, boundedBytes, limitRemoved) := enforceCacheLimits maxEntries maxBytes ttlEntries
+  ({ entries := boundedEntries, approxBytes := boundedBytes }, ttlRemoved || limitRemoved)
+
+private def findSnapshot? (key : String) (entries : Array ModuleSnapshot) : Option ModuleSnapshot :=
+  entries.find? (fun entry => entry.key == key)
+
+private def hasFileIdentity (fileIdentity : String) (entries : Array ModuleSnapshot) : Bool :=
+  entries.any (fun entry => entry.fileIdentity == fileIdentity)
+
+private def upsertSnapshot (snapshot : ModuleSnapshot) (entries : Array ModuleSnapshot) : Array ModuleSnapshot :=
+  (entries.filter (fun entry => entry.key != snapshot.key)).push snapshot
+
+private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (policy : ModuleQueryCachePolicy) :
+    IO (Except (LeanRsFixture.Elaboration.ElabFailure × Nat) (ModuleSnapshot × ModuleQueryTimings)) := do
+  let headerStart ← IO.monoMsNow
+  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let inputCtx := Parser.mkInputContext source fileLabel
+  let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
+  if headerMessages.hasErrors then
+    let elapsed ← elapsedMicrosSince headerStart
+    return .error (← failureFromMessages headerMessages diagBytes fileLabel, elapsed)
+
+  let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
+  let loadedModules := env.header.moduleNames.map (·.toString)
+  let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
+  let (commandEnv, initialMessages) ←
+    if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
+      try
+        unsafe Lean.enableInitializersExecution
+        Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+      catch ex =>
+        let elapsed ← elapsedMicrosSince headerStart
+        return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
+    else
+      pure (env, headerMessages)
+  let headerMicros ← elapsedMicrosSince headerStart
+
+  let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
+  commandState := { commandState with infoState.enabled := true }
+  if !namespaceContext.isEmpty then
+    let head := commandState.scopes.headD { header := "", opts }
+    commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
+  let elabStart ← IO.monoMsNow
+  try
+    let headerSource := String.Pos.Raw.extract source 0 parserState.pos
+    let bodySource := String.Pos.Raw.extract source parserState.pos source.rawEndPos
+    let lineOffset := countNewlines headerSource
+    let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
+    let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
+    let elabMicros ← elapsedMicrosSince elabStart
+    let finalCmdState := st.commandState
+    let candidates ← declarationCandidates bodyInputCtx.fileMap finalCmdState.infoState.trees lineOffset
+    let approxBytes := approxSnapshotBytes source finalCmdState.messages finalCmdState.infoState.trees candidates
+    let nowMs ← IO.monoMsNow
+    let snapshot : ModuleSnapshot := {
+      fileIdentity := policy.fileIdentity
+      key := policy.key
+      fileMap := bodyInputCtx.fileMap
+      messages := finalCmdState.messages
+      trees := finalCmdState.infoState.trees
+      candidates
+      imports := userImports
+      missing
+      lineOffset
+      approxBytes
+      lastUsedMs := nowMs
+    }
+    pure <| .ok (snapshot, {
+      headerImportMicros := u64 headerMicros
+      elaborationMicros := u64 elabMicros
+      projectionMicros := 0
+      renderingMicros := 0
+    })
+  catch ex =>
+    let elapsed ← elapsedMicrosSince headerStart
+    return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
+
+private def parseCachePolicy (raw : String) : ModuleQueryCachePolicy :=
+  match raw.splitOn "\n" with
+  | [fileIdentity, key, maxEntries, ttlMillis, maxBytes] =>
+    {
+      fileIdentity
+      key
+      maxEntries := (maxEntries.toNat?.getD 1).toUInt64
+      ttlMillis := (ttlMillis.toNat?.getD 0).toUInt64
+      maxBytes := (maxBytes.toNat?.getD 1).toUInt64
+    }
+  | _ =>
+    { fileIdentity := "", key := raw, maxEntries := 1, ttlMillis := 0, maxBytes := 1 }
 
 /-- Parse, elaborate, and answer one bounded module query. -/
 @[export lean_rs_host_process_module_query]
@@ -486,5 +1225,127 @@ def processModuleQuery
     return wrapOutcome (match query with
       | .diagnostics => .diagnostics failure
       | _ => emptyResultFor query)
+
+/-- Parse, elaborate, and answer several bounded module selectors with one
+    module elaboration. -/
+@[export lean_rs_host_process_module_query_batch]
+def processModuleQueryBatch
+    (env : Environment) (source : String) (selectors : Array ModuleQuerySelector)
+    (budgets : ModuleQueryOutputBudgets)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (_diagBytes : USize)
+    : IO ModuleQueryBatchOutcome := do
+  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let inputCtx := Parser.mkInputContext source fileLabel
+  let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
+  if headerMessages.hasErrors then
+    return .headerParseFailed (← failureFromMessages headerMessages budgets.perFieldBytes.toUSize fileLabel)
+
+  let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
+  let loadedModules := env.header.moduleNames.map (·.toString)
+  let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
+  let wrapOutcome (result : ModuleQueryBatchEnvelope) : ModuleQueryBatchOutcome :=
+    if missing.isEmpty then .ok result userImports
+    else .missingImports result userImports missing
+
+  let (commandEnv, initialMessages) ←
+    if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
+      try
+        unsafe Lean.enableInitializersExecution
+        Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+      catch ex =>
+        let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
+        return wrapOutcome (batchEnvelopeFromFailure selectors failure)
+    else
+      pure (env, headerMessages)
+
+  if initialMessages.hasErrors && missing.isEmpty then
+    let failure ← failureFromMessages initialMessages budgets.perFieldBytes.toUSize fileLabel
+    return wrapOutcome (batchEnvelopeFromFailure selectors failure)
+
+  let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
+  commandState := { commandState with infoState.enabled := true }
+  if !namespaceContext.isEmpty then
+    let head := commandState.scopes.headD { header := "", opts }
+    commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
+  try
+    let headerSource := String.Pos.Raw.extract source 0 parserState.pos
+    let bodySource := String.Pos.Raw.extract source parserState.pos source.rawEndPos
+    let lineOffset := countNewlines headerSource
+    let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
+    let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
+    let finalCmdState := st.commandState
+    let result ←
+      runBatchSelectors selectors bodyInputCtx.fileMap finalCmdState.messages finalCmdState.infoState.trees
+        budgets fileLabel lineOffset
+    return wrapOutcome result
+  catch ex =>
+    let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
+    return wrapOutcome (batchEnvelopeFromFailure selectors failure)
+
+private def projectCachedSnapshot (snapshot : ModuleSnapshot) (selectors : Array ModuleQuerySelector)
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (status : ModuleQueryCacheStatus)
+    (baseTimings : ModuleQueryTimings) (cache : ModuleSnapshotCacheState) :
+    IO ModuleQueryBatchCachedOutcome := do
+  let projectionStart ← IO.monoMsNow
+  let envelope ←
+    runBatchSelectorsWithCandidates selectors snapshot.fileMap snapshot.messages snapshot.trees snapshot.candidates
+      budgets fileLabel snapshot.lineOffset
+  let projectionMicros ← elapsedMicrosSince projectionStart
+  let timings := { baseTimings with projectionMicros := u64 projectionMicros }
+  let facts := cacheFacts status timings (batchEnvelopeBytes envelope) cache
+  pure (wrapCachedOutcome snapshot envelope facts)
+
+/-- Parse, elaborate, cache, and answer several bounded module selectors.
+    The snapshot cache is private to this worker process and never crosses the
+    FFI boundary. -/
+@[export lean_rs_host_process_module_query_batch_cached]
+def processModuleQueryBatchCached
+    (env : Environment) (source : String) (selectors : Array ModuleQuerySelector)
+    (budgets : ModuleQueryOutputBudgets)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize)
+    (policyRaw : String)
+    : IO ModuleQueryBatchCachedOutcome := do
+  let policy := parseCachePolicy policyRaw
+  let nowMs ← IO.monoMsNow
+  let cache0 ← moduleSnapshotCache.get
+  let (cache1, evictedBeforeLookup) := pruneCache policy nowMs cache0
+  let sameFileBeforeBuild := hasFileIdentity policy.fileIdentity cache1.entries
+  match findSnapshot? policy.key cache1.entries with
+  | some snapshot =>
+    let freshSnapshot := { snapshot with lastUsedMs := nowMs }
+    let entries := upsertSnapshot freshSnapshot cache1.entries
+    let cache2 := { cache1 with entries }
+    moduleSnapshotCache.set cache2
+    projectCachedSnapshot freshSnapshot selectors budgets fileLabel .hit
+      { headerImportMicros := 0, elaborationMicros := 0, projectionMicros := 0, renderingMicros := 0 }
+      cache2
+  | none =>
+    let status :=
+      if sameFileBeforeBuild then .rebuilt
+      else if evictedBeforeLookup then .evicted
+      else .miss
+    match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes policy with
+    | .error (failure, headerMicros) =>
+      moduleSnapshotCache.set cache1
+      pure <| headerFailureCachedOutcome failure status headerMicros cache1
+    | .ok (snapshot, timings) =>
+      let cacheWithSnapshot :=
+        if snapshot.approxBytes > policy.maxBytes.toNat then
+          cache1
+        else
+          let entries := upsertSnapshot snapshot cache1.entries
+          let approxBytes := entries.foldl (init := 0) (fun bytes entry => bytes + entry.approxBytes)
+          { entries, approxBytes }
+      let (cache2, _) := pruneCache policy (← IO.monoMsNow) cacheWithSnapshot
+      moduleSnapshotCache.set cache2
+      projectCachedSnapshot snapshot selectors budgets fileLabel status timings cache2
+
+@[export lean_rs_host_clear_module_snapshot_cache]
+def clearModuleSnapshotCache (_unit : Unit) : IO ModuleSnapshotCacheClearResult := do
+  let cache ← moduleSnapshotCache.get
+  moduleSnapshotCache.set {}
+  pure { entriesCleared := u64 cache.entries.size, approxBytesCleared := u64 cache.approxBytes }
 
 end LeanRsFixture.InfoTree

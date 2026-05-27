@@ -23,7 +23,9 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
+    LeanWorkerRendered,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -707,6 +709,44 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerModuleQueryOutcome, LeanWorkerError> {
         self.with_session(|worker| worker.worker_process_module_query(source, query, options, cancellation, progress))
+    }
+
+    /// Parse and elaborate a Lean module once, returning several bounded
+    /// selector projections keyed by selector id.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, the child reports a
+    /// host error, cancellation is observed, a progress sink panics, or
+    /// protocol communication fails. Header-parse failures, missing imports,
+    /// selector unavailability, budget exhaustion, and missing capability
+    /// shims surface in the returned [`LeanWorkerModuleQueryBatchOutcome`].
+    pub fn process_module_query_batch(
+        &mut self,
+        source: &str,
+        selectors: &[LeanWorkerModuleQuerySelector],
+        budgets: &LeanWorkerOutputBudgets,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
+        self.with_session(|worker| {
+            worker.worker_process_module_query_batch(source, selectors, budgets, options, cancellation, progress)
+        })
+    }
+
+    /// Clear the worker child's private module snapshot cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is dead, no session is open,
+    /// cancellation is observed, or protocol communication fails.
+    pub fn clear_module_snapshot_cache(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_clear_module_snapshot_cache(cancellation, progress))
     }
 
     /// Run a downstream streaming export and deliver JSON rows to `rows`.

@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10,8 +11,11 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, ModuleSourceSpan, NameRefNode, ReferencesResult,
-    RenderedInfo, TypeAtResult,
+    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchItem,
+    ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryCacheFacts,
+    ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult,
+    ModuleQuerySelector, ModuleQueryTimings, ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode,
+    ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SurroundingDeclarationResult, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -20,6 +24,7 @@ use lean_rs_host::{
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
+use sha2::{Digest, Sha256};
 
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, Diagnostic, HostSessionMode, MAX_FRAME_BYTES, Message, ProgressTick, ProtocolError, Request,
@@ -27,15 +32,25 @@ use lean_rs_worker_protocol::protocol::{
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSummary, LeanWorkerDeclarationType, LeanWorkerDiagnostic,
-    LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult,
-    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
-    LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerReferencesResult, LeanWorkerRendered,
-    LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSummary, LeanWorkerDeclarationTargetInfo,
+    LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
+    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
+    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
+    LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofStateInfo,
+    LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo,
+    LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 
 const DECLARATION_TYPE_MAX_BYTES: usize = 64 * 1024;
+const MODULE_QUERY_CACHE_API_VERSION: &str = "lean-rs.module-query-cache.v1";
+const MODULE_CACHE_DEFAULT_MAX_ENTRIES: u64 = 4;
+const MODULE_CACHE_DEFAULT_TTL_MILLIS: u64 = 5 * 60 * 1000;
+const MODULE_CACHE_DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const MODULE_CACHE_DEFAULT_RSS_GUARD_KIB: u64 = 1024 * 1024;
 
 #[derive(Clone)]
 struct ProtocolWriter {
@@ -256,7 +271,8 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 imports,
             } => {
                 let response = match HostSessionState::open(runtime, &project_root, &mode, &imports) {
-                    Ok(state) => {
+                    Ok(mut state) => {
+                        drop(state.clear_module_snapshot_cache());
                         host_session = Some(state);
                         Response::HostSessionOpened
                     }
@@ -459,6 +475,31 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 write_response(&writer, response)?;
             }
+            Request::ProcessModuleQueryBatch {
+                source,
+                selectors,
+                budgets,
+                options,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.process_module_query_batch(&source, &selectors, &budgets, &options) {
+                        Ok(outcome) => Response::ProcessModuleQueryBatch { outcome },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::ClearModuleSnapshotCache => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.clear_module_snapshot_cache() {
+                        Ok(result) => Response::ModuleSnapshotCacheCleared { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
             Request::EmitTestRows { streams } => {
                 let count = emit_test_rows(&writer, &streams)?;
                 write_response(&writer, Response::RowsComplete { count })?;
@@ -532,6 +573,7 @@ struct HostSessionState {
     #[allow(dead_code, reason = "leaked capabilities anchor the session borrow")]
     capabilities: &'static LeanCapabilities<'static, 'static>,
     session: LeanSession<'static, 'static>,
+    imports: Vec<String>,
 }
 
 impl HostSessionState {
@@ -559,6 +601,7 @@ impl HostSessionState {
             host,
             capabilities,
             session,
+            imports: imports.to_vec(),
         })
     }
 
@@ -1093,6 +1136,114 @@ impl HostSessionState {
             },
         )
     }
+
+    fn process_module_query_batch(
+        &mut self,
+        source: &str,
+        selectors: &[LeanWorkerModuleQuerySelector],
+        budgets: &LeanWorkerOutputBudgets,
+        options: &LeanWorkerElabOptions,
+    ) -> LeanResult<LeanWorkerModuleQueryBatchOutcome> {
+        let policy = self.module_query_cache_policy(source, options);
+        let options = elab_options_to_host(options);
+        let selectors = selectors
+            .iter()
+            .cloned()
+            .map(module_query_selector_host)
+            .collect::<LeanResult<Vec<_>>>()?;
+        let budgets = module_query_budgets_host(budgets);
+        self.clear_module_snapshot_cache_for_rss_guard()?;
+        let cached = self.session.process_module_query_batch_cached(
+            source,
+            &selectors,
+            &budgets,
+            &options,
+            &policy,
+            None,
+        )?;
+        if !matches!(cached, ModuleQueryBatchCachedOutcome::Unsupported) {
+            return Ok(module_query_batch_cached_outcome_wire(cached));
+        }
+        Ok(
+            match self
+                .session
+                .process_module_query_batch(source, &selectors, &budgets, &options, None)?
+            {
+                ModuleQueryBatchOutcome::Ok { result, imports } => {
+                    let result = module_query_batch_envelope_wire(result);
+                    let output_bytes = approx_json_bytes(&result);
+                    LeanWorkerModuleQueryBatchOutcome::Ok {
+                        result,
+                        imports,
+                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
+                    }
+                }
+                ModuleQueryBatchOutcome::MissingImports {
+                    result,
+                    imports,
+                    missing,
+                } => {
+                    let result = module_query_batch_envelope_wire(result);
+                    let output_bytes = approx_json_bytes(&result);
+                    LeanWorkerModuleQueryBatchOutcome::MissingImports {
+                        result,
+                        imports,
+                        missing,
+                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
+                    }
+                }
+                ModuleQueryBatchOutcome::HeaderParseFailed { diagnostics } => {
+                    let diagnostics = elab_failure_wire(&diagnostics);
+                    let output_bytes = approx_json_bytes(&diagnostics);
+                    LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed {
+                        diagnostics,
+                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
+                    }
+                }
+                ModuleQueryBatchOutcome::Unsupported => LeanWorkerModuleQueryBatchOutcome::Unsupported,
+            },
+        )
+    }
+
+    fn clear_module_snapshot_cache(&mut self) -> LeanResult<LeanWorkerModuleSnapshotCacheClearResult> {
+        let result = self.session.clear_module_snapshot_cache()?;
+        Ok(module_snapshot_cache_clear_result_wire(&result))
+    }
+
+    fn clear_module_snapshot_cache_for_rss_guard(&mut self) -> LeanResult<()> {
+        let guard_kib = module_cache_env_u64("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", MODULE_CACHE_DEFAULT_RSS_GUARD_KIB);
+        if guard_kib == 0 {
+            return Ok(());
+        }
+        match current_rss_kib() {
+            Some(current) if current >= guard_kib => {
+                let _cleared = self.session.clear_module_snapshot_cache()?;
+            }
+            None => {
+                let _cleared = self.session.clear_module_snapshot_cache()?;
+            }
+            Some(_) => {}
+        }
+        Ok(())
+    }
+
+    fn module_query_cache_policy(
+        &self,
+        source: &str,
+        options: &LeanWorkerElabOptions,
+    ) -> ModuleQueryCachePolicy {
+        let file_identity = options.file_label.clone();
+        let max_entries = module_cache_env_u64("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", MODULE_CACHE_DEFAULT_MAX_ENTRIES);
+        let ttl_millis = module_cache_env_u64("LEAN_RS_MODULE_CACHE_TTL_MILLIS", MODULE_CACHE_DEFAULT_TTL_MILLIS);
+        let max_bytes = module_cache_env_u64("LEAN_RS_MODULE_CACHE_MAX_BYTES", MODULE_CACHE_DEFAULT_MAX_BYTES);
+        ModuleQueryCachePolicy {
+            file_identity: file_identity.clone(),
+            key: module_query_cache_key(source, &self.imports, options, &file_identity),
+            max_entries,
+            ttl_millis,
+            max_bytes,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1350,6 +1501,106 @@ fn module_query_host(query: LeanWorkerModuleQuery) -> LeanResult<ModuleQuery> {
     })
 }
 
+fn module_query_selector_host(selector: LeanWorkerModuleQuerySelector) -> LeanResult<ModuleQuerySelector> {
+    Ok(match selector {
+        LeanWorkerModuleQuerySelector::Diagnostics { id } => ModuleQuerySelector::Diagnostics { id },
+        LeanWorkerModuleQuerySelector::ProofState { id, line, column } => {
+            ModuleQuerySelector::ProofState { id, line, column }
+        }
+        LeanWorkerModuleQuerySelector::TypeAt { id, line, column } => ModuleQuerySelector::TypeAt { id, line, column },
+        LeanWorkerModuleQuerySelector::References { id, name } => ModuleQuerySelector::References { id, name },
+        LeanWorkerModuleQuerySelector::DeclarationTarget { id, name, line, column } => {
+            ModuleQuerySelector::DeclarationTarget { id, name, line, column }
+        }
+        LeanWorkerModuleQuerySelector::SurroundingDeclaration { id, line, column } => {
+            ModuleQuerySelector::SurroundingDeclaration { id, line, column }
+        }
+        _ => return Err(host_internal("unsupported module query selector variant")),
+    })
+}
+
+fn module_query_budgets_host(budgets: &LeanWorkerOutputBudgets) -> ModuleQueryOutputBudgets {
+    ModuleQueryOutputBudgets {
+        per_field_bytes: budgets.per_field_bytes,
+        total_bytes: budgets.total_bytes,
+    }
+}
+
+fn module_cache_env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn approx_json_bytes<T: serde::Serialize>(value: &T) -> u64 {
+    serde_json::to_vec(value)
+        .map_or(0, |bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
+fn module_query_cache_key(
+    source: &str,
+    imports: &[String],
+    options: &LeanWorkerElabOptions,
+    file_identity: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(MODULE_QUERY_CACHE_API_VERSION.as_bytes());
+    hasher.update(b"\0file\0");
+    hasher.update(file_identity.as_bytes());
+    hasher.update(b"\0source\0");
+    hasher.update(source.as_bytes());
+    hasher.update(b"\0imports\0");
+    for import in imports {
+        hasher.update(import.as_bytes());
+        hasher.update(b"\0");
+    }
+    let toolchain = lean_toolchain::ToolchainFingerprint::current();
+    hasher.update(b"\0toolchain\0");
+    hasher.update(toolchain.lean_version.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(toolchain.resolved_version.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(toolchain.header_sha256.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(toolchain.fixture_sha256.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(toolchain.host_triple.as_bytes());
+    hasher.update(b"\0options\0");
+    hasher.update(options.namespace_context.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(options.file_label.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(options.heartbeat_limit.to_le_bytes());
+    hasher.update(options.diagnostic_byte_limit.to_le_bytes());
+    hasher.finalize().iter().fold(String::with_capacity(64), |mut key, byte| {
+        let _ = write!(key, "{byte:02x}");
+        key
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn current_rss_kib() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        let rest = line.strip_prefix("VmRSS:")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_rss_kib() -> Option<u64> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim().parse::<u64>().ok().filter(|value| *value > 0)
+}
+
 fn module_source_span_wire(span: &ModuleSourceSpan) -> LeanWorkerModuleSourceSpan {
     LeanWorkerModuleSourceSpan {
         start_line: span.start_line,
@@ -1424,6 +1675,71 @@ fn references_result_wire(result: ReferencesResult) -> LeanWorkerReferencesResul
     }
 }
 
+fn local_info_wire(info: LocalInfo) -> LeanWorkerLocalInfo {
+    LeanWorkerLocalInfo {
+        name: info.name,
+        binder_info: info.binder_info,
+        type_str: rendered_info_wire(info.type_str),
+        value: info.value.map(rendered_info_wire),
+    }
+}
+
+fn declaration_target_info_wire(info: DeclarationTargetInfo) -> LeanWorkerDeclarationTargetInfo {
+    LeanWorkerDeclarationTargetInfo {
+        short_name: info.short_name,
+        declaration_name: info.declaration_name,
+        namespace_name: info.namespace_name,
+        declaration_kind: info.declaration_kind,
+        declaration_span: module_source_span_wire(&info.declaration_span),
+        name_span: module_source_span_wire(&info.name_span),
+        body_span: module_source_span_wire(&info.body_span),
+    }
+}
+
+fn declaration_target_result_wire(result: DeclarationTargetResult) -> LeanWorkerDeclarationTargetResult {
+    match result {
+        DeclarationTargetResult::Target(info) => LeanWorkerDeclarationTargetResult::Target {
+            info: declaration_target_info_wire(info),
+        },
+        DeclarationTargetResult::NotFound => LeanWorkerDeclarationTargetResult::NotFound,
+        DeclarationTargetResult::Ambiguous(candidates) => LeanWorkerDeclarationTargetResult::Ambiguous {
+            candidates: candidates.into_iter().map(declaration_target_info_wire).collect(),
+        },
+    }
+}
+
+fn proof_state_info_wire(info: ProofStateInfo) -> LeanWorkerProofStateInfo {
+    LeanWorkerProofStateInfo {
+        declaration_name: info.declaration_name,
+        namespace_name: info.namespace_name,
+        safe_edit: info.safe_edit.map(declaration_target_info_wire),
+        span: module_source_span_wire(&info.span),
+        goals_before: info.goals_before,
+        goals_after: info.goals_after,
+        locals: info.locals.into_iter().map(local_info_wire).collect(),
+        expected_type: info.expected_type.map(rendered_info_wire),
+        truncated: info.truncated,
+    }
+}
+
+fn proof_state_result_wire(result: ProofStateResult) -> LeanWorkerProofStateResult {
+    match result {
+        ProofStateResult::State(info) => LeanWorkerProofStateResult::State {
+            info: Box::new(proof_state_info_wire(*info)),
+        },
+        ProofStateResult::Unavailable { message } => LeanWorkerProofStateResult::Unavailable { message },
+    }
+}
+
+fn surrounding_declaration_result_wire(result: SurroundingDeclarationResult) -> LeanWorkerSurroundingDeclarationResult {
+    match result {
+        SurroundingDeclarationResult::Declaration(info) => LeanWorkerSurroundingDeclarationResult::Declaration {
+            info: declaration_target_info_wire(info),
+        },
+        SurroundingDeclarationResult::None => LeanWorkerSurroundingDeclarationResult::None,
+    }
+}
+
 fn module_query_result_wire(result: ModuleQueryResult) -> LeanWorkerModuleQueryResult {
     match result {
         ModuleQueryResult::Diagnostics(failure) => {
@@ -1434,6 +1750,122 @@ fn module_query_result_wire(result: ModuleQueryResult) -> LeanWorkerModuleQueryR
         ModuleQueryResult::References(result) => {
             LeanWorkerModuleQueryResult::References(references_result_wire(result))
         }
+    }
+}
+
+fn module_query_batch_result_wire(result: ModuleQueryBatchResult) -> LeanWorkerModuleQueryBatchResult {
+    match result {
+        ModuleQueryBatchResult::Diagnostics(failure) => {
+            LeanWorkerModuleQueryBatchResult::Diagnostics(elab_failure_wire(&failure))
+        }
+        ModuleQueryBatchResult::ProofState(result) => {
+            LeanWorkerModuleQueryBatchResult::ProofState(proof_state_result_wire(result))
+        }
+        ModuleQueryBatchResult::TypeAt(result) => LeanWorkerModuleQueryBatchResult::TypeAt(type_at_result_wire(result)),
+        ModuleQueryBatchResult::References(result) => {
+            LeanWorkerModuleQueryBatchResult::References(references_result_wire(result))
+        }
+        ModuleQueryBatchResult::DeclarationTarget(result) => {
+            LeanWorkerModuleQueryBatchResult::DeclarationTarget(declaration_target_result_wire(result))
+        }
+        ModuleQueryBatchResult::SurroundingDeclaration(result) => {
+            LeanWorkerModuleQueryBatchResult::SurroundingDeclaration(surrounding_declaration_result_wire(result))
+        }
+    }
+}
+
+fn module_query_batch_item_wire(item: ModuleQueryBatchItem) -> LeanWorkerModuleQueryBatchItem {
+    match item {
+        ModuleQueryBatchItem::Ok { id, result } => LeanWorkerModuleQueryBatchItem::Ok {
+            id,
+            result: Box::new(module_query_batch_result_wire(*result)),
+        },
+        ModuleQueryBatchItem::Unavailable { id, message } => {
+            LeanWorkerModuleQueryBatchItem::Unavailable { id, message }
+        }
+        ModuleQueryBatchItem::BudgetExceeded { id, message } => {
+            LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, message }
+        }
+    }
+}
+
+fn module_query_batch_envelope_wire(
+    result: lean_rs_host::host::process::ModuleQueryBatchEnvelope,
+) -> LeanWorkerModuleQueryBatchEnvelope {
+    LeanWorkerModuleQueryBatchEnvelope {
+        items: result.items.into_iter().map(module_query_batch_item_wire).collect(),
+        total_truncated: result.total_truncated,
+    }
+}
+
+fn module_cache_status_wire(status: ModuleQueryCacheStatus) -> LeanWorkerModuleCacheStatus {
+    match status {
+        ModuleQueryCacheStatus::Hit => LeanWorkerModuleCacheStatus::Hit,
+        ModuleQueryCacheStatus::Miss => LeanWorkerModuleCacheStatus::Miss,
+        ModuleQueryCacheStatus::Rebuilt => LeanWorkerModuleCacheStatus::Rebuilt,
+        ModuleQueryCacheStatus::Evicted => LeanWorkerModuleCacheStatus::Evicted,
+    }
+}
+
+fn module_query_timings_wire(timings: &ModuleQueryTimings) -> LeanWorkerModuleQueryTimings {
+    LeanWorkerModuleQueryTimings {
+        header_import_micros: timings.header_import_micros,
+        elaboration_micros: timings.elaboration_micros,
+        projection_micros: timings.projection_micros,
+        rendering_micros: timings.rendering_micros,
+    }
+}
+
+fn module_query_cache_facts_wire(facts: &ModuleQueryCacheFacts) -> LeanWorkerModuleQueryCacheFacts {
+    LeanWorkerModuleQueryCacheFacts {
+        cache_status: module_cache_status_wire(facts.cache_status),
+        timings: module_query_timings_wire(&facts.timings),
+        output_bytes: facts.output_bytes,
+        cache_entry_count: facts.cache_entry_count,
+        cache_approx_bytes: facts.cache_approx_bytes,
+    }
+}
+
+fn module_query_batch_cached_outcome_wire(
+    outcome: ModuleQueryBatchCachedOutcome,
+) -> LeanWorkerModuleQueryBatchOutcome {
+    match outcome {
+        ModuleQueryBatchCachedOutcome::Ok {
+            result,
+            imports,
+            facts,
+        } => LeanWorkerModuleQueryBatchOutcome::Ok {
+            result: module_query_batch_envelope_wire(result),
+            imports,
+            facts: module_query_cache_facts_wire(&facts),
+        },
+        ModuleQueryBatchCachedOutcome::MissingImports {
+            result,
+            imports,
+            missing,
+            facts,
+        } => LeanWorkerModuleQueryBatchOutcome::MissingImports {
+            result: module_query_batch_envelope_wire(result),
+            imports,
+            missing,
+            facts: module_query_cache_facts_wire(&facts),
+        },
+        ModuleQueryBatchCachedOutcome::HeaderParseFailed { diagnostics, facts } => {
+            LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed {
+                diagnostics: elab_failure_wire(&diagnostics),
+                facts: module_query_cache_facts_wire(&facts),
+            }
+        }
+        ModuleQueryBatchCachedOutcome::Unsupported => LeanWorkerModuleQueryBatchOutcome::Unsupported,
+    }
+}
+
+fn module_snapshot_cache_clear_result_wire(
+    result: &ModuleSnapshotCacheClearResult,
+) -> LeanWorkerModuleSnapshotCacheClearResult {
+    LeanWorkerModuleSnapshotCacheClearResult {
+        entries_cleared: result.entries_cleared,
+        approx_bytes_cleared: result.approx_bytes_cleared,
     }
 }
 

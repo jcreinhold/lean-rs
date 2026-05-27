@@ -17,7 +17,9 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
+    LeanWorkerRendered,
 };
 
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
@@ -1358,6 +1360,59 @@ impl LeanWorker {
             progress,
             |response, operation| match response {
                 Response::ProcessModuleQuery { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_process_module_query_batch(
+        &mut self,
+        source: &str,
+        selectors: &[LeanWorkerModuleQuerySelector],
+        budgets: &LeanWorkerOutputBudgets,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
+        self.round_trip(
+            "worker_process_module_query_batch",
+            Request::ProcessModuleQueryBatch {
+                source: source.to_owned(),
+                selectors: selectors.to_vec(),
+                budgets: budgets.clone(),
+                options: options.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::ProcessModuleQueryBatch { outcome } => Ok(outcome),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_clear_module_snapshot_cache(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerError> {
+        self.round_trip(
+            "worker_clear_module_snapshot_cache",
+            Request::ClearModuleSnapshotCache,
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::ModuleSnapshotCacheCleared { result } => Ok(result),
                 other => Err(unexpected_response(operation, &other)),
             },
         )

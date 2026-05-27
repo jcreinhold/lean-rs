@@ -1503,6 +1503,80 @@ fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
 }
 
 #[test]
+fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector, ProofStateResult,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let src = "theorem t (h : True) : True := by\n  exact h\n";
+    let before = session.stats();
+    let outcome = session
+        .process_module_query_batch(
+            src,
+            &[
+                ModuleQuerySelector::Diagnostics {
+                    id: "diagnostics".to_owned(),
+                },
+                ModuleQuerySelector::ProofState {
+                    id: "state".to_owned(),
+                    line: 2,
+                    column: 4,
+                },
+            ],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let after = session.stats();
+
+    assert_eq!(after.ffi_calls, before.ffi_calls + 1);
+    assert_eq!(after.batch_items, before.batch_items + 2);
+
+    let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only input should have no imports");
+    assert_eq!(result.items.len(), 2);
+    assert!(!result.total_truncated);
+
+    let state = result
+        .items
+        .iter()
+        .find(|item| item.id() == "state")
+        .expect("proof-state selector result present");
+    match state {
+        ModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            ModuleQueryBatchResult::ProofState(ProofStateResult::State(info)) => {
+                assert!(
+                    info.goals_before.iter().any(|goal| goal.contains("True")),
+                    "goal before `exact h` should mention True, got {:?}",
+                    info.goals_before,
+                );
+                assert!(
+                    info.locals.iter().any(|local| local.name == "h"),
+                    "local context should include h, got {:?}",
+                    info.locals,
+                );
+                assert!(
+                    info.safe_edit.is_some(),
+                    "proof context should identify a replace-body span"
+                );
+            }
+            other => panic!("expected proof-state result, got {other:?}"),
+        },
+        other => panic!("expected ok proof-state selector, got {other:?}"),
+    }
+}
+
+#[test]
 fn session_process_module_query_references_returns_name_locations_only() {
     use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 

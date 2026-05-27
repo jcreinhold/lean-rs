@@ -31,6 +31,7 @@ lean-rs-worker-protocol = { workspace = true }
 lean-toolchain = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # Used only to call `setrlimit(RLIMIT_CORE, 0)` and install an immediate
