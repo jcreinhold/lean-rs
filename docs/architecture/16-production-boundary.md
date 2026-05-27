@@ -20,7 +20,7 @@ The crate split is:
   streaming, typed commands, memory cycling, and fatal-exit reporting.
 
 This boundary keeps each layer at a different abstraction. `lean-rs-host` answers theorem-prover questions in one
-process. The worker crates answer an operational question: how to run that host stack when the caller needs process
+process. The worker crates answer an operational question: how to run that service layer when the caller needs process
 isolation or a hard memory reset.
 
 ## Why Process Isolation Is Required

@@ -6,15 +6,17 @@
 [![Docs](https://img.shields.io/badge/docs-jcreinhold.github.io%2Flean--rs-blue)](https://jcreinhold.github.io/lean-rs/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](#license)
 
-Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns Lean semantics (elaboration, kernel
-checking, proof objects, universes, `MetaM`, dependent-type meaning). This project owns hosting: linking, runtime
-initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics, batching, and
-packaging. Rust does not reconstruct Lean semantic facts.
+A Lean runtime bridge for Rust. The workspace has three layers: a typed FFI layer (`lean-rs`), a standard Lean service
+layer (`lean-rs-host`), and an optional process-isolation layer (`lean-rs-worker-*`). Lean owns Lean semantics:
+elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. This project owns the
+hosting work around those semantics: linking, runtime initialization, ABI conversion, module loading, error and panic
+boundaries, scheduling, diagnostics, batching, process isolation, and packaging. Rust does not reconstruct Lean semantic
+facts.
 
 ## Prerequisites
 
 - [`elan`](https://github.com/leanprover/elan) and a Lean 4 toolchain in the [supported window](docs/version-matrix.md)
-  (currently 4.26.0–4.29.1 plus the 4.30.0-rc2 release candidate). `elan` ships `lean` and `lake` together.
+  (currently 4.26.0–4.30.0). `elan` ships `lean` and `lake` together.
 - Rust stable (MSRV 1.91).
 - macOS or Linux. Windows is not supported.
 
@@ -39,12 +41,12 @@ cd fixtures/lean && lake build && cd -
 cargo run -p lean-rs-host --example tour
 ```
 
-`tour` composes the full host-stack flow in one process: open the runtime, load capabilities, open an import session,
-elaborate, kernel-check, run a bulk query, and call `Meta.whnf`.
+`tour` composes the standard Lean service flow in one process: open the runtime, load capabilities, open an import
+session, elaborate, kernel-check, run a bulk query, and call `Meta.whnf`.
 
 Browse the eight examples and walkthroughs at
-[`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the host-stack tour path for
-sessions, kernel checks, and `MetaM`.
+[`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the service-layer tour path
+for sessions, kernel checks, and `MetaM`.
 
 If something goes wrong, re-run with `RUST_LOG=lean_rs=debug` for structured spans. See
 [`docs/diagnostics.md`](docs/diagnostics.md) for the code catalogue and the in-process capture API.
@@ -63,12 +65,13 @@ Choose by job:
 | Speak the worker wire protocol from another peer (codegen, fuzz, alternate transport) | `lean-rs-worker-protocol` |
 | Bind raw Lean C symbols directly (advanced, `unsafe`) | `lean-rs-sys` |
 
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The worker boundary is three sibling crates:
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. In plain terms: raw Lean C ABI, toolchain and
+build helpers, typed Rust FFI, then standard Lean services. The worker boundary is three sibling crates:
 `lean-rs-worker-protocol` (wire types only, no Lean dependency), `lean-rs-worker-parent` (parent-side supervisor and
 pool; does not link `libleanshared`), and `lean-rs-worker-child` (child runtime and the `lean-rs-worker-child` binary;
 the only worker crate that links `libleanshared`). Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`;
 the safe layers never re-export them. Lower layers are escape hatches, not steps every downstream caller should
-hand-compose. See [`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the host-stack
+hand-compose. See [`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the service-layer
 classification table.
 
 ## Call a Lean export from Rust
@@ -226,8 +229,8 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 - [`29-loader-and-artifact-boundary.md`](docs/architecture/29-loader-and-artifact-boundary.md): shipped-capability
   manifest, bundle loader, preflight, docs.rs/package, and worker bootstrap boundary.
 
-**Host stack (`lean-rs-host`)**
-- [`03-host-stack.md`](docs/architecture/03-host-stack.md): curated host surface and semver boundary.
+**Standard Lean Services (`lean-rs-host`)**
+- [`03-host-stack.md`](docs/architecture/03-host-stack.md): curated service surface and semver boundary.
 
 **Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)**
 - [`16-production-boundary.md`](docs/architecture/16-production-boundary.md): process boundary for fatal exits and

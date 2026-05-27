@@ -117,7 +117,7 @@ Progress sink panics are caught at the Rust callback boundary and surfaced as `L
 
 The worker crates deliberately use a separate worker error surface for process boundary failures. Child panic/abort,
 request timeout, cancellation-triggered cycle, stale lease use, row sink panic, diagnostic sink panic, and typed command
-decode failure are worker outcomes, not `LeanDiagnosticCode` values from the in-process host stack.
+decode failure are worker outcomes, not `LeanDiagnosticCode` values from the in-process service layer.
 
 For large local runs, use `LeanWorkerPoolSnapshot` and `LeanWorkerSessionLease::snapshot()` for operational state.
 Snapshots summarize queue depth, active workers, warm leases, restart reasons, best-effort child RSS, stream outcomes,
@@ -194,7 +194,7 @@ is `lean-rs-host` or any other downstream of `lean-rs`.
 
 ### Spans emitted by `lean-rs-host` (L2)
 
-Host-stack session and pool spans. Fire only if the caller opted into the L2 stack and is driving a session.
+Service-layer session and pool spans. Fire only if the caller opted into `lean-rs-host` and is driving a session.
 
 | Span | Level | Fields |
 | --- | --- | --- |
@@ -268,7 +268,7 @@ requires full path suppression, install a `tracing-subscriber` filter that drops
   `lean-rs-host` project to it.
 - [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from
   `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
-- [Host stack surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans
+- [Service-layer surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans
   above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.

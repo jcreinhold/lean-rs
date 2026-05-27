@@ -25,9 +25,9 @@
 - [Loader and artifact boundary](architecture/29-loader-and-artifact-boundary.md)
 - [Info-tree projection](architecture/info-tree-projection.md)
 
-# Host stack (`lean-rs-host`)
+# Standard Lean services (`lean-rs-host`)
 
-- [Host-stack surface](architecture/03-host-stack.md)
+- [Service-layer surface](architecture/03-host-stack.md)
 - [Capability contract](lean-rs-host-capability-contract.md)
 
 # Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)

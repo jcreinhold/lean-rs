@@ -122,7 +122,7 @@ traits, so unsupported types fail at compile time rather than producing wrong de
 
 - Workspace overview, architecture docs, and the worked examples that exercise this surface end to end:
   [`lean-rs` repository](https://github.com/jcreinhold/lean-rs).
-- Host stack (sessions, kernel check, `MetaM`): [`lean-rs-host`](https://docs.rs/lean-rs-host).
+- Standard Lean services (sessions, kernel check, `MetaM`): [`lean-rs-host`](https://docs.rs/lean-rs-host).
 - Build-script helper: [`lean-toolchain`](https://docs.rs/lean-toolchain).
 - Raw FFI escape hatch (advanced): [`lean-rs-sys`](https://docs.rs/lean-rs-sys).
 - Diagnostics and tracing: [`docs/diagnostics.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/diagnostics.md).

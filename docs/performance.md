@@ -175,4 +175,4 @@ mkdir -p /tmp/dhat-runs && cd /tmp/dhat-runs
 
 dhat sees Rust allocations only. Lean's internal mimalloc is statically linked into `libleanrt.a` and is invisible to
 `#[global_allocator]`; allocation numbers capture ABI conversions, `Vec`/`String` buffers, and error-message bounding on
-the host stack, not the Lean kernel heap.
+the Rust service layer, not the Lean kernel heap.

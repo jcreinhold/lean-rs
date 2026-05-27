@@ -1,5 +1,4 @@
-//! Opinionated Rust host stack for embedding Lean 4 as a theorem-prover
-//! capability.
+//! Standard Lean service layer for Rust applications embedding Lean 4.
 //!
 //! This crate is the L2 application framework built on top of the L1
 //! FFI primitive shipped by [`lean-rs`](https://docs.rs/lean-rs). It owns:
@@ -24,9 +23,7 @@ pub mod host;
 /// Bounded `MetaM` service surface. Reachable only at this sub-module
 /// path so callers opt in explicitly via
 /// `use lean_rs_host::meta::{...};`.
-pub mod meta {
-    pub use crate::host::meta::*;
-}
+pub use crate::host::meta;
 
 pub use crate::host::elaboration::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,

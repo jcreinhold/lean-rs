@@ -106,7 +106,7 @@ back into are initialized when user code panics. The observed symptom on Linux i
 `print_backtrace` → `lean_demangle_bt_line_cstr` and hangs before reaching `abort_on_panic()`; the parent's request
 times out instead of observing a fatal exit.
 
-The worker crates and the host-stack verification fixture therefore pin a structural boundary: **no Lean code may run
+The worker crates and the service-layer verification fixture therefore pin a structural boundary: **no Lean code may run
 from the C panic handler in a worker child.** The boundary is enforced with `LEAN_BACKTRACE=0`, which `lean_panic_impl`
 checks *before* calling `print_backtrace`:
 

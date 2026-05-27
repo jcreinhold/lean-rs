@@ -17,9 +17,10 @@ platform-independent; digests are identical across the two target triples.
 Extending the window is the [bump procedure](bump-toolchain.md). Untested versions are not supported.
 
 The bundled Lake packages under `crates/lean-rs/shims/` and `crates/lean-rs-host/shims/`, plus `fixtures/lean` and
-`fixtures/interop-shims`, use the same toolchain window. The worker crates use the same window because its child process
-loads the host stack and fixture/capability dylibs built against that toolchain. The reusable interop release contract
-is documented in [`docs/architecture/14-interop-release-contract.md`](architecture/14-interop-release-contract.md).
+`fixtures/interop-shims`, use the same toolchain window. The worker crates use the same window because the child process
+loads the standard service layer and fixture/capability dylibs built against that toolchain. The reusable interop
+release contract is documented in
+[`docs/architecture/14-interop-release-contract.md`](architecture/14-interop-release-contract.md).
 
 ## `lean-rs-sys` symbol coverage
 

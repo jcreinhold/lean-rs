@@ -1,10 +1,9 @@
 # lean-rs-host
 
-Opinionated Rust host stack for embedding Lean 4 as a theorem-prover capability. Provides the `LeanHost` /
-`LeanCapabilities` / `LeanSession` trio, the kernel-check evidence types (`LeanEvidence`, `LeanKernelOutcome`,
-`ProofSummary`), the typed elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`,
-`LeanSeverity`, `LeanPosition`), the bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` /
-`PooledSession` reuse helper.
+Standard Lean services for Rust applications embedding Lean 4. Provides the `LeanHost` / `LeanCapabilities` /
+`LeanSession` trio, the kernel-check evidence types (`LeanEvidence`, `LeanKernelOutcome`, `ProofSummary`), the typed
+elaboration diagnostics (`LeanElabOptions`, `LeanElabFailure`, `LeanDiagnostic`, `LeanSeverity`, `LeanPosition`), the
+bounded `MetaM` service surface at `lean_rs_host::meta::*`, and the `SessionPool` / `PooledSession` reuse helper.
 
 Built on top of [`lean-rs`](https://docs.rs/lean-rs), the typed-FFI primitive. The opaque semantic handles `LeanName`,
 `LeanLevel`, `LeanExpr`, and `LeanDeclaration` live on `lean-rs`; this crate consumes them through `use lean_rs::{...}`.

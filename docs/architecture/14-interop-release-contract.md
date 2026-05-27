@@ -15,7 +15,7 @@ Consumer-facing contracts live in these documents:
   string callbacks without `lean-rs-host`.
 - [`../recipes/worker-capability-runner.md`](../recipes/worker-capability-runner.md): the worker-facing command path for
   live rows, diagnostics, terminal summaries, timeouts, and cycling.
-- [`03-host-stack.md`](03-host-stack.md): L2 `LeanHost` / `LeanCapabilities` / `LeanSession` surface and host method
+- [`03-host-stack.md`](03-host-stack.md): L2 `LeanHost` / `LeanCapabilities` / `LeanSession` surface and service method
   signatures.
 - [`10-callback-registry.md`](10-callback-registry.md): callback handle lifetime, panic, and reentrancy rules.
 - [`11-generic-interop-shims.md`](11-generic-interop-shims.md): generic Lean shim ownership.

@@ -1,19 +1,22 @@
 # Architecture Charter
 
-The design boundary between Lean and `lean-rs`, the smallest public interface that supports it, and the alternatives
-that were considered and rejected. Any new API or behavior must clear three questions: does it hide what should be
-hidden, preserve what should be preserved, discard what should be discarded?
+The design boundary between Lean and the `lean-rs` runtime bridge, the smallest public interface that supports it, and
+the alternatives that were considered and rejected. Any new API or behavior must clear three questions: does it hide
+what should be hidden, preserve what should be preserved, discard what should be discarded?
 
 The charter pins intent, not Rust items or symbol names; those live in the per-crate API review baselines under
 [`docs/api-review/`](../api-review/).
 
 ## Purpose
 
-Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. `lean-rs` owns
-linking, runtime initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics,
-batching, and packaging. The two halves do not negotiate. Anything that asks Rust to recompute a Lean semantic fact is
-out of scope; anything that asks Lean to know about Rust hosting (thread pools, panic conversion, FFI batching, module
-loaders) is out of scope.
+This workspace is a Lean runtime bridge for Rust. The `lean-rs` crate is the typed FFI layer, `lean-rs-host` is the
+standard Lean service layer, and the worker crates add process isolation around those services.
+
+Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. The Rust bridge
+owns linking, runtime initialization, ABI conversion, module loading, error and panic boundaries, scheduling,
+diagnostics, batching, process isolation, and packaging. The two halves do not negotiate. Anything that asks Rust to
+recompute a Lean semantic fact is out of scope; anything that asks Lean to know about Rust hosting (thread pools, panic
+conversion, FFI batching, module loaders) is out of scope.
 
 ## Adopted Shape
 
@@ -33,16 +36,16 @@ Five published crates plus one workspace-internal helper:
   sibling `lean-rs-host` the small set of `LeanError`-constructor wrappers it needs without exposing them to external
   callers. It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts
   here.
-- **`lean-rs-host`** (published, **L2**). The opinionated theorem-prover-host stack built on `lean-rs`: `LeanHost`,
+- **`lean-rs-host`** (published, **L2**). The standard Lean service layer built on `lean-rs`: `LeanHost`,
   `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 6
   `lean_rs_host_*` `@[export]` Lean shim contract it loads alongside consumer capability dylibs. Batch and session-pool
-  operations are methods on `LeanSession` rather than a separate `batch` module. Downstreams that want this opinion add
-  it on top of `lean-rs`; downstreams that don't aren't paying for it.
+  operations are methods on `LeanSession` rather than a separate `batch` module. Downstreams that need common Lean
+  services add it on top of `lean-rs`; downstreams that only need typed FFI do not pay for it.
 - **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
-  process-boundary layer). The parent supervises a child process around the host stack. They own process lifecycle,
-  private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming, diagnostics,
-  terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession` mirror and not
-  a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
+  process-boundary layer). The parent supervises a child process around the standard Lean service layer. They own
+  process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming,
+  diagnostics, terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession`
+  mirror and not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
 
 `lean-rs-test-support` is workspace-internal (`publish = false`).
 
@@ -75,7 +78,7 @@ without affecting `lean-rs-host` callers, and vice versa, as long as both crate 
 Topic deep-dives:
 
 - [`05-raw-sys-design.md`](05-raw-sys-design.md) — `lean-rs-sys` per-decision rationale.
-- [`03-host-stack.md`](03-host-stack.md) — `lean-rs-host` curated surface.
+- [`03-host-stack.md`](03-host-stack.md) — `lean-rs-host` curated service surface.
 - [`14-interop-release-contract.md`](14-interop-release-contract.md) — reusable interop release contract.
 - [`16-production-boundary.md`](16-production-boundary.md),
   [`17-worker-session-adapter.md`](17-worker-session-adapter.md) — worker-process boundary and the host-session subset
@@ -173,12 +176,12 @@ Each was considered before the adopted shape. Recorded so reviewers can recogniz
   `0.0.9` was pinned to a Lean below our target, and the surfaces we needed (`LEAN_VERSION` const,
   `cargo:rerun-if-changed=lean.h`, signature-checked allowlist, typed diagnostics) would have required ongoing upstream
   PRs the published crate did not provide.
-- **Conflate L1 FFI primitive and L2 host stack in one crate.** Putting both layers behind one default entry point
+- **Conflate L1 FFI primitive and L2 service layer in one crate.** Putting both layers behind one default entry point
   (`LeanHost`) made it impossible for an external L1-only consumer to depend on `lean-rs = "0.1"` without first
-  satisfying the `lean_rs_host_*` shim contract. Generic callback helpers belong below the host stack; theorem-prover
-  host shims do not.
+  satisfying the `lean_rs_host_*` shim contract. Generic callback helpers belong below the service layer; theorem-prover
+  shims do not.
 
 The adopted shape is deeper than each rejected alternative: fewer caller-facing details, less temporal coupling, a small
 unsafe surface, and a one-line in-process layering invariant (`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`)
-with the worker crates wrapping the host stack when callers need a process boundary. It matches the dominant Rust
+with the worker crates wrapping the service layer when callers need a process boundary. It matches the dominant Rust
 binding shape, so contributors arrive with correct expectations, and it contains no Rust-side dependent-type imitation.

@@ -13,8 +13,8 @@ both peers exchange live in [`lean-rs-worker-protocol`](https://docs.rs/lean-rs-
 ```text
 lean-rs-worker-child        (this crate; links libleanshared)
 ├── lean-rs-worker-protocol   (wire types, no Lean link)
-├── lean-rs                   (safe Lean host stack)
-├── lean-rs-host              (theorem-prover host: capabilities, sessions, kernel)
+├── lean-rs                   (typed FFI layer)
+├── lean-rs-host              (standard Lean services: capabilities, sessions, kernel)
 └── lean-toolchain            (manifest validation, capability descriptor)
 ```
 

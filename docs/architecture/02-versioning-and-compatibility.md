@@ -26,7 +26,7 @@ is the [bump procedure](../bump-toolchain.md).
 **Lower bound: 4.26.0.** A 2026-05-18 multi-toolchain sweep
 ([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1. The six
 releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases ≤ 4.25.x SIGSEGV inside
-`lean_dec_ref_cold` from L2 host-stack tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
+`lean_dec_ref_cold` from L2 service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
 on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release.
 
 **Policy.**

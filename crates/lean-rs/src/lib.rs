@@ -4,9 +4,9 @@
 //! minimum surface a Rust crate needs to drive a compiled Lean library:
 //! bring the runtime up, open a Lake-built capability bundle, initialise a
 //! module, and call typed `@[export]` functions with first-class type
-//! marshalling. The opinionated theorem-prover-host stack (`LeanHost`,
-//! `LeanCapabilities`, `LeanSession`, plus the evidence and meta
-//! surfaces) lives in the sibling
+//! marshalling. The standard Lean service layer (`LeanHost`,
+//! `LeanCapabilities`, `LeanSession`, plus the evidence and meta surfaces)
+//! lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
 //! 28+6 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
 //! interop shims used by L1 callbacks; it has no theorem-prover host shim
@@ -41,7 +41,7 @@
 //!
 //! - [`error`] — typed error boundary. [`LeanError`] is a three-variant
 //!   enum (`LeanException` for Lean-thrown `IO` errors, `Host` for
-//!   host-stack failures, `Cancelled` for cooperative host
+//!   host failures, `Cancelled` for cooperative host
 //!   cancellation); payload structs ([`LeanException`],
 //!   [`HostFailure`], [`LeanCancelled`]) have private fields so the
 //!   bounded-message invariant is structural. Every error projects to a
@@ -77,7 +77,7 @@
 //! `lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`. The first
 //! two crates expose raw FFI and toolchain metadata; this crate is the
 //! L1 safe surface every (β)-binding consumer depends on. The
-//! opinionated theorem-prover-host stack lives in `lean-rs-host`.
+//! standard Lean service layer lives in `lean-rs-host`.
 //! Embedders that genuinely need the raw `lean_*` symbols can depend
 //! on `lean-rs-sys` directly, accepting its full `unsafe` discipline.
 //!

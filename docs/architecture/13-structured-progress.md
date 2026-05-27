@@ -32,7 +32,7 @@ with stage `CallbackPanic` and code `lean_rs.internal`. Lean internal panics rem
 
 ## Reporting Points
 
-Progress is phase-granular, not a promise that every Lean suboperation reports. The current host surface reports
+Progress is phase-granular, not a promise that every Lean suboperation reports. The current service surface reports
 progress for:
 
 - `LeanCapabilities::session` and `SessionPool::acquire` on fresh imports;

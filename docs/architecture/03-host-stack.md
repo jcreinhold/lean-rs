@@ -1,7 +1,10 @@
-# Host Stack Surface (`lean-rs-host`)
+# Standard Lean Service Layer (`lean-rs-host`)
 
-The curated public API of the L2 host stack—the published [`lean-rs-host`](https://docs.rs/lean-rs-host) crate. The
-classification table below is the **semver surface**: which items cross the crate root, which stay at module paths,
+The curated public API of the L2 standard service layer—the published [`lean-rs-host`](https://docs.rs/lean-rs-host)
+crate. This layer sits above the typed FFI crate (`lean-rs`) and provides common Lean services: imports, elaboration,
+kernel checks, declaration queries, bounded `MetaM`, info-tree projections, sessions, and pooling.
+
+The classification table below is the **semver surface**: which items cross the crate root, which stay at module paths,
 which stay `pub(crate)`. Refactors that reshape internal modules are free as long as the curated re-exports stay stable.
 
 See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling rationale.
@@ -9,16 +12,15 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling r
 ## Layering
 
 `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The L1 FFI primitive `lean-rs` ships the typed
-`@[export]`-calling machinery and the structured error boundary; this L2 crate adds the opinionated
-capability/session/pool stack, and depends on the 28 + 6 `lean_rs_host_*` `@[export]` Lean shims bundled with
-`lean-rs-host` and loaded alongside consumer capability dylibs.
+`@[export]`-calling machinery and the structured error boundary; this L2 crate adds standard Lean services through
+`LeanHost`, `LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 6 `lean_rs_host_*`
+`@[export]` Lean shims bundled with `lean-rs-host` and loaded alongside consumer capability dylibs.
 
 Downstream applications that just need to call a `@[export]` Lean function with typed arguments—the norm for Rust
 bindings to GC-hosted languages—depend on `lean-rs` directly and skip this crate.
 
 Reusable interop machinery belongs below this crate; see [`08-reusable-interop.md`](08-reusable-interop.md). The
-`lean_rs_host_*` shim contract remains the theorem-prover host policy layer, not the generic callback or build
-substrate.
+`lean_rs_host_*` shim contract remains the standard service contract, not the generic callback or build substrate.
 
 ## Curated crate-root surface
 
@@ -186,7 +188,7 @@ trybuild assertion at `crates/lean-rs-host/tests/compile_fail/runtime_is_not_sen
 
 `LeanError` lives on `lean-rs` (L1). It is the only public error type that crosses either crate's boundary. Two
 variants: `LeanException(LeanException)` for Lean-thrown `IO` errors that callers may surface to end users, and
-`Host(HostFailure)` for any host-stack failure (init, link, load, conversion, contained callback panic, internal
+`Host(HostFailure)` for any host failure (init, link, load, conversion, contained callback panic, internal
 invariant). Payload structs have private fields and `pub(crate)` constructors that run the bounding helper, so the
 `LEAN_ERROR_MESSAGE_LIMIT` (4 KiB) cap on `message()` is a structural invariant—external callers receive `LeanError`
 values but cannot mint one with an unbounded message. `lean-rs-host` constructs `Host(...)` variants via the

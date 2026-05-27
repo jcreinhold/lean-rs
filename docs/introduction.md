@@ -1,9 +1,11 @@
 # lean-rs
 
-Rust bindings for hosting [Lean 4](https://lean-lang.org/) capabilities. Lean owns Lean semantics — elaboration, kernel
-checking, proof objects, universes, `MetaM`, dependent-type meaning. `lean-rs` owns hosting: linking, runtime
-initialization, ABI conversion, module loading, error and panic boundaries, scheduling, diagnostics, batching, and
-packaging. Rust does not reconstruct Lean semantic facts.
+A Lean runtime bridge for Rust. The workspace has three layers: a typed FFI layer (`lean-rs`), a standard Lean service
+layer (`lean-rs-host`), and an optional process-isolation layer (`lean-rs-worker-*`). Lean owns Lean semantics:
+elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. The Rust bridge owns the
+hosting work around those semantics: linking, runtime initialization, ABI conversion, module loading, error and panic
+boundaries, scheduling, diagnostics, batching, process isolation, and packaging. Rust does not reconstruct Lean semantic
+facts.
 
 This site collects the architecture charter, design notes, recipes, safety audits, and operational runbooks that ship in
 the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs). New users should start with the
@@ -26,7 +28,7 @@ order it was written, not the order it should be read; use the sidebar groupings
 
 - **Foundations** — charter, safety model, versioning, raw FFI rationale.
 - **Same-process FFI (`lean-rs`)** — the L1 safe front door: concurrency, panic containment, callbacks, loader.
-- **Host stack (`lean-rs-host`)** — the L2 theorem-prover-host surface and its capability contract.
+- **Standard Lean services (`lean-rs-host`)** — the L2 service surface and its capability contract.
 - **Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)** — the process-boundary supervisor and its scale and
   observability story.
 - **Recipes** — task-oriented walkthroughs for shipping a Lean-backed crate or wiring a worker capability.

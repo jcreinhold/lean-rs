@@ -249,5 +249,5 @@ The sections above describe the approved design. Implementation surfaced these d
 - Version compatibility: [`02-versioning-and-compatibility.md`](02-versioning-and-compatibility.md)—*Header digest*,
   *Bumping the Lean version*.
 - L1 safe surface: the `lean-rs` crate (typed FFI primitive). Crate docs at <https://docs.rs/lean-rs>.
-- L2 opinionated stack: [`03-host-stack.md`](03-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the
-  L1 safe surface.
+- L2 service layer: [`03-host-stack.md`](03-host-stack.md)—the `lean-rs-host` crate, what gets built on top of the L1
+  safe surface.
