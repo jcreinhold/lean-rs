@@ -30,7 +30,7 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 | Classification | Production sites | Current status |
 | --- | --- | --- |
 | Lean runtime ownership/lifetime management that belongs in `lean-rs` | `lean-rs/src/runtime/{init,obj,thread}.rs`; `lean-rs/src/abi/traits.rs`; handle wrappers in `lean-rs/src/handle/{name,level,expr,declaration}.rs`; `lean-rs-host/src/host/session.rs` argument-only `LeanAbi` for `LeanDeclarationFilter`; `lean-rs-host/src/host/process/query.rs` argument-only `LeanAbi` impls for module-query request/budget/selector types | Correctly centralised in `lean-rs` except the host argument-only impls, which still import `lean_rs_sys::lean_object` and use `Obj::from_owned_raw` to drop impossible return values. Move this ownership/drop pattern behind `lean-rs` conversion support. |
-| Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. Still leaked in `lean-rs-host`: host code reads scalar tags, constructor tags, scalar-tail bytes, and scalar-tail `UInt64`s directly through `lean_rs_sys`. Later prompts should replace these with safe Lean-object view APIs or generated decoders in `lean-rs`. |
+| Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. `lean-rs::abi::structure::{ObjView, CtorView}` now centralises scalar/nullary tag, ctor-tag, ctor-arity, and scalar-tail reads for host migrations. Still leaked in `lean-rs-host` until those decoders move off direct `lean_rs_sys` imports. |
 | Dynamic symbol dispatch that must become checked or explicitly unsafe | `lean-rs/src/module/library.rs`; `lean-rs/src/module/exported.rs`; every `LeanExported::from_function_address` use in `lean-rs-host/src/host/session.rs`, including mandatory session symbols, optional meta/process/cache symbols, `make_name`, and `call_capability_unchecked` | `lean-rs` owns `dlopen`, global-vs-function classification, `dlsym`, initializer lookup, and the unsafe function-pointer cast. `lean-rs-host` is trusted code today: it pins shim signatures in comments and constructs typed handles from raw addresses. Arbitrary `call_capability_unchecked` lookup is safe only by caller discipline today; it needs checked signature metadata or an explicitly unsafe API. |
 | Callback or context-pointer handling that belongs behind a safe callback API | `lean-rs/src/callback.rs`; `lean-rs-host/src/host/progress.rs` | `lean-rs` owns the callback registry, status bytes, panic containment, and string/progress payload trampolines. `lean-rs-host` still casts a stack-owned progress context address back to a reference inside the registered closure. That synchronous lifetime rule should be represented by a safe callback/session-progress API rather than repeated by host code. |
 | Unrelated unsafe that needs its own justification | `lean-rs/src/module/initializer.rs` `from_utf8_unchecked` for prevalidated symbol bytes and initializer call; `lean-rs/src/module/library.rs` platform loader calls including `RTLD_GLOBAL`; bundled Lean shims call `unsafe Lean.enableInitializersExecution` | Keep documented locally. These are not Lean object layout or Rust callback lifetime leaks, but each remains load-bearing and should stay isolated. |
@@ -38,9 +38,9 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 
 ### Information leakage to remove
 
-- **Lean object layout leakage:** `lean-rs` and `lean-rs-host` both know how to interpret scalar-vs-constructor tags and
-  constructor scalar tails. Host copies this rule in diagnostic severity, evidence status, module-query cache facts,
-  timings, booleans, and sum tags.
+- **Lean object layout leakage:** `lean-rs` now owns scalar-vs-constructor tags and constructor scalar-tail reads through
+  `ObjView` / `CtorView`, but `lean-rs-host` has not been migrated yet. Host still copies this rule in diagnostic
+  severity, evidence status, module-query cache facts, timings, booleans, and sum tags.
 - **Symbol ABI leakage:** `lean-rs-host/src/host/session.rs` duplicates the Lean signature of every shim export in the
   capability contract table and again at each typed `LeanExported::from_function_address` call site. The same ABI fact
   is present in Lean shim declarations and Rust comments/type annotations.
@@ -105,7 +105,7 @@ Constructor objects, polymorphic boxing, per-width scalar getters and setters. M
 
 | `pub unsafe fn` (line) | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_alloc_ctor` (113) | `tag <= LEAN_MAX_CTOR_TAG`; `num_objs <= 256`; `scalar_sz <= u16::MAX` | calls `lean_alloc_object`; writes `m_tag`, `m_other`, `m_num_objs`, `m_scalar_size`; result owns one refcount |
+| `lean_alloc_ctor` (121) | `tag <= LEAN_MAX_CTOR_TAG`; `num_objs <= 256`; `scalar_sz <= u16::MAX`; aligned object size <= `LEAN_MAX_SMALL_OBJECT_SIZE` | calls `lean_alloc_object`; writes `m_rc`, aligned `m_cs_sz`, `m_tag`, and `m_other` so refcounting, constructor arity, and object-size helpers see a well-formed small ctor; result owns one refcount |
 | `lean_ctor_num_objs` (59) | `o` is a live ctor | reads `lean_ptr_other(o)` |
 | `lean_ctor_obj_cptr` (72) | `o` is a live ctor with `num_objs` slots | layout cast to `LeanCtorObjectRepr.objs` |
 | `lean_ctor_scalar_cptr` (86) | `o` is a live ctor whose scalar payload follows `num_objs * sizeof(ptr)` | layout cast past the object pointer array |
@@ -267,7 +267,7 @@ object's header via a sys predicate (`lean_is_scalar`, `lean_is_ctor`, `lean_obj
 | `abi/array.rs` | 9 | line 28 | `lean_alloc_array`, `lean_array_size`, `lean_array_cptr`, `lean_array_set_core`, `lean_array_get_core`, `lean_is_array`, `lean_is_scalar`, `lean_obj_tag` | `from_iter_exact` write loop (line 56) relies on `lean_alloc_array(n, n)` so every slot is written exactly once |
 | `abi/option.rs` | 8 | line 27 | `lean_box(0)` for `None`, `lean_is_scalar`, `lean_unbox`, `lean_is_ctor`, `lean_obj_tag` | encodes Lean's mixed-arity nullary-scalar `Option` |
 | `abi/except.rs` | 2 | per-block | `Obj::from_owned_raw` (×2) | invariant is "`c` is a `lean_obj_res` owning one refcount per Lake's contract"—established by the typed function-pointer cast in `LeanExported::call` |
-| `abi/structure.rs` | 10 | line 38 | `lean_alloc_ctor`, `lean_ctor_obj_cptr`, `lean_ctor_num_objs`, `lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag` | `take_ctor_objects::<N>` (line 128) reads field slot via `read()` and pairs with `lean_inc` so caller's `Obj` receives a fresh refcount |
+| `abi/structure.rs` | 24 | line 38 | `lean_alloc_ctor`, `lean_ctor_obj_cptr`, `lean_ctor_scalar_cptr`, `lean_ctor_num_objs`, `lean_ctor_get_uint8`, `lean_ctor_get_uint64`, `lean_object_data_byte_size`, `lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_unbox` | `ObjView` / `CtorView` perform borrow-only shape, tag, and scalar-tail reads with explicit bounds checks; `take_ctor_objects::<N>` reads field slots and pairs each `lean_inc` with the parent drop so returned `Obj`s own their refcounts |
 | `abi/traits.rs` | 1 | per-block line 162 | `Obj::from_owned_raw` | blanket `LeanAbi for Obj<'lean>` identity impl |
 | `abi/tests.rs` | 2 | per-block line 582 |—| borrowed-view pointer-equality assertion; no header deref |
 

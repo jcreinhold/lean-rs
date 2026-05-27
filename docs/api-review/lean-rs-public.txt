@@ -13,9 +13,40 @@ pub fn lean_rs::abi::nat::from_usize(&lean_rs::LeanRuntime, usize) -> lean_rs::r
 pub fn lean_rs::abi::nat::try_to_u64(lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u64>
 pub fn lean_rs::abi::nat::try_to_usize(lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<usize>
 pub mod lean_rs::abi::structure
+pub struct lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> lean_rs::abi::structure::CtorView<'lean, 'a>
+pub fn lean_rs::abi::structure::CtorView<'lean, 'a>::bool(&self, u32, &str) -> lean_rs::error::LeanResult<bool>
+pub fn lean_rs::abi::structure::CtorView<'lean, 'a>::tag(&self) -> u8
+pub fn lean_rs::abi::structure::CtorView<'lean, 'a>::uint64(&self, u32, &str) -> lean_rs::error::LeanResult<u64>
+pub fn lean_rs::abi::structure::CtorView<'lean, 'a>::uint8(&self, u32, &str) -> lean_rs::error::LeanResult<u8>
+impl<'lean, 'a> core::clone::Clone for lean_rs::abi::structure::CtorView<'lean, 'a>
+pub fn lean_rs::abi::structure::CtorView<'lean, 'a>::clone(&self) -> lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::marker::Copy for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::marker::Freeze for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> !core::marker::Send for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> !core::marker::Sync for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::marker::Unpin for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::marker::UnsafeUnpin for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::RefUnwindSafe for lean_rs::abi::structure::CtorView<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::UnwindSafe for lean_rs::abi::structure::CtorView<'lean, 'a>
+pub struct lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> lean_rs::abi::structure::ObjView<'lean, 'a>
+pub fn lean_rs::abi::structure::ObjView<'lean, 'a>::ctor(&self) -> lean_rs::error::LeanResult<lean_rs::abi::structure::CtorView<'lean, 'a>>
+pub fn lean_rs::abi::structure::ObjView<'lean, 'a>::ctor_shape(&self, u8, usize, &str) -> lean_rs::error::LeanResult<lean_rs::abi::structure::CtorView<'lean, 'a>>
+pub fn lean_rs::abi::structure::ObjView<'lean, 'a>::is_scalar(&self) -> bool
+pub fn lean_rs::abi::structure::ObjView<'lean, 'a>::scalar_payload(&self, &str) -> lean_rs::error::LeanResult<usize>
+pub fn lean_rs::abi::structure::ObjView<'lean, 'a>::sum_tag(&self) -> lean_rs::error::LeanResult<u8>
+impl<'lean, 'a> core::marker::Freeze for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> !core::marker::Send for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> !core::marker::Sync for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> core::marker::Unpin for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> core::marker::UnsafeUnpin for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::RefUnwindSafe for lean_rs::abi::structure::ObjView<'lean, 'a>
+impl<'lean, 'a> core::panic::unwind_safe::UnwindSafe for lean_rs::abi::structure::ObjView<'lean, 'a>
 pub fn lean_rs::abi::structure::alloc_ctor_with_objects<'lean, const N: usize>(&'lean lean_rs::LeanRuntime, u8, [lean_rs::runtime::obj::Obj<'lean>; N]) -> lean_rs::runtime::obj::Obj<'lean>
 pub fn lean_rs::abi::structure::ctor_tag(&lean_rs::runtime::obj::Obj<'_>) -> lean_rs::error::LeanResult<u8>
 pub fn lean_rs::abi::structure::take_ctor_objects<'lean, const N: usize>(lean_rs::runtime::obj::Obj<'lean>, u8, &str) -> lean_rs::error::LeanResult<[lean_rs::runtime::obj::Obj<'lean>; N]>
+pub fn lean_rs::abi::structure::view<'lean, 'a>(&'a lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::abi::structure::ObjView<'lean, 'a>
 pub mod lean_rs::abi::traits
 pub trait lean_rs::abi::traits::IntoLean<'lean>: core::marker::Sized
 pub fn lean_rs::abi::traits::IntoLean::into_lean(self, &'lean lean_rs::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>

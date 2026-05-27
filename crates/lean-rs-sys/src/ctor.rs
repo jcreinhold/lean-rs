@@ -20,6 +20,7 @@
 
 use core::mem::size_of;
 
+use crate::consts::{LEAN_MAX_SMALL_OBJECT_SIZE, LEAN_OBJECT_SIZE_DELTA};
 use crate::object::lean_alloc_object;
 use crate::repr::{LeanCtorObjectRepr, LeanObjectRepr};
 use crate::types::{b_lean_obj_arg, lean_obj_res, lean_object};
@@ -28,26 +29,33 @@ use crate::types::{b_lean_obj_arg, lean_obj_res, lean_object};
 /// freshly allocated object — Rust mirror of `lean_set_st_header`
 /// (`lean.h:615–623`).
 ///
-/// `m_cs_sz` is intentionally **not** touched: under the default mimalloc
-/// build of `libleanshared`, the allocator stores the slot size in that
-/// field via `lean_alloc_object` and overwriting it would corrupt
-/// `lean_object_byte_size`. Without mimalloc, `lean_alloc_object` stores
-/// the size via a prefix word instead, so `m_cs_sz` is unused and leaving
-/// it as the allocator returned it is fine.
+/// Constructor allocation uses Lean's small-object sizing convention:
+/// `m_cs_sz` stores the aligned object byte size for live small objects.
+/// The exported `lean_alloc_object` symbol does not initialise that byte
+/// for callers that bypass Lean's inline `lean_alloc_ctor_memory`, so the
+/// Rust mirror writes it here after allocation. Without this write,
+/// `lean_object_byte_size` cannot recover the byte span of Rust-allocated
+/// constructors, which in turn prevents safe scalar-tail bounds checks.
 ///
 /// # Safety
 ///
 /// `o` must point to a freshly allocated, otherwise-uninitialized Lean
 /// heap object whose layout matches [`LeanObjectRepr`].
 #[inline(always)]
-unsafe fn set_st_header(o: *mut lean_object, tag: u8, other: u8) {
+unsafe fn set_st_header(o: *mut lean_object, tag: u8, other: u8, aligned_size: u16) {
     // SAFETY: precondition above; layout pinned by `EXPECTED_HEADER_DIGEST`.
     unsafe {
         let repr = o.cast::<LeanObjectRepr>();
         (*repr).m_rc = 1;
+        (*repr).m_cs_sz = aligned_size;
         (*repr).m_tag = tag;
         (*repr).m_other = other;
     }
+}
+
+#[inline(always)]
+fn align_small_object_size(sz: usize) -> usize {
+    sz.strict_add(LEAN_OBJECT_SIZE_DELTA - 1) & !(LEAN_OBJECT_SIZE_DELTA - 1)
 }
 
 /// Number of object-pointer fields stored in a constructor (`lean.h:644`).
@@ -109,18 +117,31 @@ pub unsafe fn lean_ctor_scalar_cptr(o: *mut lean_object) -> *mut u8 {
 /// ceilings. The caller must fully initialise every declared field before
 /// passing the object to other Lean routines (notably the object-pointer
 /// fields, which Lean's RC machinery will otherwise read as garbage).
+///
+/// # Panics
+///
+/// Panics if the computed small-object size exceeds Lean's
+/// `LEAN_MAX_SMALL_OBJECT_SIZE`; this indicates a caller violated the
+/// sizing preconditions above.
 #[inline(always)]
 pub unsafe fn lean_alloc_ctor(tag: u8, num_objs: u8, scalar_sz: usize) -> lean_obj_res {
     let sz = size_of::<LeanObjectRepr>()
         .strict_add(size_of::<*mut lean_object>().strict_mul(num_objs as usize))
         .strict_add(scalar_sz);
+    let aligned_sz = align_small_object_size(sz);
+    assert!(aligned_sz <= LEAN_MAX_SMALL_OBJECT_SIZE);
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "LEAN_MAX_SMALL_OBJECT_SIZE is below u16::MAX"
+    )]
+    let aligned_sz = aligned_sz as u16;
     // SAFETY: `lean_alloc_object` returns a non-null pointer to `sz` bytes of
     // uninitialised Lean-managed memory; we immediately install the
     // single-threaded header so any subsequent access through Lean's
     // predicates sees a well-formed object.
     unsafe {
         let o = lean_alloc_object(sz);
-        set_st_header(o, tag, num_objs);
+        set_st_header(o, tag, num_objs, aligned_sz);
         o
     }
 }
