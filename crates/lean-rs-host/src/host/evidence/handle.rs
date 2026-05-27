@@ -6,7 +6,6 @@ use lean_rs::LeanRuntime;
 use lean_rs::Obj;
 use lean_rs::abi::traits::{LeanAbi, TryFromLean, sealed};
 use lean_rs::error::LeanResult;
-use lean_rs_sys::lean_object;
 
 /// Opaque receipt for a piece of Lean evidence the kernel accepted.
 ///
@@ -45,9 +44,9 @@ impl fmt::Debug for LeanEvidence<'_> {
 impl sealed::SealedAbi for LeanEvidence<'_> {}
 
 impl<'lean> LeanAbi<'lean> for LeanEvidence<'lean> {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
-    fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
+    fn into_c(self, _runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.obj.into_raw()
     }
 
@@ -55,14 +54,8 @@ impl<'lean> LeanAbi<'lean> for LeanEvidence<'lean> {
         clippy::not_unsafe_ptr_arg_deref,
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
-    fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
-        // SAFETY: `c` is an owned `lean_object*` produced by the Lean
-        // kernel-check capability returning an `Evidence` value; per
-        // Lake's `lean_obj_res` contract it carries one reference count.
-        // `runtime` witnesses `'lean`.
-        #[allow(unsafe_code)]
-        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-        Ok(Self { obj })
+    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+        Obj::from_c(c, runtime).map(|obj| Self { obj })
     }
 }
 

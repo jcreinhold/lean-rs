@@ -8,29 +8,15 @@
 //! [`LeanPosition`] values without inspecting Lean's internal
 //! representation.
 //!
-//! The encoding contract (mirrored in `Elaboration.lean`):
-//!
-//! - `Diagnostic = lean_alloc_ctor(0, 3, 1)` — three object slots
-//!   (message, position, fileLabel) and one scalar byte (severity at
-//!   offset 0 of the scalar tail).
-//! - `DiagnosticPos = lean_alloc_ctor(0, 4, 0)` — four object slots
-//!   (line, column, endLine, endColumn) carrying `Nat` and `Option Nat`
-//!   values. `Nat` is scalar-tagged for small values (always true for
-//!   source positions), so each slot decodes through
-//!   [`lean_rs::abi::nat::try_to_u64`].
-
-// SAFETY DOC: every `unsafe { ... }` block in this file carries its own
-// `// SAFETY:` comment; the blanket allow keeps the scope minimal per
-// `docs/architecture/01-safety-model.md`.
-#![allow(unsafe_code)]
+//! The Lean shim owns the diagnostic shape. This module decodes the
+//! domain fields through `lean-rs` object views and keeps Lean runtime
+//! layout details out of the host layer.
 
 use lean_rs::Obj;
 use lean_rs::abi::nat;
-use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
+use lean_rs::abi::structure::{take_ctor_objects, view};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::{LeanResult, bound_message};
-use lean_rs_sys::ctor::lean_ctor_get_uint8;
-use lean_rs_sys::object::{lean_is_scalar, lean_obj_tag, lean_unbox};
 
 /// Severity classification attached to each [`LeanDiagnostic`]. Mirrors
 /// Lean's `MessageSeverity` constructors at 4.29.1.
@@ -175,14 +161,8 @@ impl LeanDiagnostic {
 
 impl<'lean> TryFromLean<'lean> for LeanDiagnostic {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        require_diagnostic_ctor(&obj)?;
-        let ptr = obj.as_raw_borrowed();
-        // SAFETY: ctor shape validated above; `lean_ctor_scalar_cptr`
-        // starts immediately past the object slots, so offset 0 reads
-        // the first scalar tail byte (the severity tag the Lean-side
-        // constructor writes via `lean_ctor_set_uint8(_,
-        // sizeof(void*)*num_objs, _)`).
-        let severity_byte = unsafe { lean_ctor_get_uint8(ptr, 0) };
+        let diagnostic = view(&obj).ctor_shape(0, 3, "Diagnostic")?;
+        let severity_byte = diagnostic.uint8(0, "Diagnostic.severity")?;
         let [msg_o, pos_o, label_o] = take_ctor_objects::<3>(obj, 0, "Diagnostic")?;
         let severity = LeanSeverity::from_byte(severity_byte)?;
         let message = bound_message(String::try_from_lean(msg_o)?);
@@ -194,19 +174,6 @@ impl<'lean> TryFromLean<'lean> for LeanDiagnostic {
             position,
             file_label,
         })
-    }
-}
-
-/// Tag-only check; the field-count check happens inside
-/// [`take_ctor_objects`] below.
-fn require_diagnostic_ctor(obj: &Obj<'_>) -> LeanResult<()> {
-    let tag = ctor_tag(obj)?;
-    if tag == 0 {
-        Ok(())
-    } else {
-        Err(conversion_error(format!(
-            "expected Lean Diagnostic ctor (tag 0), found tag {tag}"
-        )))
     }
 }
 
@@ -222,11 +189,9 @@ fn decode_nat_u32(obj: Obj<'_>, label: &str) -> LeanResult<u32> {
 /// `u32::try_from_lean` ABI (Nat is scalar-tagged, `UInt32` in
 /// polymorphic position is ctor-boxed).
 fn decode_option_nat_u32(obj: Obj<'_>, label: &str) -> LeanResult<Option<u32>> {
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: pure pointer-bit math.
-    if unsafe { lean_is_scalar(ptr) } {
-        // SAFETY: scalar branch verified above.
-        let payload = unsafe { lean_unbox(ptr) };
+    let obj_view = view(&obj);
+    if obj_view.is_scalar() {
+        let payload = obj_view.scalar_payload(label)?;
         return match payload {
             0 => Ok(None),
             other => Err(conversion_error(format!(
@@ -234,11 +199,11 @@ fn decode_option_nat_u32(obj: Obj<'_>, label: &str) -> LeanResult<Option<u32>> {
             ))),
         };
     }
-    // SAFETY: non-scalar branch; tag read on the owned object header.
-    let tag = unsafe { lean_obj_tag(ptr) };
-    if tag != 1 {
+    let ctor = obj_view.ctor()?;
+    if ctor.tag() != 1 {
         return Err(conversion_error(format!(
-            "{label}: expected Option.some ctor (tag 1), found heap tag {tag}"
+            "{label}: expected Option.some ctor (tag 1), found heap tag {}",
+            ctor.tag()
         )));
     }
     let [inner] = take_ctor_objects::<1>(obj, 1, "Option Nat")?;

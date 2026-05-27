@@ -5,18 +5,10 @@
 //! elaboration, info-tree traversal, cursor selection, and bounded
 //! rendering. Rust decodes only the requested projection.
 
-// SAFETY DOC: every `unsafe { ... }` block in this file carries its own
-// `// SAFETY:` comment; the blanket allow keeps the scope minimal per
-// `docs/architecture/01-safety-model.md`.
-#![allow(unsafe_code)]
-
 use lean_rs::abi::nat;
-use lean_rs::abi::structure::{alloc_ctor_with_objects, ctor_tag, take_ctor_objects};
+use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use lean_rs::{LeanRuntime, Obj};
-use lean_rs_sys::ctor::{lean_ctor_get_uint8, lean_ctor_get_uint64};
-use lean_rs_sys::lean_object;
-use lean_rs_sys::object::{lean_is_scalar, lean_unbox};
 
 use crate::host::elaboration::LeanElabFailure;
 
@@ -140,7 +132,7 @@ impl<'lean> IntoLean<'lean> for ModuleQueryOutputBudgets {
 impl sealed::SealedAbi for ModuleQueryOutputBudgets {}
 
 impl<'lean> LeanAbi<'lean> for ModuleQueryOutputBudgets {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.into_lean(runtime).into_raw()
@@ -151,9 +143,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQueryOutputBudgets {
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`
-        // contract; wrap-and-drop releases it on this unreachable decode path.
-        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        drop(Obj::from_c(c, runtime)?);
         Err(conversion_error(
             "ModuleQueryOutputBudgets cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -163,7 +153,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQueryOutputBudgets {
 impl sealed::SealedAbi for &ModuleQueryOutputBudgets {}
 
 impl<'lean> LeanAbi<'lean> for &ModuleQueryOutputBudgets {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.clone().into_lean(runtime).into_raw()
@@ -174,8 +164,7 @@ impl<'lean> LeanAbi<'lean> for &ModuleQueryOutputBudgets {
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        // SAFETY: see the owned `ModuleQueryOutputBudgets` impl.
-        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        drop(Obj::from_c(c, runtime)?);
         Err(conversion_error(
             "&ModuleQueryOutputBudgets cannot decode a Lean call result; use ModuleQueryOutputBudgets for owned values",
         ))
@@ -242,7 +231,7 @@ impl<'lean> TryFromLean<'lean> for ModuleQuerySelector {
 impl sealed::SealedAbi for ModuleQuerySelector {}
 
 impl<'lean> LeanAbi<'lean> for ModuleQuerySelector {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.into_lean(runtime).into_raw()
@@ -253,9 +242,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuerySelector {
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`
-        // contract; wrap-and-drop releases it on this unreachable decode path.
-        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        drop(Obj::from_c(c, runtime)?);
         Err(conversion_error(
             "ModuleQuerySelector cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -265,7 +252,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuerySelector {
 impl sealed::SealedAbi for ModuleQuery {}
 
 impl<'lean> LeanAbi<'lean> for ModuleQuery {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.into_lean(runtime).into_raw()
@@ -276,9 +263,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuery {
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`
-        // contract; wrap-and-drop releases it on this unreachable decode path.
-        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        drop(Obj::from_c(c, runtime)?);
         Err(conversion_error(
             "ModuleQuery cannot decode a Lean call result; it is an argument-only type",
         ))
@@ -288,7 +273,7 @@ impl<'lean> LeanAbi<'lean> for ModuleQuery {
 impl sealed::SealedAbi for &ModuleQuery {}
 
 impl<'lean> LeanAbi<'lean> for &ModuleQuery {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.clone().into_lean(runtime).into_raw()
@@ -299,8 +284,7 @@ impl<'lean> LeanAbi<'lean> for &ModuleQuery {
         reason = "sealed trait — caller invariant documented on LeanAbi::from_c"
     )]
     fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
-        // SAFETY: see the owned `ModuleQuery` impl.
-        drop(unsafe { Obj::from_owned_raw(runtime, c) });
+        drop(Obj::from_c(c, runtime)?);
         Err(conversion_error(
             "&ModuleQuery cannot decode a Lean call result; use ModuleQuery for owned values",
         ))
@@ -835,24 +819,12 @@ pub struct ModuleQueryTimings {
 
 impl<'lean> TryFromLean<'lean> for ModuleQueryTimings {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let tag = ctor_tag(&obj)?;
-        if tag != 0 {
-            return Err(conversion_error(format!(
-                "expected Lean ModuleQueryTimings constructor tag 0, found tag {tag}"
-            )));
-        }
-        let ptr = obj.as_raw_borrowed();
+        let ctor = view(&obj).ctor_shape(0, 0, "ModuleQueryTimings")?;
         Ok(Self {
-            // SAFETY: ctor tag validated above; scalar tail offsets match
-            // the four `UInt64` fields in `ModuleQueryTimings`.
-            header_import_micros: unsafe { lean_ctor_get_uint64(ptr, 0) },
-            // SAFETY: see offset 0. Offsets are byte offsets into the
-            // scalar payload.
-            elaboration_micros: unsafe { lean_ctor_get_uint64(ptr, 8) },
-            // SAFETY: see offset 0.
-            projection_micros: unsafe { lean_ctor_get_uint64(ptr, 16) },
-            // SAFETY: see offset 0.
-            rendering_micros: unsafe { lean_ctor_get_uint64(ptr, 24) },
+            header_import_micros: ctor.uint64(0, "ModuleQueryTimings.headerImportMicros")?,
+            elaboration_micros: ctor.uint64(8, "ModuleQueryTimings.elaborationMicros")?,
+            projection_micros: ctor.uint64(16, "ModuleQueryTimings.projectionMicros")?,
+            rendering_micros: ctor.uint64(24, "ModuleQueryTimings.renderingMicros")?,
         })
     }
 }
@@ -869,21 +841,14 @@ pub struct ModuleQueryCacheFacts {
 
 impl<'lean> TryFromLean<'lean> for ModuleQueryCacheFacts {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let tag = ctor_tag(&obj)?;
-        if tag != 0 {
-            return Err(conversion_error(format!(
-                "expected Lean ModuleQueryCacheFacts constructor tag 0, found tag {tag}"
-            )));
-        }
-        let ptr = obj.as_raw_borrowed();
-        let cache_status = unsafe { lean_ctor_get_uint8(ptr, 8) };
+        let ctor = view(&obj).ctor_shape(0, 3, "ModuleQueryCacheFacts")?;
+        let output_bytes = ctor.uint64(0, "ModuleQueryCacheFacts.outputBytes")?;
+        let cache_status = ctor.uint8(8, "ModuleQueryCacheFacts.cacheStatus")?;
         let [timings, cache_entry_count, cache_approx_bytes] = take_ctor_objects::<3>(obj, 0, "ModuleQueryCacheFacts")?;
         Ok(Self {
             cache_status: ModuleQueryCacheStatus::from_scalar_tail(cache_status)?,
             timings: ModuleQueryTimings::try_from_lean(timings)?,
-            // SAFETY: ctor tag validated above; scalar-tail offset 0 holds
-            // outputBytes and offset 8 holds the compact cache status byte.
-            output_bytes: unsafe { lean_ctor_get_uint64(ptr, 0) },
+            output_bytes,
             cache_entry_count: option_nat_u64(cache_entry_count)?,
             cache_approx_bytes: option_nat_u64(cache_approx_bytes)?,
         })
@@ -1068,19 +1033,10 @@ pub struct ModuleSnapshotCacheClearResult {
 
 impl<'lean> TryFromLean<'lean> for ModuleSnapshotCacheClearResult {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let tag = ctor_tag(&obj)?;
-        if tag != 0 {
-            return Err(conversion_error(format!(
-                "expected Lean ModuleSnapshotCacheClearResult constructor tag 0, found tag {tag}"
-            )));
-        }
-        let ptr = obj.as_raw_borrowed();
+        let ctor = view(&obj).ctor_shape(0, 0, "ModuleSnapshotCacheClearResult")?;
         Ok(Self {
-            // SAFETY: ctor tag validated above; scalar tail offsets match
-            // the two `UInt64` fields in `ModuleSnapshotCacheClearResult`.
-            entries_cleared: unsafe { lean_ctor_get_uint64(ptr, 0) },
-            // SAFETY: see offset 0.
-            approx_bytes_cleared: unsafe { lean_ctor_get_uint64(ptr, 8) },
+            entries_cleared: ctor.uint64(0, "ModuleSnapshotCacheClearResult.entriesCleared")?,
+            approx_bytes_cleared: ctor.uint64(8, "ModuleSnapshotCacheClearResult.approxBytesCleared")?,
         })
     }
 }
@@ -1099,32 +1055,16 @@ fn option_nat_u64(obj: Obj<'_>) -> lean_rs::LeanResult<Option<u64>> {
 }
 
 fn bool_tail(obj: &Obj<'_>, offset: u32, label: &str) -> lean_rs::LeanResult<bool> {
-    let tag = ctor_tag(obj)?;
-    if tag != 0 {
+    let ctor = view(obj).ctor()?;
+    if ctor.tag() != 0 {
         return Err(conversion_error(format!(
-            "expected Lean {label} constructor tag 0, found tag {tag}"
+            "expected Lean {label} constructor tag 0, found tag {}",
+            ctor.tag()
         )));
     }
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: ctor tag validated above; callers pass the scalar-tail offset
-    // for a Bool field in the corresponding Lean structure/constructor.
-    match unsafe { lean_ctor_get_uint8(ptr, offset) } {
-        0 => Ok(false),
-        1 => Ok(true),
-        other => Err(conversion_error(format!(
-            "Lean {label} byte {other} is not in {{0, 1}}"
-        ))),
-    }
+    ctor.bool(offset, label)
 }
 
 fn sum_tag(obj: &Obj<'_>) -> lean_rs::LeanResult<u8> {
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: `lean_is_scalar` is pure pointer-bit inspection.
-    if unsafe { lean_is_scalar(ptr) } {
-        // SAFETY: scalar branch verified above.
-        let tag = unsafe { lean_unbox(ptr) };
-        return u8::try_from(tag)
-            .map_err(|_| conversion_error(format!("Lean scalar constructor tag {tag} does not fit in u8")));
-    }
-    ctor_tag(obj)
+    view(obj).sum_tag()
 }

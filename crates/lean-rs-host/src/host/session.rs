@@ -155,7 +155,6 @@ use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
 use lean_rs::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary};
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
-use lean_rs_sys::lean_object;
 
 // -- SessionStats: per-session dispatch metrics --------------------------
 
@@ -280,7 +279,7 @@ impl<'lean> TryFromLean<'lean> for LeanDeclarationFilter {
 impl sealed::SealedAbi for LeanDeclarationFilter {}
 
 impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
-    type CRepr = *mut lean_object;
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
 
     fn into_c(self, runtime: &'lean lean_rs::LeanRuntime) -> Self::CRepr {
         self.into_lean(runtime).into_raw()
@@ -294,8 +293,7 @@ impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
         if c.is_null() {
             return Err(conversion_error("Lean DeclarationFilter returned a null pointer"));
         }
-        // SAFETY: boxed C-ABI return values carry one owned refcount.
-        let obj = unsafe { Obj::from_owned_raw(runtime, c) };
+        let obj = Obj::from_c(c, runtime)?;
         Self::try_from_lean(obj)
     }
 }

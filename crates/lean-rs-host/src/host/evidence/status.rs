@@ -9,10 +9,9 @@
 //! does the dispatch.
 
 use lean_rs::Obj;
-use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
+use lean_rs::abi::structure::{take_ctor_objects, view};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::LeanResult;
-use lean_rs_sys::object::{lean_is_scalar, lean_unbox};
 
 use crate::host::elaboration::LeanElabFailure;
 use crate::host::evidence::handle::LeanEvidence;
@@ -82,37 +81,18 @@ impl LeanKernelOutcome<'_> {
 }
 
 impl<'lean> TryFromLean<'lean> for EvidenceStatus {
-    /// Decode a nullary-only Lean `EvidenceStatus` inductive. Lean's
-    /// compiler emits a nullary-only inductive as a scalar-tagged
-    /// pointer (`lean_box(tag)`) at the top-level boundary rather
-    /// than a heap-allocated zero-field constructor, so the decoder
-    /// reads through `lean_unbox` on the scalar branch and falls back
-    /// to [`ctor_tag`] only if a future encoding shift starts
-    /// materialising the inductive on the heap.
+    /// Decode a nullary-only Lean `EvidenceStatus` inductive.
     ///
     /// Tag order is `Checked = 0`, `Rejected = 1`, `Unavailable = 2`,
     /// `Unsupported = 3`, matching the declaration order in
     /// `fixtures/lean/LeanRsFixture/Elaboration.lean`'s `EvidenceStatus`
     /// inductive.
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        let raw = obj.as_raw_borrowed();
-        // SAFETY: `lean_is_scalar` is pure pointer-bit math.
-        #[allow(unsafe_code)]
-        let tag = if unsafe { lean_is_scalar(raw) } {
-            // SAFETY: scalar branch; `lean_unbox` returns the payload
-            // `usize` (the constructor tag for a nullary-only
-            // inductive).
-            #[allow(unsafe_code)]
-            let payload = unsafe { lean_unbox(raw) };
-            // The parent `obj` (a scalar pointer) carries no heap
-            // refcount; drop is a no-op.
-            drop(obj);
-            payload
+        let obj_view = view(&obj);
+        let tag = if obj_view.is_scalar() {
+            obj_view.scalar_payload("EvidenceStatus")?
         } else {
-            // Future-proofing: if Lean ever heap-allocates this
-            // inductive, the ctor branch decodes through the standard
-            // structure-pattern primitives.
-            let heap_tag = ctor_tag(&obj)?;
+            let heap_tag = obj_view.ctor()?.tag();
             let _ = take_ctor_objects::<0>(obj, heap_tag, "EvidenceStatus")?;
             usize::from(heap_tag)
         };
@@ -130,9 +110,7 @@ impl<'lean> TryFromLean<'lean> for EvidenceStatus {
 
 impl<'lean> TryFromLean<'lean> for LeanKernelOutcome<'lean> {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        // KernelOutcome is a 4-constructor inductive; each ctor carries
-        // a single object-pointer field.
-        let tag = ctor_tag(&obj)?;
+        let tag = view(&obj).ctor()?.tag();
         match tag {
             0 => {
                 let [payload] = take_ctor_objects::<1>(obj, 0, "KernelOutcome.checked")?;

@@ -4,22 +4,15 @@
 //!
 //! The Lean side returns a structure carrying an `Array Diagnostic` and
 //! a `Truncation` tag indicating whether the diagnostic byte budget was
-//! hit. The encoding is `lean_alloc_ctor(0, 1, 1)` — one object slot
-//! (the diagnostics array) and one scalar byte (the truncation tag at
-//! scalar tail offset 0).
-
-// SAFETY DOC: the single `unsafe { ... }` block in this file carries
-// its own `// SAFETY:` comment; the blanket allow keeps the scope
-// minimal per `docs/architecture/01-safety-model.md`.
-#![allow(unsafe_code)]
+//! hit. Runtime shape details stay behind the `lean-rs` object-view
+//! API.
 
 use core::fmt;
 
 use lean_rs::Obj;
-use lean_rs::abi::structure::{ctor_tag, take_ctor_objects};
+use lean_rs::abi::structure::{take_ctor_objects, view};
 use lean_rs::abi::traits::{TryFromLean, conversion_error};
 use lean_rs::error::{LeanDiagnosticCode, LeanResult};
-use lean_rs_sys::ctor::lean_ctor_get_uint8;
 
 use crate::host::elaboration::diagnostic::{LeanDiagnostic, LeanSeverity};
 
@@ -101,19 +94,8 @@ impl std::error::Error for LeanElabFailure {}
 
 impl<'lean> TryFromLean<'lean> for LeanElabFailure {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        // ElabFailure is `lean_alloc_ctor(0, 1, 1)` — one object slot
-        // (diagnostics) and one scalar byte (truncated). Read the
-        // scalar before consuming through `take_ctor_objects`.
-        let tag = ctor_tag(&obj)?;
-        if tag != 0 {
-            return Err(conversion_error(format!(
-                "expected Lean ElabFailure ctor (tag 0), found tag {tag}"
-            )));
-        }
-        let ptr = obj.as_raw_borrowed();
-        // SAFETY: ctor validated above; the first scalar-tail byte holds
-        // the Truncation tag (0 = complete, 1 = truncated).
-        let truncated_byte = unsafe { lean_ctor_get_uint8(ptr, 0) };
+        let failure = view(&obj).ctor_shape(0, 1, "ElabFailure")?;
+        let truncated_byte = failure.uint8(0, "ElabFailure.truncated")?;
         let truncated = match truncated_byte {
             0 => false,
             1 => true,

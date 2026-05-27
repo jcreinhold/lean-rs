@@ -29,8 +29,8 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 
 | Classification | Production sites | Current status |
 | --- | --- | --- |
-| Lean runtime ownership/lifetime management that belongs in `lean-rs` | `lean-rs/src/runtime/{init,obj,thread}.rs`; `lean-rs/src/abi/traits.rs`; handle wrappers in `lean-rs/src/handle/{name,level,expr,declaration}.rs`; `lean-rs-host/src/host/session.rs` argument-only `LeanAbi` for `LeanDeclarationFilter`; `lean-rs-host/src/host/process/query.rs` argument-only `LeanAbi` impls for module-query request/budget/selector types | Correctly centralised in `lean-rs` except the host argument-only impls, which still import `lean_rs_sys::lean_object` and use `Obj::from_owned_raw` to drop impossible return values. Move this ownership/drop pattern behind `lean-rs` conversion support. |
-| Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. `lean-rs::abi::structure::{ObjView, CtorView}` now centralises scalar/nullary tag, ctor-tag, ctor-arity, and scalar-tail reads for host migrations. Still leaked in `lean-rs-host` until those decoders move off direct `lean_rs_sys` imports. |
+| Lean runtime ownership/lifetime management that belongs in `lean-rs` | `lean-rs/src/runtime/{init,obj,thread}.rs`; `lean-rs/src/abi/traits.rs`; handle wrappers in `lean-rs/src/handle/{name,level,expr,declaration}.rs`; `lean-rs-host/src/host/session.rs` argument-only `LeanAbi` for `LeanDeclarationFilter`; `lean-rs-host/src/host/process/query.rs` argument-only `LeanAbi` impls for module-query request/budget/selector types | Correctly centralised in `lean-rs`. Host argument-only impls now use `Obj`'s `LeanAbi::from_c` to consume impossible owned returns instead of importing `lean_rs_sys::lean_object` or calling `Obj::from_owned_raw` directly. |
+| Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. `lean-rs::abi::structure::{ObjView, CtorView}` now centralises scalar/nullary tag, ctor-tag, ctor-arity, and scalar-tail reads; host production decoders consume those views instead of direct `lean_rs_sys` object-layout helpers. |
 | Dynamic symbol dispatch that must become checked or explicitly unsafe | `lean-rs/src/module/library.rs`; `lean-rs/src/module/exported.rs`; every `LeanExported::from_function_address` use in `lean-rs-host/src/host/session.rs`, including mandatory session symbols, optional meta/process/cache symbols, `make_name`, and `call_capability_unchecked` | `lean-rs` owns `dlopen`, global-vs-function classification, `dlsym`, initializer lookup, and the unsafe function-pointer cast. `lean-rs-host` is trusted code today: it pins shim signatures in comments and constructs typed handles from raw addresses. Arbitrary `call_capability_unchecked` lookup is safe only by caller discipline today; it needs checked signature metadata or an explicitly unsafe API. |
 | Callback or context-pointer handling that belongs behind a safe callback API | `lean-rs/src/callback.rs`; `lean-rs-host/src/host/progress.rs` | `lean-rs` owns the callback registry, status bytes, panic containment, and string/progress payload trampolines. `lean-rs-host` still casts a stack-owned progress context address back to a reference inside the registered closure. That synchronous lifetime rule should be represented by a safe callback/session-progress API rather than repeated by host code. |
 | Unrelated unsafe that needs its own justification | `lean-rs/src/module/initializer.rs` `from_utf8_unchecked` for prevalidated symbol bytes and initializer call; `lean-rs/src/module/library.rs` platform loader calls including `RTLD_GLOBAL`; bundled Lean shims call `unsafe Lean.enableInitializersExecution` | Keep documented locally. These are not Lean object layout or Rust callback lifetime leaks, but each remains load-bearing and should stay isolated. |
@@ -38,16 +38,16 @@ Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an
 
 ### Information leakage to remove
 
-- **Lean object layout leakage:** `lean-rs` now owns scalar-vs-constructor tags and constructor scalar-tail reads through
-  `ObjView` / `CtorView`, but `lean-rs-host` has not been migrated yet. Host still copies this rule in diagnostic
-  severity, evidence status, module-query cache facts, timings, booleans, and sum tags.
+- **Lean object layout leakage:** closed for the current host decoders. `lean-rs` owns scalar-vs-constructor tags and
+  constructor scalar-tail reads through `ObjView` / `CtorView`; diagnostic severity, elaboration failures, evidence
+  status, module-query cache facts, timings, booleans, and sum tags now decode through that API.
 - **Symbol ABI leakage:** `lean-rs-host/src/host/session.rs` duplicates the Lean signature of every shim export in the
   capability contract table and again at each typed `LeanExported::from_function_address` call site. The same ABI fact
   is present in Lean shim declarations and Rust comments/type annotations.
 - **Callback lifetime leakage:** `lean-rs` owns callback handles and trampolines, but `lean-rs-host` still knows that a
   progress callback is synchronous and that the boxed context outlives exactly one Lean call.
-- **Ownership/drop leakage:** host request-only `LeanAbi` impls need to know that an owned `lean_obj_res` must be wrapped
-  and dropped if Lean ever returns it, even though these types are not valid return types.
+- **Ownership/drop leakage:** closed for host request-only `LeanAbi` impls. They still name the C-ABI representation
+  through `Obj`'s associated type, but owned-result wrapping and dropping is handled by `Obj::from_c`.
 
 ## `lean-rs-sys`—the load-bearing boundary
 
@@ -313,7 +313,7 @@ a resolved `dlsym` address into a typed function pointer.
 
 `catch_callback_panic` is pure safe Rust around `std::panic::catch_unwind`.
 
-### Host—`crates/lean-rs/src/host/`
+### Host—`crates/lean-rs-host/src/host/`
 
 #### `host/session.rs`—16 blocks (`#![allow(unsafe_code)]` at line 89)
 
@@ -322,27 +322,12 @@ Each `LeanSession` method that dispatches into a Lake-installed function constru
 by one `dlsym` per symbol at capability load. `from_function_address`'s `# Safety` requires the address to have been
 resolved as the correct typed symbol; `SessionSymbols::resolve` is the one place that obligation is discharged.
 
-#### `host/handle/{name,level,expr,declaration}.rs`—1 block each (per-block)
+#### Object-decoding host modules—0 blocks
 
-Each constructs the public handle's inner `Obj` from a freshly-returned `lean_object*` produced by a fixture export.
-Invariant is the `LeanExported::call` return contract.
-
-#### `host/elaboration/failure.rs`—2 blocks (`#![allow(unsafe_code)]` at line 14)
-
-`lean_ctor_get_uint8` reads the `Severity` byte off the failure ctor.
-
-#### `host/elaboration/diagnostic.rs`—5 blocks (`#![allow(unsafe_code)]` at line 25)
-
-`lean_ctor_get_uint8`, `lean_is_scalar`, `lean_unbox`, `lean_obj_tag` reads on the diagnostic ctor and its severity tag.
-
-#### `host/evidence/handle.rs`—1 block (per-block)
-
-Wraps the evidence handle's `Obj` from a fixture-returned pointer.
-
-#### `host/evidence/status.rs`—2 blocks (per-block, lines 103 and 108)
-
-Reads the `EvidenceStatus` scalar tag (`lean_is_scalar` + `lean_unbox`), with a heap-ctor fallback gated by
-`lean_obj_tag` (not currently triggered but kept for forward-compat with a Lean representation change).
+`host/process/query.rs`, `host/elaboration/{diagnostic,failure}.rs`, and `host/evidence/{handle,status}.rs` no longer
+import `lean_rs_sys` or opt into `unsafe_code`. They decode scalar tags, constructor tags, object-field arity, and
+scalar-tail fields through `lean_rs::abi::structure::view` / `take_ctor_objects`, and they consume owned C-ABI results
+through `Obj`'s `LeanAbi` implementation.
 
 ---
 

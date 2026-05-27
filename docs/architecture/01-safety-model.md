@@ -9,11 +9,10 @@ proof term proves what the user intended, that user-authored Lean code terminate
 rejects the input.
 
 The current host stack is still partly inside the trusted boundary. `lean-rs-host` pre-resolves shim symbols, calls
-`LeanExported::from_function_address`, decodes several host-specific Lean constructor/scalar layouts directly through
-`lean_rs_sys`, and owns a temporary context pointer for progress callbacks. That is intentional debt in this pre-1.0
-migration series, not the final boundary. The target state is for `lean-rs-host` to become a safe consumer of `lean-rs`:
-host-specific symbol dispatch should be checked or explicitly unsafe, Lean object layout reads should sit behind safe
-`lean-rs` view APIs, and callback/context-pointer handling should go through a safe callback API.
+`LeanExported::from_function_address`, and owns a temporary context pointer for progress callbacks. That is intentional
+debt in this pre-1.0 migration series, not the final boundary. The target state is for `lean-rs-host` to become a safe
+consumer of `lean-rs`: host-specific symbol dispatch should be checked or explicitly unsafe, Lean object layout reads
+should sit behind safe `lean-rs` view APIs, and callback/context-pointer handling should go through a safe callback API.
 
 Every change that adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
 below. An API that cannot be made consistent does not ship as safe.
@@ -50,9 +49,8 @@ The public surface never accepts or returns raw `lean_obj_arg`, `b_lean_obj_arg`
 `lean-rs` does not need to know what `lean_inc` and `lean_dec` are. If a future API would force the caller to choose a
 refcount discipline, that is a charter violation, not an option.
 
-Current leakage to remove: `lean-rs-host` still imports `lean_rs_sys::lean_object` for several argument-only `LeanAbi`
-impls and wraps unreachable call-result pointers with `Obj::from_owned_raw` to drop them. That is ownership/lifetime
-management that belongs in `lean-rs`.
+The former host ownership/drop leakage is closed for argument-only `LeanAbi` impls: host types name the boxed C-ABI
+representation through `Obj`'s associated `LeanAbi` type and consume impossible owned returns through `Obj::from_c`.
 
 ## Proof objects
 
