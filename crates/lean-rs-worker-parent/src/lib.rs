@@ -61,6 +61,6 @@ pub use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector,
     LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerModuleSourceSpan,
     LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofStateInfo, LeanWorkerProofStateResult,
-    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering,
-    LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange,
+    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };

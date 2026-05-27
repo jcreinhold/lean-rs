@@ -6,9 +6,9 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 ## Supported Lean toolchain window
 
-`lean-rs` supports a **contiguous window of Lean 4 stable releases**,
-enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table is the single
-source of truth; this document mirrors it for narrative context. As of 2026-05-26:
+`lean-rs` supports a **contiguous window of Lean 4 stable releases**, enumerated in the
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table is the single source of truth; this
+document mirrors it for narrative context. As of 2026-05-26:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 |
 | --- | --- |

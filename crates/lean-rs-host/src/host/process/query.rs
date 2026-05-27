@@ -10,8 +10,8 @@
 // `docs/architecture/01-safety-model.md`.
 #![allow(unsafe_code)]
 
-use lean_rs::abi::structure::{alloc_ctor_with_objects, ctor_tag, take_ctor_objects};
 use lean_rs::abi::nat;
+use lean_rs::abi::structure::{alloc_ctor_with_objects, ctor_tag, take_ctor_objects};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use lean_rs::{LeanRuntime, Obj};
 use lean_rs_sys::ctor::{lean_ctor_get_uint8, lean_ctor_get_uint64};
@@ -877,8 +877,7 @@ impl<'lean> TryFromLean<'lean> for ModuleQueryCacheFacts {
         }
         let ptr = obj.as_raw_borrowed();
         let cache_status = unsafe { lean_ctor_get_uint8(ptr, 8) };
-        let [timings, cache_entry_count, cache_approx_bytes] =
-            take_ctor_objects::<3>(obj, 0, "ModuleQueryCacheFacts")?;
+        let [timings, cache_entry_count, cache_approx_bytes] = take_ctor_objects::<3>(obj, 0, "ModuleQueryCacheFacts")?;
         Ok(Self {
             cache_status: ModuleQueryCacheStatus::from_scalar_tail(cache_status)?,
             timings: ModuleQueryTimings::try_from_lean(timings)?,
@@ -1027,8 +1026,7 @@ impl<'lean> TryFromLean<'lean> for ModuleQueryBatchCachedOutcome {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         match sum_tag(&obj)? {
             0 => {
-                let [result, imports, facts] =
-                    take_ctor_objects::<3>(obj, 0, "ModuleQueryBatchCachedOutcome::ok")?;
+                let [result, imports, facts] = take_ctor_objects::<3>(obj, 0, "ModuleQueryBatchCachedOutcome::ok")?;
                 Ok(Self::Ok {
                     result: ModuleQueryBatchEnvelope::try_from_lean(result)?,
                     imports: Vec::<String>::try_from_lean(imports)?,

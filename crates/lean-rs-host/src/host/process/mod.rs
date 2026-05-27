@@ -9,10 +9,10 @@
 mod query;
 
 pub use self::query::{
-    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchEnvelope,
-    ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-    ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
-    ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings, ModuleSnapshotCacheClearResult,
-    ModuleSourceSpan, NameRefNode, ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo,
-    SurroundingDeclarationResult, TypeAtResult,
+    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery,
+    ModuleQueryBatchCachedOutcome, ModuleQueryBatchEnvelope, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
+    ModuleQueryBatchResult, ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
+    ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
+    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofStateInfo, ProofStateResult, ReferencesResult,
+    RenderedInfo, SurroundingDeclarationResult, TypeAtResult,
 };

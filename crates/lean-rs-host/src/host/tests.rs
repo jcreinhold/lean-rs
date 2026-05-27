@@ -7,7 +7,7 @@
 //! symbols — five `MetaM` services and the info-tree projection), starts a session over an import list, and
 //! exercises the typed query methods.
 
-#![allow(clippy::expect_used, clippy::panic)]
+#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

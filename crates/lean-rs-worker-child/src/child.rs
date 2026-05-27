@@ -11,11 +11,12 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchItem,
-    ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryCacheFacts,
-    ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult,
-    ModuleQuerySelector, ModuleQueryTimings, ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode,
-    ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SurroundingDeclarationResult, TypeAtResult,
+    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery,
+    ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+    ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
+    ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
+    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofStateInfo, ProofStateResult, ReferencesResult,
+    RenderedInfo, SurroundingDeclarationResult, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -1153,14 +1154,9 @@ impl HostSessionState {
             .collect::<LeanResult<Vec<_>>>()?;
         let budgets = module_query_budgets_host(budgets);
         self.clear_module_snapshot_cache_for_rss_guard()?;
-        let cached = self.session.process_module_query_batch_cached(
-            source,
-            &selectors,
-            &budgets,
-            &options,
-            &policy,
-            None,
-        )?;
+        let cached = self
+            .session
+            .process_module_query_batch_cached(source, &selectors, &budgets, &options, &policy, None)?;
         if !matches!(cached, ModuleQueryBatchCachedOutcome::Unsupported) {
             return Ok(module_query_batch_cached_outcome_wire(cached));
         }
@@ -1227,11 +1223,7 @@ impl HostSessionState {
         Ok(())
     }
 
-    fn module_query_cache_policy(
-        &self,
-        source: &str,
-        options: &LeanWorkerElabOptions,
-    ) -> ModuleQueryCachePolicy {
+    fn module_query_cache_policy(&self, source: &str, options: &LeanWorkerElabOptions) -> ModuleQueryCachePolicy {
         let file_identity = options.file_label.clone();
         let max_entries = module_cache_env_u64("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", MODULE_CACHE_DEFAULT_MAX_ENTRIES);
         let ttl_millis = module_cache_env_u64("LEAN_RS_MODULE_CACHE_TTL_MILLIS", MODULE_CACHE_DEFAULT_TTL_MILLIS);
@@ -1534,8 +1526,7 @@ fn module_cache_env_u64(name: &str, default: u64) -> u64 {
 }
 
 fn approx_json_bytes<T: serde::Serialize>(value: &T) -> u64 {
-    serde_json::to_vec(value)
-        .map_or(0, |bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+    serde_json::to_vec(value).map_or(0, |bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
 }
 
 fn module_query_cache_key(
@@ -1573,10 +1564,13 @@ fn module_query_cache_key(
     hasher.update(b"\0");
     hasher.update(options.heartbeat_limit.to_le_bytes());
     hasher.update(options.diagnostic_byte_limit.to_le_bytes());
-    hasher.finalize().iter().fold(String::with_capacity(64), |mut key, byte| {
-        let _ = write!(key, "{byte:02x}");
-        key
-    })
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut key, byte| {
+            let _ = write!(key, "{byte:02x}");
+            key
+        })
 }
 
 #[cfg(target_os = "linux")]
@@ -1826,15 +1820,9 @@ fn module_query_cache_facts_wire(facts: &ModuleQueryCacheFacts) -> LeanWorkerMod
     }
 }
 
-fn module_query_batch_cached_outcome_wire(
-    outcome: ModuleQueryBatchCachedOutcome,
-) -> LeanWorkerModuleQueryBatchOutcome {
+fn module_query_batch_cached_outcome_wire(outcome: ModuleQueryBatchCachedOutcome) -> LeanWorkerModuleQueryBatchOutcome {
     match outcome {
-        ModuleQueryBatchCachedOutcome::Ok {
-            result,
-            imports,
-            facts,
-        } => LeanWorkerModuleQueryBatchOutcome::Ok {
+        ModuleQueryBatchCachedOutcome::Ok { result, imports, facts } => LeanWorkerModuleQueryBatchOutcome::Ok {
             result: module_query_batch_envelope_wire(result),
             imports,
             facts: module_query_cache_facts_wire(&facts),

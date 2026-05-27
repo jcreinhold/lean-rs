@@ -20,10 +20,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationSearch, LeanWorkerElabOptions,
     LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryCacheFacts,
-    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
-    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
-    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofStateResult,
+    LeanWorkerRendering, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -86,7 +86,9 @@ fn batch_facts(outcome: &LeanWorkerModuleQueryBatchOutcome) -> &LeanWorkerModule
         LeanWorkerModuleQueryBatchOutcome::Ok { facts, .. }
         | LeanWorkerModuleQueryBatchOutcome::MissingImports { facts, .. }
         | LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed { facts, .. } => facts,
-        LeanWorkerModuleQueryBatchOutcome::Unsupported => panic!("batch cache facts unavailable on unsupported outcome"),
+        LeanWorkerModuleQueryBatchOutcome::Unsupported => {
+            panic!("batch cache facts unavailable on unsupported outcome")
+        }
         _ => panic!("unexpected batch outcome variant"),
     }
 }
@@ -797,10 +799,7 @@ fn process_module_query_batch_rebuilds_when_content_changes() {
         )
         .expect("changed-content batch succeeds");
     assert_batch_has_state(&changed);
-    assert_eq!(
-        batch_facts(&changed).cache_status,
-        LeanWorkerModuleCacheStatus::Rebuilt
-    );
+    assert_eq!(batch_facts(&changed).cache_status, LeanWorkerModuleCacheStatus::Rebuilt);
 }
 
 #[test]
@@ -827,7 +826,10 @@ fn process_module_query_batch_clear_evicts_snapshot() {
     let cleared = session
         .clear_module_snapshot_cache(None, None)
         .expect("manual clear succeeds");
-    assert!(cleared.entries_cleared >= 1, "expected at least one cache entry cleared");
+    assert!(
+        cleared.entries_cleared >= 1,
+        "expected at least one cache entry cleared"
+    );
 
     let after_clear = session
         .process_module_query_batch(
@@ -891,8 +893,8 @@ fn process_module_query_batch_changed_session_imports_miss() {
 fn process_module_query_batch_ttl_evicts_idle_snapshot() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new().file_label("/cache/ttl.lean");
-    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", "1"))
-        .expect("worker starts");
+    let mut worker =
+        LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", "1")).expect("worker starts");
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
@@ -920,14 +922,17 @@ fn process_module_query_batch_ttl_evicts_idle_snapshot() {
             None,
         )
         .expect("batch after ttl succeeds");
-    assert_eq!(batch_facts(&after_ttl).cache_status, LeanWorkerModuleCacheStatus::Evicted);
+    assert_eq!(
+        batch_facts(&after_ttl).cache_status,
+        LeanWorkerModuleCacheStatus::Evicted
+    );
 }
 
 #[test]
 fn process_module_query_batch_entry_limit_evicts_old_entries() {
     ensure_fixture_built();
-    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", "1"))
-        .expect("worker starts");
+    let mut worker =
+        LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", "1")).expect("worker starts");
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
@@ -975,8 +980,8 @@ fn process_module_query_batch_entry_limit_evicts_old_entries() {
 fn process_module_query_batch_tiny_cache_still_returns_correct_query() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new().file_label("/cache/tiny.lean");
-    let mut worker = LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_BYTES", "1"))
-        .expect("worker starts");
+    let mut worker =
+        LeanWorker::spawn(&cache_worker_config().env("LEAN_RS_MODULE_CACHE_MAX_BYTES", "1")).expect("worker starts");
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");

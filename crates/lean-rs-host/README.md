@@ -27,9 +27,8 @@ Hold a `LeanHost` for the process lifetime, share a `LeanCapabilities` across ca
 a fresh `LeanSession` for each unit of work.
 
 Supports the same Lean toolchain window as [`lean-rs-sys`](https://docs.rs/lean-rs-sys): currently **Lean 4.26.0 through
-4.30.0**; see
-[`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md). The capability
-loader transparently handles the Lake naming-convention change between Lean 4.26 and 4.27 (dylib filename and
+4.30.0**; see [`docs/version-matrix.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/version-matrix.md). The
+capability loader transparently handles the Lake naming-convention change between Lean 4.26 and 4.27 (dylib filename and
 module-initializer symbol shape), so consumer `lakefile.lean`s do not need version-conditional logic.
 
 ## Quick start
@@ -131,8 +130,8 @@ built dylib path at compile time. `load_capabilities` also builds and opens the 
 Hosts that only need the standard shim-backed session services can use `host.load_shims_only()?` instead. That path
 builds and opens only the bundled interop and host shim dylibs; it can import any `.olean` files on the Lake project's
 manifest-derived search path, including transitive Lake package dependencies, and run Meta, elaboration, kernel,
-info-tree, and declaration services, but
-`LeanSession::call_capability` returns `lean_rs::LeanDiagnosticCode::Unsupported` because no user dylib is attached.
+info-tree, and declaration services, but `LeanSession::call_capability` returns
+`lean_rs::LeanDiagnosticCode::Unsupported` because no user dylib is attached.
 
 Long-running imports, bulk introspection, filtered listing, and kernel-check calls accept a borrowed `LeanProgressSink`
 for live in-thread progress events. Passing `None` keeps the no-progress fast path.
