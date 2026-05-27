@@ -1,7 +1,7 @@
 # `lean-rs-host` Capability Contract
 
-The 28 mandatory + 6 optional `@[export] lean_rs_host_*` symbols [`lean-rs-host`](https://docs.rs/lean-rs-host)'s
-`LeanCapabilities::load_capabilities` resolves at runtime. The `lean-rs-host` crate ships the implementation under
+The 28 mandatory + 9 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
+[`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host` crate ships the implementation under
 `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
 `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a `lean_rs_host_shims` require line to
 their own `lakefile.lean`; the Rust loader builds and opens the crate-owned shim dylibs. Expected host-shim dylib name:
@@ -15,24 +15,21 @@ the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](a
 
 `LeanCapabilities::new` performs:
 
-1. `LakeProject::interop_dylib()` builds the bundled generic interop shim target if needed, opens the generic interop
-   dylib globally, and initializes `LeanRsInterop`.
-2. `LakeProject::shim_dylib()` builds the bundled host shim target if needed.
-3. `LeanLibrary::open_globally(runtime, shim_dylib_path)` opens the host shim dylib with `RTLD_LAZY | RTLD_GLOBAL` on
-   Unix.
-4. `shim_library.initialize_module("lean_rs_host_shims", "LeanRsHostShims")` runs the shim's root initializer, which
-   transitively initializes `Lean.*` and the already-loaded generic callback module.
-5. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not
+1. `LakeProject::shim_capability(...)` builds the bundled host shim target and writes a capability manifest containing
+   the generated `lean_rs_host_*` export signatures.
+2. `LeanCapability::from_build_manifest(...)` opens the host shim dylib and its generic interop dependency from that
+   manifest, then initializes `LeanRsHostShims`.
+3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer. The consumer does not
    require or initialize host shims.
-6. `SessionSymbols::resolve(&shim_library)` populates every `lean_rs_host_*` address from the shim dylib. The consumer
-   dylib's `LeanSession::call_capability_unchecked` route stays open for user-authored `@[export]` symbols.
+4. `HostShimBindings::resolve(&shim_capability)` constructs typed checked bindings for every bundled shim symbol used by
+   `LeanSession`. The consumer dylib's `LeanSession::call_capability_unchecked` route stays open only for user-authored
+   `@[export]` symbols and remains unsafe.
 
 `LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
 `lean_rs_host_shims`.
 
-A missing mandatory symbol fails capability load with `LeanError::Host(stage = Link)`. A missing optional meta-service
-symbol stores `None` in `SessionSymbols`; `LeanSession::run_meta` returns `LeanMetaResponse::Unsupported` for that
-service at dispatch time.
+A missing or signature-mismatched mandatory symbol fails session construction. A missing optional symbol stores `None` in
+the typed binding table; the relevant `LeanSession` method returns its `Unsupported` response at dispatch time.
 
 ## Mandatory contract (28 symbols)
 
@@ -82,12 +79,11 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (6 symbols)
+## Optional contract (9 symbols)
 
-If absent at load time, `SessionSymbols::resolve_optional_function_symbol` stores `None` for that slot; the dispatching
-call site degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta
-services, and `LeanSession::process_module_query` returns `ModuleQueryOutcome::Unsupported` for the bounded module-query
-projection.
+If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call site
+degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services, and
+module-query methods return their `Unsupported` outcome for bounded module projections.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
@@ -97,6 +93,9 @@ projection.
 | `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
 | `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
 | `lean_rs_host_process_module_query` | `(env) (src : String) (query : ModuleQuery) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryOutcome` | `process_module_query(source, query, options, cancellation)` |
+| `lean_rs_host_process_module_query_batch` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryBatchOutcome` | `process_module_query_batch(source, selectors, budgets, options, cancellation)` |
+| `lean_rs_host_process_module_query_batch_cached` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) (policy : String) : IO ModuleQueryBatchCachedOutcome` | `process_module_query_batch_cached(source, selectors, budgets, options, policy, cancellation)` |
+| `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache(cancellation)` |
 
 ## Forking the shim package
 
@@ -105,10 +104,10 @@ policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can
   initialize the module and interpret symbol names consistently.
-- Same 28 mandatory `@[export]` symbol names with compatible signatures (the Rust side casts function pointers to fixed
-  shapes).
-- The 6 optional symbols are truly optional; omitting any collapses the corresponding session method to its
-  `Unsupported` arm (`run_meta` for the five meta services, `process_module_query` for bounded module projections).
+- Same 28 mandatory `@[export]` symbol names with manifest-compatible signatures.
+- The 9 optional symbols are truly optional; omitting any collapses the corresponding session method to its
+  `Unsupported` arm (`run_meta` for the five meta services, module-query methods for bounded module projections, or
+  cache-clear reporting unsupported).
 
 A fork that changes the Lean structure layouts also needs corresponding Rust changes—this is why the shim package isn't
 framed as "compatibility shims" but as the **implementation** of the wire contract.

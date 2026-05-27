@@ -9,8 +9,8 @@
 //!   crate `lean-rs`; the session methods here take and return them.
 //! - [`LeanHost`], [`LeanCapabilities`], [`LeanSession`] — Lake-project
 //!   entry point, capability loading (either user-dylib-backed or
-//!   shims-only, with pre-resolved session symbol addresses cached at load
-//!   time), and a long-lived session that owns the imported
+//!   shims-only, with manifest-checked host-shim bindings resolved when a
+//!   session is constructed), and a long-lived session that owns the imported
 //!   `Lean.Environment` and dispatches every typed query, elaboration,
 //!   kernel check, bulk operation, and meta call.
 //! - [`elaboration`] — bounded [`elaboration::LeanElabOptions`], typed
@@ -65,6 +65,7 @@ mod capabilities;
 mod host;
 mod progress;
 mod session;
+mod shim_bindings;
 
 pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;

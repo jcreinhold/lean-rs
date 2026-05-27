@@ -2,9 +2,8 @@
 //! `LeanSession` cascade.
 //!
 //! Each test bootstraps the runtime, opens the fixture Lake project,
-//! loads the `LeanRsFixture` capability dylib (which pre-resolves the
-//! twenty-eight mandatory session symbols plus the six optional
-//! symbols — five `MetaM` services and the info-tree projection), starts a session over an import list, and
+//! loads the `LeanRsFixture` capability dylib plus the checked bundled host
+//! shim capability, starts a session over an import list, and
 //! exercises the typed query methods.
 
 #![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
@@ -177,13 +176,13 @@ fn from_lake_project_missing_path_is_load_error() {
 // -- load_capabilities ---------------------------------------------------
 
 #[test]
-fn load_capabilities_resolves_all_session_symbols() {
+fn load_capabilities_prepares_checked_host_shims() {
     let host = fixture_host();
     let caps = host
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
         .expect("capability dylib loads + symbols resolve");
     // Sanity: caps is move-constructed, no public observable state to
-    // assert against. The follow-on tests prove the cached addresses
+    // assert against. The follow-on tests prove checked shim bindings
     // actually dispatch correctly.
     drop(caps);
 }
@@ -991,9 +990,8 @@ fn session_reuse_amortises_import() {
 //
 // Each test imports `LeanRsHostShims.Meta` (which also pulls in
 // `LeanRsHostShims.Elaboration` via the dependency edge). The fixture
-// dylib exports all six optional symbols, so the
-// `SessionSymbols::resolve` tolerant lookup finds them and `run_meta`
-// dispatches through cached addresses.
+// dylib exports the optional meta symbols, so checked binding resolution
+// finds them and `run_meta` dispatches through cached typed handles.
 
 fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
     caps.session(&["LeanRsFixture.Meta", "LeanRsHostShims.Meta"], None, None)

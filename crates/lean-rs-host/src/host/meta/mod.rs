@@ -43,7 +43,7 @@
 //! | `Ok`                  | `MetaM` action returned a payload                               |
 //! | `Failed`              | `MetaM` raised a non-heartbeat Lean exception                   |
 //! | `TimeoutOrHeartbeat`  | `Exception.isMaxHeartbeat` matched on the caught exception    |
-//! | `Unsupported`         | Lean shim classified the request out-of-domain, **or** the loaded capability does not export the service's symbol (the Rust dispatcher synthesises this branch from a missing cached address) |
+//! | `Unsupported`         | Lean shim classified the request out-of-domain, **or** the loaded capability does not export the service's symbol (the Rust dispatcher synthesises this branch from a missing optional binding) |
 //!
 //! The outer [`lean_rs::LeanResult`] still carries true host-stack
 //! failures (a Lean shim *itself* raising through `IO`, or a malformed

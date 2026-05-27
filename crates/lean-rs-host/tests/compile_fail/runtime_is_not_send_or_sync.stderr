@@ -182,36 +182,13 @@ note: required by a bound in `require_sync`
 14 | fn require_sync<T: Sync>() {}
    |                    ^^^^ required by this bound in `require_sync`
 
-error[E0277]: `*mut c_void` cannot be sent between threads safely
-  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:23:20
-   |
-23 |     require_send::<LeanCapabilities<'static, 'static>>();
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be sent between threads safely
-   |
-   = help: within `LeanCapabilities<'static, 'static>`, the trait `Send` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
-   |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
-   |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-note: required by a bound in `require_send`
-  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:13:20
-   |
-13 | fn require_send<T: Send>() {}
-   |                    ^^^^ required by this bound in `require_send`
-
 error[E0277]: `*mut ()` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:23:20
    |
 23 |     require_send::<LeanCapabilities<'static, 'static>>();
    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut ()` cannot be shared between threads safely
    |
-   = help: within `LeanRuntime`, the trait `Sync` is not implemented for `*mut ()`
+   = help: within `LeanHost<'static>`, the trait `Sync` is not implemented for `*mut ()`
 note: required because it appears within the type `PhantomData<*mut ()>`
   --> $RUST/core/src/marker.rs
    |
@@ -222,12 +199,13 @@ note: required because it appears within the type `LeanRuntime`
    |
    | pub struct LeanRuntime {
    |            ^^^^^^^^^^^
-   = note: required for `&'static LeanRuntime` to implement `Send`
-note: required because it appears within the type `LeanLibrary<'static>`
-  --> $WORKSPACE/crates/lean-rs/src/module/library.rs
+   = note: required because it appears within the type `&'static LeanRuntime`
+note: required because it appears within the type `LeanHost<'static>`
+  --> src/host/host.rs
    |
-   | pub struct LeanLibrary<'lean> {
-   |            ^^^^^^^^^^^
+   | pub struct LeanHost<'lean> {
+   |            ^^^^^^^^
+   = note: required for `&'static LeanHost<'static>` to implement `Send`
 note: required because it appears within the type `LeanCapabilities<'static, 'static>`
   --> src/host/capabilities.rs
    |
@@ -238,29 +216,6 @@ note: required by a bound in `require_send`
    |
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
-
-error[E0277]: `*mut c_void` cannot be shared between threads safely
-  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:24:20
-   |
-24 |     require_sync::<LeanCapabilities<'static, 'static>>();
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
-   |
-   = help: within `LeanCapabilities<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
-   |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
-   |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-note: required by a bound in `require_sync`
-  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:14:20
-   |
-14 | fn require_sync<T: Sync>() {}
-   |                    ^^^^ required by this bound in `require_sync`
 
 error[E0277]: `*mut ()` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:24:20
@@ -280,11 +235,12 @@ note: required because it appears within the type `LeanRuntime`
    | pub struct LeanRuntime {
    |            ^^^^^^^^^^^
    = note: required because it appears within the type `&'static LeanRuntime`
-note: required because it appears within the type `LeanLibrary<'static>`
-  --> $WORKSPACE/crates/lean-rs/src/module/library.rs
+note: required because it appears within the type `LeanHost<'static>`
+  --> src/host/host.rs
    |
-   | pub struct LeanLibrary<'lean> {
-   |            ^^^^^^^^^^^
+   | pub struct LeanHost<'lean> {
+   |            ^^^^^^^^
+   = note: required because it appears within the type `&'static LeanHost<'static>`
 note: required because it appears within the type `LeanCapabilities<'static, 'static>`
   --> src/host/capabilities.rs
    |
@@ -319,24 +275,31 @@ note: required by a bound in `require_send`
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
 
-error[E0277]: `*mut c_void` cannot be shared between threads safely
+error[E0277]: `*mut c_void` cannot be sent between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:25:20
    |
 25 |     require_send::<LeanSession<'static, 'static>>();
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be sent between threads safely
    |
-   = help: within `LeanCapabilities<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
+   = help: within `LeanSession<'static, 'static>`, the trait `Send` is not implemented for `*mut c_void`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-   = note: required for `&'static LeanCapabilities<'static, 'static>` to implement `Send`
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -347,6 +310,44 @@ note: required by a bound in `require_send`
    |
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `*mut *mut lean_rs_sys::types::lean_object` cannot be sent between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:25:20
+   |
+25 |     require_send::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut *mut lean_rs_sys::types::lean_object` cannot be sent between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Send` is not implemented for `*mut *mut lean_rs_sys::types::lean_object`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:13:20
+   |
+13 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `*mut ()` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:25:20
@@ -366,16 +367,19 @@ note: required because it appears within the type `LeanRuntime`
    | pub struct LeanRuntime {
    |            ^^^^^^^^^^^
    = note: required for `&'static LeanRuntime` to implement `Send`
-note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
-  --> $RUST/core/src/marker.rs
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct PhantomData<T: PointeeSized>;
-   |            ^^^^^^^^^^^
-note: required because it appears within the type `Obj<'static>`
-  --> $WORKSPACE/crates/lean-rs/src/runtime/obj.rs
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
    |
-   | pub struct Obj<'lean> {
-   |            ^^^
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -386,6 +390,7 @@ note: required by a bound in `require_send`
    |
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `Cell<SessionStats>` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:26:20
@@ -436,17 +441,24 @@ error[E0277]: `*mut c_void` cannot be shared between threads safely
    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
    |
    = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-   = note: required because it appears within the type `&'static LeanCapabilities<'static, 'static>`
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -457,6 +469,44 @@ note: required by a bound in `require_sync`
    |
 14 | fn require_sync<T: Sync>() {}
    |                    ^^^^ required by this bound in `require_sync`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `*mut *mut lean_rs_sys::types::lean_object` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:26:20
+   |
+26 |     require_sync::<LeanSession<'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut *mut lean_rs_sys::types::lean_object` cannot be shared between threads safely
+   |
+   = help: within `LeanSession<'static, 'static>`, the trait `Sync` is not implemented for `*mut *mut lean_rs_sys::types::lean_object`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:14:20
+   |
+14 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `*mut ()` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:26:20
@@ -476,16 +526,19 @@ note: required because it appears within the type `LeanRuntime`
    | pub struct LeanRuntime {
    |            ^^^^^^^^^^^
    = note: required because it appears within the type `&'static LeanRuntime`
-note: required because it appears within the type `PhantomData<&'static LeanRuntime>`
-  --> $RUST/core/src/marker.rs
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct PhantomData<T: PointeeSized>;
-   |            ^^^^^^^^^^^
-note: required because it appears within the type `Obj<'static>`
-  --> $WORKSPACE/crates/lean-rs/src/runtime/obj.rs
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
    |
-   | pub struct Obj<'lean> {
-   |            ^^^
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -496,6 +549,7 @@ note: required by a bound in `require_sync`
    |
 14 | fn require_sync<T: Sync>() {}
    |                    ^^^^ required by this bound in `require_sync`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `NonNull<lean_rs_sys::types::lean_object>` cannot be sent between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:27:20
@@ -1380,24 +1434,31 @@ note: required by a bound in `require_send`
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
 
-error[E0277]: `*mut c_void` cannot be shared between threads safely
+error[E0277]: `*mut c_void` cannot be sent between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:39:20
    |
 39 |     require_send::<PooledSession<'static, 'static, 'static>>();
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be sent between threads safely
    |
-   = help: within `LeanCapabilities<'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
+   = help: within `PooledSession<'static, 'static, 'static>`, the trait `Send` is not implemented for `*mut c_void`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-   = note: required for `&'static LeanCapabilities<'static, 'static>` to implement `Send`
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -1418,6 +1479,54 @@ note: required by a bound in `require_send`
    |
 13 | fn require_send<T: Send>() {}
    |                    ^^^^ required by this bound in `require_send`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `*mut *mut lean_rs_sys::types::lean_object` cannot be sent between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:39:20
+   |
+39 |     require_send::<PooledSession<'static, 'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut *mut lean_rs_sys::types::lean_object` cannot be sent between threads safely
+   |
+   = help: within `PooledSession<'static, 'static, 'static>`, the trait `Send` is not implemented for `*mut *mut lean_rs_sys::types::lean_object`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `Option<LeanSession<'static, 'static>>`
+  --> $RUST/core/src/option.rs
+   |
+   | pub enum Option<T> {
+   |          ^^^^^^
+note: required because it appears within the type `PooledSession<'static, 'static, 'static>`
+  --> src/host/pool.rs
+   |
+   | pub struct PooledSession<'lean, 'p, 'c> {
+   |            ^^^^^^^^^^^^^
+note: required by a bound in `require_send`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:13:20
+   |
+13 | fn require_send<T: Send>() {}
+   |                    ^^^^ required by this bound in `require_send`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: `RefCell<pool::PoolInner<'static>>` cannot be shared between threads safely
   --> tests/compile_fail/runtime_is_not_send_or_sync.rs:40:20
@@ -1573,17 +1682,24 @@ error[E0277]: `*mut c_void` cannot be shared between threads safely
    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut c_void` cannot be shared between threads safely
    |
    = help: within `PooledSession<'static, 'static, 'static>`, the trait `Sync` is not implemented for `*mut c_void`
-note: required because it appears within the type `host::session::SessionSymbols`
-  --> src/host/session.rs
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub(crate) struct SessionSymbols {
-   |                   ^^^^^^^^^^^^^^
-note: required because it appears within the type `LeanCapabilities<'static, 'static>`
-  --> src/host/capabilities.rs
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
    |
-   | pub struct LeanCapabilities<'lean, 'h> {
-   |            ^^^^^^^^^^^^^^^^
-   = note: required because it appears within the type `&'static LeanCapabilities<'static, 'static>`
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
 note: required because it appears within the type `LeanSession<'static, 'static>`
   --> src/host/session.rs
    |
@@ -1604,3 +1720,51 @@ note: required by a bound in `require_sync`
    |
 14 | fn require_sync<T: Sync>() {}
    |                    ^^^^ required by this bound in `require_sync`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `*mut *mut lean_rs_sys::types::lean_object` cannot be shared between threads safely
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:40:20
+   |
+40 |     require_sync::<PooledSession<'static, 'static, 'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `*mut *mut lean_rs_sys::types::lean_object` cannot be shared between threads safely
+   |
+   = help: within `PooledSession<'static, 'static, 'static>`, the trait `Sync` is not implemented for `*mut *mut lean_rs_sys::types::lean_object`
+note: required because it appears within the type `module::exported::CallableTarget`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | enum CallableTarget {
+   |      ^^^^^^^^^^^^^^
+note: required because it appears within the type `LeanExported<'static, 'static, (Vec<String>, Vec<String>), LeanIo<Obj<'static>>>`
+  --> $WORKSPACE/crates/lean-rs/src/module/exported.rs
+   |
+   | pub struct LeanExported<'lean, 'lib, Args, R> {
+   |            ^^^^^^^^^^^^
+note: required because it appears within the type `host::shim_bindings::HostShimBindings<'static, 'static>`
+  --> src/host/shim_bindings.rs
+   |
+   |         pub(crate) struct HostShimBindings<'lean, 'cap> {
+   |                           ^^^^^^^^^^^^^^^^
+...
+   | host_shim_exports!(define_host_shim_bindings);
+   | --------------------------------------------- in this macro invocation
+note: required because it appears within the type `LeanSession<'static, 'static>`
+  --> src/host/session.rs
+   |
+   | pub struct LeanSession<'lean, 'c> {
+   |            ^^^^^^^^^^^
+note: required because it appears within the type `Option<LeanSession<'static, 'static>>`
+  --> $RUST/core/src/option.rs
+   |
+   | pub enum Option<T> {
+   |          ^^^^^^
+note: required because it appears within the type `PooledSession<'static, 'static, 'static>`
+  --> src/host/pool.rs
+   |
+   | pub struct PooledSession<'lean, 'p, 'c> {
+   |            ^^^^^^^^^^^^^
+note: required by a bound in `require_sync`
+  --> tests/compile_fail/runtime_is_not_send_or_sync.rs:14:20
+   |
+14 | fn require_sync<T: Sync>() {}
+   |                    ^^^^ required by this bound in `require_sync`
+   = note: this error originates in the macro `define_host_shim_bindings` which comes from the expansion of the macro `host_shim_exports` (in Nightly builds, run with -Z macro-backtrace for more info)

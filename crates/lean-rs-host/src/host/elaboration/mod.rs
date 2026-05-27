@@ -18,10 +18,10 @@
 //! saturate at the published ceilings — there is no error path for
 //! out-of-range option values; the bound exists as a safety rail.
 //!
-//! The capability contract names two Lean-side fixture exports
+//! The capability contract names Lean-side fixture exports
 //! (`lean_rs_host_elaborate`, `lean_rs_host_kernel_check`) alongside the
-//! ten environment-query symbols. [`crate::host::LeanCapabilities`]
-//! caches both addresses at load time so the per-call cost is one
+//! environment-query symbols. [`crate::LeanSession`] resolves checked typed
+//! bindings once when the session is constructed, so the per-call cost is one
 //! struct-field read plus one FFI call.
 
 pub(crate) mod diagnostic;

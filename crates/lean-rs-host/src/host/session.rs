@@ -5,14 +5,14 @@
 //! opaque `Obj<'lean>`) plus a borrow of its parent
 //! [`crate::host::LeanCapabilities`]. Each typed query method
 //! ([`LeanSession::query_declaration`], …) dispatches through a
-//! pre-resolved C-ABI function address cached on the capability — one
+//! manifest-checked typed host-shim binding cached on the session — one
 //! struct-field read, one FFI call, no per-query `dlsym`.
 //!
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
 //! exports twenty-eight **mandatory** `@[export]` symbols and may export nine
-//! **optional** symbols (matched at `LeanCapabilities::load_capabilities` time) —
+//! **optional** symbols (checked when session bindings are constructed) —
 //! five bounded `MetaM` services plus module-query entry points and cache control:
 //!
 //! | C symbol                                               | Mandatory? | Lean signature                                                                                                                                                       |
@@ -60,7 +60,7 @@
 //! not to the first query. Missing **optional** symbols degrade
 //! gracefully: [`LeanSession::run_meta`] returns
 //! [`crate::host::meta::LeanMetaResponse::Unsupported`] against a service whose
-//! address did not resolve, [`LeanSession::process_module_query`]
+//! binding did not resolve, [`LeanSession::process_module_query`]
 //! returns [`crate::host::process::ModuleQueryOutcome::Unsupported`],
 //! and the rest of the capability stays usable.
 //! The evidence-side pair (`check_evidence`, `evidence_summary`) is
@@ -115,10 +115,9 @@
 //! - The session's owned `Obj<'lean>` is independent of `'c`; it carries
 //!   one Lean refcount on the imported environment, anchored to the
 //!   runtime.
-//! - Local `LeanExported<'lean, '_, ...>` values used per query borrow
-//!   from the capability's `LeanLibrary` through the lifetime inferred
-//!   at the `LeanExported::from_function_address` call site; they die
-//!   at end-of-method; their `'lean`-anchored outputs escape cleanly.
+//! - `HostShimBindings<'lean, 'c>` borrows from the manifest-backed shim
+//!   capability owned by `LeanCapabilities`; its typed call handles live
+//!   exactly as long as the session borrow.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the precondition. The blanket allow is
@@ -133,7 +132,6 @@
 #![allow(private_bounds, private_interfaces)]
 
 use core::cell::Cell;
-use core::ffi::c_void;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -147,13 +145,14 @@ use crate::host::process::{
     ModuleQueryOutputBudgets, ModuleQuerySelector, ModuleSnapshotCacheClearResult,
 };
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
+use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
 use lean_rs::Obj;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 #[cfg(doc)]
 use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
-use lean_rs::module::{DecodeCallResult, LeanArgs, LeanExported, LeanIo, LeanLibrary};
+use lean_rs::module::{DecodeCallResult, LeanArgs};
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionStats: per-session dispatch metrics --------------------------
@@ -298,153 +297,18 @@ impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
     }
 }
 
-// -- SessionSymbols: pre-resolved C-ABI function addresses ---------------
-
-/// The session function-symbol addresses [`LeanSession`] dispatches
-/// through.
-///
-/// Populated once at [`LeanCapabilities::new`] time; read by every
-/// session method without further `dlsym`. Each mandatory field is a
-/// non-null `*mut c_void` (raw function entry point); the safety
-/// obligation that these point at Lake-emitted functions with the
-/// expected ABI is discharged by [`Self::resolve`] only resolving
-/// symbols whose Lean signatures are pinned in the module docstring
-/// above. Meta-service fields are `Option<*mut c_void>`: missing
-/// symbols degrade to [`crate::host::meta::LeanMetaResponse::Unsupported`] at the
-/// `run_meta` dispatch site instead of failing capability load.
-pub(crate) struct SessionSymbols {
-    pub(crate) session_import: *mut c_void,
-    pub(crate) session_import_progress: *mut c_void,
-    pub(crate) name_from_string: *mut c_void,
-    pub(crate) name_to_string: *mut c_void,
-    pub(crate) env_query_declaration: *mut c_void,
-    pub(crate) env_query_declarations_bulk: *mut c_void,
-    pub(crate) env_query_declarations_bulk_progress: *mut c_void,
-    pub(crate) env_list_declarations: *mut c_void,
-    pub(crate) env_list_declarations_filtered: *mut c_void,
-    pub(crate) env_list_declarations_filtered_progress: *mut c_void,
-    pub(crate) env_declaration_source_range: *mut c_void,
-    pub(crate) env_declaration_type: *mut c_void,
-    pub(crate) env_declaration_type_bulk: *mut c_void,
-    pub(crate) env_declaration_type_bulk_progress: *mut c_void,
-    pub(crate) env_declaration_kind: *mut c_void,
-    pub(crate) env_declaration_kind_bulk: *mut c_void,
-    pub(crate) env_declaration_kind_bulk_progress: *mut c_void,
-    pub(crate) env_declaration_name: *mut c_void,
-    pub(crate) env_declaration_name_bulk: *mut c_void,
-    pub(crate) env_declaration_name_bulk_progress: *mut c_void,
-    pub(crate) env_expr_to_string_raw: *mut c_void,
-    pub(crate) elaborate: *mut c_void,
-    pub(crate) elaborate_bulk: *mut c_void,
-    pub(crate) elaborate_bulk_progress: *mut c_void,
-    pub(crate) kernel_check: *mut c_void,
-    pub(crate) kernel_check_progress: *mut c_void,
-    pub(crate) check_evidence: *mut c_void,
-    pub(crate) evidence_summary: *mut c_void,
-    pub(crate) meta_infer_type: Option<*mut c_void>,
-    pub(crate) meta_whnf: Option<*mut c_void>,
-    pub(crate) meta_heartbeat_burn: Option<*mut c_void>,
-    pub(crate) meta_is_def_eq: Option<*mut c_void>,
-    pub(crate) meta_pp_expr: Option<*mut c_void>,
-    pub(crate) process_module_query: Option<*mut c_void>,
-    pub(crate) process_module_query_batch: Option<*mut c_void>,
-    pub(crate) process_module_query_batch_cached: Option<*mut c_void>,
-    pub(crate) clear_module_snapshot_cache: Option<*mut c_void>,
-}
-
-impl SessionSymbols {
-    /// Resolve session function symbols from `library`. The twenty-eight
-    /// baseline symbols are mandatory; the nine optional symbols (five
-    /// bounded `MetaM` services and the info-tree projections) degrade
-    /// to per-call `Unsupported` returns if missing.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`lean_rs::LeanError::Host`] with stage [`HostStage::Link`] on
-    /// the first mandatory symbol that fails to resolve; the
-    /// diagnostic embeds the missing symbol name and the library path
-    /// (via [`LeanLibrary::resolve_function_symbol`]). Missing
-    /// **optional** meta-service symbols never fail capability load —
-    /// the corresponding field is `None` and the `run_meta` dispatch
-    /// site synthesises an `Unsupported` response.
-    pub(crate) fn resolve(library: &LeanLibrary<'_>) -> LeanResult<Self> {
-        Ok(Self {
-            session_import: library.resolve_function_symbol("lean_rs_host_session_import")?,
-            session_import_progress: library.resolve_function_symbol("lean_rs_host_session_import_progress")?,
-            name_from_string: library.resolve_function_symbol("lean_rs_host_name_from_string")?,
-            name_to_string: library.resolve_function_symbol("lean_rs_host_name_to_string")?,
-            env_query_declaration: library.resolve_function_symbol("lean_rs_host_env_query_declaration")?,
-            env_query_declarations_bulk: library.resolve_function_symbol("lean_rs_host_env_query_declarations_bulk")?,
-            env_query_declarations_bulk_progress: library
-                .resolve_function_symbol("lean_rs_host_env_query_declarations_bulk_progress")?,
-            env_list_declarations: library.resolve_function_symbol("lean_rs_host_env_list_declarations")?,
-            env_list_declarations_filtered: library
-                .resolve_function_symbol("lean_rs_host_env_list_declarations_filtered")?,
-            env_list_declarations_filtered_progress: library
-                .resolve_function_symbol("lean_rs_host_env_list_declarations_filtered_progress")?,
-            env_declaration_source_range: library
-                .resolve_function_symbol("lean_rs_host_env_declaration_source_range")?,
-            env_declaration_type: library.resolve_function_symbol("lean_rs_host_env_declaration_type")?,
-            env_declaration_type_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_type_bulk")?,
-            env_declaration_type_bulk_progress: library
-                .resolve_function_symbol("lean_rs_host_env_declaration_type_bulk_progress")?,
-            env_declaration_kind: library.resolve_function_symbol("lean_rs_host_env_declaration_kind")?,
-            env_declaration_kind_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_kind_bulk")?,
-            env_declaration_kind_bulk_progress: library
-                .resolve_function_symbol("lean_rs_host_env_declaration_kind_bulk_progress")?,
-            env_declaration_name: library.resolve_function_symbol("lean_rs_host_env_declaration_name")?,
-            env_declaration_name_bulk: library.resolve_function_symbol("lean_rs_host_env_declaration_name_bulk")?,
-            env_declaration_name_bulk_progress: library
-                .resolve_function_symbol("lean_rs_host_env_declaration_name_bulk_progress")?,
-            env_expr_to_string_raw: library.resolve_function_symbol("lean_rs_host_env_expr_to_string_raw")?,
-            elaborate: library.resolve_function_symbol("lean_rs_host_elaborate")?,
-            elaborate_bulk: library.resolve_function_symbol("lean_rs_host_elaborate_bulk")?,
-            elaborate_bulk_progress: library.resolve_function_symbol("lean_rs_host_elaborate_bulk_progress")?,
-            kernel_check: library.resolve_function_symbol("lean_rs_host_kernel_check")?,
-            kernel_check_progress: library.resolve_function_symbol("lean_rs_host_kernel_check_progress")?,
-            check_evidence: library.resolve_function_symbol("lean_rs_host_check_evidence")?,
-            evidence_summary: library.resolve_function_symbol("lean_rs_host_evidence_summary")?,
-            meta_infer_type: library.resolve_optional_function_symbol("lean_rs_host_meta_infer_type"),
-            meta_whnf: library.resolve_optional_function_symbol("lean_rs_host_meta_whnf"),
-            meta_heartbeat_burn: library.resolve_optional_function_symbol("lean_rs_host_meta_heartbeat_burn"),
-            meta_is_def_eq: library.resolve_optional_function_symbol("lean_rs_host_meta_is_def_eq"),
-            meta_pp_expr: library.resolve_optional_function_symbol("lean_rs_host_meta_pp_expr"),
-            process_module_query: library.resolve_optional_function_symbol("lean_rs_host_process_module_query"),
-            process_module_query_batch: library
-                .resolve_optional_function_symbol("lean_rs_host_process_module_query_batch"),
-            process_module_query_batch_cached: library
-                .resolve_optional_function_symbol("lean_rs_host_process_module_query_batch_cached"),
-            clear_module_snapshot_cache: library
-                .resolve_optional_function_symbol("lean_rs_host_clear_module_snapshot_cache"),
-        })
-    }
-
-    /// Look up the cached address for a meta service by name. Returns
-    /// `None` if the service was absent from the loaded capability at
-    /// resolve time.
-    pub(crate) fn meta_address_by_name(&self, name: &str) -> Option<*mut c_void> {
-        match name {
-            "lean_rs_host_meta_infer_type" => self.meta_infer_type,
-            "lean_rs_host_meta_whnf" => self.meta_whnf,
-            "lean_rs_host_meta_heartbeat_burn" => self.meta_heartbeat_burn,
-            "lean_rs_host_meta_is_def_eq" => self.meta_is_def_eq,
-            "lean_rs_host_meta_pp_expr" => self.meta_pp_expr,
-            _ => None,
-        }
-    }
-}
-
 // -- LeanSession ---------------------------------------------------------
 
 /// A long-lived Lean session over an imported environment.
 ///
 /// Construct via [`LeanCapabilities::session`]. The session owns the
 /// imported `Lean.Environment` privately (never exposed) and dispatches
-/// each typed query through the capability's pre-resolved symbol
-/// addresses. Neither [`Send`] nor [`Sync`]: inherited from the
+/// each typed query through checked host-shim bindings resolved during
+/// construction. Neither [`Send`] nor [`Sync`]: inherited from the
 /// contained `Obj<'lean>` and the borrow of `LeanCapabilities`.
 pub struct LeanSession<'lean, 'c> {
     capabilities: &'c LeanCapabilities<'lean, 'c>,
+    shims: HostShimBindings<'lean, 'c>,
     /// The imported `Lean.Environment`. Private — Rust never inspects
     /// the environment directly; every query routes through a Lean
     /// capability export.
@@ -483,7 +347,6 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let runtime = capabilities.host().runtime();
         let project = capabilities.host().project();
         let mut search_paths: Vec<String> = project
             .olean_search_paths()
@@ -514,34 +377,21 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let _import_guard = SESSION_IMPORT_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let shims = HostShimBindings::resolve(capabilities.shim_capability())
+            .map_err(|err| binding_error_to_lean_error(&err))?;
         let environment = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = capabilities.symbols().session_import_progress;
-            // SAFETY: `address` was resolved by `SessionSymbols::resolve`
-            // against the shim library, which outlives `'c`. The
-            // signature `(Array String, Array String, USize, USize) ->
-            // IO (Except UInt8 Environment)` matches the Lean-side
-            // progress import shim.
-            let import_fn: LeanExported<'lean, '_, (Vec<String>, Vec<String>, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(runtime, address) };
-            let raw = import_fn.call(search_paths, imports_owned, handle, trampoline)?;
+            let raw = shims
+                .session_import_progress
+                .call(search_paths, imports_owned, handle, trampoline)?;
             bridge.decode(raw)?
         } else {
-            let address = capabilities.symbols().session_import;
-            // SAFETY: `address` was resolved by `SessionSymbols::resolve`
-            // against the shim library, which outlives `'c`. The
-            // signature `(Vec<String>, Vec<String>) -> IO Environment`
-            // matches the Lean-side `lean_rs_host_session_import` —
-            // first argument is the list of `.olean` search-path
-            // entries (the user's package + the shim package), second
-            // is the module-name list.
-            let import_fn: LeanExported<'lean, '_, (Vec<String>, Vec<String>), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(runtime, address) };
-            import_fn.call(search_paths, imports_owned)?
+            shims.session_import.call(search_paths, imports_owned)?
         };
         Ok(Self {
             capabilities,
+            shims,
             environment,
             stats: Cell::new(SessionStats::default()),
         })
@@ -555,12 +405,18 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// capability borrow. The returned session's [`SessionStats`] start
     /// at zero — accumulated counters from the previous owner do not
     /// leak across pool checkouts.
-    pub(crate) fn from_environment(capabilities: &'c LeanCapabilities<'lean, 'c>, environment: Obj<'lean>) -> Self {
-        Self {
+    pub(crate) fn from_environment(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        environment: Obj<'lean>,
+    ) -> LeanResult<Self> {
+        let shims = HostShimBindings::resolve(capabilities.shim_capability())
+            .map_err(|err| binding_error_to_lean_error(&err))?;
+        Ok(Self {
             capabilities,
+            shims,
             environment,
             stats: Cell::new(SessionStats::default()),
-        }
+        })
     }
 
     /// Consume the session and return its owned `Lean.Environment`.
@@ -647,13 +503,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_query_declaration;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Name) -> IO (Option Declaration)`.
-        let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<Option<LeanDeclaration<'lean>>>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = query.call(self.environment.clone(), name_handle);
+        let result = self
+            .shims
+            .env_query_declaration
+            .call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         match result? {
             Some(decl) => Ok(decl),
@@ -684,13 +538,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_list_declarations;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `Environment -> IO (Array Name)`.
-        let list: LeanExported<'lean, '_, (Obj<'lean>,), LeanIo<Vec<Obj<'lean>>>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let raw = list.call(self.environment.clone());
+        let raw = self.shims.env_list_declarations.call(self.environment.clone());
         self.record_call(0, t.elapsed());
         raw?.into_iter().map(LeanName::try_from_lean).collect()
     }
@@ -725,24 +574,21 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let raw = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "list_declarations_filtered", None)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().env_list_declarations_filtered_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, DeclarationFilter, USize, USize) ->
-            // IO (Except UInt8 (Array Name))`.
-            let list: LeanExported<'lean, '_, (Obj<'lean>, LeanDeclarationFilter, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = list.call(self.environment.clone(), *filter, handle, trampoline);
+            let result = self.shims.env_list_declarations_filtered_progress.call(
+                self.environment.clone(),
+                *filter,
+                handle,
+                trampoline,
+            );
             self.record_call(0, t.elapsed());
             bridge.decode::<Vec<Obj<'lean>>>(result?)?
         } else {
-            let address = self.capabilities.symbols().env_list_declarations_filtered;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, DeclarationFilter) -> IO (Array Name)`.
-            let list: LeanExported<'lean, '_, (Obj<'lean>, LeanDeclarationFilter), LeanIo<Vec<Obj<'lean>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = list.call(self.environment.clone(), *filter);
+            let result = self
+                .shims
+                .env_list_declarations_filtered
+                .call(self.environment.clone(), *filter);
             self.record_call(0, t.elapsed());
             result?
         };
@@ -784,17 +630,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             .map(|path| path.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_declaration_source_range;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Name, Array String) -> IO (Option SourceRange)`.
-        let query: LeanExported<
-            'lean,
-            '_,
-            (Obj<'lean>, LeanName<'lean>, Vec<String>),
-            LeanIo<Option<LeanSourceRange>>,
-        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = query.call(self.environment.clone(), name_handle, source_roots);
+        let result = self
+            .shims
+            .env_declaration_source_range
+            .call(self.environment.clone(), name_handle, source_roots);
         self.record_call(0, t.elapsed());
         result
     }
@@ -821,13 +661,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_declaration_type;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Name) -> IO (Option Expr)`.
-        let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<Option<LeanExpr<'lean>>>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = query.call(self.environment.clone(), name_handle);
+        let result = self
+            .shims
+            .env_declaration_type
+            .call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -883,13 +721,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             && let Some(name) = Self::all_equal_name(names)
         {
             let names_owned = vec![name.to_owned()];
-            let address = self.capabilities.symbols().env_declaration_type_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array (Option Expr))`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Option<LeanExpr<'lean>>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let mut result = query.call(self.environment.clone(), names_owned)?;
+            let mut result = self
+                .shims
+                .env_declaration_type_bulk
+                .call(self.environment.clone(), names_owned)?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or(None);
@@ -900,25 +736,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_type_bulk", total)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().env_declaration_type_bulk_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String, USize, USize) ->
-            // IO (Except UInt8 (Array (Option Expr)))`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned, handle, trampoline);
+            let result = self.shims.env_declaration_type_bulk_progress.call(
+                self.environment.clone(),
+                names_owned,
+                handle,
+                trampoline,
+            );
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             bridge.decode(result?)
         } else {
-            let address = self.capabilities.symbols().env_declaration_type_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array (Option Expr))`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Option<LeanExpr<'lean>>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned);
+            let result = self
+                .shims
+                .env_declaration_type_bulk
+                .call(self.environment.clone(), names_owned);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             result
@@ -944,13 +777,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_declaration_kind;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Name) -> IO String`.
-        let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<String>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = query.call(self.environment.clone(), name_handle);
+        let result = self
+            .shims
+            .env_declaration_kind
+            .call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1005,13 +836,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             && let Some(name) = Self::all_equal_name(names)
         {
             let names_owned = vec![name.to_owned()];
-            let address = self.capabilities.symbols().env_declaration_kind_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array String)`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let mut result = Self::decode_strings_cached(query.call(self.environment.clone(), names_owned)?)?;
+            let mut result = Self::decode_strings_cached(
+                self.shims
+                    .env_declaration_kind_bulk
+                    .call(self.environment.clone(), names_owned)?,
+            )?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or_default();
@@ -1022,26 +852,23 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_kind_bulk", total)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().env_declaration_kind_bulk_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String, USize, USize) ->
-            // IO (Except UInt8 (Array String))`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned, handle, trampoline);
+            let result = self.shims.env_declaration_kind_bulk_progress.call(
+                self.environment.clone(),
+                names_owned,
+                handle,
+                trampoline,
+            );
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let raw = bridge.decode::<Vec<Obj<'lean>>>(result?)?;
             Self::decode_strings_cached(raw)
         } else {
-            let address = self.capabilities.symbols().env_declaration_kind_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array String)`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned);
+            let result = self
+                .shims
+                .env_declaration_kind_bulk
+                .call(self.environment.clone(), names_owned);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             Self::decode_strings_cached(result?)
@@ -1070,13 +897,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_declaration_name;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Name) -> IO String`.
-        let query: LeanExported<'lean, '_, (Obj<'lean>, LeanName<'lean>), LeanIo<String>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = query.call(self.environment.clone(), name_handle);
+        let result = self
+            .shims
+            .env_declaration_name
+            .call(self.environment.clone(), name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1134,13 +959,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             && let Some(name) = Self::all_equal_name(names)
         {
             let names_owned = vec![name.to_owned()];
-            let address = self.capabilities.symbols().env_declaration_name_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array String)`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let mut result = Self::decode_strings_cached(query.call(self.environment.clone(), names_owned)?)?;
+            let mut result = Self::decode_strings_cached(
+                self.shims
+                    .env_declaration_name_bulk
+                    .call(self.environment.clone(), names_owned)?,
+            )?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or_default();
@@ -1151,26 +975,23 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_name_bulk", total)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().env_declaration_name_bulk_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String, USize, USize) ->
-            // IO (Except UInt8 (Array String))`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned, handle, trampoline);
+            let result = self.shims.env_declaration_name_bulk_progress.call(
+                self.environment.clone(),
+                names_owned,
+                handle,
+                trampoline,
+            );
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let raw = bridge.decode::<Vec<Obj<'lean>>>(result?)?;
             Self::decode_strings_cached(raw)
         } else {
-            let address = self.capabilities.symbols().env_declaration_name_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String) -> IO (Array String)`.
-            let query: LeanExported<'lean, '_, (Obj<'lean>, Vec<String>), LeanIo<Vec<Obj<'lean>>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = query.call(self.environment.clone(), names_owned);
+            let result = self
+                .shims
+                .env_declaration_name_bulk
+                .call(self.environment.clone(), names_owned);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             Self::decode_strings_cached(result?)
@@ -1196,13 +1017,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ) -> LeanResult<String> {
         let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.name_to_string").entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().name_to_string;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `Name -> String` (pure, not IO).
-        let render: LeanExported<'lean, '_, (LeanName<'lean>,), String> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = render.call(name.clone());
+        let result = self.shims.name_to_string.call(name.clone());
         self.record_call(0, t.elapsed());
         result
     }
@@ -1301,13 +1117,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ) -> LeanResult<String> {
         let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.expr_to_string_raw").entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().env_expr_to_string_raw;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `Expr -> String` (pure, not IO).
-        let render: LeanExported<'lean, '_, (LeanExpr<'lean>,), String> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = render.call(expr.clone());
+        let result = self.shims.env_expr_to_string_raw.call(expr.clone());
         self.record_call(0, t.elapsed());
         result
     }
@@ -1350,25 +1161,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(address) = self.capabilities.symbols().process_module_query else {
+        let Some(call) = self.shims.process_module_query.as_ref() else {
             return Ok(ModuleQueryOutcome::Unsupported);
         };
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, String, ModuleQuery, String, String, UInt64,
-        // USize) -> IO ModuleQueryOutcome`.
-        let call: LeanExported<
-            'lean,
-            '_,
-            (Obj<'lean>, &str, &ModuleQuery, &str, &str, u64, usize),
-            LeanIo<ModuleQueryOutcome>,
-        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
         let result = call.call(
             self.environment.clone(),
-            source,
-            query,
-            options.namespace_context_str(),
-            options.file_label_str(),
+            source.to_owned(),
+            query.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -1416,37 +1218,18 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(address) = self.capabilities.symbols().process_module_query_batch else {
+        let Some(call) = self.shims.process_module_query_batch.as_ref() else {
             return Ok(ModuleQueryBatchOutcome::Unsupported);
         };
         let selectors_owned = selectors.to_vec();
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, String, Array ModuleQuerySelector,
-        // ModuleQueryOutputBudgets, String, String, UInt64, USize) ->
-        // IO ModuleQueryBatchOutcome`.
-        let call: LeanExported<
-            'lean,
-            '_,
-            (
-                Obj<'lean>,
-                &str,
-                Vec<ModuleQuerySelector>,
-                &ModuleQueryOutputBudgets,
-                &str,
-                &str,
-                u64,
-                usize,
-            ),
-            LeanIo<ModuleQueryBatchOutcome>,
-        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
         let result = call.call(
             self.environment.clone(),
-            source,
+            source.to_owned(),
             selectors_owned,
-            budgets,
-            options.namespace_context_str(),
-            options.file_label_str(),
+            budgets.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -1487,31 +1270,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(address) = self.capabilities.symbols().process_module_query_batch_cached else {
+        let Some(call) = self.shims.process_module_query_batch_cached.as_ref() else {
             return Ok(ModuleQueryBatchCachedOutcome::Unsupported);
         };
         let selectors_owned = selectors.to_vec();
-        // SAFETY: per the SessionSymbols::resolve invariant; signature is
-        // `(Environment, String, Array ModuleQuerySelector,
-        // ModuleQueryOutputBudgets, String, String, UInt64, USize, String)
-        // -> IO ModuleQueryBatchCachedOutcome`. The final string is a
-        // private cache-policy envelope decoded by the shim.
-        let call: LeanExported<
-            'lean,
-            '_,
-            (
-                Obj<'lean>,
-                &str,
-                Vec<ModuleQuerySelector>,
-                &ModuleQueryOutputBudgets,
-                &str,
-                &str,
-                u64,
-                usize,
-                &str,
-            ),
-            LeanIo<ModuleQueryBatchCachedOutcome>,
-        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let policy_text = format!(
             "{}\n{}\n{}\n{}\n{}",
             policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
@@ -1519,14 +1281,14 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let t = Instant::now();
         let result = call.call(
             self.environment.clone(),
-            source,
+            source.to_owned(),
             selectors_owned,
-            budgets,
-            options.namespace_context_str(),
-            options.file_label_str(),
+            budgets.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
-            policy_text.as_str(),
+            policy_text,
         );
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
         result
@@ -1540,16 +1302,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns an error if the shim raises an `IO` exception or if the Lean
     /// clear result cannot be decoded.
     pub fn clear_module_snapshot_cache(&mut self) -> LeanResult<ModuleSnapshotCacheClearResult> {
-        let Some(address) = self.capabilities.symbols().clear_module_snapshot_cache else {
+        let Some(call) = self.shims.clear_module_snapshot_cache.as_ref() else {
             return Ok(ModuleSnapshotCacheClearResult {
                 entries_cleared: 0,
                 approx_bytes_cleared: 0,
             });
         };
-        // SAFETY: per the SessionSymbols::resolve invariant; signature is
-        // `Unit -> IO ModuleSnapshotCacheClearResult`.
-        let call: LeanExported<'lean, '_, (), LeanIo<ModuleSnapshotCacheClearResult>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
         let result = call.call();
         self.record_call(0, t.elapsed());
@@ -1596,23 +1354,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().elaborate;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, String, Option Expr, String, String,
-        // UInt64, USize) -> IO (Except ElabFailure Expr)`.
-        let call: LeanExported<
-            'lean,
-            '_,
-            (Obj<'lean>, &str, Option<LeanExpr<'lean>>, &str, &str, u64, usize),
-            LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>,
-        > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = call.call(
+        let result = self.shims.elaborate.call(
             self.environment.clone(),
-            source,
+            source.to_owned(),
             expected_type.cloned(),
-            options.namespace_context_str(),
-            options.file_label_str(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
         );
@@ -1658,22 +1406,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "kernel_check", Some(1))?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().kernel_check_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, String, String, String, UInt64, USize,
-            // USize, USize) -> IO (Except UInt8 KernelOutcome)`.
-            let call: LeanExported<
-                'lean,
-                '_,
-                (Obj<'lean>, &str, &str, &str, u64, usize, usize, usize),
-                LeanIo<Obj<'lean>>,
-            > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(
+            let result = self.shims.kernel_check_progress.call(
                 self.environment.clone(),
-                source,
-                options.namespace_context_str(),
-                options.file_label_str(),
+                source.to_owned(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
                 handle,
@@ -1682,22 +1420,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             self.record_call(0, t.elapsed());
             bridge.decode(result?)
         } else {
-            let address = self.capabilities.symbols().kernel_check;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, String, String, String, UInt64, USize) ->
-            // IO KernelOutcome`.
-            let call: LeanExported<
-                'lean,
-                '_,
-                (Obj<'lean>, &str, &str, &str, u64, usize),
-                LeanIo<LeanKernelOutcome<'lean>>,
-            > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(
+            let result = self.shims.kernel_check.call(
                 self.environment.clone(),
-                source,
-                options.namespace_context_str(),
-                options.file_label_str(),
+                source.to_owned(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
             );
@@ -1745,13 +1473,8 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().check_evidence;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Evidence) -> IO EvidenceStatus`.
-        let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<EvidenceStatus>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = call.call(self.environment.clone(), handle.clone());
+        let result = self.shims.check_evidence.call(self.environment.clone(), handle.clone());
         self.record_call(0, t.elapsed());
         result
     }
@@ -1788,13 +1511,11 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().evidence_summary;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `(Environment, Evidence) -> IO ProofSummary`.
-        let call: LeanExported<'lean, '_, (Obj<'lean>, LeanEvidence<'lean>), LeanIo<ProofSummary>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
         let t = Instant::now();
-        let result = call.call(self.environment.clone(), handle.clone());
+        let result = self
+            .shims
+            .evidence_summary
+            .call(self.environment.clone(), handle.clone());
         self.record_call(0, t.elapsed());
         result
     }
@@ -1802,13 +1523,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Invoke a registered bounded [`MetaM`](https://leanprover.github.io/theorem_proving_in_lean4/)
     /// service against the imported environment.
     ///
-    /// The session looks up the service's cached address; if the
-    /// loaded capability does not export the symbol, the call short-
-    /// circuits to [`LeanMetaResponse::Unsupported`] with a synthetic
-    /// host-side diagnostic naming the missing symbol. Otherwise the
-    /// session constructs a per-call typed [`LeanExported`] handle
-    /// over the meta service's `(Environment, Req, UInt64, USize,
-    /// UInt8) -> IO (MetaResponse Resp)` signature and dispatches.
+    /// The session dispatches through the checked binding for the closed
+    /// service shape; if the loaded capability does not export the optional
+    /// symbol, the call short-circuits to [`LeanMetaResponse::Unsupported`]
+    /// with a synthetic host-side diagnostic naming the missing symbol.
     ///
     /// The outer [`LeanResult`] surfaces host-stack failures (a Lean
     /// `IO`-level exception from the shim itself, or an undecodable
@@ -1830,6 +1548,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<LeanMetaResponse<Resp>>
     where
+        LeanMetaService<Req, Resp>: HostMetaDispatch<'lean, Req, Resp>,
         Req: lean_rs::abi::traits::LeanAbi<'lean>,
         Resp: TryFromLean<'lean>,
     {
@@ -1842,35 +1561,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(address) = self.capabilities.symbols().meta_address_by_name(service.name()) else {
-            let message = format!(
-                "meta service '{}' is not exported by the loaded capability",
-                service.name()
-            );
-            return Ok(LeanMetaResponse::Unsupported(LeanElabFailure::synthetic(
-                message,
-                "<host>".to_owned(),
-            )));
-        };
-        // SAFETY: per the SessionSymbols::resolve invariant — the
-        // address (when present) resolves a Lake-emitted function
-        // whose signature is pinned in the capability contract table
-        // above: `(Environment, Req, UInt64, USize, UInt8) -> IO
-        // (MetaResponse Resp)`. `Req: LeanAbi<'lean>` and `Resp:
-        // TryFromLean<'lean>` line up with the per-arg `CRepr` and the
-        // `LeanIo` decoder.
-        let call: LeanExported<'lean, '_, (Obj<'lean>, Req, u64, usize, u8), LeanIo<LeanMetaResponse<Resp>>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
-        let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            request,
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.transparency_byte(),
-        );
-        self.record_call(0, t.elapsed());
-        result
+        service.dispatch(self, request, options)
     }
 
     /// Look up many declarations in one Lean traversal.
@@ -1946,29 +1637,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let raw = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "query_declarations_bulk", total)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().env_query_declarations_bulk_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array Name, USize, USize) ->
-            // IO (Except UInt8 (Array (Option Declaration)))`.
-            let call: LeanExported<'lean, '_, (Obj<'lean>, Vec<LeanName<'lean>>, usize, usize), LeanIo<Obj<'lean>>> =
-                unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(self.environment.clone(), name_handles, handle, trampoline);
+            let result = self.shims.env_query_declarations_bulk_progress.call(
+                self.environment.clone(),
+                name_handles,
+                handle,
+                trampoline,
+            );
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             bridge.decode::<Vec<Option<LeanDeclaration<'lean>>>>(result?)?
         } else {
-            let address = self.capabilities.symbols().env_query_declarations_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array Name) -> IO (Array (Option Declaration))`.
-            let call: LeanExported<
-                'lean,
-                '_,
-                (Obj<'lean>, Vec<LeanName<'lean>>),
-                LeanIo<Vec<Option<LeanDeclaration<'lean>>>>,
-            > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(self.environment.clone(), name_handles);
+            let result = self
+                .shims
+                .env_query_declarations_bulk
+                .call(self.environment.clone(), name_handles);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             result?
@@ -2056,23 +1740,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             let total = Some(u64::try_from(sources.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "elaborate_bulk", total)?;
             let (handle, trampoline) = bridge.abi_parts();
-            let address = self.capabilities.symbols().elaborate_bulk_progress;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String, String, String, UInt64,
-            // USize, USize, USize) -> IO (Except UInt8 (Array (Except
-            // ElabFailure Expr)))`.
-            let call: LeanExported<
-                'lean,
-                '_,
-                (Obj<'lean>, Vec<String>, &str, &str, u64, usize, usize, usize),
-                LeanIo<Obj<'lean>>,
-            > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(
+            let result = self.shims.elaborate_bulk_progress.call(
                 self.environment.clone(),
                 sources_owned,
-                options.namespace_context_str(),
-                options.file_label_str(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
                 handle,
@@ -2082,22 +1755,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             self.record_call(batch_len, t.elapsed());
             bridge.decode(result?)
         } else {
-            let address = self.capabilities.symbols().elaborate_bulk;
-            // SAFETY: per the SessionSymbols::resolve invariant; signature
-            // is `(Environment, Array String, String, String, UInt64, USize)
-            // -> IO (Array (Except ElabFailure Expr))`.
-            let call: LeanExported<
-                'lean,
-                '_,
-                (Obj<'lean>, Vec<String>, &str, &str, u64, usize),
-                LeanIo<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>,
-            > = unsafe { LeanExported::from_function_address(self.runtime(), address) };
             let t = Instant::now();
-            let result = call.call(
+            let result = self.shims.elaborate_bulk.call(
                 self.environment.clone(),
                 sources_owned,
-                options.namespace_context_str(),
-                options.file_label_str(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
             );
@@ -2123,10 +1786,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Function-only: nullary-constant globals are not capabilities.
     /// Reach a Lean nullary-constant global directly through
     /// [`lean_rs::module::LeanModule::exported_unchecked`] if you need one. The
-    /// symbol address is resolved on every call (one `dlsym` per
-    /// invocation); for hot capabilities, prefer pre-resolving via
+    /// the unchecked export handle is resolved on every call (one `dlsym` per
+    /// invocation); for hot user capabilities, prefer pre-resolving via
     /// `LeanModule::exported_unchecked` and caching the [`lean_rs::module::LeanExported`]
-    /// handle.
+    /// handle in caller-owned code.
     ///
     /// # Safety
     ///
@@ -2166,43 +1829,146 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(library) = self.capabilities.user_library() else {
+        let Some((library, package, module_name)) = self.capabilities.user_module() else {
             return Err(lean_rs::__host_internals::host_unsupported(format!(
                 "call_capability_unchecked('{name}') requires a user capability dylib; this LeanCapabilities was loaded with load_shims_only",
             )));
         };
-        let address = library.resolve_function_symbol(name)?;
+        let module = library.initialize_module(package, module_name)?;
         check_cancellation(cancellation)?;
-        // SAFETY: `resolve_function_symbol` resolved an address inside
-        // the capability's `LeanLibrary<'lean>` (the dylib outlives the
-        // session via the `'c` borrow). `Args: LeanArgs<'lean>` and
-        // `R: DecodeCallResult<'lean>` line up with Lake's emitted C
-        // ABI for the named symbol. The caller is responsible for
-        // matching the Lean export's actual signature.
-        let call: LeanExported<'lean, '_, Args, R> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        // SAFETY: this method's caller proves the named user export's C ABI
+        // matches `Args` and `R`. `LeanModule::exported_unchecked` still
+        // performs function-vs-global and symbol-presence checks before
+        // constructing the typed handle.
+        let call = unsafe { module.exported_unchecked::<Args, R>(name) }?;
         let t = Instant::now();
         let result = Args::invoke(&call, args);
         self.record_call(0, t.elapsed());
         result
     }
 
-    fn runtime(&self) -> &'lean lean_rs::LeanRuntime {
-        self.capabilities.host().runtime()
-    }
-
     /// Build a `LeanName` from a dotted Rust string via the capability's
     /// `Name.toName` shim.
     fn make_name(&self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<LeanName<'lean>> {
         check_cancellation(cancellation)?;
-        let address = self.capabilities.symbols().name_from_string;
-        // SAFETY: per the SessionSymbols::resolve invariant; signature
-        // is `String -> Name` (pure, not IO).
-        let to_name: LeanExported<'lean, '_, (&str,), LeanName<'lean>> =
-            unsafe { LeanExported::from_function_address(self.runtime(), address) };
+        let lean_name = lean_rs::__host_internals::string_from_str(self.capabilities.host().runtime(), name);
         let t = Instant::now();
-        let result = to_name.call(name);
+        let result = self.shims.name_from_string.call(lean_name);
         self.record_call(0, t.elapsed());
         result
     }
+}
+
+trait HostMetaDispatch<'lean, Req, Resp> {
+    fn dispatch(
+        &self,
+        session: &mut LeanSession<'lean, '_>,
+        request: Req,
+        options: &LeanMetaOptions,
+    ) -> LeanResult<LeanMetaResponse<Resp>>;
+}
+
+impl<'lean> HostMetaDispatch<'lean, LeanExpr<'lean>, LeanExpr<'lean>>
+    for LeanMetaService<LeanExpr<'lean>, LeanExpr<'lean>>
+{
+    fn dispatch(
+        &self,
+        session: &mut LeanSession<'lean, '_>,
+        request: LeanExpr<'lean>,
+        options: &LeanMetaOptions,
+    ) -> LeanResult<LeanMetaResponse<LeanExpr<'lean>>> {
+        let Some(call) = (match self.name() {
+            "lean_rs_host_meta_infer_type" => session.shims.meta_infer_type.as_ref(),
+            "lean_rs_host_meta_whnf" => session.shims.meta_whnf.as_ref(),
+            "lean_rs_host_meta_heartbeat_burn" => session.shims.meta_heartbeat_burn.as_ref(),
+            _ => None,
+        }) else {
+            return Ok(unsupported_meta_response(self.name()));
+        };
+        let t = Instant::now();
+        let result = call.call(
+            session.environment.clone(),
+            request,
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+            options.transparency_byte(),
+        );
+        session.record_call(0, t.elapsed());
+        result
+    }
+}
+
+impl<'lean>
+    HostMetaDispatch<
+        'lean,
+        (
+            LeanExpr<'lean>,
+            LeanExpr<'lean>,
+            crate::host::meta::LeanMetaTransparency,
+        ),
+        bool,
+    >
+    for LeanMetaService<
+        (
+            LeanExpr<'lean>,
+            LeanExpr<'lean>,
+            crate::host::meta::LeanMetaTransparency,
+        ),
+        bool,
+    >
+{
+    fn dispatch(
+        &self,
+        session: &mut LeanSession<'lean, '_>,
+        request: (
+            LeanExpr<'lean>,
+            LeanExpr<'lean>,
+            crate::host::meta::LeanMetaTransparency,
+        ),
+        options: &LeanMetaOptions,
+    ) -> LeanResult<LeanMetaResponse<bool>> {
+        let Some(call) = session.shims.meta_is_def_eq.as_ref() else {
+            return Ok(unsupported_meta_response(self.name()));
+        };
+        let t = Instant::now();
+        let result = call.call(
+            session.environment.clone(),
+            request,
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+            options.transparency_byte(),
+        );
+        session.record_call(0, t.elapsed());
+        result
+    }
+}
+
+impl<'lean> HostMetaDispatch<'lean, LeanExpr<'lean>, String> for LeanMetaService<LeanExpr<'lean>, String> {
+    fn dispatch(
+        &self,
+        session: &mut LeanSession<'lean, '_>,
+        request: LeanExpr<'lean>,
+        options: &LeanMetaOptions,
+    ) -> LeanResult<LeanMetaResponse<String>> {
+        let Some(call) = session.shims.meta_pp_expr.as_ref() else {
+            return Ok(unsupported_meta_response(self.name()));
+        };
+        let t = Instant::now();
+        let result = call.call(
+            session.environment.clone(),
+            request,
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+            options.transparency_byte(),
+        );
+        session.record_call(0, t.elapsed());
+        result
+    }
+}
+
+fn unsupported_meta_response<Resp>(symbol: &str) -> LeanMetaResponse<Resp> {
+    LeanMetaResponse::Unsupported(LeanElabFailure::synthetic(
+        format!("bundled host shim does not export meta service '{symbol}'"),
+        "<lean-rs-host meta>".to_owned(),
+    ))
 }

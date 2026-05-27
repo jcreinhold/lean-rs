@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use lean_rs::error::LeanResult;
+use lean_toolchain::{BuiltLeanCapability, LeanExportSignature};
 use serde_json::Value;
 
 /// Lake package name the host shim contract ships under.
@@ -25,9 +26,6 @@ pub(crate) const SHIM_PACKAGE_NAME: &str = "lean_rs_host_shims";
 /// Lake `lean_lib` name inside the shim package. Constant on our side
 /// because the shim package is ours; consumers don't re-declare it.
 pub(crate) const SHIM_LIB_NAME: &str = "LeanRsHostShims";
-/// Lake package name for the generic Lean/Rust interop shims used by
-/// host progress callbacks.
-pub(crate) const INTEROP_PACKAGE_NAME: &str = "lean_rs_interop_shims";
 /// Lake `lean_lib` name inside the generic interop shim package.
 pub(crate) const INTEROP_LIB_NAME: &str = "LeanRsInterop";
 
@@ -143,7 +141,8 @@ impl LakeProject {
     ///
     /// # Errors
     ///
-    /// Same as [`Self::shim_dylib`].
+    /// Returns a module-initialization error if the bundled shim package
+    /// cannot be built.
     pub(crate) fn shim_olean_search_path() -> LeanResult<PathBuf> {
         let package_dir = bundled_host_shims_root();
         drop(build_bundled_target(&package_dir, SHIM_LIB_NAME)?);
@@ -169,24 +168,10 @@ impl LakeProject {
         Ok(vec![self.root.clone(), bundled_host_shims_root()])
     }
 
-    /// Resolve the bundled host-shim dylib, building it on demand if needed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`lean_rs::LeanError::Host`] with
-    /// [`lean_rs::LeanDiagnosticCode::ModuleInit`] if Lake cannot build the
-    /// crate-owned shim package or the expected dylib cannot be resolved.
-    pub(crate) fn shim_dylib() -> LeanResult<PathBuf> {
-        build_bundled_target(&bundled_host_shims_root(), SHIM_LIB_NAME)
-    }
-
-    /// Resolve the bundled generic interop shim dylib, building it on demand if needed.
-    ///
-    /// Host progress shims import `LeanRsInterop.Callback`. The host loader
-    /// opens this dylib globally before initializing host shims so the
-    /// generated interop initializers resolve normally.
-    pub(crate) fn interop_dylib() -> LeanResult<PathBuf> {
-        build_bundled_target(&bundled_interop_shims_root(), INTEROP_LIB_NAME)
+    /// Build the bundled host-shim target and emit a manifest carrying
+    /// trusted export signatures.
+    pub(crate) fn shim_capability(export_signatures: Vec<LeanExportSignature>) -> LeanResult<BuiltLeanCapability> {
+        build_bundled_capability(&bundled_host_shims_root(), SHIM_LIB_NAME, export_signatures)
     }
 }
 
@@ -234,6 +219,28 @@ fn build_bundled_target(project_root: &Path, target_name: &str) -> LeanResult<Pa
         lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
     })?;
     lean_toolchain::build_lake_target_quiet(project_root, target_name).map_err(|diagnostic| {
+        lean_rs::__host_internals::host_module_init(format!(
+            "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
+            project_root.display()
+        ))
+    })
+}
+
+fn build_bundled_capability(
+    project_root: &Path,
+    target_name: &str,
+    export_signatures: Vec<LeanExportSignature>,
+) -> LeanResult<BuiltLeanCapability> {
+    let _guard = BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
+        lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
+    })?;
+    let mut builder = lean_toolchain::CargoLeanCapability::new(project_root, target_name)
+        .package(SHIM_PACKAGE_NAME)
+        .module(SHIM_LIB_NAME);
+    for signature in export_signatures {
+        builder = builder.export_signature(signature);
+    }
+    builder.build_quiet().map_err(|diagnostic| {
         lean_rs::__host_internals::host_module_init(format!(
             "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
             project_root.display()

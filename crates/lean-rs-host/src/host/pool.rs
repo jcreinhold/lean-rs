@@ -233,7 +233,7 @@ impl<'lean> SessionPool<'lean> {
             let mut inner = self.inner.borrow_mut();
             if let Some(env) = inner.take_matching(&key) {
                 self.bump_reused();
-                (LeanSession::from_environment(caps, env), true)
+                (LeanSession::from_environment(caps, env)?, true)
             } else {
                 drop(inner);
                 let session = caps.session(imports, cancellation, progress)?;

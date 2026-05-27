@@ -8,7 +8,7 @@
 //! `LeanCapabilities`, `LeanSession`, plus the evidence and meta surfaces)
 //! lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
-//! 28+6 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
+//! 28+9 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
 //! interop shims used by L1 callbacks; it has no theorem-prover host shim
 //! contract.
 //!
@@ -111,11 +111,21 @@ pub mod runtime;
 /// External crates must not depend on anything under this path.
 #[doc(hidden)]
 pub mod __host_internals {
+    use crate::runtime::LeanRuntime;
+    use crate::runtime::obj::Obj;
+
     pub use crate::error::host_callback_panic;
     pub use crate::error::host_cancelled;
     pub use crate::error::host_internal;
     pub use crate::error::host_module_init;
     pub use crate::error::host_unsupported;
+
+    /// Build a Lean `String` object without allocating an intermediate Rust
+    /// owned `String`.
+    #[must_use]
+    pub fn string_from_str<'lean>(runtime: &'lean LeanRuntime, value: &str) -> Obj<'lean> {
+        crate::abi::string::from_str(runtime, value)
+    }
 }
 
 #[cfg(feature = "fuzzing")]
