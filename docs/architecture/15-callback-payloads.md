@@ -47,9 +47,9 @@ pub struct LeanStringEvent {
 
 `LeanProgressTick` carries the existing counter payload. `LeanProgressCallback<'a>` is the scoped progress registration
 that lets host code borrow its sink without owning raw context pointers. `lean-rs-host` continues to own progress
-policy: phase names, elapsed time, cancellation checkpoints, and which `LeanSession` methods emit events. The host
-layer maps a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the general L1 callback abstraction. It is
-an observability/control signal, not a data row.
+policy: phase names, elapsed time, cancellation checkpoints, and which `LeanSession` methods emit events. The host layer
+maps a `LeanProgressTick` into `LeanProgressEvent`, but progress is not the general L1 callback abstraction. It is an
+observability/control signal, not a data row.
 
 `LeanStringEvent` is the next useful L1 payload. It supports downstream same-process line-oriented protocols: Lean can
 emit one encoded line at a time, Rust receives owned strings, and neither side has to tunnel through subprocess stdout.

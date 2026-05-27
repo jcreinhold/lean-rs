@@ -155,7 +155,6 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     pub(crate) fn shim_capability(&self) -> &LeanCapability<'lean> {
         &self.shim_capability
     }
-
 }
 
 fn load_shim_capability<'lean>(host: &LeanHost<'lean>) -> LeanResult<LeanCapability<'lean>> {

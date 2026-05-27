@@ -71,16 +71,15 @@ runtime interaction: runtime initialization, object ownership, ABI decoding, dyn
 manifest-backed export lookup, and the explicitly unsafe `LeanModule::exported_unchecked` path for arbitrary symbols.
 `lean-rs-host` is a safe consumer of that layer. It exposes closed host operations backed by manifest-checked
 `HostShimBindings`; it does not rewrap arbitrary export dispatch or expose raw Lean runtime bindings. Safe APIs in
-`lean-rs` and `lean-rs-host` do not require callers to uphold Rust memory-safety invariants manually. That claim is
-only about Rust memory safety, not Lean proof correctness, semantic correctness, termination, or resource exhaustion.
-The worker boundary is three sibling crates:
-`lean-rs-worker-protocol` (wire types only, no Lean dependency), `lean-rs-worker-parent` (parent-side supervisor and
-pool; does not link `libleanshared`), and `lean-rs-worker-child` (child runtime and the `lean-rs-worker-child` binary;
-the only worker crate that links `libleanshared`). Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`;
-the higher layers do not re-export them. Lower layers are escape hatches, not steps every downstream caller should
-hand-compose. See [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) for the safety
-boundary and [`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the service-layer
-classification table.
+`lean-rs` and `lean-rs-host` do not require callers to uphold Rust memory-safety invariants manually. That claim is only
+about Rust memory safety, not Lean proof correctness, semantic correctness, termination, or resource exhaustion. The
+worker boundary is three sibling crates: `lean-rs-worker-protocol` (wire types only, no Lean dependency),
+`lean-rs-worker-parent` (parent-side supervisor and pool; does not link `libleanshared`), and `lean-rs-worker-child`
+(child runtime and the `lean-rs-worker-child` binary; the only worker crate that links `libleanshared`). Raw `lean_*`
+symbols enter the workspace only through `lean-rs-sys`; the higher layers do not re-export them. Lower layers are escape
+hatches, not steps every downstream caller should hand-compose. See
+[`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) for the safety boundary and
+[`docs/architecture/03-host-stack.md`](docs/architecture/03-host-stack.md) for the service-layer classification table.
 
 ## Call a Lean export from Rust
 

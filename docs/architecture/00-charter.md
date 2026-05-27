@@ -40,8 +40,8 @@ Five published crates plus one workspace-internal helper:
   `LeanCapabilities`, `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 9
   `lean_rs_host_*` `@[export]` Lean shim contract it loads through manifest-checked `HostShimBindings` alongside
   consumer capability dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate
-  `batch` module. Downstreams that need common Lean
-  services add it on top of `lean-rs`; downstreams that only need typed FFI do not pay for it.
+  `batch` module. Downstreams that need common Lean services add it on top of `lean-rs`; downstreams that only need
+  typed FFI do not pay for it.
 - **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
   process-boundary layer). The parent supervises a child process around the standard Lean service layer. They own
   process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming,

@@ -14,8 +14,8 @@ use std::process::Command;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lean_rs::error::{HostStage, LeanError};
 use lean_rs::LeanRuntime;
+use lean_rs::error::{HostStage, LeanError};
 use lean_toolchain::LEAN_VERSION;
 
 use crate::host::meta::{
@@ -998,12 +998,8 @@ fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, fixture: &str) -> lean
     let source = match fixture {
         "lean_rs_fixture_meta_expr_nat" => "Nat".to_owned(),
         "lean_rs_fixture_meta_expr_bool" => "Bool".to_owned(),
-        "lean_rs_fixture_meta_expr_reducible_nat_alias" => {
-            "LeanRsFixture.Meta.ReducibleNatAlias".to_owned()
-        }
-        "lean_rs_fixture_meta_expr_irreducible_nat_alias" => {
-            "LeanRsFixture.Meta.IrreducibleNatAlias".to_owned()
-        }
+        "lean_rs_fixture_meta_expr_reducible_nat_alias" => "LeanRsFixture.Meta.ReducibleNatAlias".to_owned(),
+        "lean_rs_fixture_meta_expr_irreducible_nat_alias" => "LeanRsFixture.Meta.IrreducibleNatAlias".to_owned(),
         other => panic!("unknown meta fixture expression export {other}"),
     };
     session

@@ -1,11 +1,11 @@
 # `lean-rs-host` Capability Contract
 
 The 28 mandatory + 9 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
-[`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host` crate ships the implementation under
-`crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop dependency under
-`crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a `lean_rs_host_shims` require line to
-their own `lakefile.lean`; the Rust loader builds and opens the crate-owned shim dylibs. Expected host-shim dylib name:
-`liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
+[`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host`
+crate ships the implementation under `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop
+dependency under `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
+`lean_rs_host_shims` require line to their own `lakefile.lean`; the Rust loader builds and opens the crate-owned shim
+dylibs. Expected host-shim dylib name: `liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
 
 This document covers the **wire-level contract**: each Lean signature, the typed Rust shape `LeanSession::*` exposes on
 top, and the Rust call-site mapping. The architectural rationale (generic interop dylib, host shim dylib, `RTLD_GLOBAL`,
@@ -19,17 +19,17 @@ the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](a
    the generated `lean_rs_host_*` export signatures.
 2. `LeanCapability::from_build_manifest(...)` opens the host shim dylib and its generic interop dependency from that
    manifest, then initializes `LeanRsHostShims`.
-3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer and keeps the user
-   dylib loaded as the session's project anchor. The consumer does not require or initialize host shims.
+3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer and keeps the user dylib
+   loaded as the session's project anchor. The consumer does not require or initialize host shims.
 4. `HostShimBindings::resolve(&shim_capability)` constructs typed checked bindings for every bundled shim symbol used by
-   `LeanSession`. User-authored arbitrary `@[export]` dispatch is not a host-session surface; use lower-level
-   `lean-rs` for custom same-process ABI calls.
+   `LeanSession`. User-authored arbitrary `@[export]` dispatch is not a host-session surface; use lower-level `lean-rs`
+   for custom same-process ABI calls.
 
 `LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
 `lean_rs_host_shims`.
 
-A missing or signature-mismatched mandatory symbol fails session construction. A missing optional symbol stores `None` in
-the typed binding table; the relevant `LeanSession` method returns its `Unsupported` response at dispatch time.
+A missing or signature-mismatched mandatory symbol fails session construction. A missing optional symbol stores `None`
+in the typed binding table; the relevant `LeanSession` method returns its `Unsupported` response at dispatch time.
 
 ## Mandatory contract (28 symbols)
 
@@ -81,9 +81,9 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 
 ## Optional contract (9 symbols)
 
-If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call site
-degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services, and
-module-query methods return their `Unsupported` outcome for bounded module projections.
+If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call
+site degrades gracefully — `LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services,
+and module-query methods return their `Unsupported` outcome for bounded module projections.
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |

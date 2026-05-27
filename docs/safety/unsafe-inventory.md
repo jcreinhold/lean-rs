@@ -10,8 +10,8 @@ this file catches the inverse—invariants that drifted away from what the code 
 
 The thesis these invariants serve is in [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
 Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; `lean-rs` consumes them through narrow per-file
-`#![allow(unsafe_code)]` opt-outs; `lean-rs-host` forbids unsafe code crate-wide and consumes checked `lean-rs`
-facades; `lean-toolchain` has no Rust `unsafe`.
+`#![allow(unsafe_code)]` opt-outs; `lean-rs-host` forbids unsafe code crate-wide and consumes checked `lean-rs` facades;
+`lean-toolchain` has no Rust `unsafe`.
 
 ## Safety boundary audit, 2026-05-27
 

@@ -267,8 +267,8 @@ requires full path suppression, install a `tracing-subscriber` filter that drops
   `lean-rs-host` project to it.
 - [`lean_rs::DiagnosticCapture`](../crates/lean-rs/src/error/capture.rs)—the in-process capture; captures spans from
   `lean-rs` and `lean-rs-host` against the shared `lean_rs` target.
-- [Service-layer surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2 spans
-  above.
+- [Service-layer surface](architecture/03-host-stack.md)—methods on `LeanSession` and `SessionPool` that emit the L2
+  spans above.
 - [Concurrency contract](architecture/04-concurrency.md)—why spans are per-thread.
 - [Safety model](architecture/01-safety-model.md)—why messages are bounded at construction.
 - [Panic containment](architecture/06-panic-containment.md)—why Lean internal panics are process-scoped.
