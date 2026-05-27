@@ -50,10 +50,12 @@ pub use supervisor::{
 #[doc(inline)]
 pub use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
-    LeanWorkerDeclarationRow, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport,
-    LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
-    LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQueryResult, LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerReferencesResult,
-    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+    LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult,
+    LeanWorkerDeclarationSummary, LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic,
+    LeanWorkerDoctorReport, LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus,
+    LeanWorkerKernelSummary, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleSourceSpan, LeanWorkerNameRef,
+    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange,
+    LeanWorkerTypeAtResult,
 };

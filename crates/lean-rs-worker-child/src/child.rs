@@ -26,13 +26,16 @@ use lean_rs_worker_protocol::protocol::{
     Response, StreamSummary, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDiagnostic,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSummary, LeanWorkerDeclarationType, LeanWorkerDiagnostic,
     LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult,
     LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerMetaResult,
     LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
     LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerReferencesResult, LeanWorkerRendered,
     LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
 };
+
+const DECLARATION_TYPE_MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 struct ProtocolWriter {
@@ -63,6 +66,17 @@ impl ProtocolWriter {
             .lock()
             .map_err(|_| ProtocolError::Io(std::io::Error::other("worker stdout mutex was poisoned")))?;
         write_frame(&mut *stdout, message, cap)
+    }
+}
+
+fn write_response(writer: &ProtocolWriter, response: Response) -> Result<(), ProtocolError> {
+    match writer.write(Message::Response(response)) {
+        Ok(()) => Ok(()),
+        Err(ProtocolError::FrameTooLarge { len, max }) => writer.write(Message::Response(Response::Error {
+            code: "lean_rs.worker.output_frame_too_large".to_owned(),
+            message: format!("worker response frame too large: {len} bytes exceeds {max}"),
+        })),
+        Err(err) => Err(err),
     }
 }
 
@@ -198,30 +212,33 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let frame = read_frame(&mut reader, writer.max_frame_bytes())?;
         let Message::Request(request) = frame.message else {
-            writer.write(Message::Response(Response::Error {
-                code: "lean_rs.worker.protocol.unexpected_frame".to_owned(),
-                message: "child expected request frame".to_owned(),
-            }))?;
+            write_response(
+                &writer,
+                Response::Error {
+                    code: "lean_rs.worker.protocol.unexpected_frame".to_owned(),
+                    message: "child expected request frame".to_owned(),
+                },
+            )?;
             continue;
         };
 
         match request {
             Request::Health => {
-                writer.write(Message::Response(Response::HealthOk))?;
+                write_response(&writer, Response::HealthOk)?;
             }
             Request::LoadFixtureCapability { fixture_root } => {
                 let response = match load_fixture_capability(runtime, Path::new(&fixture_root)) {
                     Ok(()) => Response::CapabilityLoaded,
                     Err(err) => error_response(&err),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::CallFixtureMul { fixture_root, lhs, rhs } => {
                 let response = match call_fixture_mul(runtime, Path::new(&fixture_root), lhs, rhs) {
                     Ok(value) => Response::U64 { value },
                     Err(err) => error_response(&err),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::TriggerLeanPanic { fixture_root } => {
                 let response = match trigger_lean_panic(runtime, Path::new(&fixture_root)) {
@@ -231,7 +248,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     Err(err) => error_response(&err),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::OpenHostSession {
                 project_root,
@@ -245,7 +262,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(err) => error_response(&err),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::Elaborate { source, options } => {
                 let response = match host_session.as_mut() {
@@ -255,7 +272,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::KernelCheck {
                 source,
@@ -269,7 +286,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::DeclarationKinds { names, progress } => {
                 let response = match host_session.as_mut() {
@@ -279,7 +296,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::DeclarationNames { names, progress } => {
                 let response = match host_session.as_mut() {
@@ -289,7 +306,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::RunDataStream {
                 export,
@@ -311,7 +328,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::CapabilityMetadata { export, request_json } => {
                 let response = match host_session.as_mut() {
@@ -324,7 +341,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::CapabilityDoctor { export, request_json } => {
                 let response = match host_session.as_mut() {
@@ -335,7 +352,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::JsonCommand { export, request_json } => {
                 let response = match host_session.as_mut() {
@@ -345,7 +362,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::InferType { source, options } => {
                 let response = match host_session.as_mut() {
@@ -355,7 +372,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::Whnf { source, options } => {
                 let response = match host_session.as_mut() {
@@ -365,7 +382,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::IsDefEq {
                 lhs,
@@ -380,7 +397,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::Describe { name } => {
                 let response = match host_session.as_mut() {
@@ -390,7 +407,27 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
+            }
+            Request::SearchDeclarations { search } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.search_declarations(&search) {
+                        Ok(result) => Response::DeclarationSearch { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::DeclarationType { name, max_bytes } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.declaration_type(&name, max_bytes) {
+                        Ok(row) => Response::DeclarationType { row },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
             }
             Request::ListDeclarationsStrings { filter, progress } => {
                 let response = match host_session.as_mut() {
@@ -400,7 +437,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::DescribeBulk { names, progress } => {
                 let response = match host_session.as_mut() {
@@ -410,7 +447,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::ProcessModuleQuery { source, query, options } => {
                 let response = match host_session.as_mut() {
@@ -420,11 +457,11 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                writer.write(Message::Response(response))?;
+                write_response(&writer, response)?;
             }
             Request::EmitTestRows { streams } => {
                 let count = emit_test_rows(&writer, &streams)?;
-                writer.write(Message::Response(Response::RowsComplete { count }))?;
+                write_response(&writer, Response::RowsComplete { count })?;
             }
             Request::EmitTestRowsThenExit => {
                 let _count = emit_test_rows(&writer, &["rows".to_owned()])?;
@@ -435,7 +472,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::abort();
             }
             Request::Terminate => {
-                writer.write(Message::Response(Response::Terminating))?;
+                write_response(&writer, Response::Terminating)?;
                 return Ok(());
             }
             #[allow(
@@ -443,10 +480,13 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 reason = "Request is #[non_exhaustive] across the lean-rs-worker-protocol crate boundary; unrecognised variants come from a newer parent than this child supports and are surfaced as a protocol error"
             )]
             _ => {
-                writer.write(Message::Response(Response::Error {
-                    code: "lean_rs.worker.protocol.unknown_request".to_owned(),
-                    message: "child received a request variant it does not recognise".to_owned(),
-                }))?;
+                write_response(
+                    &writer,
+                    Response::Error {
+                        code: "lean_rs.worker.protocol.unknown_request".to_owned(),
+                        message: "child received a request variant it does not recognise".to_owned(),
+                    },
+                )?;
             }
         }
     }
@@ -875,6 +915,72 @@ impl HostSessionState {
         }))
     }
 
+    fn search_declarations(
+        &mut self,
+        search: &LeanWorkerDeclarationSearch,
+    ) -> LeanResult<LeanWorkerDeclarationSearchResult> {
+        let host_filter = LeanDeclarationFilter {
+            include_private: search.filter.include_private,
+            include_generated: search.filter.include_generated,
+            include_internal: search.filter.include_internal,
+        };
+        let needle = search.query.to_lowercase();
+        let kind_filter = search.kind.as_deref();
+        let limit = search.limit.clamp(1, 100);
+        let names = self.session.list_declarations_strings(&host_filter, None, None)?;
+        let mut declarations = Vec::with_capacity(limit);
+        let mut truncated = false;
+        for name in names {
+            if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
+                continue;
+            }
+            let kind = self.session.declaration_kind(&name, None)?;
+            if kind_filter.is_some_and(|wanted| kind != wanted) {
+                continue;
+            }
+            if declarations.len() >= limit {
+                truncated = true;
+                break;
+            }
+            let source = if search.include_source {
+                self.session
+                    .declaration_source_range(&name, None)?
+                    .map(source_range_wire)
+            } else {
+                None
+            };
+            declarations.push(LeanWorkerDeclarationSummary { name, kind, source });
+        }
+        Ok(LeanWorkerDeclarationSearchResult {
+            declarations,
+            truncated,
+        })
+    }
+
+    fn declaration_type(&mut self, name: &str, max_bytes: usize) -> LeanResult<Option<LeanWorkerDeclarationType>> {
+        let kind = self.session.declaration_kind(name, None)?;
+        if kind == "missing" {
+            return Ok(None);
+        }
+        let type_signature = match self.session.declaration_type(name, None)? {
+            Some(expr) => {
+                let rendered = self.session.expr_to_string_raw(&expr, None)?;
+                Some(bound_rendered_info(rendered, max_bytes.min(DECLARATION_TYPE_MAX_BYTES)))
+            }
+            None => None,
+        };
+        let source = self
+            .session
+            .declaration_source_range(name, None)?
+            .map(source_range_wire);
+        Ok(Some(LeanWorkerDeclarationType {
+            name: name.to_owned(),
+            kind,
+            type_signature,
+            source,
+        }))
+    }
+
     fn list_declarations_strings(
         &mut self,
         filter: LeanWorkerDeclarationFilter,
@@ -1257,6 +1363,23 @@ fn rendered_info_wire(info: RenderedInfo) -> LeanWorkerRenderedInfo {
     LeanWorkerRenderedInfo {
         value: info.value,
         truncated: info.truncated,
+    }
+}
+
+fn bound_rendered_info(value: String, max_bytes: usize) -> LeanWorkerRenderedInfo {
+    if value.len() <= max_bytes {
+        return LeanWorkerRenderedInfo {
+            value,
+            truncated: false,
+        };
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    LeanWorkerRenderedInfo {
+        value: value[..end].to_owned(),
+        truncated: true,
     }
 }
 

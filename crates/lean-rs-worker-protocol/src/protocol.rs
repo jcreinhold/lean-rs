@@ -23,9 +23,10 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 
 use crate::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 /// Wire protocol version negotiated between parent and child during the
@@ -183,6 +184,13 @@ pub enum Request {
     Describe {
         name: String,
     },
+    SearchDeclarations {
+        search: LeanWorkerDeclarationSearch,
+    },
+    DeclarationType {
+        name: String,
+        max_bytes: usize,
+    },
     ListDeclarationsStrings {
         filter: LeanWorkerDeclarationFilter,
         progress: bool,
@@ -273,6 +281,12 @@ pub enum Response {
     },
     Declaration {
         row: Option<LeanWorkerDeclarationRow>,
+    },
+    DeclarationSearch {
+        result: LeanWorkerDeclarationSearchResult,
+    },
+    DeclarationType {
+        row: Option<LeanWorkerDeclarationType>,
     },
     DeclarationBulk {
         rows: Vec<LeanWorkerDeclarationRow>,

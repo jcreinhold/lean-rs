@@ -14,9 +14,10 @@ use lean_rs_worker_protocol::protocol::{
     read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 use crate::capability::LeanWorkerBootstrapDiagnosticCode;
@@ -1206,6 +1207,56 @@ impl LeanWorker {
             progress,
             |response, operation| match response {
                 Response::Declaration { row } => Ok(row),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_search_declarations(
+        &mut self,
+        search: &LeanWorkerDeclarationSearch,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationSearchResult, LeanWorkerError> {
+        self.round_trip(
+            "worker_search_declarations",
+            Request::SearchDeclarations { search: search.clone() },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationSearch { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_declaration_type(
+        &mut self,
+        name: &str,
+        max_bytes: usize,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Option<LeanWorkerDeclarationType>, LeanWorkerError> {
+        self.round_trip(
+            "worker_declaration_type",
+            Request::DeclarationType {
+                name: name.to_owned(),
+                max_bytes,
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationType { row } => Ok(row),
                 other => Err(unexpected_response(operation, &other)),
             },
         )

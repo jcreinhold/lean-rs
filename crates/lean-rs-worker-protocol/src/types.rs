@@ -266,6 +266,67 @@ pub struct LeanWorkerDeclarationRow {
     pub source: Option<LeanWorkerSourceRange>,
 }
 
+/// Bounded declaration search request.
+///
+/// Matching is intentionally name-based and metadata-only: `query` is matched
+/// as a case-insensitive substring of the declaration name, `kind` narrows the
+/// result when present, and `limit` is clamped by the child. Type rendering is
+/// a separate explicit query because declaration types can be enormous in
+/// large Mathlib-dependent environments.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearch {
+    pub query: String,
+    pub kind: Option<String>,
+    pub limit: usize,
+    pub filter: LeanWorkerDeclarationFilter,
+    pub include_source: bool,
+}
+
+impl LeanWorkerDeclarationSearch {
+    /// Build a metadata-only declaration search request.
+    #[must_use]
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            kind: None,
+            limit: 20,
+            filter: LeanWorkerDeclarationFilter {
+                include_private: false,
+                include_generated: false,
+                include_internal: false,
+            },
+            include_source: true,
+        }
+    }
+}
+
+/// One bounded metadata row returned by declaration search.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSummary {
+    pub name: String,
+    pub kind: String,
+    pub source: Option<LeanWorkerSourceRange>,
+}
+
+/// Result of a bounded declaration search.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearchResult {
+    pub declarations: Vec<LeanWorkerDeclarationSummary>,
+    pub truncated: bool,
+}
+
+/// Bounded type rendering for a single declaration.
+///
+/// `type_signature`, when present, is capped by the request's byte limit and
+/// marked `truncated` when the rendered Lean expression did not fit.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationType {
+    pub name: String,
+    pub kind: String,
+    pub type_signature: Option<LeanWorkerRenderedInfo>,
+    pub source: Option<LeanWorkerSourceRange>,
+}
+
 /// One identifier occurrence the elaborator recorded. `is_binder` distinguishes
 /// binding sites from use sites.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

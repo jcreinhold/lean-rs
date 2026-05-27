@@ -17,9 +17,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
-    LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationSearch, LeanWorkerElabOptions,
+    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerRendering, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -248,6 +248,80 @@ fn describe_returns_none_for_unknown_declaration() {
 }
 
 #[test]
+fn search_declarations_returns_bounded_metadata_without_types() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let result = session
+        .search_declarations(
+            &LeanWorkerDeclarationSearch {
+                query: "add".to_owned(),
+                kind: Some("theorem".to_owned()),
+                limit: 5,
+                filter: LeanWorkerDeclarationFilter {
+                    include_private: false,
+                    include_generated: false,
+                    include_internal: false,
+                },
+                include_source: false,
+            },
+            None,
+            None,
+        )
+        .expect("worker search_declarations dispatch succeeds");
+
+    assert!(result.declarations.len() <= 5);
+    assert!(
+        result.declarations.iter().all(|row| row.kind == "theorem"),
+        "kind filter should be applied before rows return: {:?}",
+        result.declarations
+    );
+    assert!(
+        result.declarations.iter().all(|row| row.source.is_none()),
+        "metadata search should be able to omit source lookups"
+    );
+}
+
+#[test]
+fn declaration_type_truncates_single_rendered_type() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let row = session
+        .declaration_type("Nat.rec", 16, None, None)
+        .expect("worker declaration_type dispatch succeeds")
+        .expect("Nat.rec is present");
+
+    let rendered = row.type_signature.expect("Nat.rec has a type");
+    assert!(rendered.truncated, "cap should truncate Nat.rec's recursor type");
+    assert!(rendered.value.len() <= 16);
+}
+
+#[test]
+fn declaration_type_zero_cap_returns_empty_truncated_type() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let row = session
+        .declaration_type("Nat.rec", 0, None, None)
+        .expect("worker declaration_type dispatch succeeds")
+        .expect("Nat.rec is present");
+
+    let rendered = row.type_signature.expect("Nat.rec has a type");
+    assert!(rendered.truncated, "zero cap should still report omitted type text");
+    assert!(rendered.value.is_empty());
+}
+
+#[test]
 fn list_declarations_strings_streams_full_env_without_frame_cap() {
     ensure_fixture_built();
     let filter = LeanWorkerDeclarationFilter::default();
@@ -293,6 +367,34 @@ fn describe_bulk_preserves_input_length_with_missing_slots() {
     assert!(rows[1].source.is_none());
     assert_eq!(rows[2].name, "Nat.succ");
     assert!(rows[2].kind != "missing");
+}
+
+#[test]
+fn oversized_terminal_response_is_request_error_not_child_death() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config().max_frame_bytes(64 * 1024)).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let names = vec!["Nat.rec"; 512];
+
+    let err = session
+        .describe_bulk(&names, None, None)
+        .expect_err("oversized describe_bulk should return a structured worker error");
+    match err {
+        LeanWorkerError::Worker { code, .. } => {
+            assert_eq!(code, "lean_rs.worker.output_frame_too_large");
+        }
+        other => panic!("expected structured output-frame error, got {other:?}"),
+    }
+
+    let rendered = session
+        .infer_type("(Nat.succ 0 : Nat)", &LeanWorkerElabOptions::new(), None, None)
+        .expect("worker should still accept later requests");
+    assert!(
+        matches!(rendered, LeanWorkerMetaResult::Ok { .. }),
+        "worker should survive oversized output: {rendered:?}"
+    );
 }
 
 #[test]

@@ -20,9 +20,10 @@ use serde_json::value::RawValue;
 
 use lean_rs_worker_protocol::protocol::{DataRow, Diagnostic, StreamSummary};
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDoctorReport,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
+    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryOutcome, LeanWorkerRendered,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -605,6 +606,47 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Option<LeanWorkerDeclarationRow>, LeanWorkerError> {
         self.with_session(|worker| worker.worker_describe(name, cancellation, progress))
+    }
+
+    /// Search declaration names and return bounded metadata-only rows.
+    ///
+    /// The worker matches `search.query` as a case-insensitive substring of
+    /// the declaration name, then applies `search.kind` if present. The
+    /// returned rows are capped by `search.limit` (clamped to `1..=100` in the
+    /// child) and contain no type signatures; use [`Self::declaration_type`]
+    /// for explicit one-name type rendering.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::describe`].
+    pub fn search_declarations(
+        &mut self,
+        search: &LeanWorkerDeclarationSearch,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationSearchResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_search_declarations(search, cancellation, progress))
+    }
+
+    /// Render one declaration type under a byte cap.
+    ///
+    /// The returned type text is never longer than `max_bytes`, except that
+    /// the worker also applies a 64 KiB upper ceiling. Passing `0` requests an
+    /// empty truncated rendering.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::describe`].
+    pub fn declaration_type(
+        &mut self,
+        name: &str,
+        max_bytes: usize,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<Option<LeanWorkerDeclarationType>, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_declaration_type(name, max_bytes, cancellation, progress))
     }
 
     /// Enumerate the session's open environment and return the matching
