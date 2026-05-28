@@ -1,0 +1,4 @@
+interface:
+  display_name: "Formal Actor Model"
+  short_description: "Design actor-model concurrency in Lean and Rust"
+  default_prompt: "Use $formal-actor-model to design a formal actor model in Lean, a Rust actor runtime, or a Lean/Rust FFI actor boundary."
