@@ -16,11 +16,12 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
-    LeanWorkerRendered,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered,
 };
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
@@ -1294,6 +1295,62 @@ impl LeanWorker {
             progress,
             |response, operation| match response {
                 Response::DeclarationInspection { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_attempt_proof(
+        &mut self,
+        request: &LeanWorkerProofAttemptRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProofAttemptResult, LeanWorkerError> {
+        self.round_trip(
+            "worker_attempt_proof",
+            Request::AttemptProof {
+                request: request.clone(),
+                options: options.clone(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::ProofAttempt { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_verify_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
+        self.round_trip(
+            "worker_verify_declaration",
+            Request::VerifyDeclaration {
+                request: request.clone(),
+                options: options.clone(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationVerification { result } => Ok(result),
                 other => Err(unexpected_response(operation, &other)),
             },
         )

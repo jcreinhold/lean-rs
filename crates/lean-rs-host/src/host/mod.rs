@@ -78,6 +78,11 @@ pub use self::declaration_search::{
 };
 pub use self::host::LeanHost;
 pub use self::pool::{PoolStats, PooledSession, SessionPool};
+pub use self::process::{
+    DeclarationVerificationFacts, DeclarationVerificationOutcome, DeclarationVerificationRequest,
+    DeclarationVerificationStatus, DeclarationVerificationTarget, ProofAttemptEnvelope, ProofAttemptOutcome,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
+};
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
 pub use self::session::{LeanDeclarationFilter, LeanSession, LeanSourceRange, SessionStats};
 

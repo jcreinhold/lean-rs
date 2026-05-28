@@ -240,6 +240,104 @@ structure ModuleSnapshotCacheClearResult where
   approxBytesCleared : UInt64
   deriving Inhabited
 
+inductive ProofEditTarget where
+  | replaceSpan (span : ModuleSourceSpan)
+  | insertAt (line column : Nat)
+  | declarationBody (name : String)
+  deriving Inhabited
+
+structure ProofCandidate where
+  id : String
+  text : String
+  deriving Inhabited
+
+structure ProofAttemptRequest where
+  source : String
+  edit : ProofEditTarget
+  candidates : Array ProofCandidate
+  budgets : ModuleQueryOutputBudgets
+  deriving Inhabited
+
+inductive ProofAttemptStatus where
+  | closed
+  | progressed
+  | failed
+  | timeout
+  | budgetExceeded
+  | unsupported
+  deriving Inhabited
+
+structure ProofAttemptRow where
+  id : String
+  status : ProofAttemptStatus
+  diagnostics : LeanRsFixture.Elaboration.ElabFailure
+  goals : Array RenderedInfo
+  safeEdit : Option DeclarationTargetInfo
+  outputTruncated : Bool
+  deriving Inhabited
+
+structure ProofAttemptEnvelope where
+  candidates : Array ProofAttemptRow
+  candidateLimit : Nat
+  candidatesTruncated : Bool
+  deriving Inhabited
+
+inductive ProofAttemptOutcome where
+  | ok (result : ProofAttemptEnvelope) (imports : Array String)
+  | missingImports (result : ProofAttemptEnvelope) (imports missing : Array String)
+  | headerParseFailed (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  | unsupported
+  deriving Inhabited
+
+inductive DeclarationVerificationTarget where
+  | name (name : String)
+  | span (span : ModuleSourceSpan)
+  deriving Inhabited
+
+inductive SorryPolicy where
+  | allow
+  | deny
+  deriving Inhabited
+
+structure DeclarationVerificationRequest where
+  source : String
+  target : DeclarationVerificationTarget
+  sorryPolicy : Nat
+  reportAxioms : Nat
+  budgets : ModuleQueryOutputBudgets
+  deriving Inhabited
+
+inductive DeclarationVerificationStatus where
+  | accepted
+  | rejected
+  | notFound
+  | ambiguous
+  | timeout
+  | budgetExceeded
+  | unsupported
+  deriving Inhabited
+
+structure DeclarationVerificationFacts where
+  target : Option DeclarationTargetInfo
+  diagnostics : LeanRsFixture.Elaboration.ElabFailure
+  unresolvedGoals : Array RenderedInfo
+  containsSorry : Bool
+  containsAdmit : Bool
+  containsSorryAx : Bool
+  axioms : Array String
+  axiomsTruncated : Bool
+  outputTruncated : Bool
+  deriving Inhabited
+
+inductive DeclarationVerificationOutcome where
+  | ok (status : DeclarationVerificationStatus) (facts : DeclarationVerificationFacts) (imports : Array String)
+  | missingImports
+      (status : DeclarationVerificationStatus) (facts : DeclarationVerificationFacts)
+      (imports missing : Array String)
+  | headerParseFailed (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  | unsupported
+  deriving Inhabited
+
 private def rangeOfStx (fileMap : FileMap) (stx : Syntax) : Option ModuleSourceSpan :=
   match stx.getRange? with
   | none => none
@@ -1152,6 +1250,260 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let elapsed ← elapsedMicrosSince headerStart
     return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
 
+private def proofCandidateLimit : Nat := 8
+
+private def oneShotPolicy (source fileLabel : String) : ModuleQueryCachePolicy :=
+  {
+    fileIdentity := fileLabel
+    key := source
+    maxEntries := 1
+    ttlMillis := 0
+    maxBytes := 1
+  }
+
+private def sourceRawOffset? (source : String) (line column : Nat) : Option String.Pos.Raw :=
+  if line == 0 then
+    none
+  else
+    let lines := source.splitOn "\n"
+    if line > lines.length then
+      none
+    else
+      let before := lines.take (line - 1)
+      let base := before.foldl (init := 0) fun bytes text => bytes + text.utf8ByteSize + 1
+      some ⟨base + column⟩
+
+private def replaceRawSpan (source replacement : String) (start stop : String.Pos.Raw) : String :=
+  let pfx := String.Pos.Raw.extract source 0 start
+  let suffix := String.Pos.Raw.extract source stop source.rawEndPos
+  pfx ++ replacement ++ suffix
+
+private def replaceSourceSpan? (source replacement : String) (span : ModuleSourceSpan) : Option String :=
+  match sourceRawOffset? source span.startLine span.startColumn,
+      sourceRawOffset? source span.endLine span.endColumn with
+  | some start, some stop => some (replaceRawSpan source replacement start stop)
+  | _, _ => none
+
+private def insertAt? (source insertion : String) (line column : Nat) : Option String :=
+  match sourceRawOffset? source line column with
+  | some pos => some (replaceRawSpan source insertion pos pos)
+  | none => none
+
+private def extractSourceSpan? (source : String) (span : ModuleSourceSpan) : Option String :=
+  match sourceRawOffset? source span.startLine span.startColumn,
+      sourceRawOffset? source span.endLine span.endColumn with
+  | some start, some stop => some (String.Pos.Raw.extract source start stop)
+  | _, _ => none
+
+private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarget) :
+    Except String (ModuleSourceSpan × Option DeclarationTargetInfo) :=
+  match edit with
+  | .replaceSpan span => .ok (span, none)
+  | .insertAt line column =>
+    .ok ({ startLine := line, startColumn := column, endLine := line, endColumn := column }, none)
+  | .declarationBody name =>
+    match declarationTargetByName snapshot.candidates name with
+    | .target info => .ok (info.bodySpan, some info)
+    | .notFound => .error s!"declaration `{name}` was not found"
+    | .ambiguous _ => .error s!"declaration `{name}` is ambiguous"
+
+private def overlaySource? (source : String) (edit : ProofEditTarget) (span : ModuleSourceSpan) (text : String) :
+    Option String :=
+  match edit with
+  | .insertAt .. => insertAt? source text span.startLine span.startColumn
+  | _ => replaceSourceSpan? source text span
+
+private def diagnosticHasError (failure : LeanRsFixture.Elaboration.ElabFailure) : Bool :=
+  failure.diagnostics.any fun diagnostic =>
+    match diagnostic.severity with
+    | .error => true
+    | _ => false
+
+private def diagnosticMentionsHeartbeat (failure : LeanRsFixture.Elaboration.ElabFailure) : Bool :=
+  failure.diagnostics.any fun diagnostic =>
+    let msg := diagnostic.message
+    (msg.splitOn "heartbeat").length > 1 || (msg.splitOn "Heartbeats").length > 1 ||
+      (msg.splitOn "maximum number of heartbeats").length > 1
+
+private def renderedGoalInfos (goals : Array String) (limit : Nat) : Array RenderedInfo :=
+  goals.map fun goal =>
+    if goal.utf8ByteSize ≤ limit then
+      { value := goal, truncated := false }
+    else
+      let st := goal.foldl (init := { limit := limit }) fun st c => appendBounded c.toString st
+      { value := st.out, truncated := true }
+
+private def proofStateGoalsAfter (result : ProofStateResult) (limit : Nat) : Array RenderedInfo × Bool :=
+  match result with
+  | .state info =>
+    (renderedGoalInfos info.goalsAfter limit, info.truncated)
+  | .unavailable _ => (#[], false)
+
+private def attemptRowBytes (row : ProofAttemptRow) : Nat :=
+  row.id.utf8ByteSize + failureBytes row.diagnostics +
+    row.goals.foldl (init := 0) (fun bytes goal => bytes + renderedBytes goal) +
+    match row.safeEdit with
+    | some info => declarationTargetInfoBytes info
+    | none => 0
+
+private def classifyAttempt
+    (failure : LeanRsFixture.Elaboration.ElabFailure) (goals : Array RenderedInfo) : ProofAttemptStatus :=
+  if diagnosticMentionsHeartbeat failure then
+    .timeout
+  else if diagnosticHasError failure then
+    .failed
+  else if goals.isEmpty then
+    .closed
+  else
+    .progressed
+
+private def attemptCandidate
+    (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (span : ModuleSourceSpan) (safeEdit : Option DeclarationTargetInfo)
+    (candidate : ProofCandidate) : IO ProofAttemptRow := do
+  let some overlay := overlaySource? request.source request.edit span candidate.text
+    | return {
+        id := candidate.id, status := .failed,
+        diagnostics := LeanRsFixture.Elaboration.singleErrorFailure "proof edit target is outside the source text" fileLabel,
+        goals := #[], safeEdit, outputTruncated := false
+      }
+  match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes (oneShotPolicy overlay fileLabel) with
+  | .error (failure, _) =>
+    return {
+      id := candidate.id,
+      status := if diagnosticMentionsHeartbeat failure then .timeout else .failed,
+      diagnostics := failure,
+      goals := #[],
+      safeEdit,
+      outputTruncated := false
+    }
+  | .ok (snapshot, _) =>
+    let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
+    let cursorLine := span.startLine
+    let cursorColumn := span.startColumn
+    let proofState ←
+      runProofState snapshot.fileMap snapshot.trees snapshot.candidates cursorLine cursorColumn
+        snapshot.lineOffset request.budgets
+    let (goals, proofStateTruncated) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
+    let status := classifyAttempt failure goals
+    return {
+      id := candidate.id,
+      status,
+      diagnostics := failure,
+      goals,
+      safeEdit,
+      outputTruncated := proofStateTruncated ||
+        match failure.truncated with
+        | LeanRsFixture.Elaboration.Truncation.truncated => true
+        | LeanRsFixture.Elaboration.Truncation.complete => false
+    }
+
+private def candidateCapRows (candidates : Array ProofCandidate) : Array ProofCandidate × Bool :=
+  (candidates.extract 0 (min candidates.size proofCandidateLimit), candidates.size > proofCandidateLimit)
+
+private def attemptEnvelope
+    (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize) (base : ModuleSnapshot) :
+    IO ProofAttemptEnvelope := do
+  let (candidates, candidatesTruncated) := candidateCapRows request.candidates
+  match resolveEditTarget base request.edit with
+  | .error message =>
+    let rows := candidates.map fun candidate => {
+      id := candidate.id,
+      status := ProofAttemptStatus.failed,
+      diagnostics := LeanRsFixture.Elaboration.singleErrorFailure message fileLabel,
+      goals := #[],
+      safeEdit := none,
+      outputTruncated := false
+    }
+    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
+  | .ok (span, safeEdit) =>
+    let mut rows : Array ProofAttemptRow := #[]
+    let mut spent : Nat := 0
+    for candidate in candidates do
+      if spent ≥ request.budgets.totalBytes then
+        rows := rows.push {
+          id := candidate.id,
+          status := .budgetExceeded,
+          diagnostics := emptyFailure,
+          goals := #[],
+          safeEdit,
+          outputTruncated := true
+        }
+      else
+        let row ← attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes span safeEdit candidate
+        let bytes := attemptRowBytes row
+        if spent + bytes > request.budgets.totalBytes then
+          rows := rows.push { row with status := .budgetExceeded, outputTruncated := true }
+        else
+          rows := rows.push row
+          spent := spent + bytes
+    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
+
+private def containsSubstr (text needle : String) : Bool :=
+  (text.splitOn needle).length > 1
+
+private def resolveVerificationTarget (snapshot : ModuleSnapshot) (target : DeclarationVerificationTarget) :
+    DeclarationTargetResult :=
+  match target with
+  | .name name => declarationTargetByName snapshot.candidates name
+  | .span span => declarationTargetByPosition snapshot.candidates span.startLine span.startColumn snapshot.lineOffset
+
+private def verificationFacts
+    (request : DeclarationVerificationRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
+    (target? : Option DeclarationTargetInfo) : IO DeclarationVerificationFacts := do
+  let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
+  let bodyText :=
+    match target? with
+    | some target => (extractSourceSpan? request.source target.bodySpan).getD ""
+    | none => ""
+  let containsSorry := containsSubstr bodyText "sorry"
+  let containsAdmit := containsSubstr bodyText "admit"
+  let containsSorryAx := containsSubstr request.source "sorryAx"
+  let unresolvedGoals ←
+    match target? with
+    | none => pure #[]
+    | some target => do
+      let proofState ← runProofState snapshot.fileMap snapshot.trees snapshot.candidates
+        target.bodySpan.startLine target.bodySpan.startColumn snapshot.lineOffset request.budgets
+      let (goals, _) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
+      pure goals
+  let axioms :=
+    if request.reportAxioms != 0 && (containsSorry || containsAdmit || containsSorryAx) then
+      #["sorryAx"]
+    else
+      #[]
+  pure {
+    target := target?,
+    diagnostics := failure,
+    unresolvedGoals,
+    containsSorry,
+    containsAdmit,
+    containsSorryAx,
+    axioms,
+    axiomsTruncated := false,
+    outputTruncated :=
+      match failure.truncated with
+      | LeanRsFixture.Elaboration.Truncation.truncated => true
+      | LeanRsFixture.Elaboration.Truncation.complete => false
+  }
+
+private def verificationStatus (policy : Nat) (facts : DeclarationVerificationFacts) :
+    DeclarationVerificationStatus :=
+  if diagnosticMentionsHeartbeat facts.diagnostics then
+    .timeout
+  else if diagnosticHasError facts.diagnostics then
+    .rejected
+  else if !facts.unresolvedGoals.isEmpty then
+    .rejected
+  else
+    if policy == 0 then
+      .accepted
+    else if facts.containsSorry || facts.containsAdmit || facts.containsSorryAx then
+      .rejected
+    else
+      .accepted
+
 private def parseCachePolicy (raw : String) : ModuleQueryCachePolicy :=
   match raw.splitOn "\n" with
   | [fileIdentity, key, maxEntries, ttlMillis, maxBytes] =>
@@ -1341,6 +1693,49 @@ def processModuleQueryBatchCached
       let (cache2, _) := pruneCache policy (← IO.monoMsNow) cacheWithSnapshot
       moduleSnapshotCache.set cache2
       projectCachedSnapshot snapshot selectors budgets fileLabel status timings cache2
+
+@[export lean_rs_host_attempt_proof]
+def attemptProof
+    (env : Environment) (request : ProofAttemptRequest)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize)
+    : IO ProofAttemptOutcome := do
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+      (oneShotPolicy request.source fileLabel) with
+  | .error (failure, _) => pure <| .headerParseFailed failure
+  | .ok (snapshot, _) =>
+    let envelope ← attemptEnvelope env request namespaceContext fileLabel heartbeats diagBytes snapshot
+    if snapshot.missing.isEmpty then
+      pure <| .ok envelope snapshot.imports
+    else
+      pure <| .missingImports envelope snapshot.imports snapshot.missing
+
+@[export lean_rs_host_verify_declaration]
+def verifyDeclaration
+    (env : Environment) (request : DeclarationVerificationRequest)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize)
+    : IO DeclarationVerificationOutcome := do
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+      (oneShotPolicy request.source fileLabel) with
+  | .error (failure, _) => pure <| .headerParseFailed failure
+  | .ok (snapshot, _) =>
+    let targetResult := resolveVerificationTarget snapshot request.target
+    let (status, facts) ←
+      match targetResult with
+      | .target info => do
+        let facts ← verificationFacts request snapshot fileLabel (some info)
+        pure (verificationStatus request.sorryPolicy facts, facts)
+      | .notFound => do
+        let facts ← verificationFacts request snapshot fileLabel none
+        pure (.notFound, facts)
+      | .ambiguous _ => do
+        let facts ← verificationFacts request snapshot fileLabel none
+        pure (.ambiguous, facts)
+    if snapshot.missing.isEmpty then
+      pure <| .ok status facts snapshot.imports
+    else
+      pure <| .missingImports status facts snapshot.imports snapshot.missing
 
 @[export lean_rs_host_clear_module_snapshot_cache]
 def clearModuleSnapshotCache (_unit : Unit) : IO ModuleSnapshotCacheClearResult := do

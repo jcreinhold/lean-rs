@@ -22,11 +22,12 @@ use lean_rs_worker_protocol::protocol::{DataRow, Diagnostic, StreamSummary};
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
-    LeanWorkerRendered,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -694,6 +695,44 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError> {
         self.with_session(|worker| worker.worker_inspect_declaration(request, cancellation, progress))
+    }
+
+    /// Try proof snippets against an in-memory source overlay.
+    ///
+    /// The worker never writes source files. Each candidate returns a normal
+    /// status row, including failed proofs and budget exhaustion.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::process_module_query_batch`].
+    pub fn attempt_proof(
+        &mut self,
+        request: &LeanWorkerProofAttemptRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProofAttemptResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_attempt_proof(request, options, cancellation, progress))
+    }
+
+    /// Verify one declaration in an in-memory source snapshot.
+    ///
+    /// Policy failures, missing declarations, and unsupported shim support are
+    /// returned as structured result statuses rather than worker errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::process_module_query_batch`].
+    pub fn verify_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_verify_declaration(request, options, cancellation, progress))
     }
 
     /// Enumerate the session's open environment and return the matching

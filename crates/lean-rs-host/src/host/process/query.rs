@@ -54,6 +54,152 @@ impl Default for ModuleQueryOutputBudgets {
     }
 }
 
+/// Edit target for a non-mutating proof attempt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProofEditTarget {
+    ReplaceSpan { span: ModuleSourceSpan },
+    InsertAt { line: u32, column: u32 },
+    DeclarationBody { name: String },
+}
+
+/// One proof candidate to splice into an in-memory overlay.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofCandidate {
+    pub id: String,
+    pub text: String,
+}
+
+/// Bounded request to try proof snippets without mutating source files.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofAttemptRequest {
+    pub source: String,
+    pub edit: ProofEditTarget,
+    pub candidates: Vec<ProofCandidate>,
+    pub budgets: ModuleQueryOutputBudgets,
+}
+
+/// Per-candidate proof attempt status.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProofAttemptStatus {
+    Closed,
+    Progressed,
+    Failed,
+    Timeout,
+    BudgetExceeded,
+    Unsupported,
+}
+
+/// Per-candidate proof attempt result row.
+#[derive(Clone, Debug)]
+pub struct ProofAttemptRow {
+    pub id: String,
+    pub status: ProofAttemptStatus,
+    pub diagnostics: LeanElabFailure,
+    pub goals: Vec<RenderedInfo>,
+    pub safe_edit: Option<DeclarationTargetInfo>,
+    pub output_truncated: bool,
+}
+
+/// Envelope for a bounded proof attempt.
+#[derive(Clone, Debug)]
+pub struct ProofAttemptEnvelope {
+    pub candidates: Vec<ProofAttemptRow>,
+    pub candidate_limit: u32,
+    pub candidates_truncated: bool,
+}
+
+/// Header-aware proof attempt outcome.
+#[derive(Clone, Debug)]
+pub enum ProofAttemptOutcome {
+    Ok {
+        result: ProofAttemptEnvelope,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        result: ProofAttemptEnvelope,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanElabFailure,
+    },
+    Unsupported,
+}
+
+/// Target declaration for verification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclarationVerificationTarget {
+    Name { name: String },
+    Span { span: ModuleSourceSpan },
+}
+
+/// Policy for `sorry`-like constructs during declaration verification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SorryPolicy {
+    Allow,
+    Deny,
+}
+
+/// Bounded request to verify one declaration in a source snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationVerificationRequest {
+    pub source: String,
+    pub target: DeclarationVerificationTarget,
+    pub sorry_policy: SorryPolicy,
+    pub report_axioms: bool,
+    pub budgets: ModuleQueryOutputBudgets,
+}
+
+/// Verification policy result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclarationVerificationStatus {
+    Accepted,
+    Rejected,
+    NotFound,
+    Ambiguous,
+    Timeout,
+    BudgetExceeded,
+    Unsupported,
+}
+
+/// Bounded facts returned by declaration verification.
+#[derive(Clone, Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "verification booleans are independent wire facts for policy decisions"
+)]
+pub struct DeclarationVerificationFacts {
+    pub target: Option<DeclarationTargetInfo>,
+    pub diagnostics: LeanElabFailure,
+    pub unresolved_goals: Vec<RenderedInfo>,
+    pub contains_sorry: bool,
+    pub contains_admit: bool,
+    pub contains_sorry_ax: bool,
+    pub axioms: Vec<String>,
+    pub axioms_truncated: bool,
+    pub output_truncated: bool,
+}
+
+/// Header-aware declaration verification outcome.
+#[derive(Clone, Debug)]
+pub enum DeclarationVerificationOutcome {
+    Ok {
+        status: DeclarationVerificationStatus,
+        facts: Box<DeclarationVerificationFacts>,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        status: DeclarationVerificationStatus,
+        facts: Box<DeclarationVerificationFacts>,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanElabFailure,
+    },
+    Unsupported,
+}
+
 /// One selector inside a batched module-processing request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ModuleQuerySelector {
@@ -287,6 +433,152 @@ impl<'lean> TryFromLean<'lean> for ModuleSourceSpan {
     }
 }
 
+impl<'lean> IntoLean<'lean> for ModuleSourceSpan {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.start_line.into_lean(runtime),
+                self.start_column.into_lean(runtime),
+                self.end_line.into_lean(runtime),
+                self.end_column.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl<'lean> IntoLean<'lean> for ProofEditTarget {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        match self {
+            Self::ReplaceSpan { span } => alloc_ctor_with_objects(runtime, 0, [span.into_lean(runtime)]),
+            Self::InsertAt { line, column } => {
+                alloc_ctor_with_objects(runtime, 1, [line.into_lean(runtime), column.into_lean(runtime)])
+            }
+            Self::DeclarationBody { name } => alloc_ctor_with_objects(runtime, 2, [name.into_lean(runtime)]),
+        }
+    }
+}
+
+impl<'lean> IntoLean<'lean> for ProofCandidate {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(runtime, 0, [self.id.into_lean(runtime), self.text.into_lean(runtime)])
+    }
+}
+
+impl<'lean> IntoLean<'lean> for ProofAttemptRequest {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.source.into_lean(runtime),
+                self.edit.into_lean(runtime),
+                self.candidates.into_lean(runtime),
+                self.budgets.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl sealed::SealedAbi for ProofAttemptRequest {}
+
+impl<'lean> LeanAbi<'lean> for ProofAttemptRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "ProofAttemptRequest cannot decode a Lean call result; it is an argument-only type",
+        ))
+    }
+}
+
+impl sealed::SealedAbi for &ProofAttemptRequest {}
+
+impl<'lean> LeanAbi<'lean> for &ProofAttemptRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.clone().into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "&ProofAttemptRequest cannot decode a Lean call result; use ProofAttemptRequest for owned values",
+        ))
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationVerificationTarget {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        match self {
+            Self::Name { name } => alloc_ctor_with_objects(runtime, 0, [name.into_lean(runtime)]),
+            Self::Span { span } => alloc_ctor_with_objects(runtime, 1, [span.into_lean(runtime)]),
+        }
+    }
+}
+
+impl<'lean> IntoLean<'lean> for SorryPolicy {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        match self {
+            Self::Allow => 0u32.into_lean(runtime),
+            Self::Deny => 1u32.into_lean(runtime),
+        }
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationVerificationRequest {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.source.into_lean(runtime),
+                self.target.into_lean(runtime),
+                self.sorry_policy.into_lean(runtime),
+                (u32::from(self.report_axioms)).into_lean(runtime),
+                self.budgets.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl sealed::SealedAbi for DeclarationVerificationRequest {}
+
+impl<'lean> LeanAbi<'lean> for DeclarationVerificationRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "DeclarationVerificationRequest cannot decode a Lean call result; it is an argument-only type",
+        ))
+    }
+}
+
+impl sealed::SealedAbi for &DeclarationVerificationRequest {}
+
+impl<'lean> LeanAbi<'lean> for &DeclarationVerificationRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.clone().into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "&DeclarationVerificationRequest cannot decode a Lean call result; use DeclarationVerificationRequest for owned values",
+        ))
+    }
+}
+
 /// Bounded rendered Lean text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderedInfo {
@@ -494,6 +786,179 @@ impl<'lean> TryFromLean<'lean> for DeclarationTargetResult {
             }
             other => Err(conversion_error(format!(
                 "expected Lean DeclarationTargetResult ctor (tag 0..=2), found tag {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for ProofAttemptStatus {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        Self::from_scalar(sum_tag(&obj)?)
+    }
+}
+
+impl ProofAttemptStatus {
+    fn from_scalar(value: u8) -> lean_rs::LeanResult<Self> {
+        match value {
+            0 => Ok(Self::Closed),
+            1 => Ok(Self::Progressed),
+            2 => Ok(Self::Failed),
+            3 => Ok(Self::Timeout),
+            4 => Ok(Self::BudgetExceeded),
+            5 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean ProofAttemptStatus ctor (tag 0..=5), found tag {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for ProofAttemptRow {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let ctor = view(&obj).ctor_shape(0, 4, "ProofAttemptRow")?;
+        let status = ProofAttemptStatus::from_scalar(ctor.uint8(0, "ProofAttemptRow.status")?)?;
+        let output_truncated = ctor.bool(1, "ProofAttemptRow.outputTruncated")?;
+        let [id, diagnostics, goals, safe_edit] = take_ctor_objects::<4>(obj, 0, "ProofAttemptRow")?;
+        Ok(Self {
+            id: String::try_from_lean(id)?,
+            status,
+            diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+            goals: Vec::<RenderedInfo>::try_from_lean(goals)?,
+            safe_edit: Option::<DeclarationTargetInfo>::try_from_lean(safe_edit)?,
+            output_truncated,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for ProofAttemptEnvelope {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let candidates_truncated = bool_tail(&obj, 0, "ProofAttemptEnvelope.candidatesTruncated")?;
+        let [candidates, candidate_limit] = take_ctor_objects::<2>(obj, 0, "ProofAttemptEnvelope")?;
+        Ok(Self {
+            candidates: Vec::<ProofAttemptRow>::try_from_lean(candidates)?,
+            candidate_limit: u32::try_from_lean(candidate_limit)?,
+            candidates_truncated,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for ProofAttemptOutcome {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        match sum_tag(&obj)? {
+            0 => {
+                let [result, imports] = take_ctor_objects::<2>(obj, 0, "ProofAttemptOutcome::ok")?;
+                Ok(Self::Ok {
+                    result: ProofAttemptEnvelope::try_from_lean(result)?,
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                })
+            }
+            1 => {
+                let [result, imports, missing] = take_ctor_objects::<3>(obj, 1, "ProofAttemptOutcome::missingImports")?;
+                Ok(Self::MissingImports {
+                    result: ProofAttemptEnvelope::try_from_lean(result)?,
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                    missing: Vec::<String>::try_from_lean(missing)?,
+                })
+            }
+            2 => {
+                let [diagnostics] = take_ctor_objects::<1>(obj, 2, "ProofAttemptOutcome::headerParseFailed")?;
+                Ok(Self::HeaderParseFailed {
+                    diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+                })
+            }
+            3 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean ProofAttemptOutcome ctor (tag 0..=3), found tag {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationStatus {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        Self::from_scalar(sum_tag(&obj)?)
+    }
+}
+
+impl DeclarationVerificationStatus {
+    fn from_scalar(value: u8) -> lean_rs::LeanResult<Self> {
+        match value {
+            0 => Ok(Self::Accepted),
+            1 => Ok(Self::Rejected),
+            2 => Ok(Self::NotFound),
+            3 => Ok(Self::Ambiguous),
+            4 => Ok(Self::Timeout),
+            5 => Ok(Self::BudgetExceeded),
+            6 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean DeclarationVerificationStatus ctor (tag 0..=6), found tag {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationFacts {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let contains_sorry = bool_tail(&obj, 0, "DeclarationVerificationFacts.containsSorry")?;
+        let contains_admit = bool_tail(&obj, 1, "DeclarationVerificationFacts.containsAdmit")?;
+        let contains_sorry_ax = bool_tail(&obj, 2, "DeclarationVerificationFacts.containsSorryAx")?;
+        let axioms_truncated = bool_tail(&obj, 3, "DeclarationVerificationFacts.axiomsTruncated")?;
+        let output_truncated = bool_tail(&obj, 4, "DeclarationVerificationFacts.outputTruncated")?;
+        let [target, diagnostics, unresolved_goals, axioms] =
+            take_ctor_objects::<4>(obj, 0, "DeclarationVerificationFacts")?;
+        Ok(Self {
+            target: Option::<DeclarationTargetInfo>::try_from_lean(target)?,
+            diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+            unresolved_goals: Vec::<RenderedInfo>::try_from_lean(unresolved_goals)?,
+            contains_sorry,
+            contains_admit,
+            contains_sorry_ax,
+            axioms: Vec::<String>::try_from_lean(axioms)?,
+            axioms_truncated,
+            output_truncated,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationOutcome {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        match sum_tag(&obj)? {
+            0 => {
+                let ctor = view(&obj).ctor_shape(0, 2, "DeclarationVerificationOutcome::ok")?;
+                let status = DeclarationVerificationStatus::from_scalar(
+                    ctor.uint8(0, "DeclarationVerificationOutcome::ok.status")?,
+                )?;
+                let [facts, imports] = take_ctor_objects::<2>(obj, 0, "DeclarationVerificationOutcome::ok")?;
+                Ok(Self::Ok {
+                    status,
+                    facts: Box::new(DeclarationVerificationFacts::try_from_lean(facts)?),
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                })
+            }
+            1 => {
+                let ctor = view(&obj).ctor_shape(1, 3, "DeclarationVerificationOutcome::missingImports")?;
+                let status = DeclarationVerificationStatus::from_scalar(
+                    ctor.uint8(0, "DeclarationVerificationOutcome::missingImports.status")?,
+                )?;
+                let [facts, imports, missing] =
+                    take_ctor_objects::<3>(obj, 1, "DeclarationVerificationOutcome::missingImports")?;
+                Ok(Self::MissingImports {
+                    status,
+                    facts: Box::new(DeclarationVerificationFacts::try_from_lean(facts)?),
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                    missing: Vec::<String>::try_from_lean(missing)?,
+                })
+            }
+            2 => {
+                let [diagnostics] =
+                    take_ctor_objects::<1>(obj, 2, "DeclarationVerificationOutcome::headerParseFailed")?;
+                Ok(Self::HeaderParseFailed {
+                    diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+                })
+            }
+            3 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean DeclarationVerificationOutcome ctor (tag 0..=3), found tag {other}"
             ))),
         }
     }

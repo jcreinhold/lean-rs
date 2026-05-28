@@ -586,6 +586,171 @@ pub struct LeanWorkerRenderedInfo {
     pub truncated: bool,
 }
 
+/// Edit target for a non-mutating proof attempt over an in-memory source
+/// overlay.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerProofEditTarget {
+    /// Replace exactly this source span.
+    ReplaceSpan { span: LeanWorkerModuleSourceSpan },
+    /// Insert proof text at this source position.
+    InsertAt { line: u32, column: u32 },
+    /// Resolve a declaration by name and replace its body span.
+    DeclarationBody { name: String },
+}
+
+/// One proof candidate to apply to an in-memory source overlay.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofCandidate {
+    pub id: String,
+    pub text: String,
+}
+
+/// Bounded request to try one or more proof snippets without writing files.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofAttemptRequest {
+    pub source: String,
+    pub edit: LeanWorkerProofEditTarget,
+    pub candidates: Vec<LeanWorkerProofCandidate>,
+    pub budgets: LeanWorkerOutputBudgets,
+}
+
+/// Per-candidate proof attempt status.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerProofAttemptStatus {
+    Closed,
+    Progressed,
+    Failed,
+    Timeout,
+    BudgetExceeded,
+    Unsupported,
+}
+
+/// Per-candidate proof attempt result row.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofAttemptRow {
+    pub id: String,
+    pub status: LeanWorkerProofAttemptStatus,
+    pub diagnostics: LeanWorkerElabFailure,
+    pub goals: Vec<LeanWorkerRenderedInfo>,
+    pub safe_edit: Option<LeanWorkerDeclarationTargetInfo>,
+    pub output_truncated: bool,
+}
+
+/// Envelope for a bounded proof attempt.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofAttemptEnvelope {
+    pub candidates: Vec<LeanWorkerProofAttemptRow>,
+    pub candidate_limit: u32,
+    pub candidates_truncated: bool,
+}
+
+/// Header-aware proof attempt outcome.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerProofAttemptResult {
+    Ok {
+        result: LeanWorkerProofAttemptEnvelope,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        result: LeanWorkerProofAttemptEnvelope,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanWorkerElabFailure,
+    },
+    Unsupported,
+}
+
+/// Target declaration for verification.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationVerificationTarget {
+    Name { name: String },
+    Span { span: LeanWorkerModuleSourceSpan },
+}
+
+/// Policy for `sorry`-like constructs in declaration verification.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerSorryPolicy {
+    Allow,
+    Deny,
+}
+
+/// Bounded request to verify one declaration in an in-memory source snapshot.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationVerificationRequest {
+    pub source: String,
+    pub target: LeanWorkerDeclarationVerificationTarget,
+    pub sorry_policy: LeanWorkerSorryPolicy,
+    pub report_axioms: bool,
+    pub budgets: LeanWorkerOutputBudgets,
+}
+
+/// Verification policy result after diagnostics and declaration facts are
+/// collected.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationVerificationStatus {
+    Accepted,
+    Rejected,
+    NotFound,
+    Ambiguous,
+    Timeout,
+    BudgetExceeded,
+    Unsupported,
+}
+
+/// Bounded facts returned by declaration verification.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "verification booleans are independent wire facts for policy decisions"
+)]
+pub struct LeanWorkerDeclarationVerificationFacts {
+    pub target: Option<LeanWorkerDeclarationTargetInfo>,
+    pub diagnostics: LeanWorkerElabFailure,
+    pub unresolved_goals: Vec<LeanWorkerRenderedInfo>,
+    pub contains_sorry: bool,
+    pub contains_admit: bool,
+    pub contains_sorry_ax: bool,
+    pub axioms: Vec<String>,
+    pub axioms_truncated: bool,
+    pub output_truncated: bool,
+}
+
+/// Header-aware declaration verification outcome.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationVerificationResult {
+    Ok {
+        verification_status: LeanWorkerDeclarationVerificationStatus,
+        facts: Box<LeanWorkerDeclarationVerificationFacts>,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        verification_status: LeanWorkerDeclarationVerificationStatus,
+        facts: Box<LeanWorkerDeclarationVerificationFacts>,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanWorkerElabFailure,
+    },
+    Unsupported,
+}
+
 /// Result for `LeanWorkerModuleQuery::TypeAt`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]

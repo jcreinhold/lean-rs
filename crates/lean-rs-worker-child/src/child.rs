@@ -12,12 +12,14 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    DeclarationTargetInfo, DeclarationTargetResult, GoalAtResult, LocalInfo, ModuleQuery,
-    ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-    ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
+    DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationFacts, DeclarationVerificationOutcome,
+    DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, GoalAtResult,
+    LocalInfo, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
+    ModuleQueryBatchResult, ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
     ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
-    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofStateInfo, ProofStateResult, ReferencesResult,
-    RenderedInfo, SurroundingDeclarationResult, TypeAtResult,
+    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope, ProofAttemptOutcome,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofStateInfo,
+    ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -43,16 +45,20 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
     LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
     LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType,
-    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
-    LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
-    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector,
-    LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerModuleSourceSpan,
-    LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofStateInfo, LeanWorkerProofStateResult,
-    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange,
-    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
+    LeanWorkerDeclarationVerificationTarget, LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
+    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
+    LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
+    LeanWorkerProofAttemptStatus, LeanWorkerProofEditTarget, LeanWorkerProofStateInfo, LeanWorkerProofStateResult,
+    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy,
+    LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
@@ -470,6 +476,34 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 let response = match host_session.as_mut() {
                     Some(state) => match state.inspect_declaration(&request) {
                         Ok(result) => Response::DeclarationInspection { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::AttemptProof {
+                request,
+                options,
+                progress,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.attempt_proof(&request, &options, progress, &writer) {
+                        Ok(result) => Response::ProofAttempt { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::VerifyDeclaration {
+                request,
+                options,
+                progress,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.verify_declaration(&request, &options, progress, &writer) {
+                        Ok(result) => Response::DeclarationVerification { result },
                         Err(err) => error_response(&err),
                     },
                     None => missing_session_response(),
@@ -1261,6 +1295,44 @@ impl HostSessionState {
             .map(declaration_inspection_result_wire)
     }
 
+    fn attempt_proof(
+        &mut self,
+        request: &LeanWorkerProofAttemptRequest,
+        options: &LeanWorkerElabOptions,
+        progress: bool,
+        writer: &ProtocolWriter,
+    ) -> LeanResult<LeanWorkerProofAttemptResult> {
+        if progress {
+            emit_progress(writer, "attempt_proof", 0, Some(1));
+        }
+        let request = proof_attempt_request_host(request)?;
+        let options = elab_options_to_host(options);
+        let result = self.session.attempt_proof(&request, &options, None)?;
+        if progress {
+            emit_progress(writer, "attempt_proof", 1, Some(1));
+        }
+        Ok(proof_attempt_outcome_wire(result))
+    }
+
+    fn verify_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationRequest,
+        options: &LeanWorkerElabOptions,
+        progress: bool,
+        writer: &ProtocolWriter,
+    ) -> LeanResult<LeanWorkerDeclarationVerificationResult> {
+        if progress {
+            emit_progress(writer, "verify_declaration", 0, Some(1));
+        }
+        let request = declaration_verification_request_host(request)?;
+        let options = elab_options_to_host(options);
+        let result = self.session.verify_declaration(&request, &options, None)?;
+        if progress {
+            emit_progress(writer, "verify_declaration", 1, Some(1));
+        }
+        Ok(declaration_verification_outcome_wire(result))
+    }
+
     fn list_declarations_strings(
         &mut self,
         filter: LeanWorkerDeclarationFilter,
@@ -1937,6 +2009,80 @@ fn module_query_budgets_host(budgets: &LeanWorkerOutputBudgets) -> ModuleQueryOu
     }
 }
 
+fn module_source_span_host(span: &LeanWorkerModuleSourceSpan) -> ModuleSourceSpan {
+    ModuleSourceSpan {
+        start_line: span.start_line,
+        start_column: span.start_column,
+        end_line: span.end_line,
+        end_column: span.end_column,
+    }
+}
+
+fn proof_edit_target_host(target: &LeanWorkerProofEditTarget) -> LeanResult<ProofEditTarget> {
+    Ok(match target {
+        LeanWorkerProofEditTarget::ReplaceSpan { span } => ProofEditTarget::ReplaceSpan {
+            span: module_source_span_host(span),
+        },
+        LeanWorkerProofEditTarget::InsertAt { line, column } => ProofEditTarget::InsertAt {
+            line: *line,
+            column: *column,
+        },
+        LeanWorkerProofEditTarget::DeclarationBody { name } => ProofEditTarget::DeclarationBody { name: name.clone() },
+        _ => return Err(host_internal("unsupported proof edit target variant")),
+    })
+}
+
+fn proof_attempt_request_host(request: &LeanWorkerProofAttemptRequest) -> LeanResult<ProofAttemptRequest> {
+    Ok(ProofAttemptRequest {
+        source: request.source.clone(),
+        edit: proof_edit_target_host(&request.edit)?,
+        candidates: request
+            .candidates
+            .iter()
+            .take(8)
+            .map(|candidate| ProofCandidate {
+                id: candidate.id.clone(),
+                text: candidate.text.clone(),
+            })
+            .collect(),
+        budgets: module_query_budgets_host(&request.budgets),
+    })
+}
+
+fn declaration_verification_target_host(
+    target: &LeanWorkerDeclarationVerificationTarget,
+) -> LeanResult<DeclarationVerificationTarget> {
+    Ok(match target {
+        LeanWorkerDeclarationVerificationTarget::Name { name } => {
+            DeclarationVerificationTarget::Name { name: name.clone() }
+        }
+        LeanWorkerDeclarationVerificationTarget::Span { span } => DeclarationVerificationTarget::Span {
+            span: module_source_span_host(span),
+        },
+        _ => return Err(host_internal("unsupported declaration verification target variant")),
+    })
+}
+
+fn sorry_policy_host(policy: LeanWorkerSorryPolicy) -> SorryPolicy {
+    match policy {
+        LeanWorkerSorryPolicy::Allow => SorryPolicy::Allow,
+        LeanWorkerSorryPolicy::Deny => SorryPolicy::Deny,
+        _ => SorryPolicy::Deny,
+    }
+}
+
+fn declaration_verification_request_host(
+    request: &LeanWorkerDeclarationVerificationRequest,
+) -> LeanResult<DeclarationVerificationRequest> {
+    Ok(DeclarationVerificationRequest {
+        source: request.source.clone(),
+        target: declaration_verification_target_host(&request.target)?,
+        sorry_policy: sorry_policy_host(request.sorry_policy),
+        report_axioms: request.report_axioms,
+        budgets: module_query_budgets_host(&request.budgets),
+    })
+}
+
 fn module_cache_env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
@@ -2118,6 +2264,115 @@ fn declaration_target_result_wire(result: DeclarationTargetResult) -> LeanWorker
         DeclarationTargetResult::Ambiguous(candidates) => LeanWorkerDeclarationTargetResult::Ambiguous {
             candidates: candidates.into_iter().map(declaration_target_info_wire).collect(),
         },
+    }
+}
+
+fn proof_attempt_status_wire(status: ProofAttemptStatus) -> LeanWorkerProofAttemptStatus {
+    match status {
+        ProofAttemptStatus::Closed => LeanWorkerProofAttemptStatus::Closed,
+        ProofAttemptStatus::Progressed => LeanWorkerProofAttemptStatus::Progressed,
+        ProofAttemptStatus::Failed => LeanWorkerProofAttemptStatus::Failed,
+        ProofAttemptStatus::Timeout => LeanWorkerProofAttemptStatus::Timeout,
+        ProofAttemptStatus::BudgetExceeded => LeanWorkerProofAttemptStatus::BudgetExceeded,
+        ProofAttemptStatus::Unsupported => LeanWorkerProofAttemptStatus::Unsupported,
+    }
+}
+
+fn proof_attempt_row_wire(row: ProofAttemptRow) -> LeanWorkerProofAttemptRow {
+    LeanWorkerProofAttemptRow {
+        id: row.id,
+        status: proof_attempt_status_wire(row.status),
+        diagnostics: elab_failure_wire(&row.diagnostics),
+        goals: row.goals.into_iter().map(rendered_info_wire).collect(),
+        safe_edit: row.safe_edit.map(declaration_target_info_wire),
+        output_truncated: row.output_truncated,
+    }
+}
+
+fn proof_attempt_envelope_wire(envelope: ProofAttemptEnvelope) -> LeanWorkerProofAttemptEnvelope {
+    LeanWorkerProofAttemptEnvelope {
+        candidates: envelope.candidates.into_iter().map(proof_attempt_row_wire).collect(),
+        candidate_limit: envelope.candidate_limit,
+        candidates_truncated: envelope.candidates_truncated,
+    }
+}
+
+fn proof_attempt_outcome_wire(outcome: ProofAttemptOutcome) -> LeanWorkerProofAttemptResult {
+    match outcome {
+        ProofAttemptOutcome::Ok { result, imports } => LeanWorkerProofAttemptResult::Ok {
+            result: proof_attempt_envelope_wire(result),
+            imports,
+        },
+        ProofAttemptOutcome::MissingImports {
+            result,
+            imports,
+            missing,
+        } => LeanWorkerProofAttemptResult::MissingImports {
+            result: proof_attempt_envelope_wire(result),
+            imports,
+            missing,
+        },
+        ProofAttemptOutcome::HeaderParseFailed { diagnostics } => LeanWorkerProofAttemptResult::HeaderParseFailed {
+            diagnostics: elab_failure_wire(&diagnostics),
+        },
+        ProofAttemptOutcome::Unsupported => LeanWorkerProofAttemptResult::Unsupported,
+    }
+}
+
+fn declaration_verification_status_wire(
+    status: DeclarationVerificationStatus,
+) -> LeanWorkerDeclarationVerificationStatus {
+    match status {
+        DeclarationVerificationStatus::Accepted => LeanWorkerDeclarationVerificationStatus::Accepted,
+        DeclarationVerificationStatus::Rejected => LeanWorkerDeclarationVerificationStatus::Rejected,
+        DeclarationVerificationStatus::NotFound => LeanWorkerDeclarationVerificationStatus::NotFound,
+        DeclarationVerificationStatus::Ambiguous => LeanWorkerDeclarationVerificationStatus::Ambiguous,
+        DeclarationVerificationStatus::Timeout => LeanWorkerDeclarationVerificationStatus::Timeout,
+        DeclarationVerificationStatus::BudgetExceeded => LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
+        DeclarationVerificationStatus::Unsupported => LeanWorkerDeclarationVerificationStatus::Unsupported,
+    }
+}
+
+fn declaration_verification_facts_wire(facts: DeclarationVerificationFacts) -> LeanWorkerDeclarationVerificationFacts {
+    LeanWorkerDeclarationVerificationFacts {
+        target: facts.target.map(declaration_target_info_wire),
+        diagnostics: elab_failure_wire(&facts.diagnostics),
+        unresolved_goals: facts.unresolved_goals.into_iter().map(rendered_info_wire).collect(),
+        contains_sorry: facts.contains_sorry,
+        contains_admit: facts.contains_admit,
+        contains_sorry_ax: facts.contains_sorry_ax,
+        axioms: facts.axioms,
+        axioms_truncated: facts.axioms_truncated,
+        output_truncated: facts.output_truncated,
+    }
+}
+
+fn declaration_verification_outcome_wire(
+    outcome: DeclarationVerificationOutcome,
+) -> LeanWorkerDeclarationVerificationResult {
+    match outcome {
+        DeclarationVerificationOutcome::Ok { status, facts, imports } => LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status: declaration_verification_status_wire(status),
+            facts: Box::new(declaration_verification_facts_wire(*facts)),
+            imports,
+        },
+        DeclarationVerificationOutcome::MissingImports {
+            status,
+            facts,
+            imports,
+            missing,
+        } => LeanWorkerDeclarationVerificationResult::MissingImports {
+            verification_status: declaration_verification_status_wire(status),
+            facts: Box::new(declaration_verification_facts_wire(*facts)),
+            imports,
+            missing,
+        },
+        DeclarationVerificationOutcome::HeaderParseFailed { diagnostics } => {
+            LeanWorkerDeclarationVerificationResult::HeaderParseFailed {
+                diagnostics: elab_failure_wire(&diagnostics),
+            }
+        }
+        DeclarationVerificationOutcome::Unsupported => LeanWorkerDeclarationVerificationResult::Unsupported,
     }
 }
 

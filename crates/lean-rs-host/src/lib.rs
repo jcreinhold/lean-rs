@@ -39,7 +39,10 @@ pub use crate::host::{
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
     DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
     DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
-    DeclarationSearchTimings, LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange,
-    PoolStats, PooledSession, SessionPool, SessionStats,
+    DeclarationSearchTimings, DeclarationVerificationFacts, DeclarationVerificationOutcome,
+    DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, LeanCapabilities,
+    LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope,
+    ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
+    SessionPool, SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

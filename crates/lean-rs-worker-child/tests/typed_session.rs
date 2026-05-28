@@ -21,11 +21,14 @@ use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionFields,
     LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
     LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchScope,
-    LeanWorkerElabOptions, LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
-    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
-    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
+    LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerElabOptions,
+    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
+    LeanWorkerProofAttemptResult, LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
+    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy,
 };
 
 fn worker_binary() -> PathBuf {
@@ -1057,6 +1060,182 @@ fn process_module_query_batch_obeys_total_budget_without_killing_worker() {
         matches!(rendered, LeanWorkerMetaResult::Ok { .. }),
         "worker should survive budgeted batch output: {rendered:?}"
     );
+}
+
+#[test]
+fn attempt_proof_successful_candidate_closes_simple_goal() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/success.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by\n  exact True.intro\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "trivial".to_owned(),
+            text: "by\n  trivial".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("attempt_proof dispatch succeeds");
+
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].status, LeanWorkerProofAttemptStatus::Closed);
+    assert!(
+        result.candidates[0].goals.is_empty(),
+        "closed proof should have no goals"
+    );
+    assert!(
+        result.candidates[0].safe_edit.is_some(),
+        "declaration body target should resolve safe edit"
+    );
+}
+
+#[test]
+fn attempt_proof_bad_candidate_returns_diagnostics_and_session_survives() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/bad.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by\n  trivial\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "bad".to_owned(),
+            text: "by\n  exact False.elim".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("bad candidate is a normal proof attempt result");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidates[0].status, LeanWorkerProofAttemptStatus::Failed);
+    assert!(
+        result.candidates[0]
+            .diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "error"),
+        "bad proof should return error diagnostics: {:?}",
+        result.candidates[0].diagnostics,
+    );
+
+    let later = session
+        .process_module_query(
+            "theorem u : True := by\n  trivial\n",
+            LeanWorkerModuleQuery::Diagnostics,
+            &LeanWorkerElabOptions::new(),
+            None,
+            None,
+        )
+        .expect("later module query still succeeds");
+    assert!(matches!(later, LeanWorkerModuleQueryOutcome::Ok { .. }));
+}
+
+#[test]
+fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
+    ensure_fixture_built();
+    let fixture = workspace_root().join("fixtures/lean/LeanRsFixture/SourceRanges.lean");
+    let before = fs::read_to_string(&fixture).expect("fixture reads before proof attempt");
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/cap.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let candidates = (0..10)
+        .map(|idx| LeanWorkerProofCandidate {
+            id: format!("c{idx}"),
+            text: "by\n  trivial".to_owned(),
+        })
+        .collect();
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by\n  trivial\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        candidates,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("capped attempt succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidate_limit, 8);
+    assert!(result.candidates.len() <= 8);
+
+    let after = fs::read_to_string(&fixture).expect("fixture reads after proof attempt");
+    assert_eq!(before, after, "proof attempts must not mutate source files");
+}
+
+#[test]
+fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/theorem.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let closed = LeanWorkerDeclarationVerificationRequest {
+        source: "theorem t : True := by\n  trivial\n".to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name { name: "t".to_owned() },
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .verify_declaration(&closed, &opts, None, None)
+        .expect("closed theorem verification succeeds");
+    match result {
+        LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status,
+            facts,
+            ..
+        } => {
+            assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::Accepted);
+            assert!(!facts.contains_sorry);
+            assert!(facts.unresolved_goals.is_empty());
+        }
+        other => panic!("expected accepted verification, got {other:?}"),
+    }
+
+    let sorry = LeanWorkerDeclarationVerificationRequest {
+        source: "theorem t : True := by\n  sorry\n".to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name { name: "t".to_owned() },
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+    let result = session
+        .verify_declaration(&sorry, &opts, None, None)
+        .expect("sorry theorem verification is a normal result");
+    match result {
+        LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status,
+            facts,
+            ..
+        } => {
+            assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::Rejected);
+            assert!(facts.contains_sorry);
+            assert!(facts.axioms.iter().any(|axiom| axiom == "sorryAx"));
+        }
+        other => panic!("expected rejected verification, got {other:?}"),
+    }
 }
 
 #[test]

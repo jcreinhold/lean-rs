@@ -142,8 +142,9 @@ use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use crate::host::process::{
-    ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome, ModuleQueryCachePolicy, ModuleQueryOutcome,
-    ModuleQueryOutputBudgets, ModuleQuerySelector, ModuleSnapshotCacheClearResult,
+    DeclarationVerificationOutcome, DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome,
+    ModuleQueryBatchOutcome, ModuleQueryCachePolicy, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
+    ModuleSnapshotCacheClearResult, ProofAttemptOutcome, ProofAttemptRequest,
 };
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
 use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
@@ -1380,6 +1381,94 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             policy_text,
         );
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
+        result
+    }
+
+    /// Try proof snippets against an in-memory source overlay.
+    ///
+    /// The shim is optional. When the loaded capability dylib does not export
+    /// `lean_rs_host_attempt_proof`, the method returns
+    /// [`ProofAttemptOutcome::Unsupported`] without an FFI call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cancellation is already requested, if the shim
+    /// raises an `IO` exception, or if the Lean result cannot be decoded.
+    pub fn attempt_proof(
+        &mut self,
+        request: &ProofAttemptRequest,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<ProofAttemptOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.attempt_proof",
+            source_len = request.source.len(),
+            candidates = request.candidates.len(),
+            per_field_bytes = request.budgets.per_field_bytes,
+            total_bytes = request.budgets.total_bytes,
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(call) = self.shims.attempt_proof.as_ref() else {
+            return Ok(ProofAttemptOutcome::Unsupported);
+        };
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            request.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        self.record_call(u64::try_from(request.candidates.len()).unwrap_or(u64::MAX), t.elapsed());
+        result
+    }
+
+    /// Verify one declaration in an in-memory source snapshot.
+    ///
+    /// The shim is optional. When the loaded capability dylib does not export
+    /// `lean_rs_host_verify_declaration`, the method returns
+    /// [`DeclarationVerificationOutcome::Unsupported`] without an FFI call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cancellation is already requested, if the shim
+    /// raises an `IO` exception, or if the Lean result cannot be decoded.
+    pub fn verify_declaration(
+        &mut self,
+        request: &DeclarationVerificationRequest,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<DeclarationVerificationOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.verify_declaration",
+            source_len = request.source.len(),
+            report_axioms = request.report_axioms,
+            per_field_bytes = request.budgets.per_field_bytes,
+            total_bytes = request.budgets.total_bytes,
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(call) = self.shims.verify_declaration.as_ref() else {
+            return Ok(DeclarationVerificationOutcome::Unsupported);
+        };
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            request.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        self.record_call(1, t.elapsed());
         result
     }
 

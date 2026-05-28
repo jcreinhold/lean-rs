@@ -25,10 +25,11 @@ use serde_json::value::RawValue;
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
-    LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerRendered,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
 };
 
 /// Wire protocol version negotiated between parent and child during the
@@ -196,6 +197,16 @@ pub enum Request {
     InspectDeclaration {
         request: LeanWorkerDeclarationInspectionRequest,
     },
+    AttemptProof {
+        request: LeanWorkerProofAttemptRequest,
+        options: LeanWorkerElabOptions,
+        progress: bool,
+    },
+    VerifyDeclaration {
+        request: LeanWorkerDeclarationVerificationRequest,
+        options: LeanWorkerElabOptions,
+        progress: bool,
+    },
     ListDeclarationsStrings {
         filter: LeanWorkerDeclarationFilter,
         progress: bool,
@@ -306,6 +317,12 @@ pub enum Response {
     },
     DeclarationInspection {
         result: LeanWorkerDeclarationInspectionResult,
+    },
+    ProofAttempt {
+        result: LeanWorkerProofAttemptResult,
+    },
+    DeclarationVerification {
+        result: LeanWorkerDeclarationVerificationResult,
     },
     DeclarationBulk {
         rows: Vec<LeanWorkerDeclarationRow>,
@@ -652,12 +669,18 @@ mod tests {
         LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationProofSearchFacts,
         LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
         LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
-        LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerElabFailure,
-        LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+        LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
+        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+        LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
+        LeanWorkerDeclarationVerificationTarget, LeanWorkerElabFailure, LeanWorkerElabOptions,
+        LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
         LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
         LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
         LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
-        LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+        LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
+        LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
+        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerRenderedInfo, LeanWorkerSorryPolicy,
+        LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -1071,6 +1094,110 @@ mod tests {
         let mut bytes = Vec::new();
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("module query batch response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query batch response reads");
+        assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn proof_attempt_request_and_response_round_trip() {
+        let span = LeanWorkerModuleSourceSpan {
+            start_line: 1,
+            start_column: 22,
+            end_line: 2,
+            end_column: 7,
+        };
+        let request = Message::Request(Request::AttemptProof {
+            request: LeanWorkerProofAttemptRequest {
+                source: "theorem t : True := by\n  trivial\n".to_owned(),
+                edit: LeanWorkerProofEditTarget::ReplaceSpan { span: span.clone() },
+                candidates: vec![LeanWorkerProofCandidate {
+                    id: "rfl".to_owned(),
+                    text: "by trivial".to_owned(),
+                }],
+                budgets: LeanWorkerOutputBudgets::default(),
+            },
+            options: LeanWorkerElabOptions::default(),
+            progress: true,
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("proof attempt request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("proof attempt request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::ProofAttempt {
+            result: LeanWorkerProofAttemptResult::Ok {
+                imports: Vec::new(),
+                result: LeanWorkerProofAttemptEnvelope {
+                    candidates: vec![LeanWorkerProofAttemptRow {
+                        id: "rfl".to_owned(),
+                        status: LeanWorkerProofAttemptStatus::Closed,
+                        diagnostics: LeanWorkerElabFailure {
+                            diagnostics: Vec::new(),
+                            truncated: false,
+                        },
+                        goals: Vec::new(),
+                        safe_edit: Some(LeanWorkerDeclarationTargetInfo {
+                            short_name: "t".to_owned(),
+                            declaration_name: "t".to_owned(),
+                            namespace_name: String::new(),
+                            declaration_kind: "theorem".to_owned(),
+                            declaration_span: span.clone(),
+                            name_span: span.clone(),
+                            body_span: span,
+                        }),
+                        output_truncated: false,
+                    }],
+                    candidate_limit: 8,
+                    candidates_truncated: false,
+                },
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("proof attempt response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("proof attempt response reads");
+        assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn declaration_verification_request_and_response_round_trip() {
+        let request = Message::Request(Request::VerifyDeclaration {
+            request: LeanWorkerDeclarationVerificationRequest {
+                source: "theorem t : True := by\n  trivial\n".to_owned(),
+                target: LeanWorkerDeclarationVerificationTarget::Name { name: "t".to_owned() },
+                sorry_policy: LeanWorkerSorryPolicy::Deny,
+                report_axioms: true,
+                budgets: LeanWorkerOutputBudgets::default(),
+            },
+            options: LeanWorkerElabOptions::default(),
+            progress: false,
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("verification request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("verification request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::DeclarationVerification {
+            result: LeanWorkerDeclarationVerificationResult::Ok {
+                verification_status: LeanWorkerDeclarationVerificationStatus::Accepted,
+                facts: Box::new(LeanWorkerDeclarationVerificationFacts {
+                    target: None,
+                    diagnostics: LeanWorkerElabFailure {
+                        diagnostics: Vec::new(),
+                        truncated: false,
+                    },
+                    unresolved_goals: Vec::new(),
+                    contains_sorry: false,
+                    contains_admit: false,
+                    contains_sorry_ax: false,
+                    axioms: Vec::new(),
+                    axioms_truncated: false,
+                    output_truncated: false,
+                }),
+                imports: Vec::new(),
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("verification response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("verification response reads");
         assert_eq!(frame.message, response);
     }
 }
