@@ -10,7 +10,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata;
+use lean_rs_worker_protocol::types::{
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult,
+    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerElabOptions, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
+};
 use lean_rs_worker_protocol::worker_exports::{
     doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
 };
@@ -25,6 +31,7 @@ use crate::session::{
 };
 use crate::supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy,
+    LeanWorkerRestartReason, LeanWorkerStats, LeanWorkerStatus,
 };
 
 const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
@@ -875,16 +882,52 @@ impl LeanWorkerCapability {
         self.worker.runtime_metadata()
     }
 
-    /// Borrow the underlying worker for lifecycle operations such as cycling.
+    /// Return a snapshot of worker lifecycle counters.
     #[must_use]
-    pub fn worker(&self) -> &LeanWorker {
-        &self.worker
+    pub fn stats(&self) -> LeanWorkerStats {
+        self.worker.stats()
     }
 
-    /// Mutably borrow the underlying worker for lifecycle operations such as cycling.
-    #[must_use]
-    pub fn worker_mut(&mut self) -> &mut LeanWorker {
-        &mut self.worker
+    /// Return the current worker lifecycle status.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if checking the process status fails.
+    pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
+        self.worker.status()
+    }
+
+    /// Measure the current child RSS in KiB when supported by the platform.
+    pub fn rss_kib(&mut self) -> Option<u64> {
+        self.worker.rss_kib()
+    }
+
+    /// Explicitly cycle the worker process.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker cannot be replaced.
+    pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.cycle()
+    }
+
+    pub(crate) fn cycle_with_restart_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
+        self.worker.cycle_with_restart_reason(reason)
+    }
+
+    /// Set the request timeout for subsequent commands.
+    pub fn set_request_timeout(&mut self, timeout: Duration) {
+        self.worker.set_request_timeout(timeout);
+    }
+
+    #[doc(hidden)]
+    /// Kill the child process for supervisor tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker is already dead or kill fails.
+    pub fn __kill_for_test(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.__kill_for_test()
     }
 
     /// Terminate the worker child and return its exit status.
@@ -949,6 +992,141 @@ impl LeanWorkerHostHandle {
         self.worker.open_session(&config, cancellation, progress)
     }
 
+    fn with_session_imports<T>(
+        &mut self,
+        imports: Vec<String>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        command: impl Fn(&mut LeanWorkerSession<'_>) -> Result<T, LeanWorkerError>,
+    ) -> Result<T, LeanWorkerError> {
+        let result = {
+            let mut session = self.open_session_with_imports(imports.clone(), cancellation, progress)?;
+            command(&mut session)
+        };
+        match result {
+            Ok(value) => Ok(value),
+            Err(err) if worker_session_missing(&err) => {
+                let mut session = self.open_session_with_imports(imports, cancellation, progress)?;
+                command(&mut session)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Open a session with `imports`, process one module query, and retry once
+    /// if an automatic worker lifecycle cycle invalidated the just-opened
+    /// session before the command frame was sent.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` for worker, protocol, cancellation, or
+    /// progress-sink failures other than the internally retried
+    /// `session_missing` race.
+    pub fn process_module_query_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        source: &str,
+        query: &LeanWorkerModuleQuery,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleQueryOutcome, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.process_module_query(source, query.clone(), options, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports`, process one module-query batch, and
+    /// retry once on the `session_missing` lifecycle race.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn process_module_query_batch_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        source: &str,
+        selectors: &[LeanWorkerModuleQuerySelector],
+        budgets: &LeanWorkerOutputBudgets,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.process_module_query_batch(source, selectors, budgets, options, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports` and inspect one declaration.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn inspect_declaration_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        request: &LeanWorkerDeclarationInspectionRequest,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.inspect_declaration(request, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports` and run bounded declaration search.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn search_declarations_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        search: &LeanWorkerDeclarationSearch,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationSearchResult, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.search_declarations(search, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports` and try proof fragments in-memory.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn attempt_proof_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        request: &LeanWorkerProofAttemptRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerProofAttemptResult, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.attempt_proof(request, options, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports` and verify one declaration in-memory.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn verify_declaration_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        request: &LeanWorkerDeclarationVerificationRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.verify_declaration(request, options, cancellation, progress)
+        })
+    }
+
     /// Return the session configuration used by this host handle.
     #[must_use]
     pub fn session_config(&self) -> &LeanWorkerSessionConfig {
@@ -961,16 +1139,42 @@ impl LeanWorkerHostHandle {
         self.worker.runtime_metadata()
     }
 
-    /// Borrow the underlying worker for lifecycle operations such as cycling.
+    /// Return a snapshot of worker lifecycle counters.
     #[must_use]
-    pub fn worker(&self) -> &LeanWorker {
-        &self.worker
+    pub fn stats(&self) -> LeanWorkerStats {
+        self.worker.stats()
     }
 
-    /// Mutably borrow the underlying worker for lifecycle operations such as cycling.
-    #[must_use]
-    pub fn worker_mut(&mut self) -> &mut LeanWorker {
-        &mut self.worker
+    /// Return the current worker lifecycle status.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if checking the process status fails.
+    pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
+        self.worker.status()
+    }
+
+    /// Measure the current child RSS in KiB when supported by the platform.
+    pub fn rss_kib(&mut self) -> Option<u64> {
+        self.worker.rss_kib()
+    }
+
+    /// Explicitly cycle the worker process.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker cannot be replaced.
+    pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.cycle()
+    }
+
+    /// Restart this worker using its original configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the worker cannot be replaced.
+    pub fn restart(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.restart()
     }
 
     /// Terminate the worker child and return its exit status.
@@ -982,6 +1186,10 @@ impl LeanWorkerHostHandle {
     pub fn terminate(self) -> Result<crate::supervisor::LeanWorkerExit, LeanWorkerError> {
         self.worker.terminate()
     }
+}
+
+fn worker_session_missing(err: &LeanWorkerError) -> bool {
+    matches!(err, LeanWorkerError::Worker { code, .. } if code == "lean_rs.worker.session_missing")
 }
 
 #[derive(Clone, Debug)]
@@ -1515,7 +1723,8 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::LeanWorkerChild;
+    use super::{LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
+    use crate::supervisor::LeanWorkerConfig;
     use std::path::PathBuf;
 
     #[test]
@@ -1546,5 +1755,32 @@ mod tests {
             .resolve_lean_sysroot()
             .expect("explicit sysroot resolves without filesystem checks");
         assert_eq!(resolved, sysroot);
+    }
+
+    #[test]
+    fn module_cache_limits_map_to_typed_child_policy_env() {
+        let limits = LeanWorkerModuleCacheLimits::default()
+            .max_entries(7)
+            .ttl(std::time::Duration::from_millis(250))
+            .max_bytes(4096)
+            .rss_guard_kib(8192);
+        let config = apply_module_cache_limits(LeanWorkerConfig::new("/opt/worker"), &limits);
+        let env = config.env_overrides();
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_MAX_ENTRIES" && v == "7")
+        );
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_TTL_MILLIS" && v == "250")
+        );
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_MAX_BYTES" && v == "4096")
+        );
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB" && v == "8192")
+        );
     }
 }

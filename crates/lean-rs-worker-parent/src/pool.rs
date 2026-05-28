@@ -387,41 +387,26 @@ fn snapshot_from_entries(
         queue_depth: 0,
         total_child_rss_kib: total_known_child_rss_kib(entries),
         rss_samples_unavailable: entries.iter().map(|entry| entry.rss_samples_unavailable).sum(),
-        requests: entries
-            .iter()
-            .map(|entry| entry.capability.worker().stats().requests)
-            .sum(),
-        imports: entries
-            .iter()
-            .map(|entry| entry.capability.worker().stats().imports)
-            .sum(),
-        worker_restarts: entries
-            .iter()
-            .map(|entry| entry.capability.worker().stats().restarts)
-            .sum(),
+        requests: entries.iter().map(|entry| entry.capability.stats().requests).sum(),
+        imports: entries.iter().map(|entry| entry.capability.stats().imports).sum(),
+        worker_restarts: entries.iter().map(|entry| entry.capability.stats().restarts).sum(),
         max_request_restarts: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().max_request_restarts)
+            .map(|entry| entry.capability.stats().max_request_restarts)
             .sum(),
         max_import_restarts: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().max_import_restarts)
+            .map(|entry| entry.capability.stats().max_import_restarts)
             .sum(),
-        rss_restarts: entries
-            .iter()
-            .map(|entry| entry.capability.worker().stats().rss_restarts)
-            .sum(),
-        idle_restarts: entries
-            .iter()
-            .map(|entry| entry.capability.worker().stats().idle_restarts)
-            .sum(),
+        rss_restarts: entries.iter().map(|entry| entry.capability.stats().rss_restarts).sum(),
+        idle_restarts: entries.iter().map(|entry| entry.capability.stats().idle_restarts).sum(),
         cancelled_restarts: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().cancelled_restarts)
+            .map(|entry| entry.capability.stats().cancelled_restarts)
             .sum(),
         timeout_restarts: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().timeout_restarts)
+            .map(|entry| entry.capability.stats().timeout_restarts)
             .sum(),
         policy_restarts: entries.iter().map(|entry| entry.policy_restarts).sum(),
         queue_timeouts,
@@ -429,34 +414,34 @@ fn snapshot_from_entries(
         last_restart_reason: entries.iter().rev().find_map(|entry| entry.last_restart_reason.clone()),
         stream_requests: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().stream_requests)
+            .map(|entry| entry.capability.stats().stream_requests)
             .sum(),
         stream_successes: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().stream_successes)
+            .map(|entry| entry.capability.stats().stream_successes)
             .sum(),
         stream_failures: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().stream_failures)
+            .map(|entry| entry.capability.stats().stream_failures)
             .sum(),
         data_rows_delivered: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().data_rows_delivered)
+            .map(|entry| entry.capability.stats().data_rows_delivered)
             .sum(),
         data_row_payload_bytes: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().data_row_payload_bytes)
+            .map(|entry| entry.capability.stats().data_row_payload_bytes)
             .sum(),
         stream_elapsed: entries.iter().fold(Duration::ZERO, |acc, entry| {
-            acc.saturating_add(entry.capability.worker().stats().stream_elapsed)
+            acc.saturating_add(entry.capability.stats().stream_elapsed)
         }),
         backpressure_waits: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().backpressure_waits)
+            .map(|entry| entry.capability.stats().backpressure_waits)
             .sum(),
         backpressure_failures: entries
             .iter()
-            .map(|entry| entry.capability.worker().stats().backpressure_failures)
+            .map(|entry| entry.capability.stats().backpressure_failures)
             .sum(),
     }
 }
@@ -473,7 +458,7 @@ impl LeanWorkerPool {
         let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool entry disappeared during liveness check".to_owned(),
         })?;
-        match entry.capability.worker_mut().status()? {
+        match entry.capability.status()? {
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(_exit) => {
                 entry.capability = entry.builder.clone().open()?;
@@ -564,7 +549,7 @@ struct PoolEntry {
 
 impl PoolEntry {
     fn sample_rss(&mut self) -> Option<u64> {
-        match self.capability.worker_mut().rss_kib() {
+        match self.capability.rss_kib() {
             Some(value) => {
                 self.last_rss_kib = Some(value);
                 Some(value)
@@ -605,7 +590,7 @@ impl PoolEntry {
     }
 
     fn cycle_for_policy(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
-        self.capability.worker_mut().cycle_with_restart_reason(reason.clone())?;
+        self.capability.cycle_with_restart_reason(reason.clone())?;
         self.last_restart_reason = Some(reason);
         self.last_activity = Instant::now();
         self.last_rss_kib = None;
@@ -675,7 +660,7 @@ impl LeanWorkerSessionLease<'_> {
     /// underlying worker cannot be cycled.
     pub fn cycle(&mut self) -> Result<(), LeanWorkerError> {
         self.ensure_valid()?;
-        self.entry.capability.worker_mut().cycle()?;
+        self.entry.capability.cycle()?;
         self.invalidate("explicit worker cycle");
         Ok(())
     }
@@ -791,7 +776,6 @@ impl LeanWorkerSessionLease<'_> {
         if self.request_timeout_override.is_some() {
             self.entry
                 .capability
-                .worker_mut()
                 .set_request_timeout(self.entry.base_request_timeout);
         }
         match result {

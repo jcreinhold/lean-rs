@@ -108,6 +108,11 @@ impl LeanWorkerConfig {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn env_overrides(&self) -> &[(OsString, OsString)] {
+        &self.env
+    }
+
     /// Set the maximum time to wait for the child handshake.
     #[must_use]
     pub fn startup_timeout(mut self, timeout: Duration) -> Self {
