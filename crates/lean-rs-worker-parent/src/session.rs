@@ -635,13 +635,13 @@ impl LeanWorkerSession<'_> {
         self.with_session(|worker| worker.worker_describe(name, cancellation, progress))
     }
 
-    /// Search declaration names and return bounded metadata-only rows.
+    /// Search declarations and return bounded metadata-only rows plus facts.
     ///
-    /// The worker matches `search.query` as a case-insensitive substring of
-    /// the declaration name, then applies `search.kind` if present. The
-    /// returned rows are capped by `search.limit` (clamped to `1..=100` in the
-    /// child) and contain no type signatures; use [`Self::declaration_type`]
-    /// for explicit one-name type rendering.
+    /// The worker applies structured name, kind, required-constant,
+    /// conclusion-head, and scope filters inside Lean while scanning the
+    /// imported environment. Rows are capped by `search.limit` (clamped to
+    /// `1..=100` in the child) and contain no type signatures; use
+    /// [`Self::declaration_type`] for explicit one-name type rendering.
     ///
     /// # Errors
     ///

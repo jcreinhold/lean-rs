@@ -132,6 +132,7 @@ use std::time::Instant;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
+use crate::host::declaration_search::{DeclarationSearchRequest, DeclarationSearchResult};
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
@@ -1080,6 +1081,52 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.list_declarations_strings").entered();
         let names = self.list_declarations_filtered(filter, cancellation, None)?;
         self.name_to_string_bulk(&names, cancellation, progress)
+    }
+
+    /// Search declarations with structural filters and bounded metadata rows.
+    ///
+    /// The search runs inside Lean while traversing the imported environment.
+    /// It may inspect declaration types structurally for required constants and
+    /// conclusion heads, but it never renders type text. Use
+    /// [`Self::declaration_type`] for explicit one-name type rendering.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is already
+    /// cancelled before dispatch. Returns [`lean_rs::LeanError::LeanException`]
+    /// if the Lean-side search raises.
+    pub fn search_declarations(
+        &mut self,
+        search: &DeclarationSearchRequest,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<DeclarationSearchResult> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.search_declarations",
+            limit = search.limit,
+            include_source = search.include_source,
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let source_roots = if search.include_source {
+            self.capabilities
+                .host()
+                .project()
+                .source_roots()?
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        check_cancellation(cancellation)?;
+        let t = Instant::now();
+        let result = self
+            .shims
+            .env_search_declarations
+            .call(self.environment.clone(), search.clone(), source_roots);
+        self.record_call(0, t.elapsed());
+        result
     }
 
     /// Render `expr` via `Expr.toString`—the cheap, deterministic

@@ -52,8 +52,10 @@ pub use supervisor::{
 #[doc(inline)]
 pub use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
-    LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult,
-    LeanWorkerDeclarationSummary, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
+    LeanWorkerDeclarationFlags, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
+    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
     LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport,
     LeanWorkerDoctorSeverity, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
     LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,

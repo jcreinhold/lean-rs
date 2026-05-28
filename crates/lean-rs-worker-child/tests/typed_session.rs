@@ -18,12 +18,13 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationSearch, LeanWorkerElabOptions,
-    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofStateResult,
-    LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationNameMatch,
+    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchScope,
+    LeanWorkerElabOptions, LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
+    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
 };
 
 fn worker_binary() -> PathBuf {
@@ -304,8 +305,12 @@ fn search_declarations_returns_bounded_metadata_without_types() {
     let result = session
         .search_declarations(
             &LeanWorkerDeclarationSearch {
-                query: "add".to_owned(),
+                name_fragment: Some("add".to_owned()),
+                name_match: LeanWorkerDeclarationNameMatch::Contains,
                 kind: Some("theorem".to_owned()),
+                required_constants: Vec::new(),
+                conclusion_head: None,
+                scope_biases: Vec::new(),
                 limit: 5,
                 filter: LeanWorkerDeclarationFilter {
                     include_private: false,
@@ -328,6 +333,111 @@ fn search_declarations_returns_bounded_metadata_without_types() {
     assert!(
         result.declarations.iter().all(|row| row.source.is_none()),
         "metadata search should be able to omit source lookups"
+    );
+    assert!(
+        result.declarations.iter().all(|row| row.rank >= 1),
+        "search rows should carry deterministic ranks: {:?}",
+        result.declarations
+    );
+    assert_eq!(result.facts.source_lookups, 0);
+    assert!(result.facts.declarations_scanned >= result.facts.after_name_filter);
+}
+
+#[test]
+fn search_declarations_supports_structural_filters_and_deterministic_order() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let search = LeanWorkerDeclarationSearch {
+        name_fragment: Some("Anonymous".to_owned()),
+        name_match: LeanWorkerDeclarationNameMatch::Suffix,
+        kind: Some("definition".to_owned()),
+        required_constants: vec!["Unit".to_owned()],
+        conclusion_head: Some("Lean.Name".to_owned()),
+        scope_biases: vec![LeanWorkerDeclarationSearchBias {
+            scope: LeanWorkerDeclarationSearchScope::Namespace,
+            prefix: "LeanRsFixture.Handles".to_owned(),
+            strict: true,
+            weight: 25,
+        }],
+        limit: 10,
+        filter: LeanWorkerDeclarationFilter {
+            include_private: false,
+            include_generated: false,
+            include_internal: false,
+        },
+        include_source: false,
+    };
+
+    let first = session
+        .search_declarations(&search, None, None)
+        .expect("first search_declarations dispatch succeeds");
+    let second = session
+        .search_declarations(&search, None, None)
+        .expect("second search_declarations dispatch succeeds");
+
+    assert_eq!(
+        first.declarations, second.declarations,
+        "search order must be deterministic"
+    );
+    assert!(
+        first
+            .declarations
+            .iter()
+            .any(|row| row.name == "LeanRsFixture.Handles.nameAnonymous"),
+        "required-constant and conclusion-head filters should find the fixture declaration: {:?}",
+        first.declarations
+    );
+    assert!(first.declarations.iter().all(|row| row.kind == "definition"));
+    assert!(first.declarations.iter().all(|row| row.name.ends_with("Anonymous")));
+    assert_eq!(first.facts.source_lookups, 0);
+    assert!(first.facts.after_scope_filter <= first.facts.after_conclusion_filter);
+}
+
+#[test]
+fn search_declarations_caps_broad_queries_and_reports_pruning() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let result = session
+        .search_declarations(
+            &LeanWorkerDeclarationSearch {
+                name_fragment: None,
+                name_match: LeanWorkerDeclarationNameMatch::Contains,
+                kind: None,
+                required_constants: Vec::new(),
+                conclusion_head: None,
+                scope_biases: Vec::new(),
+                limit: 1,
+                filter: LeanWorkerDeclarationFilter {
+                    include_private: false,
+                    include_generated: false,
+                    include_internal: false,
+                },
+                include_source: false,
+            },
+            None,
+            None,
+        )
+        .expect("broad search_declarations dispatch succeeds");
+
+    assert_eq!(result.declarations.len(), 1);
+    assert!(result.truncated);
+    assert!(result.facts.truncated);
+    assert!(
+        result
+            .facts
+            .broad_pruning
+            .iter()
+            .any(|pruning| pruning.reason == "broad_search_limit"),
+        "broad search should report limit pruning: {:?}",
+        result.facts.broad_pruning
     );
 }
 

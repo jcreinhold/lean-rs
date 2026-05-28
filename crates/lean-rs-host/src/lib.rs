@@ -34,8 +34,10 @@ pub use crate::host::elaboration::{
 pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
-pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};
 pub use crate::host::{
-    LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange, PoolStats, PooledSession,
-    SessionPool, SessionStats,
+    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
+    DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
+    DeclarationSearchTimings, LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange,
+    PoolStats, PooledSession, SessionPool, SessionStats,
 };
+pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

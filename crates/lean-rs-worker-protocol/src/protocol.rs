@@ -640,11 +640,15 @@ mod tests {
         Request, Response, read_frame, write_frame,
     };
     use crate::types::{
-        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery,
-        LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-        LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
-        LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
-        LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
+        LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationNameMatch,
+        LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
+        LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
+        LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerElabFailure,
+        LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+        LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+        LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+        LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
+        LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -794,6 +798,76 @@ mod tests {
         .expect("rows complete writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("rows complete reads");
         assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
+    }
+
+    #[test]
+    fn declaration_search_request_and_response_round_trip() {
+        let request = Message::Request(Request::SearchDeclarations {
+            search: LeanWorkerDeclarationSearch {
+                name_fragment: Some("map".to_owned()),
+                name_match: LeanWorkerDeclarationNameMatch::Suffix,
+                kind: Some("theorem".to_owned()),
+                required_constants: vec!["List.map".to_owned()],
+                conclusion_head: Some("Eq".to_owned()),
+                scope_biases: vec![LeanWorkerDeclarationSearchBias {
+                    scope: LeanWorkerDeclarationSearchScope::Namespace,
+                    prefix: "List".to_owned(),
+                    strict: false,
+                    weight: 7,
+                }],
+                limit: 3,
+                filter: LeanWorkerDeclarationFilter {
+                    include_private: false,
+                    include_generated: false,
+                    include_internal: false,
+                },
+                include_source: false,
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("declaration search request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration search request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::DeclarationSearch {
+            result: LeanWorkerDeclarationSearchResult {
+                declarations: vec![LeanWorkerDeclarationSearchRow {
+                    name: "List.map_map".to_owned(),
+                    kind: "theorem".to_owned(),
+                    module: Some("Init.Data.List.Lemmas".to_owned()),
+                    source: None,
+                    match_reason: "name,kind,required_constants,conclusion_head".to_owned(),
+                    score: 127,
+                    rank: 1,
+                    flags: LeanWorkerDeclarationFlags::default(),
+                }],
+                truncated: true,
+                facts: LeanWorkerDeclarationSearchFacts {
+                    declarations_scanned: 100,
+                    after_name_filter: 10,
+                    after_kind_filter: 8,
+                    after_required_constants_filter: 4,
+                    after_conclusion_filter: 2,
+                    after_scope_filter: 2,
+                    source_lookups: 0,
+                    broad_pruning: vec![LeanWorkerDeclarationSearchPruning {
+                        stage: "limit".to_owned(),
+                        reason: "broad_search_limit".to_owned(),
+                        count: 1,
+                    }],
+                    truncated: true,
+                    timings: LeanWorkerDeclarationSearchTimings {
+                        scan_micros: 1000,
+                        rank_micros: 50,
+                        source_micros: 0,
+                    },
+                },
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("declaration search response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration search response reads");
+        assert_eq!(frame.message, response);
     }
 
     #[test]

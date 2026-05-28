@@ -47,6 +47,7 @@
 //! Construction or inspection of the handle types in [`lean_rs::handle`]
 //! outside of a session belongs to the lower-level `lean-rs` crate.
 
+pub mod declaration_search;
 pub mod elaboration;
 pub mod evidence;
 pub mod meta;
@@ -68,6 +69,11 @@ mod shim_bindings;
 
 pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;
+pub use self::declaration_search::{
+    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
+    DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
+    DeclarationSearchTimings,
+};
 pub use self::host::LeanHost;
 pub use self::pool::{PoolStats, PooledSession, SessionPool};
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};

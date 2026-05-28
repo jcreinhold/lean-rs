@@ -11,6 +11,7 @@ use lean_rs::module::{
 };
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName, Obj};
 
+use crate::host::declaration_search::{DeclarationSearchRequest, DeclarationSearchResult};
 use crate::host::elaboration::LeanElabFailure;
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaResponse, LeanMetaTransparency};
@@ -63,6 +64,8 @@ macro_rules! host_shim_exports {
                 => [(Obj<'lean>, Vec<String>)] => [LeanIo<Vec<Obj<'lean>>>];
             mandatory env_declaration_name_bulk_progress => "lean_rs_host_env_declaration_name_bulk_progress"
                 => [(Obj<'lean>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
+            mandatory env_search_declarations => "lean_rs_host_env_search_declarations"
+                => [(Obj<'lean>, DeclarationSearchRequest, Vec<String>)] => [LeanIo<DeclarationSearchResult>];
             mandatory env_expr_to_string_raw => "lean_rs_host_env_expr_to_string_raw"
                 => [(LeanExpr<'lean>,)] => [String];
             mandatory elaborate => "lean_rs_host_elaborate"

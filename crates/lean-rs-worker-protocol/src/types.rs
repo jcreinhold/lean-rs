@@ -266,29 +266,65 @@ pub struct LeanWorkerDeclarationRow {
     pub source: Option<LeanWorkerSourceRange>,
 }
 
-/// Bounded declaration search request.
+/// Name-fragment matching policy for declaration search.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerDeclarationNameMatch {
+    /// Case-insensitive substring match.
+    #[default]
+    Contains,
+    /// Case-insensitive suffix match.
+    Suffix,
+}
+
+/// Scope kind used by declaration-search ranking bias.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeanWorkerDeclarationSearchScope {
+    Namespace,
+    Module,
+}
+
+/// Optional namespace/module preference for declaration search.
 ///
-/// Matching is intentionally name-based and metadata-only: `query` is matched
-/// as a case-insensitive substring of the declaration name, `kind` narrows the
-/// result when present, and `limit` is clamped by the child. Type rendering is
-/// a separate explicit query because declaration types can be enormous in
-/// large Mathlib-dependent environments.
+/// Non-strict biases affect ranking only. Strict biases act as filters.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearchBias {
+    pub scope: LeanWorkerDeclarationSearchScope,
+    pub prefix: String,
+    pub strict: bool,
+    pub weight: i32,
+}
+
+/// Bounded structured declaration search request.
+///
+/// Search inspects declaration metadata and Lean expressions structurally, but
+/// never renders declaration type text. Use the worker session's explicit
+/// one-name declaration-type query for type rendering.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearch {
-    pub query: String,
+    pub name_fragment: Option<String>,
+    pub name_match: LeanWorkerDeclarationNameMatch,
     pub kind: Option<String>,
+    pub required_constants: Vec<String>,
+    pub conclusion_head: Option<String>,
+    pub scope_biases: Vec<LeanWorkerDeclarationSearchBias>,
     pub limit: usize,
     pub filter: LeanWorkerDeclarationFilter,
     pub include_source: bool,
 }
 
 impl LeanWorkerDeclarationSearch {
-    /// Build a metadata-only declaration search request.
+    /// Build a bounded structured declaration search request.
     #[must_use]
-    pub fn new(query: impl Into<String>) -> Self {
+    pub fn new(name_fragment: impl Into<String>) -> Self {
         Self {
-            query: query.into(),
+            name_fragment: Some(name_fragment.into()),
+            name_match: LeanWorkerDeclarationNameMatch::Contains,
             kind: None,
+            required_constants: Vec::new(),
+            conclusion_head: None,
+            scope_biases: Vec::new(),
             limit: 20,
             filter: LeanWorkerDeclarationFilter {
                 include_private: false,
@@ -300,19 +336,64 @@ impl LeanWorkerDeclarationSearch {
     }
 }
 
+/// Compact declaration flags returned by declaration search.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationFlags {
+    pub is_private: bool,
+    pub is_generated: bool,
+    pub is_internal: bool,
+}
+
 /// One bounded metadata row returned by declaration search.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LeanWorkerDeclarationSummary {
+pub struct LeanWorkerDeclarationSearchRow {
     pub name: String,
     pub kind: String,
+    pub module: Option<String>,
     pub source: Option<LeanWorkerSourceRange>,
+    pub match_reason: String,
+    pub score: i32,
+    pub rank: usize,
+    pub flags: LeanWorkerDeclarationFlags,
+}
+
+/// One broad fanout pruning record returned in search facts.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearchPruning {
+    pub stage: String,
+    pub reason: String,
+    pub count: usize,
+}
+
+/// Cheap elapsed timings for declaration search.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearchTimings {
+    pub scan_micros: u64,
+    pub rank_micros: u64,
+    pub source_micros: u64,
+}
+
+/// Fanout and timing facts for a bounded declaration search.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationSearchFacts {
+    pub declarations_scanned: usize,
+    pub after_name_filter: usize,
+    pub after_kind_filter: usize,
+    pub after_required_constants_filter: usize,
+    pub after_conclusion_filter: usize,
+    pub after_scope_filter: usize,
+    pub source_lookups: usize,
+    pub broad_pruning: Vec<LeanWorkerDeclarationSearchPruning>,
+    pub truncated: bool,
+    pub timings: LeanWorkerDeclarationSearchTimings,
 }
 
 /// Result of a bounded declaration search.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearchResult {
-    pub declarations: Vec<LeanWorkerDeclarationSummary>,
+    pub declarations: Vec<LeanWorkerDeclarationSearchRow>,
     pub truncated: bool,
+    pub facts: LeanWorkerDeclarationSearchFacts,
 }
 
 /// Bounded type rendering for a single declaration.

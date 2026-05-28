@@ -21,8 +21,9 @@ use lean_rs_host::host::process::{
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
-    LeanCapabilities, LeanDeclarationFilter, LeanElabFailure, LeanElabOptions, LeanHost, LeanKernelOutcome,
-    LeanSession, LeanSeverity, LeanSourceRange,
+    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
+    DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanElabFailure,
+    LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity, LeanSourceRange,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -33,10 +34,13 @@ use lean_rs_worker_protocol::protocol::{
     Response, StreamSummary, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSummary, LeanWorkerDeclarationTargetInfo,
-    LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
-    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags,
+    LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
+    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
+    LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
     LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
     LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
@@ -1205,42 +1209,9 @@ impl HostSessionState {
         &mut self,
         search: &LeanWorkerDeclarationSearch,
     ) -> LeanResult<LeanWorkerDeclarationSearchResult> {
-        let host_filter = LeanDeclarationFilter {
-            include_private: search.filter.include_private,
-            include_generated: search.filter.include_generated,
-            include_internal: search.filter.include_internal,
-        };
-        let needle = search.query.to_lowercase();
-        let kind_filter = search.kind.as_deref();
-        let limit = search.limit.clamp(1, 100);
-        let names = self.session.list_declarations_strings(&host_filter, None, None)?;
-        let mut declarations = Vec::with_capacity(limit);
-        let mut truncated = false;
-        for name in names {
-            if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
-                continue;
-            }
-            let kind = self.session.declaration_kind(&name, None)?;
-            if kind_filter.is_some_and(|wanted| kind != wanted) {
-                continue;
-            }
-            if declarations.len() >= limit {
-                truncated = true;
-                break;
-            }
-            let source = if search.include_source {
-                self.session
-                    .declaration_source_range(&name, None)?
-                    .map(source_range_wire)
-            } else {
-                None
-            };
-            declarations.push(LeanWorkerDeclarationSummary { name, kind, source });
-        }
-        Ok(LeanWorkerDeclarationSearchResult {
-            declarations,
-            truncated,
-        })
+        self.session
+            .search_declarations(&declaration_search_host(search), None)
+            .map(declaration_search_wire)
     }
 
     fn declaration_type(&mut self, name: &str, max_bytes: usize) -> LeanResult<Option<LeanWorkerDeclarationType>> {
@@ -1742,6 +1713,107 @@ fn source_range_wire(range: LeanSourceRange) -> LeanWorkerSourceRange {
         start_column: range.start_column,
         end_line: range.end_line,
         end_column: range.end_column,
+    }
+}
+
+fn declaration_search_host(search: &LeanWorkerDeclarationSearch) -> DeclarationSearchRequest {
+    DeclarationSearchRequest {
+        name_fragment: search.name_fragment.clone(),
+        name_match: declaration_name_match_host(search.name_match),
+        kind: search.kind.clone(),
+        required_constants: search.required_constants.clone(),
+        conclusion_head: search.conclusion_head.clone(),
+        scope_biases: search.scope_biases.iter().map(declaration_search_bias_host).collect(),
+        limit: search.limit.clamp(1, 100),
+        filter: LeanDeclarationFilter {
+            include_private: search.filter.include_private,
+            include_generated: search.filter.include_generated,
+            include_internal: search.filter.include_internal,
+        },
+        include_source: search.include_source,
+    }
+}
+
+fn declaration_name_match_host(name_match: LeanWorkerDeclarationNameMatch) -> DeclarationNameMatch {
+    match name_match {
+        LeanWorkerDeclarationNameMatch::Contains => DeclarationNameMatch::Contains,
+        LeanWorkerDeclarationNameMatch::Suffix => DeclarationNameMatch::Suffix,
+    }
+}
+
+fn declaration_search_scope_host(scope: LeanWorkerDeclarationSearchScope) -> DeclarationSearchScope {
+    match scope {
+        LeanWorkerDeclarationSearchScope::Namespace => DeclarationSearchScope::Namespace,
+        LeanWorkerDeclarationSearchScope::Module => DeclarationSearchScope::Module,
+    }
+}
+
+fn declaration_search_bias_host(bias: &LeanWorkerDeclarationSearchBias) -> DeclarationSearchBias {
+    DeclarationSearchBias {
+        scope: declaration_search_scope_host(bias.scope),
+        prefix: bias.prefix.clone(),
+        strict: bias.strict,
+        weight: bias.weight,
+    }
+}
+
+fn declaration_search_wire(result: DeclarationSearchResult) -> LeanWorkerDeclarationSearchResult {
+    LeanWorkerDeclarationSearchResult {
+        declarations: result
+            .declarations
+            .into_iter()
+            .map(declaration_search_row_wire)
+            .collect(),
+        truncated: result.truncated,
+        facts: declaration_search_facts_wire(result.facts),
+    }
+}
+
+fn declaration_search_row_wire(row: DeclarationSearchRow) -> LeanWorkerDeclarationSearchRow {
+    LeanWorkerDeclarationSearchRow {
+        name: row.name,
+        kind: row.kind,
+        module: row.module,
+        source: row.source.map(source_range_wire),
+        match_reason: row.match_reason,
+        score: row.score,
+        rank: row.rank,
+        flags: declaration_flags_wire(row.flags),
+    }
+}
+
+fn declaration_flags_wire(flags: DeclarationFlags) -> LeanWorkerDeclarationFlags {
+    LeanWorkerDeclarationFlags {
+        is_private: flags.is_private,
+        is_generated: flags.is_generated,
+        is_internal: flags.is_internal,
+    }
+}
+
+fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) -> LeanWorkerDeclarationSearchFacts {
+    LeanWorkerDeclarationSearchFacts {
+        declarations_scanned: facts.declarations_scanned,
+        after_name_filter: facts.after_name_filter,
+        after_kind_filter: facts.after_kind_filter,
+        after_required_constants_filter: facts.after_required_constants_filter,
+        after_conclusion_filter: facts.after_conclusion_filter,
+        after_scope_filter: facts.after_scope_filter,
+        source_lookups: facts.source_lookups,
+        broad_pruning: facts
+            .broad_pruning
+            .into_iter()
+            .map(|pruning| LeanWorkerDeclarationSearchPruning {
+                stage: pruning.stage,
+                reason: pruning.reason,
+                count: pruning.count,
+            })
+            .collect(),
+        truncated: facts.truncated,
+        timings: LeanWorkerDeclarationSearchTimings {
+            scan_micros: facts.timings.scan_micros,
+            rank_micros: facts.timings.rank_micros,
+            source_micros: facts.timings.source_micros,
+        },
     }
 }
 

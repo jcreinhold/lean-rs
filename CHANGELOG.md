@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Structured worker declaration search
+
+`lean-rs-worker-protocol` replaces the 0.1.16 declaration-search request/row shape with a structured bounded search
+surface: name contains/suffix matching, kind filters, required-constant filters, conclusion-head filters, namespace or
+module scope biasing, deterministic scores/ranks, compact declaration flags, and fanout/timing facts. Search remains
+metadata-only from the caller's perspective and does not render declaration type text; use the existing single-name
+declaration-type query for explicit bounded rendering.
+
 ## [0.1.16] - 2026-05-27
 
 ### Checked export signatures and host boundary tightening
