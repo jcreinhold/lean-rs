@@ -17,7 +17,7 @@ namespace LeanRsFixture.Elaboration
 open Lean
 
 private def reportProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
-  let status ← LeanRsInterop.Callback.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
+  let status ← LeanRsInterop.Callback.Tick.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
   if status == 0 then
     pure none
   else
@@ -99,7 +99,7 @@ private def severityOfMessage : MessageSeverity → Severity
     one diagnostic if any are present so callers always see *some*
     failure context; subsequent diagnostics stop being collected once
     the cumulative body bytes meet the limit. -/
-private def serializeMessages
+def serializeMessages
     (msgs : MessageLog) (byteLimit : USize) (fallbackLabel : String)
     : BaseIO (Array Diagnostic × Truncation) := do
   let mut out : Array Diagnostic := #[]

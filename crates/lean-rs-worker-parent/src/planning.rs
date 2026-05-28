@@ -439,12 +439,12 @@ mod tests {
             r#"
 name = "demo"
 [[lean_lib]]
-name = "KanProofs"
+name = "FixtureLib"
 "#,
         );
-        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+        write_file(&root.join("FixtureLib.lean"), "#check Nat\n");
 
-        let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "KanProofs"));
+        let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "FixtureLib"));
         let batches = planner.plan_lake_project().expect("TOML-declared target should plan");
         assert!(!batches.is_empty());
     }
@@ -457,10 +457,10 @@ name = "KanProofs"
             r#"
 name = "demo"
 [[lean_lib]]
-name = "KanProofs"
+name = "FixtureLib"
 "#,
         );
-        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+        write_file(&root.join("FixtureLib.lean"), "#check Nat\n");
 
         let planner = LeanWorkerImportPlanner::new(LeanWorkerImportPlanConfig::new(&root, "demo", "Bogus"));
         match planner.plan_lake_project() {

@@ -68,7 +68,7 @@ const MODULE_QUERY_CACHE_API_VERSION: &str = "lean-rs.module-query-cache.v1";
 const MODULE_CACHE_DEFAULT_MAX_ENTRIES: u64 = 4;
 const MODULE_CACHE_DEFAULT_TTL_MILLIS: u64 = 5 * 60 * 1000;
 const MODULE_CACHE_DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024;
-const MODULE_CACHE_DEFAULT_RSS_GUARD_KIB: u64 = 1024 * 1024;
+const MODULE_CACHE_DEFAULT_RSS_GUARD_KIB: u64 = 3 * 1024 * 1024;
 
 #[derive(Clone)]
 struct ProtocolWriter {
@@ -2304,6 +2304,7 @@ fn proof_attempt_row_wire(row: ProofAttemptRow) -> LeanWorkerProofAttemptRow {
     LeanWorkerProofAttemptRow {
         id: row.id,
         status: proof_attempt_status_wire(row.status),
+        candidate_text: rendered_info_wire(row.candidate_text),
         diagnostics: elab_failure_wire(&row.diagnostics),
         downstream_diagnostics: elab_failure_wire(&row.downstream_diagnostics),
         goals: row.goals.into_iter().map(rendered_info_wire).collect(),

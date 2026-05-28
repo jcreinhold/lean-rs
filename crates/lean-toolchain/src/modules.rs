@@ -706,16 +706,16 @@ name = "Other"
             r#"
 name = "demo"
 [[lean_lib]]
-name = "KanProofs"
+name = "FixtureLib"
 [[lean_lib]]
 name = "Other"
 "#,
         );
-        write_file(&root.join("KanProofs.lean"), "#check Nat\n");
+        write_file(&root.join("FixtureLib.lean"), "#check Nat\n");
         write_file(&root.join("Other.lean"), "#check Nat\n");
 
         let project = discover_lake_modules(LeanModuleDiscoveryOptions::new(&root)).unwrap();
-        assert_eq!(project.declared_lean_libs, vec!["KanProofs", "Other"]);
+        assert_eq!(project.declared_lean_libs, vec!["FixtureLib", "Other"]);
     }
 
     #[test]

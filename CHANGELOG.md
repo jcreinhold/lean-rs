@@ -22,10 +22,9 @@ declaration-type query for explicit bounded rendering.
 ### Checked export signatures and host boundary tightening
 
 Breaking pre-1.0 change: direct Lean export lookup is now split into a safe checked capability path and an explicit
-unsafe unchecked module path. `LeanCapability::exported` validates the requested Rust ABI shape against trusted
-manifest signature metadata before dispatch, while arbitrary raw symbol lookup moves to
-`unsafe LeanModule::exported_unchecked`. The low-level function-address constructors and raw library symbol resolvers
-are no longer public API.
+unsafe unchecked module path. `LeanCapability::exported` validates the requested Rust ABI shape against trusted manifest
+signature metadata before dispatch, while arbitrary raw symbol lookup moves to `unsafe LeanModule::exported_unchecked`.
+The low-level function-address constructors and raw library symbol resolvers are no longer public API.
 
 `CargoLeanCapability` manifests now use schema version 2 and can record export signatures. The workspace also exposes
 the public signature-description types (`LeanExportSignature`, `LeanExportAbiRepr`, ownership/result-convention
@@ -44,9 +43,9 @@ output-budget controls while preserving bounded responses for large modules.
 
 ### Lean object decoding and progress callbacks
 
-`lean-rs` adds safe Lean object view helpers for scalar/sum/constructor decoding and a dedicated
-`LeanProgressCallback` wrapper for progress callback ABI plumbing. Host-side decoders were migrated onto these safe
-views, and `lean-rs-host` no longer contains unsafe code.
+`lean-rs` adds safe Lean object view helpers for scalar/sum/constructor decoding and a dedicated `LeanProgressCallback`
+wrapper for progress callback ABI plumbing. Host-side decoders were migrated onto these safe views, and `lean-rs-host`
+no longer contains unsafe code.
 
 ## [0.1.15] - 2026-05-26
 

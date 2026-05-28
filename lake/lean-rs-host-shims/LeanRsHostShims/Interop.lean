@@ -7,7 +7,7 @@
 
 namespace LeanRsFixture.Interop
 
-@[extern "lean_rs_interop_callback_call"]
+@[extern "lean_rs_interop_tick_callback_call"]
 opaque callbackCall (handle : USize) (trampoline : USize) (current total : UInt64) : BaseIO UInt8
 
 partial def callbackLoopCore (handle trampoline : USize) (current total : UInt64) : IO UInt8 := do

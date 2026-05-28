@@ -1274,18 +1274,18 @@ mod tests {
 
     #[test]
     fn toml_lakefile_build_succeeds() {
-        let root = make_toml_project("toml-success", "KanProofs");
+        let root = make_toml_project("toml-success", "FixtureLib");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
-        let path = build_lake_target_with_runner(&root, "KanProofs", &mut runner, CargoMetadata::Emit)
+        let path = build_lake_target_with_runner(&root, "FixtureLib", &mut runner, CargoMetadata::Emit)
             .expect("TOML lakefile build");
 
-        assert!(path.ends_with(format!("libmy__pkg_KanProofs.{}", dylib_ext())));
+        assert!(path.ends_with(format!("libmy__pkg_FixtureLib.{}", dylib_ext())));
         assert_eq!(runner.calls(), 1);
     }
 
     #[test]
     fn toml_lakefile_missing_target_is_typed() {
-        let root = make_toml_project("toml-missing", "KanProofs");
+        let root = make_toml_project("toml-missing", "FixtureLib");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
         let err = build_lake_target_with_runner(&root, "OtherTarget", &mut runner, CargoMetadata::Emit)
             .expect_err("missing TOML target");
@@ -1299,13 +1299,13 @@ mod tests {
 
     #[test]
     fn toml_lakefile_missing_manifest_resolves_package() {
-        let root = make_toml_project("toml-no-manifest", "KanProofs");
+        let root = make_toml_project("toml-no-manifest", "FixtureLib");
         fs::remove_file(root.join("lake-manifest.json")).expect("remove manifest");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
-        let path = build_lake_target_with_runner(&root, "KanProofs", &mut runner, CargoMetadata::Emit)
+        let path = build_lake_target_with_runner(&root, "FixtureLib", &mut runner, CargoMetadata::Emit)
             .expect("TOML build without manifest");
 
-        assert!(path.ends_with(format!("libmy__pkg_KanProofs.{}", dylib_ext())));
+        assert!(path.ends_with(format!("libmy__pkg_FixtureLib.{}", dylib_ext())));
         assert_eq!(runner.calls(), 1);
     }
 

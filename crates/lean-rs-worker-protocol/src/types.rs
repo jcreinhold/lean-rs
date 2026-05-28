@@ -656,6 +656,7 @@ pub enum LeanWorkerProofAttemptStatus {
 pub struct LeanWorkerProofAttemptRow {
     pub id: String,
     pub status: LeanWorkerProofAttemptStatus,
+    pub candidate_text: LeanWorkerRenderedInfo,
     pub diagnostics: LeanWorkerElabFailure,
     pub downstream_diagnostics: LeanWorkerElabFailure,
     pub goals: Vec<LeanWorkerRenderedInfo>,

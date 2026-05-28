@@ -62,10 +62,10 @@ mod tests {
         let parsed = parse_lakefile_toml(
             r#"
 name = "demo"
-defaultTargets = ["KanProofs"]
+defaultTargets = ["FixtureLib"]
 
 [[lean_lib]]
-name = "KanProofs"
+name = "FixtureLib"
 
 [[lean_lib]]
 name = "Other"
@@ -73,7 +73,7 @@ name = "Other"
         )
         .expect("valid TOML");
         assert_eq!(parsed.package_name.as_deref(), Some("demo"));
-        assert_eq!(parsed.lean_libs, vec!["KanProofs", "Other"]);
+        assert_eq!(parsed.lean_libs, vec!["FixtureLib", "Other"]);
     }
 
     #[test]

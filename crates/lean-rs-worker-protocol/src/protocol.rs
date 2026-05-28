@@ -1134,6 +1134,10 @@ mod tests {
                     candidates: vec![LeanWorkerProofAttemptRow {
                         id: "rfl".to_owned(),
                         status: LeanWorkerProofAttemptStatus::Closed,
+                        candidate_text: LeanWorkerRenderedInfo {
+                            value: "rfl".to_owned(),
+                            truncated: false,
+                        },
                         diagnostics: LeanWorkerElabFailure {
                             diagnostics: Vec::new(),
                             truncated: false,

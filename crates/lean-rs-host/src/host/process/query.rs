@@ -109,6 +109,7 @@ pub enum ProofAttemptStatus {
 pub struct ProofAttemptRow {
     pub id: String,
     pub status: ProofAttemptStatus,
+    pub candidate_text: RenderedInfo,
     pub diagnostics: LeanElabFailure,
     pub downstream_diagnostics: LeanElabFailure,
     pub goals: Vec<RenderedInfo>,
@@ -878,20 +879,22 @@ impl<'lean> TryFromLean<'lean> for ProofPositionSummary {
 
 impl<'lean> TryFromLean<'lean> for ProofAttemptRow {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let ctor = view(&obj).ctor_shape(0, 6, "ProofAttemptRow")?;
+        let ctor = view(&obj).ctor_shape(0, 7, "ProofAttemptRow")?;
         let status = ProofAttemptStatus::from_scalar(ctor.uint8(0, "ProofAttemptRow.status")?)?;
         let output_truncated = ctor.bool(1, "ProofAttemptRow.outputTruncated")?;
         let [
             id,
+            candidate_text,
             diagnostics,
             downstream_diagnostics,
             goals,
             declaration,
             proof_position,
-        ] = take_ctor_objects::<6>(obj, 0, "ProofAttemptRow")?;
+        ] = take_ctor_objects::<7>(obj, 0, "ProofAttemptRow")?;
         Ok(Self {
             id: String::try_from_lean(id)?,
             status,
+            candidate_text: RenderedInfo::try_from_lean(candidate_text)?,
             diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
             downstream_diagnostics: LeanElabFailure::try_from_lean(downstream_diagnostics)?,
             goals: Vec::<RenderedInfo>::try_from_lean(goals)?,

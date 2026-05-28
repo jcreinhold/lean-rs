@@ -7,15 +7,12 @@ abbrev leanRsLeanOptions : Array LeanOption := #[
   ⟨`pp.unicode.fun, true⟩,
 ]
 
-/-! Development mirror of the generic Lean/Rust interop helpers for `lean-rs`.
+/-! Generic Lean/Rust interop helpers for `lean-rs`.
 
     This package contains reusable ABI support shared by downstream Lean
     capabilities and higher-level host shims. It does not define theorem-prover
     host policy, declaration introspection, elaboration, or `MetaM` services.
-    Those stay in `lean-rs-host-shims`.
-
-    The packaged L1 copy lives under `crates/lean-rs/shims/lean-rs-interop-shims`;
-    `lean-rs-host` also carries a bundled copy for its host shims. -/
+    Those stay in `lean-rs-host-shims`. -/
 package «lean_rs_interop_shims»
 
 input_file interop_callback.c where

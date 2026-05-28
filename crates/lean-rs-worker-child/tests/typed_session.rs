@@ -1095,6 +1095,7 @@ fn attempt_proof_successful_candidate_closes_simple_goal() {
     };
     assert_eq!(result.candidates.len(), 1);
     assert_eq!(result.candidates[0].status, LeanWorkerProofAttemptStatus::Closed);
+    assert_eq!(result.candidates[0].candidate_text.value, "trivial");
     assert!(
         result.candidates[0].goals.is_empty(),
         "closed proof should have no goals"
@@ -1114,6 +1115,59 @@ fn attempt_proof_successful_candidate_closes_simple_goal() {
             .iter()
             .all(|diagnostic| !diagnostic.message.contains("unexpected token '/--'")),
         "candidate overlay must not corrupt the following docstring"
+    );
+}
+
+#[test]
+fn attempt_proof_bad_candidate_on_unicode_signature_does_not_false_close() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/unicode.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem unicodeSig (hα : True) : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem after : True := by\n  trivial\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "unicodeSig".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "bad".to_owned(),
+            text: "exact definitely_missing_identifier".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("unicode signature proof attempt dispatch succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    let row = &result.candidates[0];
+    assert_eq!(row.candidate_text.value, "exact definitely_missing_identifier");
+    assert_eq!(
+        row.status,
+        LeanWorkerProofAttemptStatus::Failed,
+        "invalid candidate must not be reported as closed: {row:?}",
+    );
+    assert!(
+        row.diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "error"
+                && diagnostic.message.contains("definitely_missing_identifier")),
+        "bad proof should return candidate-local diagnostics: {:?}",
+        row.diagnostics,
+    );
+    assert!(
+        row.downstream_diagnostics
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unexpected token '/--'")),
+        "candidate overlay must not corrupt the following docstring: {:?}",
+        row.downstream_diagnostics,
     );
 }
 
