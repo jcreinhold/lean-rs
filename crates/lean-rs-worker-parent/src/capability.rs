@@ -61,6 +61,7 @@ pub struct LeanWorkerCapabilityBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     metadata_check: Option<CapabilityMetadataCheck>,
     max_frame_bytes: Option<u32>,
     worker_export_signatures: Vec<LeanExportSignature>,
@@ -91,6 +92,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            module_cache_limits: None,
             metadata_check: None,
             max_frame_bytes: None,
             worker_export_signatures: Vec::new(),
@@ -130,6 +132,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            module_cache_limits: None,
             metadata_check: None,
             max_frame_bytes: None,
             worker_export_signatures: Vec::new(),
@@ -178,6 +181,17 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Set typed limits for the worker child's module snapshot cache.
+    ///
+    /// These are deliberately not exposed as a generic child-env passthrough:
+    /// the cache knobs are part of the worker lifecycle contract, and callers
+    /// should not need to know the child process's environment-variable names.
+    #[must_use]
+    pub fn module_cache_limits(mut self, limits: LeanWorkerModuleCacheLimits) -> Self {
+        self.module_cache_limits = Some(limits);
         self
     }
 
@@ -391,6 +405,7 @@ impl LeanWorkerCapabilityBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.restart_policy,
+            self.module_cache_limits,
             self.max_frame_bytes,
         )?;
 
@@ -446,7 +461,52 @@ pub struct LeanWorkerHostHandleBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
+}
+
+/// Typed limits for the worker child's module snapshot cache.
+///
+/// The worker child still receives these values as environment variables at
+/// launch time, but the public API names the lifecycle policy rather than the
+/// transport mechanism. A field left unset uses the child default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LeanWorkerModuleCacheLimits {
+    max_entries: Option<u64>,
+    ttl_millis: Option<u64>,
+    max_bytes: Option<u64>,
+    rss_guard_kib: Option<u64>,
+}
+
+impl LeanWorkerModuleCacheLimits {
+    /// Set the maximum retained cache entries.
+    #[must_use]
+    pub fn max_entries(mut self, max_entries: u64) -> Self {
+        self.max_entries = Some(max_entries.max(1));
+        self
+    }
+
+    /// Set the time-to-live for retained module snapshots.
+    #[must_use]
+    pub fn ttl(mut self, ttl: Duration) -> Self {
+        self.ttl_millis = Some(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX).max(1));
+        self
+    }
+
+    /// Set the approximate retained-cache byte ceiling.
+    #[must_use]
+    pub fn max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = Some(max_bytes.max(1));
+        self
+    }
+
+    /// Set the child RSS guard above which the child clears retained snapshots
+    /// before cacheable module-query requests.
+    #[must_use]
+    pub fn rss_guard_kib(mut self, rss_guard_kib: u64) -> Self {
+        self.rss_guard_kib = Some(rss_guard_kib.max(1));
+        self
+    }
 }
 
 impl LeanWorkerHostHandleBuilder {
@@ -464,6 +524,7 @@ impl LeanWorkerHostHandleBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            module_cache_limits: None,
             max_frame_bytes: None,
         }
     }
@@ -507,6 +568,16 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Set typed limits for the worker child's module snapshot cache.
+    ///
+    /// These are applied when the worker child is spawned. They are scoped to
+    /// this handle and do not mutate process-global environment variables.
+    #[must_use]
+    pub fn module_cache_limits(mut self, limits: LeanWorkerModuleCacheLimits) -> Self {
+        self.module_cache_limits = Some(limits);
         self
     }
 
@@ -569,6 +640,7 @@ impl LeanWorkerHostHandleBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.restart_policy,
+            self.module_cache_limits,
             self.max_frame_bytes,
         )?;
         let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports);
@@ -1019,6 +1091,7 @@ fn spawn_checked_worker(
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
 ) -> Result<LeanWorker, LeanWorkerError> {
     let worker_child = worker_child.unwrap_or_default();
@@ -1036,6 +1109,9 @@ fn spawn_checked_worker(
     if let Some(policy) = restart_policy {
         config = config.restart_policy(policy);
     }
+    if let Some(limits) = module_cache_limits.as_ref() {
+        config = apply_module_cache_limits(config, limits);
+    }
     if let Some(cap) = max_frame_bytes {
         config = config.max_frame_bytes(cap);
     }
@@ -1043,6 +1119,22 @@ fn spawn_checked_worker(
     let mut worker = LeanWorker::spawn(&config)?;
     worker.health()?;
     Ok(worker)
+}
+
+fn apply_module_cache_limits(mut config: LeanWorkerConfig, limits: &LeanWorkerModuleCacheLimits) -> LeanWorkerConfig {
+    if let Some(value) = limits.max_entries {
+        config = config.env("LEAN_RS_MODULE_CACHE_MAX_ENTRIES", value.to_string());
+    }
+    if let Some(value) = limits.ttl_millis {
+        config = config.env("LEAN_RS_MODULE_CACHE_TTL_MILLIS", value.to_string());
+    }
+    if let Some(value) = limits.max_bytes {
+        config = config.env("LEAN_RS_MODULE_CACHE_MAX_BYTES", value.to_string());
+    }
+    if let Some(value) = limits.rss_guard_kib {
+        config = config.env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", value.to_string());
+    }
+    config
 }
 
 /// Locator for an app-owned worker child executable.

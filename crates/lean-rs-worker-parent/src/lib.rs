@@ -22,7 +22,7 @@ mod supervisor;
 pub use capability::{
     LeanWorkerBootstrapCheck, LeanWorkerBootstrapDiagnosticCode, LeanWorkerBootstrapReport,
     LeanWorkerBootstrapSeverity, LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild,
-    LeanWorkerHostHandle, LeanWorkerHostHandleBuilder,
+    LeanWorkerHostHandle, LeanWorkerHostHandleBuilder, LeanWorkerModuleCacheLimits,
 };
 pub use planning::{
     LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
