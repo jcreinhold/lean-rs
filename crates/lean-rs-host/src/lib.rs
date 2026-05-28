@@ -35,7 +35,9 @@ pub use crate::host::evidence::{
     EvidenceStatus, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanEvidence, LeanKernelOutcome, ProofSummary,
 };
 pub use crate::host::{
-    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
+    DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
+    DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
     DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
     DeclarationSearchTimings, LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange,
     PoolStats, PooledSession, SessionPool, SessionStats,

@@ -21,7 +21,9 @@ use lean_rs_host::host::process::{
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
-    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
+    DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
+    DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
     DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanElabFailure,
     LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity, LeanSourceRange,
 };
@@ -35,20 +37,22 @@ use lean_rs_worker_protocol::protocol::{
 };
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags,
-    LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
-    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
-    LeanWorkerDeclarationType, LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
-    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
-    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
-    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
-    LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
-    LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofStateInfo,
-    LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo,
-    LeanWorkerRendering, LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerDeclarationInspection, LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationProofSearchFacts,
+    LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias,
+    LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
+    LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
+    LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType,
+    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerGoalAtResult, LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary,
+    LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerModuleSourceSpan,
+    LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofStateInfo, LeanWorkerProofStateResult,
+    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSourceRange,
+    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
@@ -456,6 +460,16 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 let response = match host_session.as_mut() {
                     Some(state) => match state.declaration_type(&name, max_bytes) {
                         Ok(row) => Response::DeclarationType { row },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::InspectDeclaration { request } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.inspect_declaration(&request) {
+                        Ok(result) => Response::DeclarationInspection { result },
                         Err(err) => error_response(&err),
                     },
                     None => missing_session_response(),
@@ -1238,6 +1252,15 @@ impl HostSessionState {
         }))
     }
 
+    fn inspect_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationInspectionRequest,
+    ) -> LeanResult<LeanWorkerDeclarationInspectionResult> {
+        self.session
+            .inspect_declaration(&declaration_inspection_host(request), None)
+            .map(declaration_inspection_result_wire)
+    }
+
     fn list_declarations_strings(
         &mut self,
         filter: LeanWorkerDeclarationFilter,
@@ -1734,6 +1757,27 @@ fn declaration_search_host(search: &LeanWorkerDeclarationSearch) -> DeclarationS
     }
 }
 
+fn declaration_inspection_host(request: &LeanWorkerDeclarationInspectionRequest) -> DeclarationInspectionRequest {
+    DeclarationInspectionRequest {
+        name: request.name.clone(),
+        fields: declaration_inspection_fields_host(request.fields),
+        budgets: DeclarationInspectionBudgets {
+            per_field_bytes: request.budgets.per_field_bytes,
+            total_bytes: request.budgets.total_bytes,
+        },
+    }
+}
+
+fn declaration_inspection_fields_host(fields: LeanWorkerDeclarationInspectionFields) -> DeclarationInspectionFields {
+    DeclarationInspectionFields {
+        source: fields.source,
+        statement: fields.statement,
+        docstring: fields.docstring,
+        attributes: fields.attributes,
+        flags: fields.flags,
+    }
+}
+
 fn declaration_name_match_host(name_match: LeanWorkerDeclarationNameMatch) -> DeclarationNameMatch {
     match name_match {
         LeanWorkerDeclarationNameMatch::Contains => DeclarationNameMatch::Contains,
@@ -1814,6 +1858,47 @@ fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) ->
             rank_micros: facts.timings.rank_micros,
             source_micros: facts.timings.source_micros,
         },
+    }
+}
+
+fn declaration_inspection_result_wire(result: DeclarationInspectionResult) -> LeanWorkerDeclarationInspectionResult {
+    match result {
+        DeclarationInspectionResult::Found { declaration } => LeanWorkerDeclarationInspectionResult::Found {
+            declaration: Box::new(declaration_inspection_wire(*declaration)),
+        },
+        DeclarationInspectionResult::NotFound { name } => LeanWorkerDeclarationInspectionResult::NotFound { name },
+        DeclarationInspectionResult::Unsupported => LeanWorkerDeclarationInspectionResult::Unsupported,
+    }
+}
+
+fn declaration_inspection_wire(declaration: DeclarationInspection) -> LeanWorkerDeclarationInspection {
+    LeanWorkerDeclarationInspection {
+        name: declaration.name,
+        kind: declaration.kind,
+        module: declaration.module,
+        source: declaration.source.map(source_range_wire),
+        statement: declaration.statement.map(declaration_rendered_info_wire),
+        docstring: declaration.docstring.map(declaration_rendered_info_wire),
+        attributes: declaration.attributes,
+        proof_search: declaration_proof_search_facts_wire(declaration.proof_search),
+        flags: declaration_flags_wire(declaration.flags),
+    }
+}
+
+fn declaration_rendered_info_wire(info: DeclarationRenderedInfo) -> LeanWorkerRenderedInfo {
+    LeanWorkerRenderedInfo {
+        value: info.value,
+        truncated: info.truncated,
+    }
+}
+
+fn declaration_proof_search_facts_wire(facts: DeclarationProofSearchFacts) -> LeanWorkerDeclarationProofSearchFacts {
+    LeanWorkerDeclarationProofSearchFacts {
+        is_simp: facts.is_simp,
+        is_rw_candidate: facts.is_rw_candidate,
+        is_instance: facts.is_instance,
+        is_class: facts.is_class,
+        class_name: facts.class_name,
     }
 }
 

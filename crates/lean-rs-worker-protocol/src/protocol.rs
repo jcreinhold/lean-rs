@@ -23,7 +23,8 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 
 use crate::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
     LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
@@ -192,6 +193,9 @@ pub enum Request {
         name: String,
         max_bytes: usize,
     },
+    InspectDeclaration {
+        request: LeanWorkerDeclarationInspectionRequest,
+    },
     ListDeclarationsStrings {
         filter: LeanWorkerDeclarationFilter,
         progress: bool,
@@ -299,6 +303,9 @@ pub enum Response {
     },
     DeclarationType {
         row: Option<LeanWorkerDeclarationType>,
+    },
+    DeclarationInspection {
+        result: LeanWorkerDeclarationInspectionResult,
     },
     DeclarationBulk {
         rows: Vec<LeanWorkerDeclarationRow>,
@@ -640,7 +647,9 @@ mod tests {
         Request, Response, read_frame, write_frame,
     };
     use crate::types::{
-        LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationNameMatch,
+        LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection,
+        LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
+        LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationProofSearchFacts,
         LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
         LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
         LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerElabFailure,
@@ -648,7 +657,7 @@ mod tests {
         LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
         LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
         LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
-        LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerTypeAtResult,
+        LeanWorkerOutputBudgets, LeanWorkerRenderedInfo, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -868,6 +877,91 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("declaration search response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration search response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn declaration_inspection_request_and_response_round_trip() {
+        let request = Message::Request(Request::InspectDeclaration {
+            request: LeanWorkerDeclarationInspectionRequest {
+                name: "List.map_map".to_owned(),
+                fields: LeanWorkerDeclarationInspectionFields {
+                    source: true,
+                    statement: true,
+                    docstring: true,
+                    attributes: true,
+                    flags: true,
+                },
+                budgets: LeanWorkerOutputBudgets {
+                    per_field_bytes: 128,
+                    total_bytes: 512,
+                },
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, request.clone(), MAX_FRAME_BYTES).expect("declaration inspection request writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration inspection request reads");
+        assert_eq!(frame.message, request);
+
+        let response = Message::Response(Response::DeclarationInspection {
+            result: LeanWorkerDeclarationInspectionResult::Found {
+                declaration: Box::new(LeanWorkerDeclarationInspection {
+                    name: "List.map_map".to_owned(),
+                    kind: "theorem".to_owned(),
+                    module: Some("Init.Data.List.Lemmas".to_owned()),
+                    source: Some(LeanWorkerSourceRange {
+                        file: "Init/Data/List/Lemmas.lean".to_owned(),
+                        start_line: 1,
+                        start_column: 1,
+                        end_line: 1,
+                        end_column: 10,
+                    }),
+                    statement: Some(LeanWorkerRenderedInfo {
+                        value: "forall ...".to_owned(),
+                        truncated: true,
+                    }),
+                    docstring: Some(LeanWorkerRenderedInfo {
+                        value: "doc".to_owned(),
+                        truncated: false,
+                    }),
+                    attributes: vec!["simp".to_owned(), "rw".to_owned()],
+                    proof_search: LeanWorkerDeclarationProofSearchFacts {
+                        is_simp: true,
+                        is_rw_candidate: true,
+                        is_instance: false,
+                        is_class: false,
+                        class_name: None,
+                    },
+                    flags: LeanWorkerDeclarationFlags::default(),
+                }),
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("declaration inspection response writes");
+        let frame =
+            read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("declaration inspection response reads");
+        assert_eq!(frame.message, response);
+
+        let not_found = Message::Response(Response::DeclarationInspection {
+            result: LeanWorkerDeclarationInspectionResult::NotFound {
+                name: "Missing.name".to_owned(),
+            },
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, not_found.clone(), MAX_FRAME_BYTES)
+            .expect("declaration inspection not-found response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES)
+            .expect("declaration inspection not-found response reads");
+        assert_eq!(frame.message, not_found);
+
+        let unsupported = Message::Response(Response::DeclarationInspection {
+            result: LeanWorkerDeclarationInspectionResult::Unsupported,
+        });
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, unsupported.clone(), MAX_FRAME_BYTES)
+            .expect("declaration inspection unsupported response writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES)
+            .expect("declaration inspection unsupported response reads");
+        assert_eq!(frame.message, unsupported);
     }
 
     #[test]

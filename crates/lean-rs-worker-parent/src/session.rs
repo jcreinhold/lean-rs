@@ -20,7 +20,8 @@ use serde_json::value::RawValue;
 
 use lean_rs_worker_protocol::protocol::{DataRow, Diagnostic, StreamSummary};
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
     LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
@@ -674,6 +675,25 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Option<LeanWorkerDeclarationType>, LeanWorkerError> {
         self.with_session(|worker| worker.worker_declaration_type(name, max_bytes, cancellation, progress))
+    }
+
+    /// Inspect one selected declaration under explicit output budgets.
+    ///
+    /// Declaration search intentionally returns metadata-only rows. Use this
+    /// method after selecting one declaration name whose rendered statement
+    /// and docstring are worth paying for.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::describe`].
+    pub fn inspect_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationInspectionRequest,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_inspect_declaration(request, cancellation, progress))
     }
 
     /// Enumerate the session's open environment and return the matching

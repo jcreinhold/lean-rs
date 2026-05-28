@@ -11,9 +11,10 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-eight **mandatory** `@[export]` symbols and may export nine
+//! exports twenty-nine **mandatory** `@[export]` symbols and may export ten
 //! **optional** symbols (checked when session bindings are constructed)—
-//! five bounded `MetaM` services plus module-query entry points and cache control:
+//! five bounded `MetaM` services plus declaration inspection, module-query
+//! entry points, and cache control:
 //!
 //! | C symbol                                               | Mandatory? | Lean signature                                                                                                                                                       |
 //! | ------------------------------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,6 +38,8 @@
 //! | `lean_rs_host_env_declaration_name`                    | yes        | `Environment -> Name -> IO String`                                                                                                                                   |
 //! | `lean_rs_host_env_declaration_name_bulk`               | yes        | `Environment -> Array String -> IO (Array String)`                                                                                                                   |
 //! | `lean_rs_host_env_declaration_name_bulk_progress`      | yes        | `Environment -> Array String -> USize -> USize -> IO (Except UInt8 (Array String))`                                                                                  |
+//! | `lean_rs_host_env_search_declarations`                 | yes        | `Environment -> DeclarationSearchRequest -> Array String -> IO DeclarationSearchResult`                                                                              |
+//! | `lean_rs_host_env_inspect_declaration`                 | optional   | `Environment -> DeclarationInspectionRequest -> Array String -> IO DeclarationInspectionResult`                                                                       |
 //! | `lean_rs_host_env_expr_to_string_raw`                  | yes        | `Expr -> String`                                                                                                                                                     |
 //! | `lean_rs_host_elaborate`                               | yes        | `Environment -> String -> Option Expr -> String -> String -> UInt64 -> USize -> IO (Except ElabFailure Expr)`                                                        |
 //! | `lean_rs_host_elaborate_bulk`                          | yes        | `Environment -> Array String -> String -> String -> UInt64 -> USize -> IO (Array (Except ElabFailure Expr))`                                                         |
@@ -132,7 +135,9 @@ use std::time::Instant;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
-use crate::host::declaration_search::{DeclarationSearchRequest, DeclarationSearchResult};
+use crate::host::declaration_search::{
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest, DeclarationSearchResult,
+};
 use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
@@ -1125,6 +1130,55 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             .shims
             .env_search_declarations
             .call(self.environment.clone(), search.clone(), source_roots);
+        self.record_call(0, t.elapsed());
+        result
+    }
+
+    /// Inspect one selected declaration under explicit output budgets.
+    ///
+    /// Search remains metadata-only; callers use this method after selecting
+    /// one declaration name whose rendered statement/docstring are worth
+    /// paying for. Missing names and missing optional shim support are normal
+    /// result statuses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`lean_rs::LeanError::Cancelled`] if `cancellation` is already
+    /// cancelled before dispatch. Returns [`lean_rs::LeanError::LeanException`]
+    /// if the Lean-side inspection raises.
+    pub fn inspect_declaration(
+        &mut self,
+        request: &DeclarationInspectionRequest,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<DeclarationInspectionResult> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.inspect_declaration",
+            source = request.fields.source,
+            statement = request.fields.statement,
+            docstring = request.fields.docstring,
+            attributes = request.fields.attributes,
+            flags = request.fields.flags,
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(inspect) = &self.shims.env_inspect_declaration else {
+            return Ok(DeclarationInspectionResult::Unsupported);
+        };
+        let source_roots = if request.fields.source {
+            self.capabilities
+                .host()
+                .project()
+                .source_roots()?
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        check_cancellation(cancellation)?;
+        let t = Instant::now();
+        let result = inspect.call(self.environment.clone(), request.clone(), source_roots);
         self.record_call(0, t.elapsed());
         result
     }

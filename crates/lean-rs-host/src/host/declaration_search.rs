@@ -5,7 +5,7 @@
 //! bounded rows plus fanout facts.
 
 use lean_rs::abi::nat;
-use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
+use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use lean_rs::{LeanRuntime, Obj};
 
@@ -120,6 +120,103 @@ pub struct DeclarationSearchResult {
     pub facts: DeclarationSearchFacts,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "field-selection flags mirror the Lean request shape and are clearer than five tiny enums"
+)]
+pub struct DeclarationInspectionFields {
+    pub source: bool,
+    pub statement: bool,
+    pub docstring: bool,
+    pub attributes: bool,
+    pub flags: bool,
+}
+
+impl Default for DeclarationInspectionFields {
+    fn default() -> Self {
+        Self {
+            source: true,
+            statement: true,
+            docstring: true,
+            attributes: true,
+            flags: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeclarationInspectionBudgets {
+    pub per_field_bytes: u32,
+    pub total_bytes: u32,
+}
+
+impl Default for DeclarationInspectionBudgets {
+    fn default() -> Self {
+        Self {
+            per_field_bytes: 8 * 1024,
+            total_bytes: 64 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationInspectionRequest {
+    pub name: String,
+    pub fields: DeclarationInspectionFields,
+    pub budgets: DeclarationInspectionBudgets,
+}
+
+impl DeclarationInspectionRequest {
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            fields: DeclarationInspectionFields::default(),
+            budgets: DeclarationInspectionBudgets::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationRenderedInfo {
+    pub value: String,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "proof-search booleans are independent inspection facts, not control-flow state"
+)]
+pub struct DeclarationProofSearchFacts {
+    pub is_simp: bool,
+    pub is_rw_candidate: bool,
+    pub is_instance: bool,
+    pub is_class: bool,
+    pub class_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationInspection {
+    pub name: String,
+    pub kind: String,
+    pub module: Option<String>,
+    pub source: Option<LeanSourceRange>,
+    pub statement: Option<DeclarationRenderedInfo>,
+    pub docstring: Option<DeclarationRenderedInfo>,
+    pub attributes: Vec<String>,
+    pub proof_search: DeclarationProofSearchFacts,
+    pub flags: DeclarationFlags,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclarationInspectionResult {
+    Found { declaration: Box<DeclarationInspection> },
+    NotFound { name: String },
+    Unsupported,
+}
+
 impl<'lean> IntoLean<'lean> for DeclarationNameMatch {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
         match self {
@@ -178,6 +275,81 @@ impl<'lean> IntoLean<'lean> for DeclarationSearchRequest {
                 nat_from_bool(runtime, self.include_source),
             ],
         )
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationInspectionFields {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                nat_from_bool(runtime, self.source),
+                nat_from_bool(runtime, self.statement),
+                nat_from_bool(runtime, self.docstring),
+                nat_from_bool(runtime, self.attributes),
+                nat_from_bool(runtime, self.flags),
+            ],
+        )
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationInspectionBudgets {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                nat::from_usize(runtime, self.per_field_bytes as usize),
+                nat::from_usize(runtime, self.total_bytes as usize),
+            ],
+        )
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationInspectionRequest {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.name.into_lean(runtime),
+                self.fields.into_lean(runtime),
+                self.budgets.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl sealed::SealedAbi for DeclarationInspectionRequest {}
+
+impl<'lean> LeanAbi<'lean> for DeclarationInspectionRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "DeclarationInspectionRequest cannot decode a Lean call result; it is an argument-only type",
+        ))
+    }
+}
+
+impl sealed::SealedAbi for &DeclarationInspectionRequest {}
+
+impl<'lean> LeanAbi<'lean> for &DeclarationInspectionRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.clone().into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "&DeclarationInspectionRequest cannot decode a Lean call result; use DeclarationInspectionRequest for owned values",
+        ))
     }
 }
 
@@ -302,5 +474,82 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchResult {
             truncated: bool_from_nat(truncated)?,
             facts: DeclarationSearchFacts::try_from_lean(facts)?,
         })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationRenderedInfo {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [value, truncated] = take_ctor_objects::<2>(obj, 0, "DeclarationRenderedInfo")?;
+        Ok(Self {
+            value: String::try_from_lean(value)?,
+            truncated: bool_from_nat(truncated)?,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationProofSearchFacts {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [is_simp, is_rw_candidate, is_instance, is_class, class_name] =
+            take_ctor_objects::<5>(obj, 0, "DeclarationProofSearchFacts")?;
+        Ok(Self {
+            is_simp: bool_from_nat(is_simp)?,
+            is_rw_candidate: bool_from_nat(is_rw_candidate)?,
+            is_instance: bool_from_nat(is_instance)?,
+            is_class: bool_from_nat(is_class)?,
+            class_name: Option::<String>::try_from_lean(class_name)?,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationInspection {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [
+            name,
+            kind,
+            module,
+            source,
+            statement,
+            docstring,
+            attributes,
+            proof_search,
+            flags,
+        ] = take_ctor_objects::<9>(obj, 0, "DeclarationInspection")?;
+        Ok(Self {
+            name: String::try_from_lean(name)?,
+            kind: String::try_from_lean(kind)?,
+            module: Option::<String>::try_from_lean(module)?,
+            source: Option::<LeanSourceRange>::try_from_lean(source)?,
+            statement: Option::<DeclarationRenderedInfo>::try_from_lean(statement)?,
+            docstring: Option::<DeclarationRenderedInfo>::try_from_lean(docstring)?,
+            attributes: Vec::<String>::try_from_lean(attributes)?,
+            proof_search: DeclarationProofSearchFacts::try_from_lean(proof_search)?,
+            flags: DeclarationFlags::try_from_lean(flags)?,
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationInspectionResult {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        match view(&obj).sum_tag()? {
+            0 => {
+                let [declaration] = take_ctor_objects::<1>(obj, 0, "DeclarationInspectionResult::found")?;
+                Ok(Self::Found {
+                    declaration: Box::new(DeclarationInspection::try_from_lean(declaration)?),
+                })
+            }
+            1 => {
+                let [name] = take_ctor_objects::<1>(obj, 1, "DeclarationInspectionResult::notFound")?;
+                Ok(Self::NotFound {
+                    name: String::try_from_lean(name)?,
+                })
+            }
+            2 => {
+                let [] = take_ctor_objects::<0>(obj, 2, "DeclarationInspectionResult::unsupported")?;
+                Ok(Self::Unsupported)
+            }
+            other => Err(conversion_error(format!(
+                "expected Lean DeclarationInspectionResult ctor (tag 0..=2), found tag {other}"
+            ))),
+        }
     }
 }

@@ -408,6 +408,94 @@ pub struct LeanWorkerDeclarationType {
     pub source: Option<LeanWorkerSourceRange>,
 }
 
+/// Field selection for one declaration inspection request.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "wire field-selection flags mirror the Lean request shape and are clearer than five tiny enums"
+)]
+pub struct LeanWorkerDeclarationInspectionFields {
+    pub source: bool,
+    pub statement: bool,
+    pub docstring: bool,
+    pub attributes: bool,
+    pub flags: bool,
+}
+
+impl Default for LeanWorkerDeclarationInspectionFields {
+    fn default() -> Self {
+        Self {
+            source: true,
+            statement: true,
+            docstring: true,
+            attributes: true,
+            flags: true,
+        }
+    }
+}
+
+/// Bounded request to inspect one selected declaration.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationInspectionRequest {
+    pub name: String,
+    pub fields: LeanWorkerDeclarationInspectionFields,
+    pub budgets: LeanWorkerOutputBudgets,
+}
+
+impl LeanWorkerDeclarationInspectionRequest {
+    /// Inspect one declaration with the default field set and output budgets.
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            fields: LeanWorkerDeclarationInspectionFields::default(),
+            budgets: LeanWorkerOutputBudgets::default(),
+        }
+    }
+}
+
+/// Cheap proof-search facts for one declaration.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "proof-search booleans are independent wire facts, not control-flow state"
+)]
+pub struct LeanWorkerDeclarationProofSearchFacts {
+    pub is_simp: bool,
+    pub is_rw_candidate: bool,
+    pub is_instance: bool,
+    pub is_class: bool,
+    pub class_name: Option<String>,
+}
+
+/// Bounded facts for one inspected declaration.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationInspection {
+    pub name: String,
+    pub kind: String,
+    pub module: Option<String>,
+    pub source: Option<LeanWorkerSourceRange>,
+    pub statement: Option<LeanWorkerRenderedInfo>,
+    pub docstring: Option<LeanWorkerRenderedInfo>,
+    pub attributes: Vec<String>,
+    pub proof_search: LeanWorkerDeclarationProofSearchFacts,
+    pub flags: LeanWorkerDeclarationFlags,
+}
+
+/// Outcome of inspecting one selected declaration.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationInspectionResult {
+    Found {
+        declaration: Box<LeanWorkerDeclarationInspection>,
+    },
+    NotFound {
+        name: String,
+    },
+    Unsupported,
+}
+
 /// One identifier occurrence the elaborator recorded. `is_binder` distinguishes
 /// binding sites from use sites.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

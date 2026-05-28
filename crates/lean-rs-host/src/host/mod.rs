@@ -70,7 +70,9 @@ mod shim_bindings;
 pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;
 pub use self::declaration_search::{
-    DeclarationFlags, DeclarationNameMatch, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
+    DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
+    DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
+    DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
     DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
     DeclarationSearchTimings,
 };

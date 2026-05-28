@@ -1,4 +1,5 @@
 import Lean
+import Lean.Meta.Tactic.Simp.Attr
 import LeanRsInterop.Callback
 
 /-! Capability category: session-scoped environment queries. The Rust
@@ -108,6 +109,56 @@ structure DeclarationSearchResult where
   declarations : Array DeclarationSearchRow
   truncated : Nat
   facts : DeclarationSearchFacts
+  deriving Inhabited
+
+structure DeclarationInspectionFields where
+  source : Nat
+  statement : Nat
+  docstring : Nat
+  attributes : Nat
+  flags : Nat
+  deriving Inhabited
+
+structure DeclarationInspectionBudgets where
+  perFieldBytes : Nat
+  totalBytes : Nat
+  deriving Inhabited
+
+structure DeclarationInspectionRequest where
+  name : String
+  fields : DeclarationInspectionFields
+  budgets : DeclarationInspectionBudgets
+  deriving Inhabited
+
+structure DeclarationRenderedInfo where
+  value : String
+  truncated : Nat
+  deriving Inhabited
+
+structure DeclarationProofSearchFacts where
+  isSimp : Nat
+  isRwCandidate : Nat
+  isInstance : Nat
+  isClass : Nat
+  className : Option String
+  deriving Inhabited
+
+structure DeclarationInspection where
+  name : String
+  kind : String
+  module : Option String
+  source : Option SourceRange
+  statement : Option DeclarationRenderedInfo
+  docstring : Option DeclarationRenderedInfo
+  attributes : Array String
+  proofSearch : DeclarationProofSearchFacts
+  flags : DeclarationFlags
+  deriving Inhabited
+
+inductive DeclarationInspectionResult where
+  | found (declaration : DeclarationInspection)
+  | notFound (name : String)
+  | unsupported
   deriving Inhabited
 
 /-- Initialise the Lean search path and import the named modules into a
@@ -647,6 +698,148 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
     declarations := rows
     truncated := if truncated then 1 else 0
     facts
+  }
+
+private def natOfBool (value : Bool) : Nat :=
+  if value then 1 else 0
+
+private def takeUtf8Bytes (limit : Nat) (text : String) : String × Bool := Id.run do
+  if text.utf8ByteSize <= limit then
+    return (text, false)
+  let mut out := ""
+  let mut bytes := 0
+  for c in text.toList do
+    let cBytes := c.toString.utf8ByteSize
+    if bytes + cBytes <= limit then
+      out := out.push c
+      bytes := bytes + cBytes
+  (out, true)
+
+private def boundText (text : String) (perFieldBytes totalRemaining : Nat) : DeclarationRenderedInfo × Nat :=
+  let limit := min perFieldBytes totalRemaining
+  let (value, fieldTruncated) := takeUtf8Bytes limit text
+  let truncated := fieldTruncated || text.utf8ByteSize > totalRemaining
+  ({ value, truncated := natOfBool truncated }, value.utf8ByteSize)
+
+private def isSimpDeclarationCore (declName : Name) : CoreM Bool := do
+  let some ext ← Lean.Meta.getSimpExtension? `simp | return false
+  let thms ← ext.getTheorems
+  return thms.isLemma (.decl declName true false) ||
+    thms.isLemma (.decl declName false false) ||
+    thms.isLemma (.decl declName true true) ||
+    thms.isLemma (.decl declName false true) ||
+    thms.isDeclToUnfold declName
+
+private def runCoreBool (env : Environment) (action : CoreM Bool) : IO Bool := do
+  let coreCtx : Core.Context := { fileName := "<declaration-inspection>", fileMap := default, options := {} }
+  let coreState : Core.State := { env }
+  match ← ((action coreCtx).run' coreState).toBaseIO with
+  | .ok value => pure value
+  | .error _ => pure false
+
+private def isSimpDeclaration (env : Environment) (declName : Name) : IO Bool :=
+  runCoreBool env (isSimpDeclarationCore declName)
+
+private def isInstanceDeclaration (env : Environment) (declName : Name) : Bool :=
+  Lean.Meta.isInstanceCore env declName
+
+private def isClassDeclaration (env : Environment) (declName : Name) : Bool :=
+  Lean.isClass env declName
+
+private def rwCandidateHead (head : Option Name) : Bool :=
+  head == some ``Eq || head == some ``Iff
+
+private def proofSearchFacts (env : Environment) (declName : Name) (type : Expr) : IO DeclarationProofSearchFacts := do
+  let isSimp ← isSimpDeclaration env declName
+  let isClass := isClassDeclaration env declName
+  let head := conclusionHead? type
+  let className :=
+    if isClass then
+      some declName.toString
+    else
+      head.bind fun name => if isClassDeclaration env name then some name.toString else none
+  pure {
+    isSimp := natOfBool isSimp
+    isRwCandidate := natOfBool (rwCandidateHead head)
+    isInstance := natOfBool (isInstanceDeclaration env declName)
+    isClass := natOfBool isClass
+    className
+  }
+
+private def reducibilityAttribute? : ConstantInfo → Option String
+  | .defnInfo info =>
+    match info.hints with
+    | .abbrev => some "abbrev"
+    | .opaque => some "irreducible"
+    | .regular _ => none
+  | .opaqueInfo _ => some "opaque"
+  | _ => none
+
+private def inspectionAttributes (info : ConstantInfo) (facts : DeclarationProofSearchFacts) : Array String := Id.run do
+  let mut attrs := #[]
+  if facts.isSimp != 0 then
+    attrs := attrs.push "simp"
+  if facts.isRwCandidate != 0 then
+    attrs := attrs.push "rw"
+  if facts.isInstance != 0 then
+    attrs := attrs.push "instance"
+  if facts.isClass != 0 then
+    attrs := attrs.push "class"
+  if let some attr := reducibilityAttribute? info then
+    attrs := attrs.push attr
+  attrs
+
+@[export lean_rs_host_env_inspect_declaration]
+def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRequest) (sourceRoots : Array String)
+    : IO DeclarationInspectionResult := do
+  let declName := request.name.toName
+  let some info := env.find? declName
+    | return .notFound request.name
+  let canonicalName := declName.toString
+  let kind := declarationKindOf info
+  let moduleName := (declarationModule? env declName).map Name.toString
+  let source ←
+    if request.fields.source != 0 then
+      envDeclarationSourceRange env declName sourceRoots
+    else
+      pure none
+  let flags : DeclarationFlags := {
+    isPrivate := natOfBool (isPrivateName declName)
+    isGenerated := natOfBool (isGeneratedName declName)
+    isInternal := natOfBool (isInternalName declName)
+  }
+  let facts ← proofSearchFacts env declName info.type
+  let attributes :=
+    if request.fields.attributes != 0 then
+      inspectionAttributes info facts
+    else
+      #[]
+  let mut spent := 0
+  let mut statement := none
+  if request.fields.statement != 0 then
+    let (rendered, used) := boundText (toString info.type) request.budgets.perFieldBytes
+      (request.budgets.totalBytes - spent)
+    spent := spent + used
+    statement := some rendered
+  let mut docstring := none
+  if request.fields.docstring != 0 then
+    match ← findDocString? env declName false with
+    | none => pure ()
+    | some doc =>
+      let (rendered, used) := boundText doc request.budgets.perFieldBytes
+        (request.budgets.totalBytes - spent)
+      spent := spent + used
+      docstring := some rendered
+  pure <| .found {
+    name := canonicalName
+    kind
+    module := moduleName
+    source
+    statement
+    docstring
+    attributes
+    proofSearch := facts
+    flags := if request.fields.flags != 0 then flags else default
   }
 
 /-- Bulk variant of [`envQueryDeclaration`]: a single IO traversal that

@@ -18,7 +18,8 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationNameMatch,
+    LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionFields,
+    LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
     LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchScope,
     LeanWorkerElabOptions, LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
     LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem,
@@ -61,7 +62,7 @@ fn handles_session_config() -> LeanWorkerSessionConfig {
         fixture_root(),
         "lean_rs_fixture",
         "LeanRsFixture",
-        ["LeanRsFixture.Handles"],
+        ["LeanRsFixture.Handles", "LeanRsFixture.SourceRanges"],
     )
 }
 
@@ -475,6 +476,229 @@ fn declaration_type_zero_cap_returns_empty_truncated_type() {
     let rendered = row.type_signature.expect("Nat.rec has a type");
     assert!(rendered.truncated, "zero cap should still report omitted type text");
     assert!(rendered.value.is_empty());
+}
+
+#[test]
+fn inspect_declaration_returns_known_theorem() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let result = session
+        .inspect_declaration(
+            &LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.SourceRanges.knownTheorem"),
+            None,
+            None,
+        )
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("known theorem should be found, got {result:?}");
+    };
+    assert_eq!(declaration.name, "LeanRsFixture.SourceRanges.knownTheorem");
+    assert_eq!(declaration.kind, "theorem");
+    assert!(declaration.source.is_some());
+    let statement = declaration.statement.expect("default inspection renders statement");
+    assert_eq!(statement.value, "True");
+    assert!(!statement.truncated);
+}
+
+#[test]
+fn inspect_declaration_returns_known_definition() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let result = session
+        .inspect_declaration(
+            &LeanWorkerDeclarationInspectionRequest::new("LeanRsFixture.Handles.nameAnonymous"),
+            None,
+            None,
+        )
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("known definition should be found, got {result:?}");
+    };
+    assert_eq!(declaration.kind, "definition");
+    assert!(
+        declaration
+            .statement
+            .as_ref()
+            .is_some_and(|statement| statement.value.contains("Lean.Name")),
+        "definition statement should be rendered: {:?}",
+        declaration.statement
+    );
+}
+
+#[test]
+fn inspect_declaration_returns_not_found_for_unknown_name() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let result = session
+        .inspect_declaration(
+            &LeanWorkerDeclarationInspectionRequest::new("This.Name.Does.Not.Exist"),
+            None,
+            None,
+        )
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    assert_eq!(
+        result,
+        LeanWorkerDeclarationInspectionResult::NotFound {
+            name: "This.Name.Does.Not.Exist".to_owned()
+        }
+    );
+}
+
+#[test]
+fn inspect_declaration_bounds_docstring_and_reports_attributes() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationInspectionRequest {
+        name: "LeanRsFixture.SourceRanges.documentedSimpTheorem".to_owned(),
+        fields: LeanWorkerDeclarationInspectionFields::default(),
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 24,
+            total_bytes: 96,
+        },
+    };
+
+    let result = session
+        .inspect_declaration(&request, None, None)
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("documented theorem should be found, got {result:?}");
+    };
+    assert!(
+        declaration.attributes.iter().any(|attr| attr == "simp"),
+        "simp attribute should be reported: {:?}",
+        declaration.attributes
+    );
+    assert!(declaration.proof_search.is_simp);
+    assert!(declaration.proof_search.is_rw_candidate);
+    let docstring = declaration.docstring.expect("docstring should be present");
+    assert!(docstring.truncated);
+    assert!(docstring.value.len() <= 24);
+}
+
+#[test]
+fn inspect_declaration_truncates_large_type() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationInspectionRequest {
+        name: "Nat.rec".to_owned(),
+        fields: LeanWorkerDeclarationInspectionFields {
+            docstring: false,
+            ..LeanWorkerDeclarationInspectionFields::default()
+        },
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 16,
+            total_bytes: 16,
+        },
+    };
+
+    let result = session
+        .inspect_declaration(&request, None, None)
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("Nat.rec should be found, got {result:?}");
+    };
+    let statement = declaration.statement.expect("statement should be rendered");
+    assert!(statement.truncated);
+    assert!(statement.value.len() <= 16);
+}
+
+#[test]
+fn inspect_declaration_default_stays_under_total_budget() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationInspectionRequest {
+        name: "LeanRsFixture.SourceRanges.documentedSimpTheorem".to_owned(),
+        fields: LeanWorkerDeclarationInspectionFields::default(),
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 32,
+            total_bytes: 48,
+        },
+    };
+
+    let result = session
+        .inspect_declaration(&request, None, None)
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("documented theorem should be found, got {result:?}");
+    };
+    let rendered_bytes = declaration
+        .statement
+        .as_ref()
+        .map_or(0, |statement| statement.value.len())
+        + declaration
+            .docstring
+            .as_ref()
+            .map_or(0, |docstring| docstring.value.len());
+    assert!(rendered_bytes <= 48, "rendered text exceeded budget: {rendered_bytes}");
+}
+
+#[test]
+fn search_result_name_can_be_inspected() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let search = LeanWorkerDeclarationSearch {
+        name_fragment: Some("knownTheorem".to_owned()),
+        name_match: LeanWorkerDeclarationNameMatch::Suffix,
+        kind: Some("theorem".to_owned()),
+        required_constants: Vec::new(),
+        conclusion_head: None,
+        scope_biases: Vec::new(),
+        limit: 1,
+        filter: LeanWorkerDeclarationFilter {
+            include_private: false,
+            include_generated: false,
+            include_internal: false,
+        },
+        include_source: false,
+    };
+    let result = session
+        .search_declarations(&search, None, None)
+        .expect("worker search_declarations dispatch succeeds");
+    let name = result
+        .declarations
+        .first()
+        .expect("search should return known theorem")
+        .name
+        .clone();
+
+    let inspected = session
+        .inspect_declaration(&LeanWorkerDeclarationInspectionRequest::new(name.clone()), None, None)
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = inspected else {
+        panic!("search result should inspect successfully, got {inspected:?}");
+    };
+    assert_eq!(declaration.name, name);
 }
 
 #[test]

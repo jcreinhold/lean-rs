@@ -7,6 +7,10 @@ open Lean
 theorem knownTheorem : True := by
   trivial
 
+/-- Fixture theorem with docstring and simp metadata for declaration inspection. -/
+@[simp] theorem documentedSimpTheorem (p : Prop) : (p ∧ True) ↔ p := by
+  simp
+
 set_option backward.privateInPublic true in
 private def privateFixture : Nat := 1
 

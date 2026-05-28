@@ -14,7 +14,8 @@ use lean_rs_worker_protocol::protocol::{
     read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDoctorReport, LeanWorkerElabOptions,
     LeanWorkerElabResult, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
     LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
@@ -1268,6 +1269,31 @@ impl LeanWorker {
             progress,
             |response, operation| match response {
                 Response::DeclarationType { row } => Ok(row),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        )
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_inspect_declaration(
+        &mut self,
+        request: &LeanWorkerDeclarationInspectionRequest,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationInspectionResult, LeanWorkerError> {
+        self.round_trip(
+            "worker_inspect_declaration",
+            Request::InspectDeclaration {
+                request: request.clone(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationInspection { result } => Ok(result),
                 other => Err(unexpected_response(operation, &other)),
             },
         )
