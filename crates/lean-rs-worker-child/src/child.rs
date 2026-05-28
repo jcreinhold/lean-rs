@@ -56,9 +56,10 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
     LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope,
     LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
-    LeanWorkerProofAttemptStatus, LeanWorkerProofEditTarget, LeanWorkerProofStateInfo, LeanWorkerProofStateResult,
-    LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy,
-    LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerProofAttemptStatus, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
+    LeanWorkerProofPositionSummary, LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult,
+    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
+    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
@@ -1990,6 +1991,15 @@ fn module_query_selector_host(selector: LeanWorkerModuleQuerySelector) -> LeanRe
         LeanWorkerModuleQuerySelector::ProofState { id, line, column } => {
             ModuleQuerySelector::ProofState { id, line, column }
         }
+        LeanWorkerModuleQuerySelector::ProofStateInDeclaration {
+            id,
+            declaration,
+            position,
+        } => ModuleQuerySelector::ProofStateInDeclaration {
+            id,
+            declaration,
+            position: proof_position_selector_host(&position),
+        },
         LeanWorkerModuleQuerySelector::TypeAt { id, line, column } => ModuleQuerySelector::TypeAt { id, line, column },
         LeanWorkerModuleQuerySelector::References { id, name } => ModuleQuerySelector::References { id, name },
         LeanWorkerModuleQuerySelector::DeclarationTarget { id, name, line, column } => {
@@ -2020,16 +2030,28 @@ fn module_source_span_host(span: &LeanWorkerModuleSourceSpan) -> ModuleSourceSpa
 
 fn proof_edit_target_host(target: &LeanWorkerProofEditTarget) -> LeanResult<ProofEditTarget> {
     Ok(match target {
-        LeanWorkerProofEditTarget::ReplaceSpan { span } => ProofEditTarget::ReplaceSpan {
-            span: module_source_span_host(span),
+        LeanWorkerProofEditTarget::Declaration { name, position } => ProofEditTarget::Declaration {
+            name: name.clone(),
+            position: proof_position_selector_host(position),
         },
-        LeanWorkerProofEditTarget::InsertAt { line, column } => ProofEditTarget::InsertAt {
-            line: *line,
-            column: *column,
-        },
-        LeanWorkerProofEditTarget::DeclarationBody { name } => ProofEditTarget::DeclarationBody { name: name.clone() },
         _ => return Err(host_internal("unsupported proof edit target variant")),
     })
+}
+
+fn proof_position_selector_host(selector: &LeanWorkerProofPositionSelector) -> lean_rs_host::ProofPositionSelector {
+    match selector {
+        LeanWorkerProofPositionSelector::Default => lean_rs_host::ProofPositionSelector::Default,
+        LeanWorkerProofPositionSelector::Index { index } => {
+            lean_rs_host::ProofPositionSelector::Index { index: *index }
+        }
+        LeanWorkerProofPositionSelector::AfterText { text, occurrence } => {
+            lean_rs_host::ProofPositionSelector::AfterText {
+                text: text.clone(),
+                occurrence: *occurrence,
+            }
+        }
+        _ => lean_rs_host::ProofPositionSelector::Default,
+    }
 }
 
 fn proof_attempt_request_host(request: &LeanWorkerProofAttemptRequest) -> LeanResult<ProofAttemptRequest> {
@@ -2283,9 +2305,18 @@ fn proof_attempt_row_wire(row: ProofAttemptRow) -> LeanWorkerProofAttemptRow {
         id: row.id,
         status: proof_attempt_status_wire(row.status),
         diagnostics: elab_failure_wire(&row.diagnostics),
+        downstream_diagnostics: elab_failure_wire(&row.downstream_diagnostics),
         goals: row.goals.into_iter().map(rendered_info_wire).collect(),
-        safe_edit: row.safe_edit.map(declaration_target_info_wire),
+        declaration: row.declaration.map(declaration_target_info_wire),
+        proof_position: row.proof_position.map(proof_position_summary_wire),
         output_truncated: row.output_truncated,
+    }
+}
+
+fn proof_position_summary_wire(summary: lean_rs_host::ProofPositionSummary) -> LeanWorkerProofPositionSummary {
+    LeanWorkerProofPositionSummary {
+        index: summary.index,
+        tactic: rendered_info_wire(summary.tactic),
     }
 }
 

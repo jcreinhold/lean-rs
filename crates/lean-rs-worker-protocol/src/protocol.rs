@@ -679,8 +679,9 @@ mod tests {
         LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
         LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
         LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
-        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerRenderedInfo, LeanWorkerSorryPolicy,
-        LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
+        LeanWorkerProofPositionSummary, LeanWorkerRenderedInfo, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
+        LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -1108,7 +1109,10 @@ mod tests {
         let request = Message::Request(Request::AttemptProof {
             request: LeanWorkerProofAttemptRequest {
                 source: "theorem t : True := by\n  trivial\n".to_owned(),
-                edit: LeanWorkerProofEditTarget::ReplaceSpan { span: span.clone() },
+                edit: LeanWorkerProofEditTarget::Declaration {
+                    name: "t".to_owned(),
+                    position: LeanWorkerProofPositionSelector::Default,
+                },
                 candidates: vec![LeanWorkerProofCandidate {
                     id: "rfl".to_owned(),
                     text: "by trivial".to_owned(),
@@ -1134,8 +1138,12 @@ mod tests {
                             diagnostics: Vec::new(),
                             truncated: false,
                         },
+                        downstream_diagnostics: LeanWorkerElabFailure {
+                            diagnostics: Vec::new(),
+                            truncated: false,
+                        },
                         goals: Vec::new(),
-                        safe_edit: Some(LeanWorkerDeclarationTargetInfo {
+                        declaration: Some(LeanWorkerDeclarationTargetInfo {
                             short_name: "t".to_owned(),
                             declaration_name: "t".to_owned(),
                             namespace_name: String::new(),
@@ -1143,6 +1151,13 @@ mod tests {
                             declaration_span: span.clone(),
                             name_span: span.clone(),
                             body_span: span,
+                        }),
+                        proof_position: Some(LeanWorkerProofPositionSummary {
+                            index: 0,
+                            tactic: LeanWorkerRenderedInfo {
+                                value: "trivial".to_owned(),
+                                truncated: false,
+                            },
                         }),
                         output_truncated: false,
                     }],

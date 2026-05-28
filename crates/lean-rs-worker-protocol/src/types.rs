@@ -548,6 +548,11 @@ pub enum LeanWorkerModuleQuerySelector {
         line: u32,
         column: u32,
     },
+    ProofStateInDeclaration {
+        id: String,
+        declaration: String,
+        position: LeanWorkerProofPositionSelector,
+    },
     TypeAt {
         id: String,
         line: u32,
@@ -586,18 +591,35 @@ pub struct LeanWorkerRenderedInfo {
     pub truncated: bool,
 }
 
-/// Edit target for a non-mutating proof attempt over an in-memory source
-/// overlay.
+/// Intent selector for one proof position inside a declaration.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerProofPositionSelector {
+    /// Select the first tactic state in declaration order.
+    #[default]
+    Default,
+    /// Select the `index`-th tactic state in declaration order.
+    Index { index: u32 },
+    /// Select the tactic whose source text exactly matches `text`.
+    AfterText {
+        text: String,
+        #[serde(default)]
+        occurrence: Option<u32>,
+    },
+}
+
+/// Target for a non-mutating proof attempt over an in-memory source overlay.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum LeanWorkerProofEditTarget {
-    /// Replace exactly this source span.
-    ReplaceSpan { span: LeanWorkerModuleSourceSpan },
-    /// Insert proof text at this source position.
-    InsertAt { line: u32, column: u32 },
-    /// Resolve a declaration by name and replace its body span.
-    DeclarationBody { name: String },
+    /// Try a tactic fragment at a selected proof position inside one declaration.
+    Declaration {
+        name: String,
+        #[serde(default)]
+        position: LeanWorkerProofPositionSelector,
+    },
 }
 
 /// One proof candidate to apply to an in-memory source overlay.
@@ -635,9 +657,19 @@ pub struct LeanWorkerProofAttemptRow {
     pub id: String,
     pub status: LeanWorkerProofAttemptStatus,
     pub diagnostics: LeanWorkerElabFailure,
+    pub downstream_diagnostics: LeanWorkerElabFailure,
     pub goals: Vec<LeanWorkerRenderedInfo>,
-    pub safe_edit: Option<LeanWorkerDeclarationTargetInfo>,
+    pub declaration: Option<LeanWorkerDeclarationTargetInfo>,
+    pub proof_position: Option<LeanWorkerProofPositionSummary>,
     pub output_truncated: bool,
+}
+
+/// Informational summary of the selected proof position. It is not an edit
+/// handle and cannot be fed back into proof-action requests.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofPositionSummary {
+    pub index: u32,
+    pub tactic: LeanWorkerRenderedInfo,
 }
 
 /// Envelope for a bounded proof attempt.

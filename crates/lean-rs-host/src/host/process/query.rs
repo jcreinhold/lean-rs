@@ -54,12 +54,27 @@ impl Default for ModuleQueryOutputBudgets {
     }
 }
 
-/// Edit target for a non-mutating proof attempt.
+/// Intent selector for one proof position inside a declaration.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ProofPositionSelector {
+    #[default]
+    Default,
+    Index {
+        index: u32,
+    },
+    AfterText {
+        text: String,
+        occurrence: Option<u32>,
+    },
+}
+
+/// Target for a non-mutating proof attempt.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProofEditTarget {
-    ReplaceSpan { span: ModuleSourceSpan },
-    InsertAt { line: u32, column: u32 },
-    DeclarationBody { name: String },
+    Declaration {
+        name: String,
+        position: ProofPositionSelector,
+    },
 }
 
 /// One proof candidate to splice into an in-memory overlay.
@@ -95,9 +110,18 @@ pub struct ProofAttemptRow {
     pub id: String,
     pub status: ProofAttemptStatus,
     pub diagnostics: LeanElabFailure,
+    pub downstream_diagnostics: LeanElabFailure,
     pub goals: Vec<RenderedInfo>,
-    pub safe_edit: Option<DeclarationTargetInfo>,
+    pub declaration: Option<DeclarationTargetInfo>,
+    pub proof_position: Option<ProofPositionSummary>,
     pub output_truncated: bool,
+}
+
+/// Informational summary of the resolved proof position.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofPositionSummary {
+    pub index: u32,
+    pub tactic: RenderedInfo,
 }
 
 /// Envelope for a bounded proof attempt.
@@ -211,6 +235,11 @@ pub enum ModuleQuerySelector {
         line: u32,
         column: u32,
     },
+    ProofStateInDeclaration {
+        id: String,
+        declaration: String,
+        position: ProofPositionSelector,
+    },
     TypeAt {
         id: String,
         line: u32,
@@ -239,6 +268,7 @@ impl ModuleQuerySelector {
         match self {
             Self::Diagnostics { id }
             | Self::ProofState { id, .. }
+            | Self::ProofStateInDeclaration { id, .. }
             | Self::TypeAt { id, .. }
             | Self::References { id, .. }
             | Self::DeclarationTarget { id, .. }
@@ -351,6 +381,19 @@ impl<'lean> IntoLean<'lean> for ModuleQuerySelector {
                     column.into_lean(runtime),
                 ],
             ),
+            Self::ProofStateInDeclaration {
+                id,
+                declaration,
+                position,
+            } => alloc_ctor_with_objects(
+                runtime,
+                6,
+                [
+                    id.into_lean(runtime),
+                    declaration.into_lean(runtime),
+                    position.into_lean(runtime),
+                ],
+            ),
         }
     }
 }
@@ -448,14 +491,24 @@ impl<'lean> IntoLean<'lean> for ModuleSourceSpan {
     }
 }
 
+impl<'lean> IntoLean<'lean> for ProofPositionSelector {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        match self {
+            Self::Default => 0u8.into_lean(runtime),
+            Self::Index { index } => alloc_ctor_with_objects(runtime, 1, [index.into_lean(runtime)]),
+            Self::AfterText { text, occurrence } => {
+                alloc_ctor_with_objects(runtime, 2, [text.into_lean(runtime), occurrence.into_lean(runtime)])
+            }
+        }
+    }
+}
+
 impl<'lean> IntoLean<'lean> for ProofEditTarget {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
         match self {
-            Self::ReplaceSpan { span } => alloc_ctor_with_objects(runtime, 0, [span.into_lean(runtime)]),
-            Self::InsertAt { line, column } => {
-                alloc_ctor_with_objects(runtime, 1, [line.into_lean(runtime), column.into_lean(runtime)])
+            Self::Declaration { name, position } => {
+                alloc_ctor_with_objects(runtime, 0, [name.into_lean(runtime), position.into_lean(runtime)])
             }
-            Self::DeclarationBody { name } => alloc_ctor_with_objects(runtime, 2, [name.into_lean(runtime)]),
         }
     }
 }
@@ -813,18 +866,37 @@ impl ProofAttemptStatus {
     }
 }
 
+impl<'lean> TryFromLean<'lean> for ProofPositionSummary {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [index, tactic] = take_ctor_objects::<2>(obj, 0, "ProofPositionSummary")?;
+        Ok(Self {
+            index: u32::try_from_lean(index)?,
+            tactic: RenderedInfo::try_from_lean(tactic)?,
+        })
+    }
+}
+
 impl<'lean> TryFromLean<'lean> for ProofAttemptRow {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let ctor = view(&obj).ctor_shape(0, 4, "ProofAttemptRow")?;
+        let ctor = view(&obj).ctor_shape(0, 6, "ProofAttemptRow")?;
         let status = ProofAttemptStatus::from_scalar(ctor.uint8(0, "ProofAttemptRow.status")?)?;
         let output_truncated = ctor.bool(1, "ProofAttemptRow.outputTruncated")?;
-        let [id, diagnostics, goals, safe_edit] = take_ctor_objects::<4>(obj, 0, "ProofAttemptRow")?;
+        let [
+            id,
+            diagnostics,
+            downstream_diagnostics,
+            goals,
+            declaration,
+            proof_position,
+        ] = take_ctor_objects::<6>(obj, 0, "ProofAttemptRow")?;
         Ok(Self {
             id: String::try_from_lean(id)?,
             status,
             diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+            downstream_diagnostics: LeanElabFailure::try_from_lean(downstream_diagnostics)?,
             goals: Vec::<RenderedInfo>::try_from_lean(goals)?,
-            safe_edit: Option::<DeclarationTargetInfo>::try_from_lean(safe_edit)?,
+            declaration: Option::<DeclarationTargetInfo>::try_from_lean(declaration)?,
+            proof_position: Option::<ProofPositionSummary>::try_from_lean(proof_position)?,
             output_truncated,
         })
     }

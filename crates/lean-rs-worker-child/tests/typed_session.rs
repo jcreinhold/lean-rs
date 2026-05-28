@@ -28,7 +28,8 @@ use lean_rs_worker_parent::{
     LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
     LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
     LeanWorkerProofAttemptResult, LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
-    LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy,
+    LeanWorkerProofPositionSelector, LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
+    LeanWorkerSorryPolicy,
 };
 
 fn worker_binary() -> PathBuf {
@@ -1071,11 +1072,16 @@ fn attempt_proof_successful_candidate_closes_simple_goal() {
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
     let request = LeanWorkerProofAttemptRequest {
-        source: "theorem t : True := by\n  exact True.intro\n".to_owned(),
-        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        source:
+            "import Lean\n\ntheorem t : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem u : True := by\n  trivial\n"
+                .to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
         candidates: vec![LeanWorkerProofCandidate {
             id: "trivial".to_owned(),
-            text: "by\n  trivial".to_owned(),
+            text: "trivial".to_owned(),
         }],
         budgets: LeanWorkerOutputBudgets::default(),
     };
@@ -1094,8 +1100,20 @@ fn attempt_proof_successful_candidate_closes_simple_goal() {
         "closed proof should have no goals"
     );
     assert!(
-        result.candidates[0].safe_edit.is_some(),
-        "declaration body target should resolve safe edit"
+        result.candidates[0].declaration.is_some(),
+        "declaration target should resolve"
+    );
+    assert!(
+        result.candidates[0].proof_position.is_some(),
+        "proof attempts should report the selected proof position"
+    );
+    assert!(
+        result.candidates[0]
+            .downstream_diagnostics
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("unexpected token '/--'")),
+        "candidate overlay must not corrupt the following docstring"
     );
 }
 
@@ -1108,11 +1126,14 @@ fn attempt_proof_bad_candidate_returns_diagnostics_and_session_survives() {
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
     let request = LeanWorkerProofAttemptRequest {
-        source: "theorem t : True := by\n  trivial\n".to_owned(),
-        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        source: "theorem t : True := by\n  skip\n/-- following docstring must remain parseable -/\ntheorem u : True := by\n  trivial\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
         candidates: vec![LeanWorkerProofCandidate {
             id: "bad".to_owned(),
-            text: "by\n  exact False.elim".to_owned(),
+            text: "exact missingIdentifier".to_owned(),
         }],
         budgets: LeanWorkerOutputBudgets::default(),
     };
@@ -1129,7 +1150,7 @@ fn attempt_proof_bad_candidate_returns_diagnostics_and_session_survives() {
             .diagnostics
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.severity == "error"),
+            .any(|diagnostic| diagnostic.severity == "error" && diagnostic.message.contains("missingIdentifier")),
         "bad proof should return error diagnostics: {:?}",
         result.candidates[0].diagnostics,
     );
@@ -1159,12 +1180,15 @@ fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
     let candidates = (0..10)
         .map(|idx| LeanWorkerProofCandidate {
             id: format!("c{idx}"),
-            text: "by\n  trivial".to_owned(),
+            text: "trivial".to_owned(),
         })
         .collect();
     let request = LeanWorkerProofAttemptRequest {
-        source: "theorem t : True := by\n  trivial\n".to_owned(),
-        edit: LeanWorkerProofEditTarget::DeclarationBody { name: "t".to_owned() },
+        source: "theorem t : True := by\n  skip\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
         candidates,
         budgets: LeanWorkerOutputBudgets::default(),
     };

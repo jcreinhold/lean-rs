@@ -24,6 +24,12 @@ inductive ModuleQuery where
   | references (name : String)
   deriving Inhabited
 
+inductive ProofPositionSelector where
+  | default
+  | index (index : Nat)
+  | afterText (text : String) (occurrence : Option Nat)
+  deriving Inhabited
+
 /-- One selector in a batched module-processing request. Each selector carries
     a caller-chosen id so the result can be correlated without relying on
     ordering. -/
@@ -34,6 +40,7 @@ inductive ModuleQuerySelector where
   | references (id : String) (name : String)
   | declarationTarget (id : String) (name? : Option String) (line? column? : Option Nat)
   | surroundingDeclaration (id : String) (line : Nat) (column : Nat)
+  | proofStateInDeclaration (id declaration : String) (position : ProofPositionSelector)
   deriving Inhabited
 
 /-- Explicit byte budgets for batch projections. `perFieldBytes` caps individual
@@ -241,9 +248,7 @@ structure ModuleSnapshotCacheClearResult where
   deriving Inhabited
 
 inductive ProofEditTarget where
-  | replaceSpan (span : ModuleSourceSpan)
-  | insertAt (line column : Nat)
-  | declarationBody (name : String)
+  | declaration (name : String) (position : ProofPositionSelector)
   deriving Inhabited
 
 structure ProofCandidate where
@@ -267,12 +272,19 @@ inductive ProofAttemptStatus where
   | unsupported
   deriving Inhabited
 
+structure ProofPositionSummary where
+  index : Nat
+  tactic : RenderedInfo
+  deriving Inhabited
+
 structure ProofAttemptRow where
   id : String
   status : ProofAttemptStatus
   diagnostics : LeanRsFixture.Elaboration.ElabFailure
+  downstreamDiagnostics : LeanRsFixture.Elaboration.ElabFailure
   goals : Array RenderedInfo
-  safeEdit : Option DeclarationTargetInfo
+  declaration : Option DeclarationTargetInfo
+  proofPosition : Option ProofPositionSummary
   outputTruncated : Bool
   deriving Inhabited
 
@@ -345,8 +357,8 @@ private def rangeOfStx (fileMap : FileMap) (stx : Syntax) : Option ModuleSourceS
     let s := fileMap.toPosition sp
     let e := fileMap.toPosition ep
     some {
-      startLine := s.line, startColumn := s.column
-      endLine := e.line, endColumn := e.column
+      startLine := s.line, startColumn := s.column + 1
+      endLine := e.line, endColumn := e.column + 1
     }
 
 private def rangeContains (span : ModuleSourceSpan) (line column : Nat) : Bool :=
@@ -363,6 +375,77 @@ private def rangeArea (span : ModuleSourceSpan) : Nat :=
   let lineSpan := span.endLine - span.startLine
   let colSpan := span.endColumn - span.startColumn
   lineSpan * 1000000 + colSpan
+
+private structure SourceDocument where
+  source : String
+  bodyFileMap : FileMap
+  lineOffset : Nat
+
+private def SourceDocument.fileLineToBody (doc : SourceDocument) (line : Nat) : Nat :=
+  if line > doc.lineOffset then line - doc.lineOffset else 0
+
+private def SourceDocument.bodySpanToFile (doc : SourceDocument) (span : ModuleSourceSpan) : ModuleSourceSpan :=
+  { span with startLine := span.startLine + doc.lineOffset, endLine := span.endLine + doc.lineOffset }
+
+private def SourceDocument.fileSpanToBody (doc : SourceDocument) (span : ModuleSourceSpan) : ModuleSourceSpan :=
+  { span with startLine := doc.fileLineToBody span.startLine, endLine := doc.fileLineToBody span.endLine }
+
+private def SourceDocument.syntaxSpan? (doc : SourceDocument) (stx : Syntax) : Option ModuleSourceSpan :=
+  rangeOfStx doc.bodyFileMap stx
+
+private def SourceDocument.bodyCursor (doc : SourceDocument) (line column : Nat) : Nat × Nat :=
+  (doc.fileLineToBody line, column)
+
+private def SourceDocument.bodySpanContains (span : ModuleSourceSpan) (line column : Nat) : Bool :=
+  rangeContains span line column
+
+private def SourceDocument.lineText? (doc : SourceDocument) (line : Nat) : Option String :=
+  if line == 0 then
+    none
+  else
+    match doc.source.splitOn "\n" |>.drop (line - 1) with
+    | text :: _ => some text
+    | [] => none
+
+private def SourceDocument.rawOffset? (doc : SourceDocument) (line column : Nat) : Option String.Pos.Raw :=
+  if line == 0 || column == 0 then
+    none
+  else
+    let lines := doc.source.splitOn "\n"
+    if line > lines.length then
+      none
+    else
+      let before := lines.take (line - 1)
+      let base := before.foldl (init := 0) fun bytes text => bytes + text.utf8ByteSize + 1
+      some ⟨base + column - 1⟩
+
+private def SourceDocument.replaceRawSpan (doc : SourceDocument) (replacement : String) (start stop : String.Pos.Raw) :
+    String :=
+  let pfx := String.Pos.Raw.extract doc.source 0 start
+  let suffix := String.Pos.Raw.extract doc.source stop doc.source.rawEndPos
+  pfx ++ replacement ++ suffix
+
+private def SourceDocument.extractFileSpan? (doc : SourceDocument) (span : ModuleSourceSpan) : Option String :=
+  match doc.rawOffset? span.startLine span.startColumn,
+      doc.rawOffset? span.endLine span.endColumn with
+  | some start, some stop => some (String.Pos.Raw.extract doc.source start stop)
+  | _, _ => none
+
+private def SourceDocument.extractBodySpan? (doc : SourceDocument) (span : ModuleSourceSpan) : Option String :=
+  doc.extractFileSpan? (doc.bodySpanToFile span)
+
+private def SourceDocument.indentationOfLine (doc : SourceDocument) (line : Nat) : String :=
+  match doc.lineText? line with
+  | none => ""
+  | some text =>
+    Id.run do
+      let mut out := ""
+      for ch in text.toList do
+        if ch == ' ' || ch == '\t' then
+          out := out.push ch
+        else
+          return out
+      out
 
 private structure RenderState where
   limit : Nat := renderByteLimit
@@ -514,17 +597,12 @@ private def collectTypeAt (fileMap : FileMap) (ctx : ContextInfo) (info : Info) 
     | none => pure acc
   | _ => pure acc
 
-private def offsetSpan (lineOffset : Nat) (span : ModuleSourceSpan) : ModuleSourceSpan :=
-  { span with startLine := span.startLine + lineOffset, endLine := span.endLine + lineOffset }
-
-private def bodyLine (line lineOffset : Nat) : Nat :=
-  if line > lineOffset then line - lineOffset else 0
-
-private def runTypeAt (fileMap : FileMap) (trees : PersistentArray InfoTree) (line column lineOffset : Nat) :
+private def runTypeAt (doc : SourceDocument) (trees : PersistentArray InfoTree) (line column : Nat) :
     IO TypeAtResult := do
-  let mut acc : TypeAtAcc := { line := bodyLine line lineOffset, column := column }
+  let (line, column) := doc.bodyCursor line column
+  let mut acc : TypeAtAcc := { line, column }
   for tree in trees do
-    acc ← tree.foldInfoM (init := acc) (collectTypeAt fileMap)
+    acc ← tree.foldInfoM (init := acc) (collectTypeAt doc.bodyFileMap)
   match acc.best? with
   | none => pure .noTerm
   | some candidate =>
@@ -534,14 +612,15 @@ private def runTypeAt (fileMap : FileMap) (trees : PersistentArray InfoTree) (li
         pure (renderExprBounded ty)
       catch _ =>
         pure { value := "", truncated := false }
-    pure <| .term (offsetSpan lineOffset candidate.span) (renderExprBounded candidate.expr) typeInfo
+    pure <| .term (doc.bodySpanToFile candidate.span) (renderExprBounded candidate.expr) typeInfo
       (candidate.expectedType?.map renderExprBounded)
 
-private def runTypeAtWith (fileMap : FileMap) (trees : PersistentArray InfoTree) (line column lineOffset : Nat)
+private def runTypeAtWith (doc : SourceDocument) (trees : PersistentArray InfoTree) (line column : Nat)
     (limit : Nat) : IO TypeAtResult := do
-  let mut acc : TypeAtAcc := { line := bodyLine line lineOffset, column := column }
+  let (line, column) := doc.bodyCursor line column
+  let mut acc : TypeAtAcc := { line, column }
   for tree in trees do
-    acc ← tree.foldInfoM (init := acc) (collectTypeAt fileMap)
+    acc ← tree.foldInfoM (init := acc) (collectTypeAt doc.bodyFileMap)
   match acc.best? with
   | none => pure .noTerm
   | some candidate =>
@@ -551,7 +630,7 @@ private def runTypeAtWith (fileMap : FileMap) (trees : PersistentArray InfoTree)
         pure (renderExprBoundedWith limit ty)
       catch _ =>
         pure { value := "", truncated := false }
-    pure <| .term (offsetSpan lineOffset candidate.span) (renderExprBoundedWith limit candidate.expr) typeInfo
+    pure <| .term (doc.bodySpanToFile candidate.span) (renderExprBoundedWith limit candidate.expr) typeInfo
       (candidate.expectedType?.map (renderExprBoundedWith limit))
 
 private structure TacticCandidate where
@@ -588,11 +667,12 @@ private def collectGoalAt (fileMap : FileMap) (ctx : ContextInfo) (info : Info) 
     | none => pure acc
   | _ => pure acc
 
-private def runGoalAt (fileMap : FileMap) (trees : PersistentArray InfoTree) (line column lineOffset : Nat)
+private def runGoalAt (doc : SourceDocument) (trees : PersistentArray InfoTree) (line column : Nat)
     (diagBytes : USize) : IO GoalAtResult := do
-  let mut acc : GoalAtAcc := { line := bodyLine line lineOffset, column := column }
+  let (line, column) := doc.bodyCursor line column
+  let mut acc : GoalAtAcc := { line, column }
   for tree in trees do
-    acc ← tree.foldInfoM (init := acc) (collectGoalAt fileMap)
+    acc ← tree.foldInfoM (init := acc) (collectGoalAt doc.bodyFileMap)
   match acc.best? with
   | none => pure .noTacticContext
   | some candidate =>
@@ -600,7 +680,7 @@ private def runGoalAt (fileMap : FileMap) (trees : PersistentArray InfoTree) (li
       renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore diagBytes 0
     let (after, _, truncAfter) ←
       renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter diagBytes bytesAfterBefore
-    pure <| .goal (offsetSpan lineOffset candidate.span) before after (truncBefore || truncAfter)
+    pure <| .goal (doc.bodySpanToFile candidate.span) before after (truncBefore || truncAfter)
 
 private structure ReferencesAcc where
   target : String
@@ -622,29 +702,29 @@ private def pushNameRef (span : ModuleSourceSpan) (name : String) (isBinder : Bo
       name := name, isBinder := isBinder
     } }
 
-private def collectReferences (fileMap : FileMap) (lineOffset : Nat) (_ctx : ContextInfo) (info : Info) (acc : ReferencesAcc) :
+private def collectReferences (doc : SourceDocument) (_ctx : ContextInfo) (info : Info) (acc : ReferencesAcc) :
     IO ReferencesAcc := do
   if acc.truncated then
     pure acc
   else
     match info with
     | .ofTermInfo ti =>
-      match rangeOfStx fileMap ti.stx with
+      match doc.syntaxSpan? ti.stx with
       | none => pure acc
       | some span =>
         if ti.expr.isConst && ti.stx.isIdent then
-          pure <| pushNameRef (offsetSpan lineOffset span) (toString ti.expr.constName!) ti.isBinder acc
+          pure <| pushNameRef (doc.bodySpanToFile span) (toString ti.expr.constName!) ti.isBinder acc
         else if ti.stx.isIdent && ti.isBinder then
-          pure <| pushNameRef (offsetSpan lineOffset span) (toString ti.stx.getId) true acc
+          pure <| pushNameRef (doc.bodySpanToFile span) (toString ti.stx.getId) true acc
         else
           pure acc
     | _ => pure acc
 
-private def runReferences (fileMap : FileMap) (trees : PersistentArray InfoTree) (name : String) (lineOffset : Nat) :
+private def runReferences (doc : SourceDocument) (trees : PersistentArray InfoTree) (name : String) :
     IO ReferencesResult := do
   let mut acc : ReferencesAcc := { target := name }
   for tree in trees do
-    acc ← tree.foldInfoM (init := acc) (collectReferences fileMap lineOffset)
+    acc ← tree.foldInfoM (init := acc) (collectReferences doc)
     if acc.truncated then
       break
   pure { references := acc.refs, truncated := acc.truncated }
@@ -711,15 +791,15 @@ private structure DeclarationCandidate where
 private def fullDeclarationName (namespaceName shortName : Name) : Name :=
   if namespaceName.isAnonymous then shortName else namespaceName ++ shortName
 
-private def commandDeclaration? (fileMap : FileMap) (lineOffset : Nat) (ctx : ContextInfo) (stx : Syntax) :
+private def commandDeclaration? (doc : SourceDocument) (ctx : ContextInfo) (stx : Syntax) :
     Option DeclarationCandidate := do
   let declStx ← catalogDeclarationSyntax? stx
   let nameStx := declIdNameStx declStx
   guard nameStx.isIdent
   let bodyStx ← declarationBodySyntax? declStx
-  let declarationSpanBody ← rangeOfStx fileMap declStx
-  let nameSpanBody ← rangeOfStx fileMap nameStx
-  let bodySpanBody ← rangeOfStx fileMap bodyStx
+  let declarationSpanBody ← doc.syntaxSpan? declStx
+  let nameSpanBody ← doc.syntaxSpan? nameStx
+  let bodySpanBody ← doc.syntaxSpan? bodyStx
   let shortName := nameStx.getId
   let namespaceName := ctx.currNamespace
   let fullName := fullDeclarationName namespaceName shortName
@@ -728,26 +808,26 @@ private def commandDeclaration? (fileMap : FileMap) (lineOffset : Nat) (ctx : Co
     declarationName := fullName.toString
     namespaceName := namespaceName.toString
     declarationKind := declarationKeyword declStx
-    declarationSpan := offsetSpan lineOffset declarationSpanBody
-    nameSpan := offsetSpan lineOffset nameSpanBody
-    bodySpan := offsetSpan lineOffset bodySpanBody
+    declarationSpan := doc.bodySpanToFile declarationSpanBody
+    nameSpan := doc.bodySpanToFile nameSpanBody
+    bodySpan := doc.bodySpanToFile bodySpanBody
   }
   some { info, bodySpanBodyCoords := bodySpanBody, declarationSpanBodyCoords := declarationSpanBody }
 
-private def collectDeclarations (fileMap : FileMap) (lineOffset : Nat) (ctx : ContextInfo) (info : Info)
+private def collectDeclarations (doc : SourceDocument) (ctx : ContextInfo) (info : Info)
     (acc : Array DeclarationCandidate) : IO (Array DeclarationCandidate) := do
   match info with
   | .ofCommandInfo ci =>
-    match commandDeclaration? fileMap lineOffset ctx ci.stx with
+    match commandDeclaration? doc ctx ci.stx with
     | some candidate => pure (acc.push candidate)
     | none => pure acc
   | _ => pure acc
 
-private def declarationCandidates (fileMap : FileMap) (trees : PersistentArray InfoTree) (lineOffset : Nat) :
+private def declarationCandidates (doc : SourceDocument) (trees : PersistentArray InfoTree) :
     IO (Array DeclarationCandidate) := do
   let mut out : Array DeclarationCandidate := #[]
   for tree in trees do
-    out ← tree.foldInfoM (init := out) (collectDeclarations fileMap lineOffset)
+    out ← tree.foldInfoM (init := out) (collectDeclarations doc)
   pure out
 
 private def declarationTargetByName (candidates : Array DeclarationCandidate) (name : String) :
@@ -759,9 +839,9 @@ private def declarationTargetByName (candidates : Array DeclarationCandidate) (n
   | #[candidate] => .target candidate.info
   | many => .ambiguous (many.map (·.info))
 
-private def declarationAt? (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) :
+private def declarationAt? (doc : SourceDocument) (candidates : Array DeclarationCandidate) (line column : Nat) :
     Option DeclarationCandidate :=
-  let bodyCursorLine := bodyLine line lineOffset
+  let bodyCursorLine := doc.fileLineToBody line
   let containing := candidates.filter fun candidate =>
     rangeContains candidate.declarationSpanBodyCoords bodyCursorLine column
   containing.foldl
@@ -775,18 +855,103 @@ private def declarationAt? (candidates : Array DeclarationCandidate) (line colum
         else
           best?
 
-private def declarationTargetByPosition (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) :
+private def declarationTargetByPosition (doc : SourceDocument) (candidates : Array DeclarationCandidate) (line column : Nat) :
     DeclarationTargetResult :=
-  match declarationAt? candidates line column lineOffset with
+  match declarationAt? doc candidates line column with
   | some candidate => .target candidate.info
   | none => .notFound
 
-private def selectorDeclarationTarget (candidates : Array DeclarationCandidate) (name? : Option String)
-    (line? column? : Option Nat) (lineOffset : Nat) : DeclarationTargetResult :=
+private def selectorDeclarationTarget (doc : SourceDocument) (candidates : Array DeclarationCandidate) (name? : Option String)
+    (line? column? : Option Nat) : DeclarationTargetResult :=
   match name?, line?, column? with
   | some name, _, _ => declarationTargetByName candidates name
-  | none, some line, some column => declarationTargetByPosition candidates line column lineOffset
+  | none, some line, some column => declarationTargetByPosition doc candidates line column
   | _, _, _ => .notFound
+
+private structure ProofPosition where
+  index : Nat
+  tactic : TacticCandidate
+  summary : ProofPositionSummary
+
+private def lineColumnAfterText (line column : Nat) (text : String) : Nat × Nat :=
+  let parts := text.splitOn "\n"
+  match parts.reverse with
+  | [] => (line, column)
+  | last :: _ =>
+    if parts.length == 1 then
+      (line, column + text.utf8ByteSize)
+    else
+      (line + parts.length - 1, last.utf8ByteSize + 1)
+
+private def tacticSummary (doc : SourceDocument) (index : Nat) (span : ModuleSourceSpan) : ProofPositionSummary :=
+  let text := (doc.extractBodySpan? span).getD ""
+  { index, tactic := { value := text, truncated := false } }
+
+private def spanStrictlyContains (outer inner : ModuleSourceSpan) : Bool :=
+  rangeContains outer inner.startLine inner.startColumn &&
+    rangeContains outer inner.endLine inner.endColumn &&
+    !(outer.startLine == inner.startLine && outer.startColumn == inner.startColumn &&
+      outer.endLine == inner.endLine && outer.endColumn == inner.endColumn)
+
+private def minimalTacticCandidates (tactics : Array TacticCandidate) : Array TacticCandidate :=
+  tactics.filter fun candidate =>
+    !tactics.any fun other => spanStrictlyContains candidate.span other.span
+
+private def collectTacticsInDeclaration (doc : SourceDocument) (decl : DeclarationCandidate)
+    (trees : PersistentArray InfoTree) : IO (Array ProofPosition) := do
+  let mut tactics : Array TacticCandidate := #[]
+  for tree in trees do
+    tactics ← tree.foldInfoM (init := tactics) fun ctx info acc => do
+      match info with
+      | .ofTacticInfo ti =>
+        match rangeOfStx doc.bodyFileMap ti.stx with
+        | some span =>
+          if rangeContains decl.bodySpanBodyCoords span.startLine span.startColumn then
+            pure <| acc.push {
+              span, ctx, mctxBefore := ti.mctxBefore, goalsBefore := ti.goalsBefore,
+              mctxAfter := ti.mctxAfter, goalsAfter := ti.goalsAfter
+            }
+          else
+            pure acc
+        | none => pure acc
+      | _ => pure acc
+  let sorted := tactics.qsort fun left right =>
+    left.span.startLine < right.span.startLine ||
+      (left.span.startLine == right.span.startLine && left.span.startColumn < right.span.startColumn) ||
+      (left.span.startLine == right.span.startLine && left.span.startColumn == right.span.startColumn &&
+        rangeArea left.span < rangeArea right.span)
+  let minimal := minimalTacticCandidates sorted
+  pure <| minimal.mapIdx fun idx tactic =>
+    { index := idx, tactic, summary := tacticSummary doc idx tactic.span }
+
+private def selectProofPosition (_doc : SourceDocument) (positions : Array ProofPosition)
+    (selector : ProofPositionSelector) : Option ProofPosition :=
+  match selector with
+  | .default => positions[0]?
+  | .index index => positions[index]?
+  | .afterText text occurrence? =>
+    let wanted := text.trimAscii
+    let occurrence := occurrence?.getD 0
+    let hits := positions.filter fun pos => pos.summary.tactic.value.trimAscii == wanted
+    hits[occurrence]?
+
+private def prefixBeforeOccurrence? (haystack needle : String) (occurrence : Nat) : Option String :=
+  let parts := haystack.splitOn needle
+  if parts.length <= occurrence + 1 then
+    none
+  else
+    some (String.intercalate needle (parts.take (occurrence + 1)))
+
+private def sourceTextProofPosition? (doc : SourceDocument) (decl : DeclarationCandidate)
+    (text : String) (occurrence? : Option Nat) : Option (ModuleSourceSpan × ProofPositionSummary) := do
+  let bodyText ← doc.extractBodySpan? decl.bodySpanBodyCoords
+  let occurrence := occurrence?.getD 0
+  let before ← prefixBeforeOccurrence? bodyText text occurrence
+  let (startLine, startColumn) :=
+    lineColumnAfterText decl.bodySpanBodyCoords.startLine decl.bodySpanBodyCoords.startColumn before
+  let (endLine, endColumn) := lineColumnAfterText startLine startColumn text
+  let span : ModuleSourceSpan := { startLine, startColumn, endLine, endColumn }
+  some (span, { index := occurrence, tactic := { value := text, truncated := false } })
 
 private def collectLocalContextMeta (limit : Nat) (lctx : LocalContext) : MetaM (Array LocalInfo) :=
   lctx.foldlM (init := #[]) fun acc localDecl => do
@@ -815,13 +980,14 @@ private def collectGoalLocals (limit : Nat) (ctx : ContextInfo) (mctx : MetavarC
         collectLocalContextMeta limit decl.lctx
     | [] => pure #[]
 
-private def runProofState (fileMap : FileMap) (trees : PersistentArray InfoTree)
-    (candidates : Array DeclarationCandidate) (line column lineOffset : Nat) (budgets : ModuleQueryOutputBudgets) :
+private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTree)
+    (candidates : Array DeclarationCandidate) (line column : Nat) (budgets : ModuleQueryOutputBudgets) :
     IO ProofStateResult := do
-  let mut goalAcc : GoalAtAcc := { line := bodyLine line lineOffset, column := column }
+  let (bodyCursorLine, bodyCursorColumn) := doc.bodyCursor line column
+  let mut goalAcc : GoalAtAcc := { line := bodyCursorLine, column := bodyCursorColumn }
   for tree in trees do
-    goalAcc ← tree.foldInfoM (init := goalAcc) (collectGoalAt fileMap)
-  let safeEdit := (declarationAt? candidates line column lineOffset).map (·.info)
+    goalAcc ← tree.foldInfoM (init := goalAcc) (collectGoalAt doc.bodyFileMap)
+  let safeEdit := (declarationAt? doc candidates line column).map (·.info)
   match goalAcc.best? with
   | some candidate =>
     let (before, bytesAfterBefore, truncBefore) ←
@@ -834,7 +1000,7 @@ private def runProofState (fileMap : FileMap) (trees : PersistentArray InfoTree)
       declarationName := declName
       namespaceName := candidate.ctx.currNamespace.toString
       safeEdit
-      span := offsetSpan lineOffset candidate.span
+      span := doc.bodySpanToFile candidate.span
       goalsBefore := before
       goalsAfter := after
       locals
@@ -842,9 +1008,9 @@ private def runProofState (fileMap : FileMap) (trees : PersistentArray InfoTree)
       truncated := truncBefore || truncAfter
     }
   | none =>
-    let mut termAcc : TypeAtAcc := { line := bodyLine line lineOffset, column := column }
+    let mut termAcc : TypeAtAcc := { line := bodyCursorLine, column := bodyCursorColumn }
     for tree in trees do
-      termAcc ← tree.foldInfoM (init := termAcc) (collectTypeAt fileMap)
+      termAcc ← tree.foldInfoM (init := termAcc) (collectTypeAt doc.bodyFileMap)
     match termAcc.best? with
     | none => pure <| .unavailable "no tactic or term context covers the requested cursor"
     | some candidate =>
@@ -863,13 +1029,47 @@ private def runProofState (fileMap : FileMap) (trees : PersistentArray InfoTree)
         declarationName := declName
         namespaceName := candidate.ctx.currNamespace.toString
         safeEdit
-        span := offsetSpan lineOffset candidate.span
+        span := doc.bodySpanToFile candidate.span
         goalsBefore := #[]
         goalsAfter := #[]
         locals
         expectedType
         truncated := expectedType.any (·.truncated)
       }
+
+private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCandidate)
+    (pos : ProofPosition) (budgets : ModuleQueryOutputBudgets) : IO ProofStateResult := do
+  let candidate := pos.tactic
+  let (before, bytesAfterBefore, truncBefore) ←
+    renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
+  let (after, _, truncAfter) ←
+    renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
+  let locals ← collectGoalLocals budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
+  pure <| .state {
+    declarationName := some decl.info.declarationName
+    namespaceName := decl.info.namespaceName
+    safeEdit := some decl.info
+    span := doc.bodySpanToFile candidate.span
+    goalsBefore := before
+    goalsAfter := after
+    locals
+    expectedType := none
+    truncated := truncBefore || truncAfter
+  }
+
+private def runProofStateInDeclaration (doc : SourceDocument) (trees : PersistentArray InfoTree)
+    (candidates : Array DeclarationCandidate) (name : String) (selector : ProofPositionSelector)
+    (budgets : ModuleQueryOutputBudgets) : IO ProofStateResult := do
+  match declarationTargetByName candidates name with
+  | .target info =>
+    let some decl := candidates.find? (fun candidate => candidate.info.declarationName == info.declarationName)
+      | pure <| .unavailable "resolved declaration is not available in the module snapshot"
+    let positions ← collectTacticsInDeclaration doc decl trees
+    match selectProofPosition doc positions selector with
+    | some pos => proofStateFromPosition doc decl pos budgets
+    | none => pure <| .unavailable "declaration has no proof position matching the selector"
+  | .notFound => pure <| .unavailable "declaration was not found in the module"
+  | .ambiguous _ => pure <| .unavailable "declaration name is ambiguous in the module"
 
 private def emptyResultFor (query : ModuleQuery) : ModuleQueryResult :=
   match query with
@@ -881,39 +1081,39 @@ private def emptyResultFor (query : ModuleQuery) : ModuleQueryResult :=
 private def countNewlines (s : String) : Nat :=
   s.foldl (init := 0) fun n c => if c == '\n' then n + 1 else n
 
-private def offsetDiagnosticPos (lineOffset : Nat)
+private def SourceDocument.offsetDiagnosticPos (doc : SourceDocument)
     (pos : LeanRsFixture.Elaboration.DiagnosticPos) :
     LeanRsFixture.Elaboration.DiagnosticPos :=
   { pos with
-    line := pos.line + lineOffset
-    endLine := pos.endLine.map (· + lineOffset) }
+    line := pos.line + doc.lineOffset
+    endLine := pos.endLine.map (· + doc.lineOffset) }
 
-private def offsetDiagnostic (lineOffset : Nat)
+private def SourceDocument.offsetDiagnostic (doc : SourceDocument)
     (diagnostic : LeanRsFixture.Elaboration.Diagnostic) :
     LeanRsFixture.Elaboration.Diagnostic :=
-  { diagnostic with position := diagnostic.position.map (offsetDiagnosticPos lineOffset) }
+  { diagnostic with position := diagnostic.position.map (doc.offsetDiagnosticPos) }
 
-private def offsetFailure (lineOffset : Nat)
+private def SourceDocument.offsetFailure (doc : SourceDocument)
     (failure : LeanRsFixture.Elaboration.ElabFailure) :
     LeanRsFixture.Elaboration.ElabFailure :=
-  if lineOffset == 0 then
+  if doc.lineOffset == 0 then
     failure
   else
-    { failure with diagnostics := failure.diagnostics.map (offsetDiagnostic lineOffset) }
+    { failure with diagnostics := failure.diagnostics.map (doc.offsetDiagnostic) }
 
-private def resultFor (query : ModuleQuery) (fileMap : FileMap) (messages : MessageLog)
-    (trees : PersistentArray InfoTree) (diagBytes : USize) (fileLabel : String) (lineOffset : Nat) :
+private def resultFor (query : ModuleQuery) (doc : SourceDocument) (messages : MessageLog)
+    (trees : PersistentArray InfoTree) (diagBytes : USize) (fileLabel : String) :
     IO ModuleQueryResult := do
   match query with
   | .diagnostics =>
     let failure ← failureFromMessages messages diagBytes fileLabel
-    pure <| .diagnostics (offsetFailure lineOffset failure)
+    pure <| .diagnostics (doc.offsetFailure failure)
   | .typeAt line column =>
-    pure <| .typeAt (← runTypeAt fileMap trees line column lineOffset)
+    pure <| .typeAt (← runTypeAt doc trees line column)
   | .goalAt line column =>
-    pure <| .goalAt (← runGoalAt fileMap trees line column lineOffset diagBytes)
+    pure <| .goalAt (← runGoalAt doc trees line column diagBytes)
   | .references name =>
-    pure <| .references (← runReferences fileMap trees name lineOffset)
+    pure <| .references (← runReferences doc trees name)
 
 private def selectorId : ModuleQuerySelector → String
   | .diagnostics id => id
@@ -922,6 +1122,7 @@ private def selectorId : ModuleQuerySelector → String
   | .references id .. => id
   | .declarationTarget id .. => id
   | .surroundingDeclaration id .. => id
+  | .proofStateInDeclaration id .. => id
 
 private def renderedBytes (info : RenderedInfo) : Nat :=
   info.value.utf8ByteSize
@@ -995,25 +1196,27 @@ private def batchResultBytes : ModuleQueryBatchResult → Nat
   | .declarationTarget result => declarationTargetBytes result
   | .surroundingDeclaration result => surroundingDeclarationBytes result
 
-private def batchResultFor (selector : ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
+private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
-    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
     IO ModuleQueryBatchResult := do
   match selector with
   | .diagnostics _ =>
     let failure ← failureFromMessages messages budgets.perFieldBytes.toUSize fileLabel
-    pure <| .diagnostics (offsetFailure lineOffset failure)
+    pure <| .diagnostics (doc.offsetFailure failure)
   | .proofState _ line column =>
-    pure <| .proofState (← runProofState fileMap trees candidates line column lineOffset budgets)
+    pure <| .proofState (← runProofState doc trees candidates line column budgets)
+  | .proofStateInDeclaration _ declaration position =>
+    pure <| .proofState (← runProofStateInDeclaration doc trees candidates declaration position budgets)
   | .typeAt _ line column =>
-    pure <| .typeAt (← runTypeAtWith fileMap trees line column lineOffset budgets.perFieldBytes)
+    pure <| .typeAt (← runTypeAtWith doc trees line column budgets.perFieldBytes)
   | .references _ name =>
-    pure <| .references (← runReferences fileMap trees name lineOffset)
+    pure <| .references (← runReferences doc trees name)
   | .declarationTarget _ name? line? column? =>
-    pure <| .declarationTarget (selectorDeclarationTarget candidates name? line? column? lineOffset)
+    pure <| .declarationTarget (selectorDeclarationTarget doc candidates name? line? column?)
   | .surroundingDeclaration _ line column =>
     let result :=
-      match declarationAt? candidates line column lineOffset with
+      match declarationAt? doc candidates line column with
       | some candidate => .declaration candidate.info
       | none => .none
     pure <| .surroundingDeclaration result
@@ -1022,6 +1225,7 @@ private def emptyBatchResultFor (selector : ModuleQuerySelector) : ModuleQueryBa
   match selector with
   | .diagnostics _ => .diagnostics emptyFailure
   | .proofState _ .. => .proofState (.unavailable "module processing did not reach the requested context")
+  | .proofStateInDeclaration _ .. => .proofState (.unavailable "module processing did not reach the requested declaration")
   | .typeAt _ .. => .typeAt .noTerm
   | .references _ .. => .references { references := #[], truncated := false }
   | .declarationTarget _ .. => .declarationTarget .notFound
@@ -1035,9 +1239,9 @@ private def batchEnvelopeFromFailure (selectors : Array ModuleQuerySelector)
     | _ => .ok (selectorId selector) (emptyBatchResultFor selector)
   { items, totalTruncated := false }
 
-private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
+private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
-    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
     IO ModuleQueryBatchEnvelope := do
   let totalLimit := budgets.totalBytes
   let mut items : Array ModuleQueryBatchItem := #[]
@@ -1050,7 +1254,7 @@ private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelect
       totalTruncated := true
     else
       try
-        let result ← batchResultFor selector fileMap messages trees candidates budgets fileLabel lineOffset
+        let result ← batchResultFor selector doc messages trees candidates budgets fileLabel
         let bytes := batchResultBytes result
         if spent + bytes > totalLimit then
           items := items.push (.budgetExceeded id "module query selector would exceed the batch total byte budget")
@@ -1062,11 +1266,11 @@ private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelect
         items := items.push (.unavailable id (toString ex))
   pure { items, totalTruncated }
 
-private def runBatchSelectors (selectors : Array ModuleQuerySelector) (fileMap : FileMap) (messages : MessageLog)
-    (trees : PersistentArray InfoTree) (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (lineOffset : Nat) :
+private def runBatchSelectors (selectors : Array ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
+    (trees : PersistentArray InfoTree) (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
     IO ModuleQueryBatchEnvelope := do
-  let candidates ← declarationCandidates fileMap trees lineOffset
-  runBatchSelectorsWithCandidates selectors fileMap messages trees candidates budgets fileLabel lineOffset
+  let candidates ← declarationCandidates doc trees
+  runBatchSelectorsWithCandidates selectors doc messages trees candidates budgets fileLabel
 
 private def batchEnvelopeBytes (envelope : ModuleQueryBatchEnvelope) : Nat :=
   envelope.items.foldl (init := 0) fun bytes item =>
@@ -1086,13 +1290,12 @@ private def u64 (n : Nat) : UInt64 :=
 private structure ModuleSnapshot where
   fileIdentity : String
   key : String
-  fileMap : FileMap
+  document : SourceDocument
   messages : MessageLog
   trees : PersistentArray InfoTree
   candidates : Array DeclarationCandidate
   imports : Array String
   missing : Array String
-  lineOffset : Nat
   approxBytes : Nat
   lastUsedMs : Nat
 
@@ -1224,19 +1427,19 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
     let elabMicros ← elapsedMicrosSince elabStart
     let finalCmdState := st.commandState
-    let candidates ← declarationCandidates bodyInputCtx.fileMap finalCmdState.infoState.trees lineOffset
+    let document : SourceDocument := { source, bodyFileMap := bodyInputCtx.fileMap, lineOffset }
+    let candidates ← declarationCandidates document finalCmdState.infoState.trees
     let approxBytes := approxSnapshotBytes source finalCmdState.messages finalCmdState.infoState.trees candidates
     let nowMs ← IO.monoMsNow
     let snapshot : ModuleSnapshot := {
       fileIdentity := policy.fileIdentity
       key := policy.key
-      fileMap := bodyInputCtx.fileMap
+      document
       messages := finalCmdState.messages
       trees := finalCmdState.infoState.trees
       candidates
       imports := userImports
       missing
-      lineOffset
       approxBytes
       lastUsedMs := nowMs
     }
@@ -1261,57 +1464,131 @@ private def oneShotPolicy (source fileLabel : String) : ModuleQueryCachePolicy :
     maxBytes := 1
   }
 
-private def sourceRawOffset? (source : String) (line column : Nat) : Option String.Pos.Raw :=
-  if line == 0 then
-    none
-  else
-    let lines := source.splitOn "\n"
-    if line > lines.length then
-      none
-    else
-      let before := lines.take (line - 1)
-      let base := before.foldl (init := 0) fun bytes text => bytes + text.utf8ByteSize + 1
-      some ⟨base + column⟩
-
-private def replaceRawSpan (source replacement : String) (start stop : String.Pos.Raw) : String :=
-  let pfx := String.Pos.Raw.extract source 0 start
-  let suffix := String.Pos.Raw.extract source stop source.rawEndPos
-  pfx ++ replacement ++ suffix
-
-private def replaceSourceSpan? (source replacement : String) (span : ModuleSourceSpan) : Option String :=
-  match sourceRawOffset? source span.startLine span.startColumn,
-      sourceRawOffset? source span.endLine span.endColumn with
-  | some start, some stop => some (replaceRawSpan source replacement start stop)
+private def SourceDocument.replaceFileSpan? (doc : SourceDocument) (replacement : String) (span : ModuleSourceSpan) :
+    Option String :=
+  match doc.rawOffset? span.startLine span.startColumn,
+      doc.rawOffset? span.endLine span.endColumn with
+  | some start, some stop => some (doc.replaceRawSpan replacement start stop)
   | _, _ => none
 
-private def insertAt? (source insertion : String) (line column : Nat) : Option String :=
-  match sourceRawOffset? source line column with
-  | some pos => some (replaceRawSpan source insertion pos pos)
+private def SourceDocument.insertAt? (doc : SourceDocument) (insertion : String) (line column : Nat) : Option String :=
+  match doc.rawOffset? line column with
+  | some pos => some (doc.replaceRawSpan insertion pos pos)
   | none => none
 
-private def extractSourceSpan? (source : String) (span : ModuleSourceSpan) : Option String :=
-  match sourceRawOffset? source span.startLine span.startColumn,
-      sourceRawOffset? source span.endLine span.endColumn with
-  | some start, some stop => some (String.Pos.Raw.extract source start stop)
-  | _, _ => none
+private def trimTrailingNewlines (text : String) : String :=
+  Id.run do
+    let mut chars := text.toList.reverse
+    for ch in text.toList.reverse do
+      if ch == '\n' || ch == '\r' then
+        chars := chars.drop 1
+      else
+        return chars.reverse.foldl (init := "") (fun out ch => out.push ch)
+    ""
+
+private def trimLeftAscii (text : String) : String :=
+  Id.run do
+    let mut skipping := true
+    let mut out := ""
+    for ch in text.toList do
+      if skipping && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') then
+        pure ()
+      else
+        skipping := false
+        out := out.push ch
+    out
+
+private def trimAsciiSimple (text : String) : String :=
+  trimTrailingNewlines (trimLeftAscii text)
+
+private def stripOptionalByLine (text : String) : String :=
+  let trimmed := trimAsciiSimple text
+  if trimmed == "by" then
+    ""
+  else if trimmed.startsWith "by\n" then
+    String.Pos.Raw.extract trimmed ⟨3⟩ trimmed.rawEndPos
+  else if trimmed.startsWith "by\r\n" then
+    String.Pos.Raw.extract trimmed ⟨4⟩ trimmed.rawEndPos
+  else
+    text
+
+private def indentFragment (indent text : String) : String :=
+  let text := stripOptionalByLine text |> trimTrailingNewlines
+  let lines := text.splitOn "\n"
+  String.intercalate "\n" <| lines.map fun line =>
+    if trimAsciiSimple line |>.isEmpty then
+      ""
+    else
+      indent ++ trimLeftAscii line
+
+private structure ProofInsertionSite where
+  tacticBodySpan : ModuleSourceSpan
+  tacticFileSpan : ModuleSourceSpan
+  insertedBodySpan : ModuleSourceSpan
+  insertedFileSpan : ModuleSourceSpan
+  declaration : Option DeclarationTargetInfo
+  proofPosition : Option ProofPositionSummary
+
+private def SourceDocument.diagnosticStartsInBodySpan
+    (_doc : SourceDocument) (span : ModuleSourceSpan) (diagnostic : LeanRsFixture.Elaboration.Diagnostic) : Bool :=
+  match diagnostic.position with
+  | none => false
+  | some pos => SourceDocument.bodySpanContains span pos.line pos.column
+
+private def SourceDocument.splitFailureAtBodySpan
+    (doc : SourceDocument) (span : ModuleSourceSpan) (failure : LeanRsFixture.Elaboration.ElabFailure) :
+    LeanRsFixture.Elaboration.ElabFailure × LeanRsFixture.Elaboration.ElabFailure :=
+  let localDiags := failure.diagnostics.filter (doc.diagnosticStartsInBodySpan span)
+  let downstream := failure.diagnostics.filter (fun diagnostic => !doc.diagnosticStartsInBodySpan span diagnostic)
+  ({ failure with diagnostics := localDiags }, { failure with diagnostics := downstream })
 
 private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarget) :
-    Except String (ModuleSourceSpan × Option DeclarationTargetInfo) :=
+    IO (Except String (ModuleSourceSpan × Option DeclarationTargetInfo × Option ProofPositionSummary)) := do
   match edit with
-  | .replaceSpan span => .ok (span, none)
-  | .insertAt line column =>
-    .ok ({ startLine := line, startColumn := column, endLine := line, endColumn := column }, none)
-  | .declarationBody name =>
+  | .declaration name selector =>
     match declarationTargetByName snapshot.candidates name with
-    | .target info => .ok (info.bodySpan, some info)
-    | .notFound => .error s!"declaration `{name}` was not found"
-    | .ambiguous _ => .error s!"declaration `{name}` is ambiguous"
+    | .target info =>
+      let some decl := snapshot.candidates.find? (fun candidate => candidate.info.declarationName == info.declarationName)
+        | pure <| .error "resolved declaration is not available in the module snapshot"
+      let positions ← collectTacticsInDeclaration snapshot.document decl snapshot.trees
+      match selectProofPosition snapshot.document positions selector with
+      | some pos => pure <| .ok (pos.tactic.span, some decl.info, some pos.summary)
+      | none =>
+        match selector with
+        | .afterText text occurrence? =>
+          match sourceTextProofPosition? snapshot.document decl text occurrence? with
+          | some (span, summary) => pure <| .ok (span, some decl.info, some summary)
+          | none => pure <| .error "declaration has no proof position matching the selector"
+        | _ => pure <| .error "declaration has no proof position matching the selector"
+    | .notFound => pure <| .error "declaration was not found in the module"
+    | .ambiguous _ => pure <| .error "declaration name is ambiguous in the module"
 
-private def overlaySource? (source : String) (edit : ProofEditTarget) (span : ModuleSourceSpan) (text : String) :
-    Option String :=
-  match edit with
-  | .insertAt .. => insertAt? source text span.startLine span.startColumn
-  | _ => replaceSourceSpan? source text span
+private def SourceDocument.tacticInsertion? (doc : SourceDocument) (span : ModuleSourceSpan)
+    (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary) (text : String) :
+    Option (String × ProofInsertionSite) := do
+  let fileSpan := doc.bodySpanToFile span
+  let indent := doc.indentationOfLine fileSpan.endLine
+  let fragment := "\n" ++ indentFragment indent text
+  let pos ← doc.rawOffset? fileSpan.endLine fileSpan.endColumn
+  let overlay := doc.replaceRawSpan fragment pos pos
+  let (fileEndLine, fileEndColumn) := lineColumnAfterText fileSpan.endLine fileSpan.endColumn fragment
+  let (bodyEndLine, bodyEndColumn) := lineColumnAfterText span.endLine span.endColumn fragment
+  let insertedFileSpan := {
+    startLine := fileSpan.endLine, startColumn := fileSpan.endColumn,
+    endLine := fileEndLine, endColumn := fileEndColumn
+  }
+  let insertedBodySpan := {
+    startLine := span.endLine, startColumn := span.endColumn,
+    endLine := bodyEndLine, endColumn := bodyEndColumn
+  }
+  some (overlay, {
+    tacticBodySpan := span,
+    tacticFileSpan := fileSpan,
+    insertedBodySpan,
+    insertedFileSpan,
+    declaration,
+    proofPosition
+  })
 
 private def diagnosticHasError (failure : LeanRsFixture.Elaboration.ElabFailure) : Bool :=
   failure.diagnostics.any fun diagnostic =>
@@ -1340,9 +1617,9 @@ private def proofStateGoalsAfter (result : ProofStateResult) (limit : Nat) : Arr
   | .unavailable _ => (#[], false)
 
 private def attemptRowBytes (row : ProofAttemptRow) : Nat :=
-  row.id.utf8ByteSize + failureBytes row.diagnostics +
+  row.id.utf8ByteSize + failureBytes row.diagnostics + failureBytes row.downstreamDiagnostics +
     row.goals.foldl (init := 0) (fun bytes goal => bytes + renderedBytes goal) +
-    match row.safeEdit with
+    match row.declaration with
     | some info => declarationTargetInfoBytes info
     | none => 0
 
@@ -1359,43 +1636,53 @@ private def classifyAttempt
 
 private def attemptCandidate
     (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (span : ModuleSourceSpan) (safeEdit : Option DeclarationTargetInfo)
+    (heartbeats : UInt64) (diagBytes : USize) (document : SourceDocument) (span : ModuleSourceSpan)
+    (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary)
     (candidate : ProofCandidate) : IO ProofAttemptRow := do
-  let some overlay := overlaySource? request.source request.edit span candidate.text
+  let some (overlay, site) := document.tacticInsertion? span declaration proofPosition candidate.text
     | return {
         id := candidate.id, status := .failed,
         diagnostics := LeanRsFixture.Elaboration.singleErrorFailure "proof edit target is outside the source text" fileLabel,
-        goals := #[], safeEdit, outputTruncated := false
+        downstreamDiagnostics := emptyFailure,
+        goals := #[], declaration, proofPosition, outputTruncated := false
       }
   match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes (oneShotPolicy overlay fileLabel) with
   | .error (failure, _) =>
+    let (localFailure, downstreamFailure) := document.splitFailureAtBodySpan site.insertedBodySpan failure
     return {
       id := candidate.id,
       status := if diagnosticMentionsHeartbeat failure then .timeout else .failed,
-      diagnostics := failure,
+      diagnostics := localFailure,
       goals := #[],
-      safeEdit,
+      downstreamDiagnostics := downstreamFailure,
+      declaration := site.declaration,
+      proofPosition := site.proofPosition,
       outputTruncated := false
     }
   | .ok (snapshot, _) =>
     let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
-    let cursorLine := span.startLine
-    let cursorColumn := span.startColumn
+    let (localFailure, downstreamFailure) := snapshot.document.splitFailureAtBodySpan site.insertedBodySpan failure
+    let cursorLine := site.insertedFileSpan.endLine
+    let cursorColumn := site.insertedFileSpan.endColumn
     let proofState ←
-      runProofState snapshot.fileMap snapshot.trees snapshot.candidates cursorLine cursorColumn
-        snapshot.lineOffset request.budgets
+      runProofState snapshot.document snapshot.trees snapshot.candidates cursorLine cursorColumn request.budgets
     let (goals, proofStateTruncated) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
-    let status := classifyAttempt failure goals
+    let status := classifyAttempt localFailure goals
     return {
       id := candidate.id,
       status,
-      diagnostics := failure,
+      diagnostics := localFailure,
+      downstreamDiagnostics := downstreamFailure,
       goals,
-      safeEdit,
+      declaration := site.declaration,
+      proofPosition := site.proofPosition,
       outputTruncated := proofStateTruncated ||
-        match failure.truncated with
+        (match localFailure.truncated with
         | LeanRsFixture.Elaboration.Truncation.truncated => true
-        | LeanRsFixture.Elaboration.Truncation.complete => false
+        | LeanRsFixture.Elaboration.Truncation.complete => false) ||
+        (match downstreamFailure.truncated with
+        | LeanRsFixture.Elaboration.Truncation.truncated => true
+        | LeanRsFixture.Elaboration.Truncation.complete => false)
     }
 
 private def candidateCapRows (candidates : Array ProofCandidate) : Array ProofCandidate × Bool :=
@@ -1406,18 +1693,20 @@ private def attemptEnvelope
     (heartbeats : UInt64) (diagBytes : USize) (base : ModuleSnapshot) :
     IO ProofAttemptEnvelope := do
   let (candidates, candidatesTruncated) := candidateCapRows request.candidates
-  match resolveEditTarget base request.edit with
+  match ← resolveEditTarget base request.edit with
   | .error message =>
     let rows := candidates.map fun candidate => {
-      id := candidate.id,
-      status := ProofAttemptStatus.failed,
-      diagnostics := LeanRsFixture.Elaboration.singleErrorFailure message fileLabel,
-      goals := #[],
-      safeEdit := none,
-      outputTruncated := false
-    }
+          id := candidate.id,
+          status := ProofAttemptStatus.failed,
+          diagnostics := LeanRsFixture.Elaboration.singleErrorFailure message fileLabel,
+          downstreamDiagnostics := emptyFailure,
+          goals := #[],
+          declaration := none,
+          proofPosition := none,
+          outputTruncated := false
+        }
     pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
-  | .ok (span, safeEdit) =>
+  | .ok (span, declaration, proofPosition) =>
     let mut rows : Array ProofAttemptRow := #[]
     let mut spent : Nat := 0
     for candidate in candidates do
@@ -1426,12 +1715,16 @@ private def attemptEnvelope
           id := candidate.id,
           status := .budgetExceeded,
           diagnostics := emptyFailure,
+          downstreamDiagnostics := emptyFailure,
           goals := #[],
-          safeEdit,
+          declaration,
+          proofPosition,
           outputTruncated := true
         }
       else
-        let row ← attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes span safeEdit candidate
+        let row ←
+          attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes base.document span
+            declaration proofPosition candidate
         let bytes := attemptRowBytes row
         if spent + bytes > request.budgets.totalBytes then
           rows := rows.push { row with status := .budgetExceeded, outputTruncated := true }
@@ -1447,7 +1740,7 @@ private def resolveVerificationTarget (snapshot : ModuleSnapshot) (target : Decl
     DeclarationTargetResult :=
   match target with
   | .name name => declarationTargetByName snapshot.candidates name
-  | .span span => declarationTargetByPosition snapshot.candidates span.startLine span.startColumn snapshot.lineOffset
+  | .span span => declarationTargetByPosition snapshot.document snapshot.candidates span.startLine span.startColumn
 
 private def verificationFacts
     (request : DeclarationVerificationRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
@@ -1455,7 +1748,7 @@ private def verificationFacts
   let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
   let bodyText :=
     match target? with
-    | some target => (extractSourceSpan? request.source target.bodySpan).getD ""
+    | some target => (snapshot.document.extractFileSpan? target.bodySpan).getD ""
     | none => ""
   let containsSorry := containsSubstr bodyText "sorry"
   let containsAdmit := containsSubstr bodyText "admit"
@@ -1464,8 +1757,8 @@ private def verificationFacts
     match target? with
     | none => pure #[]
     | some target => do
-      let proofState ← runProofState snapshot.fileMap snapshot.trees snapshot.candidates
-        target.bodySpan.startLine target.bodySpan.startColumn snapshot.lineOffset request.budgets
+      let proofState ← runProofState snapshot.document snapshot.trees snapshot.candidates
+        target.bodySpan.startLine target.bodySpan.startColumn request.budgets
       let (goals, _) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
       pure goals
   let axioms :=
@@ -1570,7 +1863,8 @@ def processModuleQuery
     let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
     let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
     let finalCmdState := st.commandState
-    let result ← resultFor query bodyInputCtx.fileMap finalCmdState.messages finalCmdState.infoState.trees diagBytes fileLabel lineOffset
+    let document : SourceDocument := { source, bodyFileMap := bodyInputCtx.fileMap, lineOffset }
+    let result ← resultFor query document finalCmdState.messages finalCmdState.infoState.trees diagBytes fileLabel
     return wrapOutcome result
   catch ex =>
     let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
@@ -1627,9 +1921,9 @@ def processModuleQueryBatch
     let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
     let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
     let finalCmdState := st.commandState
+    let document : SourceDocument := { source, bodyFileMap := bodyInputCtx.fileMap, lineOffset }
     let result ←
-      runBatchSelectors selectors bodyInputCtx.fileMap finalCmdState.messages finalCmdState.infoState.trees
-        budgets fileLabel lineOffset
+      runBatchSelectors selectors document finalCmdState.messages finalCmdState.infoState.trees budgets fileLabel
     return wrapOutcome result
   catch ex =>
     let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
@@ -1641,8 +1935,8 @@ private def projectCachedSnapshot (snapshot : ModuleSnapshot) (selectors : Array
     IO ModuleQueryBatchCachedOutcome := do
   let projectionStart ← IO.monoMsNow
   let envelope ←
-    runBatchSelectorsWithCandidates selectors snapshot.fileMap snapshot.messages snapshot.trees snapshot.candidates
-      budgets fileLabel snapshot.lineOffset
+    runBatchSelectorsWithCandidates selectors snapshot.document snapshot.messages snapshot.trees snapshot.candidates
+      budgets fileLabel
   let projectionMicros ← elapsedMicrosSince projectionStart
   let timings := { baseTimings with projectionMicros := u64 projectionMicros }
   let facts := cacheFacts status timings (batchEnvelopeBytes envelope) cache

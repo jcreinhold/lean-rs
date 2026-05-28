@@ -70,7 +70,8 @@ pub use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerModuleSourceSpan,
     LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
     LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate,
-    LeanWorkerProofEditTarget, LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult,
-    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
+    LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary,
+    LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered,
+    LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
     LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };

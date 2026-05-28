@@ -16,6 +16,6 @@ pub use self::query::{
     ModuleQueryCacheStatus, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector,
     ModuleQueryTimings, ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope,
     ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
-    ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult,
-    TypeAtResult,
+    ProofPositionSelector, ProofPositionSummary, ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo,
+    SorryPolicy, SurroundingDeclarationResult, TypeAtResult,
 };

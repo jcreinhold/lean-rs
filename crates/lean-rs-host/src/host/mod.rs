@@ -81,7 +81,8 @@ pub use self::pool::{PoolStats, PooledSession, SessionPool};
 pub use self::process::{
     DeclarationVerificationFacts, DeclarationVerificationOutcome, DeclarationVerificationRequest,
     DeclarationVerificationStatus, DeclarationVerificationTarget, ProofAttemptEnvelope, ProofAttemptOutcome,
-    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
+    ProofPositionSummary,
 };
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
 pub use self::session::{LeanDeclarationFilter, LeanSession, LeanSourceRange, SessionStats};
