@@ -28,26 +28,23 @@ Load only the reference files needed for the task:
 
 ## Workflow
 
-1. Name the actor boundary.
-   Identify the private state, message vocabulary, reply protocol, lifecycle owner, and one reason this should be an
-   actor rather than a pure function, mutex-protected object, stream, or one-shot task.
+1. Name the actor boundary. Identify the private state, message vocabulary, reply protocol, lifecycle owner, and one
+   reason this should be an actor rather than a pure function, mutex-protected object, stream, or one-shot task.
 
-2. State semantic guarantees before coding.
-   Specify delivery, ordering, mailbox capacity, backpressure, cancellation, restart policy, and whether fairness is
-   enforced, assumed, or out of scope. Do not claim exactly-once, global FIFO, or fairness unless the runtime design
-   actually provides it.
+2. State semantic guarantees before coding. Specify delivery, ordering, mailbox capacity, backpressure, cancellation,
+   restart policy, and whether fairness is enforced, assumed, or out of scope. Do not claim exactly-once, global FIFO,
+   or fairness unless the runtime design actually provides it.
 
-3. Separate model from runtime.
-   In Lean, model actor systems as transition systems over configurations and traces. In Rust, implement a practical
-   runtime with narrow handles and private queues. Connect them by a stated simulation/refinement relation when needed.
+3. Separate model from runtime. In Lean, model actor systems as transition systems over configurations and traces. In
+   Rust, implement a practical runtime with narrow handles and private queues. Connect them by a stated
+   simulation/refinement relation when needed.
 
-4. Push complexity behind the boundary.
-   Public callers should send typed messages, await typed replies when needed, and observe structured statuses. They
-   should not manage channels, locks, task handles, raw pointers, thread initialization, or scheduler details.
+4. Push complexity behind the boundary. Public callers should send typed messages, await typed replies when needed, and
+   observe structured statuses. They should not manage channels, locks, task handles, raw pointers, thread
+   initialization, or scheduler details.
 
-5. Validate the concurrency story.
-   Prove or test single-message atomicity, mailbox bounds/backpressure, shutdown behavior, restart limits, no source of
-   shared mutable state outside the actor, and recovery after actor failure.
+5. Validate the concurrency story. Prove or test single-message atomicity, mailbox bounds/backpressure, shutdown
+   behavior, restart limits, no source of shared mutable state outside the actor, and recovery after actor failure.
 
 ## Design Defaults
 
@@ -63,8 +60,8 @@ Load only the reference files needed for the task:
 ## Lean Guidance
 
 - Define `Config`, `Event`, and a small-step relation before implementation details.
-- Model actors by identity, local behavior, mailbox contents, and private state. Keep the scheduler/interleaving relation
-  private behind `Step`.
+- Model actors by identity, local behavior, mailbox contents, and private state. Keep the scheduler/interleaving
+  relation private behind `Step`.
 - Prove safety invariants first: no duplicate in-flight reply IDs, no processing without a mailbox entry, bounded queue
   preservation, and state ownership.
 - Treat liveness and fairness as assumptions unless the scheduler model enforces them.
@@ -84,9 +81,11 @@ Load only the reference files needed for the task:
 
 - Use opaque handles with explicit create/destroy functions; do not expose Rust structs or Lean runtime objects directly
   across the ABI.
-- Define ownership for every crossing: who owns the value now, who decrements/frees it, and whether the value is borrowed.
+- Define ownership for every crossing: who owns the value now, who decrements/frees it, and whether the value is
+  borrowed.
 - Initialize the Lean runtime, modules, and Rust-created threads before calling into Lean.
-- For callbacks from foreign threads, enqueue data into the owning runtime rather than mutating Rust or Lean state directly.
+- For callbacks from foreign threads, enqueue data into the owning runtime rather than mutating Rust or Lean state
+  directly.
 - Keep cross-boundary messages serialized or represented by stable opaque IDs unless both runtimes can enforce the same
   lifetime and thread-safety contract.
 

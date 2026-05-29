@@ -19,7 +19,8 @@ semantic theorem; each source supports a different layer.
   - Design lesson: model actor identity and reconfiguration explicitly; do not assume a fixed thread/process topology.
 
 - Agha, Mason, Smith, and Talcott, "A Foundation for Actor Computation" (JFP 1997)
-  - URL: https://www.cambridge.org/core/journals/journal-of-functional-programming/article/foundation-for-actor-computation/E9A5266BA5D37A1856D50C939679F31C
+  - URL:
+    https://www.cambridge.org/core/journals/journal-of-functional-programming/article/foundation-for-actor-computation/E9A5266BA5D37A1856D50C939679F31C
   - Use for an operational-semantics view: actor configurations, open distributed systems, composability, testing
     equivalence, and fairness.
   - Design lesson: formalize actor systems as configurations and transitions before proving behavior.

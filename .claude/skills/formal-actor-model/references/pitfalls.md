@@ -27,8 +27,8 @@ for stronger guarantees.
 
 Bad sign: an actor holds a lock while awaiting, calls foreign code while holding state, or blocks a runtime worker.
 
-Fix: perform blocking work in a dedicated worker or process. Do not hold actor state across unknown blocking calls unless
-the actor is explicitly unavailable during that time.
+Fix: perform blocking work in a dedicated worker or process. Do not hold actor state across unknown blocking calls
+unless the actor is explicitly unavailable during that time.
 
 ## Shared Mutable State Outside The Actor
 
@@ -68,12 +68,15 @@ Fix: restart intensity, period, escalation, and observable unhealthy status.
 
 ## FFI Without Thread Initialization
 
-Bad sign: Rust-created threads call Lean functions or touch Lean objects without documented runtime/thread initialization.
+Bad sign: Rust-created threads call Lean functions or touch Lean objects without documented runtime/thread
+initialization.
 
-Fix: initialize the Lean runtime and each foreign thread according to Lean's FFI requirements before crossing the boundary.
+Fix: initialize the Lean runtime and each foreign thread according to Lean's FFI requirements before crossing the
+boundary.
 
 ## Over-General Frameworks
 
-Bad sign: traits, plugins, middleware, dynamic dispatch, and generic mailboxes appear before there is a second actor type.
+Bad sign: traits, plugins, middleware, dynamic dispatch, and generic mailboxes appear before there is a second actor
+type.
 
 Fix: implement one concrete actor boundary. Generalize only after repeated shape is real.

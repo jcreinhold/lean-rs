@@ -26,7 +26,8 @@ inductive Step : Config -> Event -> Config -> Prop
 
 Good constructors are:
 
-- `receive`: choose an enabled actor with a non-empty mailbox, dequeue according to mailbox policy, and run its behavior.
+- `receive`: choose an enabled actor with a non-empty mailbox, dequeue according to mailbox policy, and run its
+  behavior.
 - `send`: enqueue or record attempted delivery; model full queues explicitly.
 - `spawn`: allocate a fresh actor ID, initial state, behavior, and mailbox.
 - `stop`: remove or mark an actor as stopped, handling queued messages by the chosen policy.
