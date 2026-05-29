@@ -245,6 +245,26 @@ pub enum LeanWorkerRestartReason {
     },
 }
 
+impl LeanWorkerRestartReason {
+    /// Stable wire/policy cause name for this restart reason.
+    ///
+    /// This is intentionally smaller than the full enum payload: callers can
+    /// branch on the cause while still using the typed enum when they need
+    /// details such as limits or durations.
+    #[must_use]
+    pub const fn stable_cause(&self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::MaxRequests { .. } => "max_requests",
+            Self::MaxImports { .. } => "max_imports",
+            Self::RssCeiling { .. } => "rss_ceiling",
+            Self::Idle { .. } => "idle",
+            Self::Cancelled { .. } => "cancelled",
+            Self::RequestTimeout { .. } => "timeout",
+        }
+    }
+}
+
 /// Snapshot of worker lifecycle counters.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LeanWorkerStats {
@@ -2398,6 +2418,7 @@ mod tests {
         truncate_for_display,
     };
     use std::path::PathBuf;
+    use std::time::Duration;
 
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
@@ -2462,6 +2483,35 @@ mod tests {
         assert_eq!(snapshot.last_exit, Some(exit));
         assert_eq!(snapshot.last_rss_kib, Some(42));
         assert_eq!(snapshot.rss_samples_unavailable, 1);
+    }
+
+    #[test]
+    fn restart_reason_exposes_stable_policy_cause() {
+        assert_eq!(LeanWorkerRestartReason::Explicit.stable_cause(), "explicit");
+        assert_eq!(
+            LeanWorkerRestartReason::MaxRequests { limit: 1 }.stable_cause(),
+            "max_requests"
+        );
+        assert_eq!(
+            LeanWorkerRestartReason::MaxImports { limit: 1 }.stable_cause(),
+            "max_imports"
+        );
+        assert_eq!(
+            LeanWorkerRestartReason::RssCeiling {
+                current_kib: 2,
+                limit_kib: 1,
+            }
+            .stable_cause(),
+            "rss_ceiling"
+        );
+        assert_eq!(
+            LeanWorkerRestartReason::RequestTimeout {
+                operation: "test",
+                duration: Duration::from_millis(1),
+            }
+            .stable_cause(),
+            "timeout"
+        );
     }
 
     #[test]
