@@ -30,8 +30,8 @@ use crate::session::{
     LeanWorkerSessionConfig,
 };
 use crate::supervisor::{
-    LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy,
-    LeanWorkerRestartReason, LeanWorkerStats, LeanWorkerStatus,
+    LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError,
+    LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats, LeanWorkerStatus,
 };
 
 const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
@@ -888,6 +888,12 @@ impl LeanWorkerCapability {
         self.worker.stats()
     }
 
+    /// Return policy-facing lifecycle facts for this worker.
+    #[must_use]
+    pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
+        self.worker.lifecycle_snapshot()
+    }
+
     /// Return the current worker lifecycle status.
     ///
     /// # Errors
@@ -1143,6 +1149,12 @@ impl LeanWorkerHostHandle {
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {
         self.worker.stats()
+    }
+
+    /// Return policy-facing lifecycle facts for this worker.
+    #[must_use]
+    pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
+        self.worker.lifecycle_snapshot()
     }
 
     /// Return the current worker lifecycle status.
@@ -1599,6 +1611,7 @@ fn check_from_open_error(err: &LeanWorkerError) -> LeanWorkerBootstrapCheck {
         | LeanWorkerError::WorkerPoolExhausted { .. }
         | LeanWorkerError::WorkerPoolMemoryBudgetExceeded { .. }
         | LeanWorkerError::WorkerPoolQueueTimeout { .. }
+        | LeanWorkerError::RestartLimitExceeded { .. }
         | LeanWorkerError::UnsupportedRequest { .. }
         | LeanWorkerError::Wait { .. }) => LeanWorkerBootstrapCheck::error(
             LeanWorkerBootstrapDiagnosticCode::WorkerStartupFailed,

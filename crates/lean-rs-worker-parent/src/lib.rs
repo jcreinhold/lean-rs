@@ -40,8 +40,8 @@ pub use session::{
 };
 pub use supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig,
-    LeanWorkerError, LeanWorkerExit, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
-    LeanWorkerStatus,
+    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
+    LeanWorkerStats, LeanWorkerStatus,
 };
 
 // Curated re-exports of the wire types that appear on this crate's public

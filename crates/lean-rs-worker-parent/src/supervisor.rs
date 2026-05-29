@@ -3,11 +3,10 @@ use std::fmt;
 use std::io::{BufReader, BufWriter, Read as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
-
-use std::sync::Mutex;
 
 use lean_rs_worker_protocol::protocol::{
     HostSessionMode, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, Message, Request, Response,
@@ -295,6 +294,46 @@ pub struct LeanWorkerStats {
     pub backpressure_failures: u64,
 }
 
+/// Compact lifecycle facts for callers that supervise a worker boundary.
+///
+/// `LeanWorkerStats` remains the detailed counter set. This snapshot is the
+/// stable, policy-facing view: a caller can compare two snapshots to observe
+/// every restart performed inside the supervisor, including restarts caused by
+/// timeout, cancellation, RSS limits, import/request cycling, or explicit
+/// cycles.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerLifecycleSnapshot {
+    /// Monotone generation number for the current child. It equals the total
+    /// restart count observed by this supervisor.
+    pub worker_generation: u64,
+    /// Total restarts performed by the supervisor.
+    pub restarts: u64,
+    /// Child exits observed by the supervisor, including policy cycles.
+    pub exits: u64,
+    /// Most recent restart reason, if any.
+    pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    /// Most recent child exit observed by the supervisor, if any.
+    pub last_exit: Option<LeanWorkerExit>,
+    /// Last measured child RSS in KiB, when available.
+    pub last_rss_kib: Option<u64>,
+    /// RSS checks skipped because the platform did not provide a usable sample.
+    pub rss_samples_unavailable: u64,
+}
+
+impl LeanWorkerLifecycleSnapshot {
+    fn from_worker(stats: &LeanWorkerStats, last_exit: Option<LeanWorkerExit>) -> Self {
+        Self {
+            worker_generation: stats.restarts,
+            restarts: stats.restarts,
+            exits: stats.exits,
+            last_restart_reason: stats.last_restart_reason.clone(),
+            last_exit,
+            last_rss_kib: stats.last_rss_kib,
+            rss_samples_unavailable: stats.rss_samples_unavailable,
+        }
+    }
+}
+
 impl LeanWorkerStats {
     fn record_restart(&mut self, reason: LeanWorkerRestartReason) {
         self.restarts = self.restarts.saturating_add(1);
@@ -445,6 +484,8 @@ pub enum LeanWorkerError {
     WorkerPoolMemoryBudgetExceeded { current_kib: u64, limit_kib: u64 },
     /// Waiting for local worker-pool admission exceeded the configured limit.
     WorkerPoolQueueTimeout { waited: Duration },
+    /// A supervising policy refused to restart the worker again in its current window.
+    RestartLimitExceeded { restarts: u64, window: Duration },
     /// The public supervisor does not support the requested operation.
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
@@ -548,6 +589,12 @@ impl fmt::Display for LeanWorkerError {
             Self::WorkerPoolQueueTimeout { waited } => {
                 write!(f, "worker pool admission timed out after {waited:?}")
             }
+            Self::RestartLimitExceeded { restarts, window } => {
+                write!(
+                    f,
+                    "worker restart limit exceeded after {restarts} restarts in {window:?}"
+                )
+            }
             Self::UnsupportedRequest { operation } => {
                 write!(f, "worker operation {operation} is not supported")
             }
@@ -587,6 +634,7 @@ impl std::error::Error for LeanWorkerError {
             | Self::WorkerPoolExhausted { .. }
             | Self::WorkerPoolMemoryBudgetExceeded { .. }
             | Self::WorkerPoolQueueTimeout { .. }
+            | Self::RestartLimitExceeded { .. }
             | Self::UnsupportedRequest { .. } => None,
         }
     }
@@ -827,6 +875,12 @@ impl LeanWorker {
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {
         self.stats.clone()
+    }
+
+    /// Return policy-facing lifecycle facts for this supervisor.
+    #[must_use]
+    pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
+        LeanWorkerLifecycleSnapshot::from_worker(&self.stats, self.last_exit.clone())
     }
 
     /// Return protocol/runtime facts reported by the worker child.
@@ -2339,8 +2393,9 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{
-        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, MAX_FRAME_BYTES,
-        MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, truncate_for_display,
+        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot,
+        LeanWorkerRestartReason, LeanWorkerStats, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES,
+        truncate_for_display,
     };
     use std::path::PathBuf;
 
@@ -2384,6 +2439,29 @@ mod tests {
     fn max_frame_bytes_passes_through_in_range() {
         let config = dummy_config().max_frame_bytes(8 * 1024 * 1024);
         assert_eq!(config.max_frame_bytes, 8 * 1024 * 1024);
+    }
+
+    #[test]
+    fn lifecycle_snapshot_exposes_restart_generation() {
+        let stats = LeanWorkerStats {
+            restarts: 3,
+            exits: 2,
+            last_restart_reason: Some(LeanWorkerRestartReason::RequestTimeout {
+                operation: "test",
+                duration: std::time::Duration::from_secs(1),
+            }),
+            last_rss_kib: Some(42),
+            rss_samples_unavailable: 1,
+            ..LeanWorkerStats::default()
+        };
+        let exit = exit_with("bye", false);
+        let snapshot = LeanWorkerLifecycleSnapshot::from_worker(&stats, Some(exit.clone()));
+        assert_eq!(snapshot.worker_generation, 3);
+        assert_eq!(snapshot.restarts, 3);
+        assert_eq!(snapshot.exits, 2);
+        assert_eq!(snapshot.last_exit, Some(exit));
+        assert_eq!(snapshot.last_rss_kib, Some(42));
+        assert_eq!(snapshot.rss_samples_unavailable, 1);
     }
 
     #[test]
