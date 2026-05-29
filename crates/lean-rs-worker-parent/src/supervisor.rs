@@ -71,6 +71,8 @@ pub struct LeanWorkerConfig {
     startup_timeout: Duration,
     request_timeout: Duration,
     restart_policy: LeanWorkerRestartPolicy,
+    rss_hard_limit_kib: Option<u64>,
+    rss_sample_interval: Duration,
     max_frame_bytes: u32,
 }
 
@@ -84,6 +86,8 @@ impl LeanWorkerConfig {
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
             restart_policy: LeanWorkerRestartPolicy::default(),
+            rss_hard_limit_kib: None,
+            rss_sample_interval: Duration::from_millis(250),
             max_frame_bytes: MAX_FRAME_BYTES,
         }
     }
@@ -145,6 +149,19 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = policy;
+        self
+    }
+
+    /// Kill and replace the worker during an in-flight request if its RSS is
+    /// sampled at or above `limit_kib`.
+    ///
+    /// This is a protective hard stop, not a throughput optimization. The
+    /// request that crosses the limit returns
+    /// [`LeanWorkerError::RssHardLimitExceeded`] after the child is replaced.
+    #[must_use]
+    pub fn rss_hard_limit(mut self, limit_kib: u64, sample_interval: Duration) -> Self {
+        self.rss_hard_limit_kib = Some(limit_kib.max(1));
+        self.rss_sample_interval = sample_interval.max(Duration::from_millis(1));
         self
     }
 
@@ -234,6 +251,12 @@ pub enum LeanWorkerRestartReason {
     MaxImports { limit: u64 },
     /// Child resident set size reached the configured limit.
     RssCeiling { current_kib: u64, limit_kib: u64 },
+    /// Child resident set size crossed the hard in-flight kill limit.
+    RssHardLimit {
+        operation: &'static str,
+        current_kib: u64,
+        limit_kib: u64,
+    },
     /// Worker was idle at least as long as the configured limit.
     Idle { idle_for: Duration, limit: Duration },
     /// Parent-side cancellation replaced the child during an in-flight request.
@@ -258,6 +281,7 @@ impl LeanWorkerRestartReason {
             Self::MaxRequests { .. } => "max_requests",
             Self::MaxImports { .. } => "max_imports",
             Self::RssCeiling { .. } => "rss_ceiling",
+            Self::RssHardLimit { .. } => "rss_hard_limit",
             Self::Idle { .. } => "idle",
             Self::Cancelled { .. } => "cancelled",
             Self::RequestTimeout { .. } => "timeout",
@@ -370,6 +394,9 @@ impl LeanWorkerStats {
             LeanWorkerRestartReason::RssCeiling { .. } => {
                 self.rss_restarts = self.rss_restarts.saturating_add(1);
             }
+            LeanWorkerRestartReason::RssHardLimit { .. } => {
+                self.rss_restarts = self.rss_restarts.saturating_add(1);
+            }
             LeanWorkerRestartReason::Idle { .. } => {
                 self.idle_restarts = self.idle_restarts.saturating_add(1);
             }
@@ -459,6 +486,13 @@ pub enum LeanWorkerError {
         operation: &'static str,
         duration: Duration,
     },
+    /// The worker was killed and replaced because an in-flight RSS sample
+    /// crossed the hard parent-side limit.
+    RssHardLimitExceeded {
+        operation: &'static str,
+        current_kib: u64,
+        limit_kib: u64,
+    },
     /// A parent-side cancellation token was observed.
     Cancelled { operation: &'static str },
     /// A parent-side progress sink panicked while handling a worker event.
@@ -546,6 +580,16 @@ impl fmt::Display for LeanWorkerError {
             Self::ChildPanicOrAbort { exit } => write_exit(f, "worker exited fatally", exit),
             Self::Timeout { operation, duration } => {
                 write!(f, "worker operation {operation} timed out after {duration:?}")
+            }
+            Self::RssHardLimitExceeded {
+                operation,
+                current_kib,
+                limit_kib,
+            } => {
+                write!(
+                    f,
+                    "worker operation {operation} exceeded hard RSS limit; current_kib={current_kib} limit_kib={limit_kib}"
+                )
             }
             Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
@@ -636,6 +680,7 @@ impl std::error::Error for LeanWorkerError {
             | Self::ChildExited { .. }
             | Self::ChildPanicOrAbort { .. }
             | Self::Timeout { .. }
+            | Self::RssHardLimitExceeded { .. }
             | Self::Cancelled { .. }
             | Self::ProgressPanic { .. }
             | Self::DataSinkPanic { .. }
@@ -1830,6 +1875,35 @@ impl LeanWorker {
         Ok(())
     }
 
+    fn check_hard_rss_limit(&mut self, operation: &'static str) -> Result<(), LeanWorkerError> {
+        let Some(limit_kib) = self.config.rss_hard_limit_kib else {
+            return Ok(());
+        };
+        match self.child_rss_kib() {
+            Some(current_kib) if current_kib >= limit_kib => {
+                self.stats.last_rss_kib = Some(current_kib);
+                self.restart_with_reason(LeanWorkerRestartReason::RssHardLimit {
+                    operation,
+                    current_kib,
+                    limit_kib,
+                })?;
+                Err(LeanWorkerError::RssHardLimitExceeded {
+                    operation,
+                    current_kib,
+                    limit_kib,
+                })
+            }
+            Some(current_kib) => {
+                self.stats.last_rss_kib = Some(current_kib);
+                Ok(())
+            }
+            None => {
+                self.stats.rss_samples_unavailable = self.stats.rss_samples_unavailable.saturating_add(1);
+                Ok(())
+            }
+        }
+    }
+
     fn read_response(&mut self, operation: &'static str) -> Result<Response, LeanWorkerError> {
         self.read_response_with_events(operation, None, None, None, None)
     }
@@ -1889,6 +1963,7 @@ impl LeanWorker {
         let _reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
 
         loop {
+            self.check_hard_rss_limit(operation)?;
             let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
                 Some(remaining) if remaining.is_zero() => {
                     if streaming {
@@ -1903,27 +1978,38 @@ impl LeanWorker {
                         duration: timeout,
                     });
                 }
-                Some(remaining) => match receiver.recv_timeout(remaining) {
-                    Ok(event) => event,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        if streaming {
-                            self.record_stream_failure(started, request_backpressure_waits);
+                Some(remaining) => {
+                    let hard_watch_enabled = self.config.rss_hard_limit_kib.is_some();
+                    let wait_for = if hard_watch_enabled {
+                        remaining.min(self.config.rss_sample_interval)
+                    } else {
+                        remaining
+                    };
+                    match receiver.recv_timeout(wait_for) {
+                        Ok(event) => event,
+                        Err(mpsc::RecvTimeoutError::Timeout) if hard_watch_enabled && wait_for < remaining => {
+                            continue;
                         }
-                        self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
-                            operation,
-                            duration: timeout,
-                        })?;
-                        return Err(LeanWorkerError::Timeout {
-                            operation,
-                            duration: timeout,
-                        });
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if streaming {
+                                self.record_stream_failure(started, request_backpressure_waits);
+                            }
+                            self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
+                                operation,
+                                duration: timeout,
+                            })?;
+                            return Err(LeanWorkerError::Timeout {
+                                operation,
+                                duration: timeout,
+                            });
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            return Err(LeanWorkerError::Protocol {
+                                message: "worker response reader exited without a terminal response".to_owned(),
+                            });
+                        }
                     }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        return Err(LeanWorkerError::Protocol {
-                            message: "worker response reader exited without a terminal response".to_owned(),
-                        });
-                    }
-                },
+                }
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_err) => {
@@ -2463,6 +2549,13 @@ mod tests {
     }
 
     #[test]
+    fn rss_hard_limit_config_clamps_to_nonzero_policy() {
+        let config = dummy_config().rss_hard_limit(0, Duration::ZERO);
+        assert_eq!(config.rss_hard_limit_kib, Some(1));
+        assert_eq!(config.rss_sample_interval, Duration::from_millis(1));
+    }
+
+    #[test]
     fn lifecycle_snapshot_exposes_restart_generation() {
         let stats = LeanWorkerStats {
             restarts: 3,
@@ -2503,6 +2596,15 @@ mod tests {
             }
             .stable_cause(),
             "rss_ceiling"
+        );
+        assert_eq!(
+            LeanWorkerRestartReason::RssHardLimit {
+                operation: "test",
+                current_kib: 2,
+                limit_kib: 1,
+            }
+            .stable_cause(),
+            "rss_hard_limit"
         );
         assert_eq!(
             LeanWorkerRestartReason::RequestTimeout {

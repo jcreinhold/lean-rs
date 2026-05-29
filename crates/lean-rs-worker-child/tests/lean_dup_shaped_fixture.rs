@@ -295,7 +295,7 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
         }
         assert_eq!(sink.rows().len(), 1, "pre-timeout row is tentative");
     }
-    assert_eq!(timeout_capability.worker().stats().timeout_restarts, 1);
+    assert_eq!(timeout_capability.stats().timeout_restarts, 1);
 
     let token = LeanWorkerCancellationToken::new();
     let cancel_sink = CancelAfterFirstRow {
@@ -325,7 +325,7 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
     }
     assert_eq!(cancel_sink.rows().len(), 1);
     assert_eq!(
-        cancel_capability.worker().stats().last_restart_reason,
+        cancel_capability.stats().last_restart_reason,
         Some(LeanWorkerRestartReason::Cancelled {
             operation: "worker_run_data_stream",
         }),
@@ -362,9 +362,9 @@ fn worker_cycle_leaves_shape_fixture_usable() {
         assert_eq!(version.worker, "lean-rs-worker-fixture");
     }
 
-    capability.worker_mut().cycle().expect("worker cycle succeeds");
+    capability.cycle().expect("worker cycle succeeds");
     assert_eq!(
-        capability.worker().stats().last_restart_reason,
+        capability.stats().last_restart_reason,
         Some(LeanWorkerRestartReason::Explicit)
     );
 

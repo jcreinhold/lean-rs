@@ -57,8 +57,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     demonstrate_timeout(&mut capability)?;
 
-    capability.worker_mut().cycle()?;
-    println!("cycle restarts={}", capability.worker().stats().restarts);
+    capability.cycle()?;
+    println!("cycle restarts={}", capability.stats().restarts);
 
     let post_cycle = run_index(&mut capability, "post_cycle")?;
     println!("post_cycle total_rows={}", post_cycle.total_rows);
@@ -124,9 +124,7 @@ fn demonstrate_timeout(capability: &mut LeanWorkerCapability) -> Result<(), Box<
     match err {
         Err(LeanWorkerError::Timeout { operation, duration }) => {
             println!("timeout operation={operation} duration_ms={}", duration.as_millis());
-            capability
-                .worker_mut()
-                .set_request_timeout(LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT);
+            capability.set_request_timeout(LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT);
             Ok(())
         }
         Err(other) => Err(format!("expected timeout, got {other:?}").into()),

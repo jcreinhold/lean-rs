@@ -126,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .worker_executable(worker_binary())
     .open()?;
     let parent_rss_before = parent_rss_kib();
-    let child_rss_before = capability.worker_mut().rss_kib();
+    let child_rss_before = capability.rss_kib();
     let alloc_before = dhat::HeapStats::get();
     let started = Instant::now();
 
@@ -150,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = started.elapsed();
     let alloc_after = dhat::HeapStats::get();
-    let child_rss_after = capability.worker_mut().rss_kib();
+    let child_rss_after = capability.rss_kib();
     let parent_rss_after = parent_rss_kib();
     let rows = summary.total_rows;
     let rows_per_second = if elapsed.as_secs_f64() == 0.0 {
@@ -181,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("summary_ok={:?}", summary.metadata.as_ref().map(|metadata| metadata.ok));
 
     let parent_rss_before = parent_rss_kib();
-    let child_rss_before = capability.worker_mut().rss_kib();
+    let child_rss_before = capability.rss_kib();
     let alloc_before = dhat::HeapStats::get();
     let started = Instant::now();
     let sink = LargeCountingSink::default();
@@ -204,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = started.elapsed();
     let alloc_after = dhat::HeapStats::get();
-    let child_rss_after = capability.worker_mut().rss_kib();
+    let child_rss_after = capability.rss_kib();
     let parent_rss_after = parent_rss_kib();
     let rows = summary.total_rows;
     let rows_per_second = if elapsed.as_secs_f64() == 0.0 {

@@ -728,7 +728,7 @@ fn restart_policy_override_is_applied_during_builder_startup() {
         .open()
         .expect("builder opens capability with restart policy");
 
-    let stats = capability.worker().stats();
+    let stats = capability.stats();
     assert!(
         stats.max_request_restarts >= 1,
         "health then session-open should trigger the max-request restart policy, stats={stats:?}",

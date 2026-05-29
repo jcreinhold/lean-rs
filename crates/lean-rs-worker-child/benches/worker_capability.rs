@@ -242,8 +242,8 @@ fn bench_operational_shape(c: &mut Criterion) {
     group.bench_function("worker_cycle", |b| {
         b.iter(|| {
             let mut capability = capability_builder().open().expect("capability opens");
-            capability.worker_mut().cycle().expect("worker cycle succeeds");
-            std::hint::black_box(capability.worker().stats().restarts);
+            capability.cycle().expect("worker cycle succeeds");
+            std::hint::black_box(capability.stats().restarts);
         });
     });
 

@@ -66,8 +66,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let first = run_stream_once(&mut capability, &request, "initial")?;
     println!("initial_stream_rows={first}");
 
-    capability.worker_mut().cycle()?;
-    println!("worker_cycle_restarts={}", capability.worker().stats().restarts);
+    capability.cycle()?;
+    println!("worker_cycle_restarts={}", capability.stats().restarts);
 
     let second = run_stream_once(&mut capability, &request, "after_cycle")?;
     println!("post_cycle_stream_rows={second}");

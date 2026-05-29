@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .open()?;
     let cold_start = cold_started.elapsed();
-    let child_rss_after_start = capability.worker_mut().rss_kib();
+    let child_rss_after_start = capability.rss_kib();
 
     let import_started = Instant::now();
     {
@@ -52,13 +52,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fatal_elapsed = fatal_started.elapsed();
 
     let cycle_started = Instant::now();
-    capability.worker_mut().cycle()?;
+    capability.cycle()?;
     let cycle_elapsed = cycle_started.elapsed();
 
     let post_cycle_rows = run_stream(&mut capability, "lean_rs_interop_consumer_worker_shape_extract")?;
-    let child_rss_after = capability.worker_mut().rss_kib();
+    let child_rss_after = capability.rss_kib();
     let parent_rss_after = parent_rss_kib();
-    let stats = capability.worker().stats();
+    let stats = capability.stats();
 
     println!("workload=worker_capability_probe");
     println!("cold_start_ms={:.3}", cold_start.as_secs_f64() * 1000.0);

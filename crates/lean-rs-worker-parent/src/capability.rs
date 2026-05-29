@@ -68,6 +68,7 @@ pub struct LeanWorkerCapabilityBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     metadata_check: Option<CapabilityMetadataCheck>,
     max_frame_bytes: Option<u32>,
@@ -99,6 +100,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            rss_hard_limit: None,
             module_cache_limits: None,
             metadata_check: None,
             max_frame_bytes: None,
@@ -139,6 +141,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            rss_hard_limit: None,
             module_cache_limits: None,
             metadata_check: None,
             max_frame_bytes: None,
@@ -188,6 +191,14 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Configure the parent-side hard RSS kill watchdog for in-flight worker
+    /// requests.
+    #[must_use]
+    pub fn rss_hard_limit(mut self, limit_kib: u64, sample_interval: Duration) -> Self {
+        self.rss_hard_limit = Some((limit_kib.max(1), sample_interval.max(Duration::from_millis(1))));
         self
     }
 
@@ -412,6 +423,7 @@ impl LeanWorkerCapabilityBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.restart_policy,
+            self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
         )?;
@@ -468,6 +480,7 @@ pub struct LeanWorkerHostHandleBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
 }
@@ -531,6 +544,7 @@ impl LeanWorkerHostHandleBuilder {
             startup_timeout: None,
             request_timeout: None,
             restart_policy: None,
+            rss_hard_limit: None,
             module_cache_limits: None,
             max_frame_bytes: None,
         }
@@ -575,6 +589,14 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn restart_policy(mut self, policy: LeanWorkerRestartPolicy) -> Self {
         self.restart_policy = Some(policy);
+        self
+    }
+
+    /// Configure the parent-side hard RSS kill watchdog for in-flight worker
+    /// requests.
+    #[must_use]
+    pub fn rss_hard_limit(mut self, limit_kib: u64, sample_interval: Duration) -> Self {
+        self.rss_hard_limit = Some((limit_kib.max(1), sample_interval.max(Duration::from_millis(1))));
         self
     }
 
@@ -647,6 +669,7 @@ impl LeanWorkerHostHandleBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.restart_policy,
+            self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
         )?;
@@ -1311,6 +1334,7 @@ fn spawn_checked_worker(
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
 ) -> Result<LeanWorker, LeanWorkerError> {
@@ -1328,6 +1352,9 @@ fn spawn_checked_worker(
     }
     if let Some(policy) = restart_policy {
         config = config.restart_policy(policy);
+    }
+    if let Some((limit_kib, sample_interval)) = rss_hard_limit {
+        config = config.rss_hard_limit(limit_kib, sample_interval);
     }
     if let Some(limits) = module_cache_limits.as_ref() {
         config = apply_module_cache_limits(config, limits);
@@ -1594,6 +1621,7 @@ fn check_from_open_error(err: &LeanWorkerError) -> LeanWorkerBootstrapCheck {
         | LeanWorkerError::ChildExited { .. }
         | LeanWorkerError::ChildPanicOrAbort { .. }
         | LeanWorkerError::Timeout { .. }
+        | LeanWorkerError::RssHardLimitExceeded { .. }
         | LeanWorkerError::Cancelled { .. }
         | LeanWorkerError::ProgressPanic { .. }
         | LeanWorkerError::DataSinkPanic { .. }
