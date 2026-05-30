@@ -5,18 +5,27 @@ belongs to Lean/Rust interop itself, not to the theorem-prover host session mode
 
 ## Package Boundary
 
-The packaged same-process copy lives under
+The canonical copy lives under
 [`crates/lean-rs/shims/lean-rs-interop-shims/`](../../crates/lean-rs/shims/lean-rs-interop-shims/). `lean-rs-host`
 carries its own bundled copy under
 [`crates/lean-rs-host/shims/lean-rs-interop-shims/`](../../crates/lean-rs-host/shims/lean-rs-interop-shims/) so the host
 crate can build and load its shims without reaching into another crate's source directory at runtime. Its public Lean
 namespace is `LeanRsInterop`.
 
+The two copies are duplicated, not shared: a published crate's `Cargo.toml` `include` cannot reach outside its own
+directory, so each crate must vendor a self-contained copy. The copies **must be byte-identical** — the host copy is the
+canonical copy verbatim, never a host-trimmed subset (it carries `Callback.String` and `Worker.Stream` even though
+`lean-rs-host-shims` imports only `Callback.Tick`). The
+[`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces this; edit the canonical
+copy and copy it over the host one, never one alone.
+
 Current modules:
 
 - `LeanRsInterop.Callback.Tick`: tick callback helper for `LeanCallbackHandle<LeanProgressTick>`.
 - `LeanRsInterop.Callback.String`: string callback helper for `LeanCallbackHandle<LeanStringEvent>`.
 - `LeanRsInterop.Callback`: roll-up module that imports both payload-specific helper namespaces.
+- `LeanRsInterop.Worker.Stream`: callback-envelope helpers for worker row streaming. See
+  [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md).
 
 Name, byte, and object helpers belong in this package when a real caller needs them. They are not present yet, because
 unused helpers would widen the shim surface without hiding any current complexity.

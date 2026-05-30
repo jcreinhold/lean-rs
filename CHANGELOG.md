@@ -9,6 +9,17 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Guarded the bundled interop shim copy against drift
+
+`lean-rs-host`'s bundled `lean-rs-interop-shims` is now a verbatim copy of the canonical package under
+`crates/lean-rs/shims/lean-rs-interop-shims`. The host copy had silently drifted — it was missing
+`LeanRsInterop.Worker.Stream` (the worker row-streaming helpers), which had been added to the canonical copy alone. The
+host copy is meant to be the full generic package, not a host-trimmed subset (it already carried `Callback.String`,
+which the host policy shims also do not import), so the missing module was negligent drift, not design. `Worker.Stream`
+is added to the host copy, and a new `interop_shims_parity` test asserts the two copies are byte-identical so they
+cannot diverge again. The duplication itself is structural — a published crate's `Cargo.toml` `include` cannot reach
+into another crate's directory, so each crate vendors its own self-contained copy.
+
 ### Removed the obsolete `lake/` shim package mirror
 
 Deleted `lake/lean-rs-host-shims` and `lake/lean-rs-interop-shims`. These were the standalone Lake packages from the
