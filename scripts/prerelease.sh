@@ -370,7 +370,8 @@ if command -v actionlint >/dev/null 2>&1; then
 		actionlint \
 		"$REPO_ROOT/.github/workflows/ci.yml" \
 		"$REPO_ROOT/.github/workflows/release.yml" \
-		"$REPO_ROOT/.github/workflows/sanitizer.yml"
+		"$REPO_ROOT/.github/workflows/sanitizer.yml" \
+		"$REPO_ROOT/.github/workflows/compile-fail.yml"
 else
 	log_warn "actionlint not installed; skipping (install: go install github.com/rhysd/actionlint/cmd/actionlint@latest)"
 	SKIPPED+=("actionlint workflows")

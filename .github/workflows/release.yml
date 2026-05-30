@@ -156,7 +156,7 @@ jobs:
 
       - name: actionlint workflows
         if: matrix.os == 'ubuntu-latest'
-        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
+        run: actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml .github/workflows/compile-fail.yml
 
       # See `ci.yml` for the rationale on `RUST_BACKTRACE=0` and
       # `LD_PRELOAD=libgcc_s.so.1` here.

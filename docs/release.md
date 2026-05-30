@@ -39,7 +39,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 python3 scripts/check_package_docsrs.py
 cargo package --workspace --no-verify
-actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml
+actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml .github/workflows/compile-fail.yml
 ```
 
 Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/testing.md`](testing.md).
