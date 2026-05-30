@@ -48,11 +48,10 @@ case "$GIT_DIR" in /*) ;; *) GIT_DIR="$REPO_ROOT/$GIT_DIR" ;; esac
 SNAPSHOT_DIR="$GIT_DIR/test-all-toolchains.snapshot"
 
 # Lake packages the in-workspace test suite builds and the host loader opens at
-# runtime. These are the load-bearing copies — what CI builds and what the
-# runtime `dlopen`s. (`lake/lean-rs-*-shims` are the *published* consumer copies
-# that downstream projects `require` over git; they are repointed for pin
-# consistency below but not rebuilt here, because the workspace suite never
-# loads them.)
+# runtime — the load-bearing shim copies. They are bundled into the published
+# `lean-rs` / `lean-rs-host` crates (each crate's `Cargo.toml` `include` ships
+# `shims/**`) and built on demand by the Rust loader; CI builds the same copies.
+# These crate-bundled packages are the only shim copies in the repo.
 LAKE_PACKAGES=(
 	"crates/lean-rs/shims/lean-rs-interop-shims"
 	"crates/lean-rs-host/shims/lean-rs-interop-shims"

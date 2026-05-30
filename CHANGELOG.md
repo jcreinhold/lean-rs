@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Removed the obsolete `lake/` shim package mirror
+
+Deleted `lake/lean-rs-host-shims` and `lake/lean-rs-interop-shims`. These were the standalone Lake packages from the
+original hybrid layout (v0.1.0), back when downstream consumers `require`d the host shims over git. Once the shim
+packages were bundled into the `lean-rs` and `lean-rs-host` crates — shipped via each crate's `Cargo.toml` `include` and
+built on demand by the Rust loader — the `lake/` copies became an unreferenced mirror that had drifted stale (they never
+received the string-callback C path). Nothing in the build, tests, fixtures, or current docs referenced them. The
+authoritative copies remain under `crates/lean-rs/shims/lean-rs-interop-shims`,
+`crates/lean-rs-host/shims/lean-rs-interop-shims`, and `crates/lean-rs-host/shims/lean-rs-host-shims`.
+
 ### Lean 4.31.0-rc1 added to the supported window
 
 `leanprover/lean4:v4.31.0-rc1` is now a supported and CI-tested toolchain (new `lean.h` digest; layout and
