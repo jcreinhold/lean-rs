@@ -5,8 +5,11 @@
 //!    look up the matching [`SupportedToolchain`](crate::SupportedToolchain)
 //!    entry. The build fails if no entry matches.
 //! 3. Emit `cargo:rustc-env=…` so `src/consts.rs` can `env!("…")` the resolved
-//!    version, header path, and digest, plus a `cargo:rustc-cfg=lean_v_X_Y_Z`
-//!    so downstream code can `#[cfg]`-gate per-version divergences.
+//!    version, header path, and digest, plus the version `cfg` flags
+//!    (`lean_v_X_Y_Z` exact-equality and `lean_at_least_X_Y` lower-bound) so
+//!    downstream code can `#[cfg]`-gate per-version divergences, each paired
+//!    with a `rustc-check-cfg` over the whole window so the gates stay
+//!    lint-clean for the non-active versions too.
 //! 4. Emit `cargo:rustc-link-search` / `rustc-link-lib` directives for the
 //!    selected feature combination (`static` vs `dynamic`, with or without
 //!    `mimalloc`).
@@ -76,7 +79,7 @@ fn main() {
     println!("cargo:rustc-env=LEAN_RESOLVED_VERSION={resolved_version}");
     println!("cargo:rustc-env=LEAN_HEADER_PATH={}", header_path.display());
     println!("cargo:rustc-env=LEAN_HEADER_DIGEST={actual_digest}");
-    println!("cargo:rustc-cfg=lean_v_{}", cfg_token(resolved_version));
+    emit_version_cfgs(resolved_version);
 
     emit_link_directives(&prefix);
 
@@ -106,7 +109,7 @@ fn emit_docs_rs_metadata() {
     println!("cargo:rustc-env=LEAN_RESOLVED_VERSION={resolved_version}");
     println!("cargo:rustc-env=LEAN_HEADER_PATH=<docs.rs synthetic lean.h>");
     println!("cargo:rustc-env=LEAN_HEADER_DIGEST={}", entry.header_digest);
-    println!("cargo:rustc-cfg=lean_v_{}", cfg_token(resolved_version));
+    emit_version_cfgs(resolved_version);
     println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-changed=src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
@@ -136,6 +139,77 @@ fn cfg_token(version: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
         .collect()
+}
+
+/// Extract the `(major, minor)` key from a Lean version string, ignoring the
+/// patch level and any `-rcN` / build suffix. `"4.31.0-rc1"` → `(4, 31)`;
+/// `"4.30.0"` → `(4, 30)`. Returns `None` when the leading two components are
+/// not numeric (e.g. `"unknown"`, a `nightly-*` pin), in which case no
+/// lower-bound flag is set.
+fn minor_key(version: &str) -> Option<(u32, u32)> {
+    let numeric = version.split(['-', '+']).next().unwrap_or(version);
+    let mut parts = numeric.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// Emit the version `cfg` flags downstream code gates on, plus a
+/// `rustc-check-cfg` for every flag the supported window can produce so
+/// `#[cfg(lean_v_*)]` / `#[cfg(lean_at_least_*)]` stay lint-clean even for the
+/// versions that are not the active one (cargo only auto-registers the flags
+/// it actually sets, not the inactive ones a gate may name).
+///
+/// Two families:
+///
+/// - `lean_v_<token>` — exact equality with the resolved version; exactly one
+///   is active per build.
+/// - `lean_at_least_<major>_<minor>` — a monotone lower-bound predicate, set
+///   for every window minor at or below the resolved version. Gate "needs a
+///   symbol introduced in 4.31" with `#[cfg(lean_at_least_4_31)]`; gate the
+///   pre-4.31 path with `#[cfg(not(lean_at_least_4_31))]`. Release candidates
+///   count as their target minor (`4.31.0-rc1` ⇒ `lean_at_least_4_31`).
+///
+/// Only minors **within** the window `[floor ..= head]` are registered, so a
+/// gate may name only boundaries that exist; `#[cfg(not(lean_at_least_4_32))]`
+/// for a version above the head is a hard `unexpected_cfgs` error until 4.32
+/// joins the window (fail-fast, by design — there is nothing above the head to
+/// gate against yet).
+fn emit_version_cfgs(resolved_version: &str) {
+    use std::collections::BTreeSet;
+
+    // The full set of flags the window can name, gathered once so the
+    // `check-cfg` allowlist covers non-active versions a gate might mention.
+    let mut version_tokens: BTreeSet<String> = BTreeSet::new();
+    let mut minors: BTreeSet<(u32, u32)> = BTreeSet::new();
+    for t in SUPPORTED_TOOLCHAINS {
+        for v in t.versions {
+            version_tokens.insert(cfg_token(v));
+            if let Some(key) = minor_key(v) {
+                minors.insert(key);
+            }
+        }
+    }
+
+    for token in &version_tokens {
+        println!("cargo:rustc-check-cfg=cfg(lean_v_{token})");
+    }
+    for (major, minor) in &minors {
+        println!("cargo:rustc-check-cfg=cfg(lean_at_least_{major}_{minor})");
+    }
+
+    // The active exact-version flag.
+    println!("cargo:rustc-cfg=lean_v_{}", cfg_token(resolved_version));
+
+    // The active lower-bound flags: every window minor at or below the
+    // resolved version. A non-numeric resolved version sets none of them.
+    if let Some(resolved_key) = minor_key(resolved_version) {
+        for &(major, minor) in &minors {
+            if (major, minor) <= resolved_key {
+                println!("cargo:rustc-cfg=lean_at_least_{major}_{minor}");
+            }
+        }
+    }
 }
 
 /// Render the supported window as a multi-line bulleted summary, suitable

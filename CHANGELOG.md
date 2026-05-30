@@ -7,6 +7,18 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
+## [Unreleased]
+
+### Version-range `cfg` flags for per-toolchain gating
+
+`lean-rs-sys`'s build script now emits a monotone lower-bound `cfg` family alongside the existing exact-version
+`lean_v_<token>` flag: `lean_at_least_<major>_<minor>` is set for every supported-window minor at or below the resolved
+toolchain (release candidates count as their target minor, so `4.31.0-rc1` ⇒ `lean_at_least_4_31`). Downstream code can
+gate a symbol introduced in a given release with `#[cfg(lean_at_least_4_31)]` and the older path with
+`#[cfg(not(lean_at_least_4_31))]`, rather than OR-ing exact-version tokens. The script also emits `rustc-check-cfg` for
+every version token and minor boundary the window spans, so gating on a non-active version stays lint-clean under
+`-D warnings`; only boundaries within the window `[floor ..= head]` are registered.
+
 ## [0.1.17] - 2026-05-30
 
 ### Guarded the bundled interop shim copy against drift
