@@ -84,6 +84,10 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::protocol::ProtocolEr
 impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::protocol::ProtocolError
 impl !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::protocol::ProtocolError
 #[non_exhaustive] pub enum lean_rs_worker_protocol::protocol::Request
+pub lean_rs_worker_protocol::protocol::Request::AttemptProof
+pub lean_rs_worker_protocol::protocol::Request::AttemptProof::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
+pub lean_rs_worker_protocol::protocol::Request::AttemptProof::progress: bool
+pub lean_rs_worker_protocol::protocol::Request::AttemptProof::request: lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
 pub lean_rs_worker_protocol::protocol::Request::CallFixtureMul
 pub lean_rs_worker_protocol::protocol::Request::CallFixtureMul::lhs: u64
 pub lean_rs_worker_protocol::protocol::Request::CallFixtureMul::manifest_path: alloc::string::String
@@ -120,6 +124,8 @@ pub lean_rs_worker_protocol::protocol::Request::Health
 pub lean_rs_worker_protocol::protocol::Request::InferType
 pub lean_rs_worker_protocol::protocol::Request::InferType::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::protocol::Request::InferType::source: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Request::InspectDeclaration
+pub lean_rs_worker_protocol::protocol::Request::InspectDeclaration::request: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq::lhs: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Request::IsDefEq::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
@@ -159,6 +165,10 @@ pub lean_rs_worker_protocol::protocol::Request::SearchDeclarations::search: lean
 pub lean_rs_worker_protocol::protocol::Request::Terminate
 pub lean_rs_worker_protocol::protocol::Request::TriggerLeanPanic
 pub lean_rs_worker_protocol::protocol::Request::TriggerLeanPanic::manifest_path: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Request::VerifyDeclaration
+pub lean_rs_worker_protocol::protocol::Request::VerifyDeclaration::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
+pub lean_rs_worker_protocol::protocol::Request::VerifyDeclaration::progress: bool
+pub lean_rs_worker_protocol::protocol::Request::VerifyDeclaration::request: lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
 pub lean_rs_worker_protocol::protocol::Request::Whnf
 pub lean_rs_worker_protocol::protocol::Request::Whnf::options: lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::protocol::Request::Whnf::source: alloc::string::String
@@ -195,10 +205,14 @@ pub lean_rs_worker_protocol::protocol::Response::Declaration
 pub lean_rs_worker_protocol::protocol::Response::Declaration::row: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerDeclarationRow>
 pub lean_rs_worker_protocol::protocol::Response::DeclarationBulk
 pub lean_rs_worker_protocol::protocol::Response::DeclarationBulk::rows: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationRow>
+pub lean_rs_worker_protocol::protocol::Response::DeclarationInspection
+pub lean_rs_worker_protocol::protocol::Response::DeclarationInspection::result: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
 pub lean_rs_worker_protocol::protocol::Response::DeclarationSearch
 pub lean_rs_worker_protocol::protocol::Response::DeclarationSearch::result: lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
 pub lean_rs_worker_protocol::protocol::Response::DeclarationType
 pub lean_rs_worker_protocol::protocol::Response::DeclarationType::row: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerDeclarationType>
+pub lean_rs_worker_protocol::protocol::Response::DeclarationVerification
+pub lean_rs_worker_protocol::protocol::Response::DeclarationVerification::result: lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
 pub lean_rs_worker_protocol::protocol::Response::Elaboration
 pub lean_rs_worker_protocol::protocol::Response::Elaboration::outcome: lean_rs_worker_protocol::types::LeanWorkerElabResult
 pub lean_rs_worker_protocol::protocol::Response::Error
@@ -220,6 +234,8 @@ pub lean_rs_worker_protocol::protocol::Response::ProcessModuleQuery
 pub lean_rs_worker_protocol::protocol::Response::ProcessModuleQuery::outcome: lean_rs_worker_protocol::types::LeanWorkerModuleQueryOutcome
 pub lean_rs_worker_protocol::protocol::Response::ProcessModuleQueryBatch
 pub lean_rs_worker_protocol::protocol::Response::ProcessModuleQueryBatch::outcome: lean_rs_worker_protocol::types::LeanWorkerModuleQueryBatchOutcome
+pub lean_rs_worker_protocol::protocol::Response::ProofAttempt
+pub lean_rs_worker_protocol::protocol::Response::ProofAttempt::result: lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
 pub lean_rs_worker_protocol::protocol::Response::RowsComplete
 pub lean_rs_worker_protocol::protocol::Response::RowsComplete::count: u64
 pub lean_rs_worker_protocol::protocol::Response::StreamCallbackFailed
@@ -423,6 +439,79 @@ pub const lean_rs_worker_protocol::protocol::PROTOCOL_VERSION: u16
 pub fn lean_rs_worker_protocol::protocol::read_frame(&mut impl std::io::Read, u32) -> core::result::Result<lean_rs_worker_protocol::protocol::Frame, lean_rs_worker_protocol::protocol::ProtocolError>
 pub fn lean_rs_worker_protocol::protocol::write_frame(&mut impl std::io::Write, lean_rs_worker_protocol::protocol::Message, u32) -> core::result::Result<(), lean_rs_worker_protocol::protocol::ProtocolError>
 pub mod lean_rs_worker_protocol::types
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::Found
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::Found::declaration: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::NotFound
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::NotFound::name: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::Unsupported
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult
+pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::Contains
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::Suffix
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::default() -> lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::Module
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::Namespace
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult::Ambiguous
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult::Ambiguous::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
@@ -448,6 +537,90 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarati
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetResult
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::HeaderParseFailed
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::HeaderParseFailed::diagnostics: lean_rs_worker_protocol::types::LeanWorkerElabFailure
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::MissingImports
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::MissingImports::facts: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::MissingImports::verification_status: lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::Ok
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::Ok::facts: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::Ok::verification_status: lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::Unsupported
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Accepted
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Ambiguous
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::BudgetExceeded
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::NotFound
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Rejected
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Timeout
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Unsupported
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::Name
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::Name::name: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::Span
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::Span::span: lean_rs_worker_protocol::types::LeanWorkerModuleSourceSpan
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity
 pub lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::Error
 pub lean_rs_worker_protocol::types::LeanWorkerDoctorSeverity::Pass
@@ -786,6 +959,10 @@ pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofState
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofState::column: u32
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofState::id: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofState::line: u32
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::declaration: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::id: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::position: lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::References
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::References::id: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::References::name: alloc::string::String
@@ -816,6 +993,114 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerModuleQue
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::HeaderParseFailed
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::HeaderParseFailed::diagnostics: lean_rs_worker_protocol::types::LeanWorkerElabFailure
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::MissingImports
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::MissingImports::result: lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::Ok
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::Ok::result: lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::Unsupported
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::BudgetExceeded
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::Closed
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::Failed
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::Progressed
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::Timeout
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::Unsupported
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::Declaration
+pub lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::Declaration::name: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::Declaration::position: lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofEditTarget) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofEditTarget::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText::occurrence: core::option::Option<u32>
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText::text: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Default
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Index
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Index::index: u32
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::default() -> lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofStateResult
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::State
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::State::info: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerProofStateInfo>
@@ -863,6 +1148,29 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerRendering
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerRendering
+#[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::Allow
+pub lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::Deny
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub fn lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub fn lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerSorryPolicy) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub fn lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub fn lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub fn lean_rs_worker_protocol::types::LeanWorkerSorryPolicy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerSurroundingDeclarationResult
 pub lean_rs_worker_protocol::types::LeanWorkerSurroundingDeclarationResult::Declaration
 pub lean_rs_worker_protocol::types::LeanWorkerSurroundingDeclarationResult::Declaration::info: lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo
@@ -1006,6 +1314,141 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarati
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::is_generated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::is_internal: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::is_private: bool
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::default() -> lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::attributes: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::docstring: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::flags: lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::kind: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::module: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::name: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::proof_search: lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::source: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerSourceRange>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::statement: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::attributes: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::docstring: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::flags: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::source: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::statement: bool
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::default() -> Self
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::budgets: lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::fields: lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::name: alloc::string::String
+impl lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::class_name: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::is_class: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::is_instance: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::is_rw_candidate: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::is_simp: bool
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::default() -> lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
 pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::kind: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationRow::name: alloc::string::String
@@ -1031,11 +1474,15 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDec
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationRow
 pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::conclusion_head: core::option::Option<alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::filter: lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::include_source: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::kind: core::option::Option<alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::limit: usize
-pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::query: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::name_fragment: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::name_match: lean_rs_worker_protocol::types::LeanWorkerDeclarationNameMatch
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::required_constants: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::scope_biases: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias>
 impl lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch::new(impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
@@ -1057,8 +1504,88 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarati
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::prefix: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::scope: lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchScope
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::strict: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::weight: i32
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchBias
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::after_conclusion_filter: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::after_kind_filter: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::after_name_filter: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::after_required_constants_filter: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::after_scope_filter: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::broad_pruning: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::declarations_scanned: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::source_lookups: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::timings: lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::truncated: bool
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::default() -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::count: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::reason: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::stage: alloc::string::String
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchPruning
 pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
-pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult::declarations: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult::declarations: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult::facts: lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchFacts
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult::truncated: bool
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
@@ -1079,29 +1606,59 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarati
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult
-pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::kind: alloc::string::String
-pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::name: alloc::string::String
-pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::source: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerSourceRange>
-impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary) -> bool
-impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
-impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSummary
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::flags: lean_rs_worker_protocol::types::LeanWorkerDeclarationFlags
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::kind: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::match_reason: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::module: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::name: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::rank: usize
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::score: i32
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::source: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerSourceRange>
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchRow
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::rank_micros: u64
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::scan_micros: u64
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::source_micros: u64
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings) -> bool
+impl core::default::Default for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::default() -> lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchTimings
 pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo::body_span: lean_rs_worker_protocol::types::LeanWorkerModuleSourceSpan
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo::declaration_kind: alloc::string::String
@@ -1153,6 +1710,60 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarati
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationType
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationType
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationType
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::axioms_truncated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_admit: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_sorry: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_sorry_ax: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::diagnostics: lean_rs_worker_protocol::types::LeanWorkerElabFailure
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::output_truncated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::target: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::unresolved_goals: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::budgets: lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::report_axioms: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::sorry_policy: lean_rs_worker_protocol::types::LeanWorkerSorryPolicy
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::source: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::target: lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest
 pub struct lean_rs_worker_protocol::types::LeanWorkerDiagnostic
 pub lean_rs_worker_protocol::types::LeanWorkerDiagnostic::column: core::option::Option<u32>
 pub lean_rs_worker_protocol::types::LeanWorkerDiagnostic::end_column: core::option::Option<u32>
@@ -1545,6 +2156,126 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerOutputBud
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
+pub struct lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidate_limit: u32
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidates_truncated: bool
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
+pub struct lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::budgets: lean_rs_worker_protocol::types::LeanWorkerOutputBudgets
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerProofCandidate>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::edit: lean_rs_worker_protocol::types::LeanWorkerProofEditTarget
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::source: alloc::string::String
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest
+pub struct lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::candidate_text: lean_rs_worker_protocol::types::LeanWorkerRenderedInfo
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::declaration: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::diagnostics: lean_rs_worker_protocol::types::LeanWorkerElabFailure
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::downstream_diagnostics: lean_rs_worker_protocol::types::LeanWorkerElabFailure
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::goals: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::id: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::output_truncated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::proof_position: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::status: lean_rs_worker_protocol::types::LeanWorkerProofAttemptStatus
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow
+pub struct lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub lean_rs_worker_protocol::types::LeanWorkerProofCandidate::id: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerProofCandidate::text: alloc::string::String
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofCandidate::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofCandidate::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofCandidate) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofCandidate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofCandidate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofCandidate::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofCandidate
+pub struct lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::index: u32
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::tactic: lean_rs_worker_protocol::types::LeanWorkerRenderedInfo
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+pub fn lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSummary
 pub struct lean_rs_worker_protocol::types::LeanWorkerProofStateInfo
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateInfo::declaration_name: core::option::Option<alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateInfo::expected_type: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>

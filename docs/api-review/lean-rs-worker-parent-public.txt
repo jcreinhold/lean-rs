@@ -3,13 +3,30 @@ pub use lean_rs_worker_parent::LeanWorkerCapabilityFact
 pub use lean_rs_worker_parent::LeanWorkerCapabilityMetadata
 pub use lean_rs_worker_parent::LeanWorkerCommandMetadata
 pub use lean_rs_worker_parent::LeanWorkerDeclarationFilter
+pub use lean_rs_worker_parent::LeanWorkerDeclarationFlags
+pub use lean_rs_worker_parent::LeanWorkerDeclarationInspection
+pub use lean_rs_worker_parent::LeanWorkerDeclarationInspectionFields
+pub use lean_rs_worker_parent::LeanWorkerDeclarationInspectionRequest
+pub use lean_rs_worker_parent::LeanWorkerDeclarationInspectionResult
+pub use lean_rs_worker_parent::LeanWorkerDeclarationNameMatch
+pub use lean_rs_worker_parent::LeanWorkerDeclarationProofSearchFacts
 pub use lean_rs_worker_parent::LeanWorkerDeclarationRow
 pub use lean_rs_worker_parent::LeanWorkerDeclarationSearch
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchBias
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchFacts
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchPruning
 pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchResult
-pub use lean_rs_worker_parent::LeanWorkerDeclarationSummary
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchRow
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchScope
+pub use lean_rs_worker_parent::LeanWorkerDeclarationSearchTimings
 pub use lean_rs_worker_parent::LeanWorkerDeclarationTargetInfo
 pub use lean_rs_worker_parent::LeanWorkerDeclarationTargetResult
 pub use lean_rs_worker_parent::LeanWorkerDeclarationType
+pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationFacts
+pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationRequest
+pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationResult
+pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationStatus
+pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationTarget
 pub use lean_rs_worker_parent::LeanWorkerDiagnostic
 pub use lean_rs_worker_parent::LeanWorkerDoctorDiagnostic
 pub use lean_rs_worker_parent::LeanWorkerDoctorReport
@@ -39,12 +56,22 @@ pub use lean_rs_worker_parent::LeanWorkerModuleSnapshotCacheClearResult
 pub use lean_rs_worker_parent::LeanWorkerModuleSourceSpan
 pub use lean_rs_worker_parent::LeanWorkerNameRef
 pub use lean_rs_worker_parent::LeanWorkerOutputBudgets
+pub use lean_rs_worker_parent::LeanWorkerProofAttemptEnvelope
+pub use lean_rs_worker_parent::LeanWorkerProofAttemptRequest
+pub use lean_rs_worker_parent::LeanWorkerProofAttemptResult
+pub use lean_rs_worker_parent::LeanWorkerProofAttemptRow
+pub use lean_rs_worker_parent::LeanWorkerProofAttemptStatus
+pub use lean_rs_worker_parent::LeanWorkerProofCandidate
+pub use lean_rs_worker_parent::LeanWorkerProofEditTarget
+pub use lean_rs_worker_parent::LeanWorkerProofPositionSelector
+pub use lean_rs_worker_parent::LeanWorkerProofPositionSummary
 pub use lean_rs_worker_parent::LeanWorkerProofStateInfo
 pub use lean_rs_worker_parent::LeanWorkerProofStateResult
 pub use lean_rs_worker_parent::LeanWorkerReferencesResult
 pub use lean_rs_worker_parent::LeanWorkerRendered
 pub use lean_rs_worker_parent::LeanWorkerRenderedInfo
 pub use lean_rs_worker_parent::LeanWorkerRendering
+pub use lean_rs_worker_parent::LeanWorkerSorryPolicy
 pub use lean_rs_worker_parent::LeanWorkerSourceRange
 pub use lean_rs_worker_parent::LeanWorkerSurroundingDeclarationResult
 pub use lean_rs_worker_parent::LeanWorkerTypeAtResult
@@ -132,6 +159,13 @@ pub lean_rs_worker_parent::LeanWorkerError::ProgressPanic
 pub lean_rs_worker_parent::LeanWorkerError::ProgressPanic::message: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerError::Protocol
 pub lean_rs_worker_parent::LeanWorkerError::Protocol::message: alloc::string::String
+pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded
+pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::restarts: u64
+pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::window: core::time::Duration
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::limit_kib: u64
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::operation: &'static str
 pub lean_rs_worker_parent::LeanWorkerError::Setup
 pub lean_rs_worker_parent::LeanWorkerError::Setup::message: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerError::Spawn
@@ -255,6 +289,12 @@ pub lean_rs_worker_parent::LeanWorkerRestartReason::RequestTimeout::operation: &
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling::current_kib: u64
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling::limit_kib: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::limit_kib: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::operation: &'static str
+impl lean_rs_worker_parent::LeanWorkerRestartReason
+pub const fn lean_rs_worker_parent::LeanWorkerRestartReason::stable_cause(&self) -> &'static str
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerRestartReason
 pub fn lean_rs_worker_parent::LeanWorkerRestartReason::clone(&self) -> lean_rs_worker_parent::LeanWorkerRestartReason
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerRestartReason
@@ -293,6 +333,7 @@ impl lean_rs_worker_parent::LeanWorker
 pub fn lean_rs_worker_parent::LeanWorker::call_fixture_mul(&mut self, impl core::convert::AsRef<std::path::Path>, u64, u64) -> core::result::Result<u64, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::health(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorker::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
 pub fn lean_rs_worker_parent::LeanWorker::load_fixture_capability(&mut self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::request_timeout(&self) -> core::time::Duration
 pub fn lean_rs_worker_parent::LeanWorker::restart(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
@@ -398,15 +439,19 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerCancellationToken
 pub struct lean_rs_worker_parent::LeanWorkerCapability
 impl lean_rs_worker_parent::LeanWorkerCapability
+pub fn lean_rs_worker_parent::LeanWorkerCapability::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::dylib_path(&self) -> &std::path::Path
+pub fn lean_rs_worker_parent::LeanWorkerCapability::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
 pub fn lean_rs_worker_parent::LeanWorkerCapability::open_session(&mut self, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::open_session_with_imports(&mut self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerCapability::rss_kib(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::runtime_metadata(&self) -> lean_rs_worker_parent::LeanWorkerRuntimeMetadata
 pub fn lean_rs_worker_parent::LeanWorkerCapability::session_config(&self) -> &lean_rs_worker_parent::LeanWorkerSessionConfig
+pub fn lean_rs_worker_parent::LeanWorkerCapability::set_request_timeout(&mut self, core::time::Duration)
+pub fn lean_rs_worker_parent::LeanWorkerCapability::stats(&self) -> lean_rs_worker_parent::LeanWorkerStats
+pub fn lean_rs_worker_parent::LeanWorkerCapability::status(&mut self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerStatus, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::terminate(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerExit, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::validated_metadata(&self) -> core::option::Option<&lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata>
-pub fn lean_rs_worker_parent::LeanWorkerCapability::worker(&self) -> &lean_rs_worker_parent::LeanWorker
-pub fn lean_rs_worker_parent::LeanWorkerCapability::worker_mut(&mut self) -> &mut lean_rs_worker_parent::LeanWorker
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerCapability
 pub fn lean_rs_worker_parent::LeanWorkerCapability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerCapability
@@ -426,10 +471,12 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::json_command_export(s
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::max_frame_bytes(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::metadata_export(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::module_cache_limits(self, lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerCapability, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::rss_hard_limit(self, u64, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::session_key(&self) -> lean_rs_worker_parent::LeanWorkerSessionKey
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::startup_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::streaming_command_export(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -481,6 +528,7 @@ pub fn lean_rs_worker_parent::LeanWorkerConfig::max_frame_bytes(self, u32) -> Se
 pub fn lean_rs_worker_parent::LeanWorkerConfig::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerConfig::rss_hard_limit(self, u64, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::startup_timeout(self, core::time::Duration) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerConfig
 pub fn lean_rs_worker_parent::LeanWorkerConfig::clone(&self) -> lean_rs_worker_parent::LeanWorkerConfig
@@ -557,13 +605,23 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerExit
 pub struct lean_rs_worker_parent::LeanWorkerHostHandle
 impl lean_rs_worker_parent::LeanWorkerHostHandle
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::attempt_proof_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::inspect_declaration_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::open_session(&mut self, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::open_session_with_imports(&mut self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::process_module_query_batch_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &str, &[lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector], &lean_rs_worker_protocol::types::LeanWorkerOutputBudgets, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerModuleQueryBatchOutcome, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::process_module_query_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &str, &lean_rs_worker_protocol::types::LeanWorkerModuleQuery, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerModuleQueryOutcome, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::restart(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::rss_kib(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::runtime_metadata(&self) -> lean_rs_worker_parent::LeanWorkerRuntimeMetadata
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::search_declarations_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::session_config(&self) -> &lean_rs_worker_parent::LeanWorkerSessionConfig
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::stats(&self) -> lean_rs_worker_parent::LeanWorkerStats
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::status(&mut self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerStatus, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::terminate(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerExit, lean_rs_worker_parent::LeanWorkerError>
-pub fn lean_rs_worker_parent::LeanWorkerHostHandle::worker(&self) -> &lean_rs_worker_parent::LeanWorker
-pub fn lean_rs_worker_parent::LeanWorkerHostHandle::worker_mut(&mut self) -> &mut lean_rs_worker_parent::LeanWorker
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::verify_declaration_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult, lean_rs_worker_parent::LeanWorkerError>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerHostHandle
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerHostHandle
@@ -578,9 +636,11 @@ impl lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::check(&self) -> lean_rs_worker_parent::LeanWorkerBootstrapReport
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::max_frame_bytes(self, u32) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::module_cache_limits(self, lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerHostHandle, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::rss_hard_limit(self, u64, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::shims_only(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::startup_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::worker_child(self, lean_rs_worker_parent::LeanWorkerChild) -> Self
@@ -658,6 +718,53 @@ impl<Req, Resp> core::marker::Unpin for lean_rs_worker_parent::LeanWorkerJsonCom
 impl<Req, Resp> core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>
 impl<Req, Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>
 impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>
+pub struct lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::exits: u64
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_exit: core::option::Option<lean_rs_worker_parent::LeanWorkerExit>
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_rss_kib: core::option::Option<u64>
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::restarts: u64
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::rss_samples_unavailable: u64
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::worker_generation: u64
+impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+pub fn lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::clone(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::cmp::PartialEq for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+pub fn lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::eq(&self, &lean_rs_worker_parent::LeanWorkerLifecycleSnapshot) -> bool
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+pub fn lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
+pub struct lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::max_bytes(self, u64) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::max_entries(self, u64) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::rss_guard_kib(self, u64) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::ttl(self, core::time::Duration) -> Self
+impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::clone(&self) -> lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::cmp::PartialEq for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::eq(&self, &lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> bool
+impl core::default::Default for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::default() -> lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::Freeze for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::Send for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::Sync for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
 pub struct lean_rs_worker_parent::LeanWorkerModuleWork
 pub lean_rs_worker_parent::LeanWorkerModuleWork::imports: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_parent::LeanWorkerModuleWork::module: alloc::string::String
@@ -879,6 +986,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerRuntimeMetadata
 pub struct lean_rs_worker_parent::LeanWorkerSession<'worker>
 impl lean_rs_worker_parent::LeanWorkerSession<'_>
+pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::attempt_proof(&mut self, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::capability_doctor(&mut self, &str, &serde_json::value::Value, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDoctorReport, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::capability_metadata(&mut self, &str, &serde_json::value::Value, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::clear_module_snapshot_cache(&mut self, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerModuleSnapshotCacheClearResult, lean_rs_worker_parent::LeanWorkerError>
@@ -889,6 +997,7 @@ pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::describe(&mut self, &str, c
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::describe_bulk(&mut self, &[&str], core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationRow>, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::elaborate(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerElabResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::infer_type(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerMetaResult<lean_rs_worker_protocol::types::LeanWorkerRendered>, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::inspect_declaration(&mut self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::is_def_eq(&mut self, &str, &str, lean_rs_worker_protocol::types::LeanWorkerMetaTransparency, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerMetaResult<bool>, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::kernel_check(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerKernelResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::list_declarations_strings(&mut self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, lean_rs_worker_parent::LeanWorkerError>
@@ -900,6 +1009,7 @@ pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::run_json_command<Req, Resp>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::run_streaming_command<Req, Row, Summary>(&mut self, &lean_rs_worker_parent::LeanWorkerStreamingCommand<Req, Row, Summary>, &Req, &dyn lean_rs_worker_parent::LeanWorkerTypedDataSink<Row>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerDiagnosticSink>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>, lean_rs_worker_parent::LeanWorkerError> where Req: serde_core::ser::Serialize, Row: serde_core::de::DeserializeOwned, Summary: serde_core::de::DeserializeOwned
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::search_declarations(&mut self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationSearch, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationSearchResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::set_request_timeout(&mut self, core::time::Duration)
+pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::verify_declaration(&mut self, &lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationRequest, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSession<'_>::whnf(&mut self, &str, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerMetaResult<lean_rs_worker_protocol::types::LeanWorkerRendered>, lean_rs_worker_parent::LeanWorkerError>
 impl<'worker> core::marker::Freeze for lean_rs_worker_parent::LeanWorkerSession<'worker>
 impl<'worker> core::marker::Send for lean_rs_worker_parent::LeanWorkerSession<'worker>
