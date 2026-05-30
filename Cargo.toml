@@ -15,7 +15,6 @@ version = "0.1.16"
 lean-rs = { path = "crates/lean-rs", version = "0.1.16" }
 lean-rs-host = { path = "crates/lean-rs-host", version = "0.1.16" }
 lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.1.16" }
-lean-rs-worker-child = { path = "crates/lean-rs-worker-child", version = "0.1.16" }
 lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.1.16" }
 lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.1.16" }
 lean-toolchain = { path = "crates/lean-toolchain", version = "0.1.16" }
