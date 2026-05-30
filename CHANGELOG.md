@@ -19,6 +19,13 @@ gate a symbol introduced in a given release with `#[cfg(lean_at_least_4_31)]` an
 every version token and minor boundary the window spans, so gating on a non-active version stays lint-clean under
 `-D warnings`; only boundaries within the window `[floor ..= head]` are registered.
 
+### Re-export the supported-window query API from `lean-toolchain`
+
+`lean-toolchain` now re-exports `SUPPORTED_TOOLCHAINS`, `SupportedToolchain`, `supported_for`, and `supported_by_digest`
+from `lean-rs-sys`, alongside the existing `LEAN_VERSION` / `LEAN_HEADER_DIGEST` / `required_symbols()` surface. This
+lets a consumer answer "is this pin inside the supported window?" and "does this `lean.h` digest match a known
+toolchain?" through the non-FFI facade, without a direct `lean-rs-sys` dependency (which carries link directives).
+
 ## [0.1.17] - 2026-05-30
 
 ### Guarded the bundled interop shim copy against drift

@@ -44,6 +44,7 @@ pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};
 pub use lean_rs_sys::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
+pub use lean_rs_sys::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
 pub use limits::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,

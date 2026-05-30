@@ -2,6 +2,10 @@ pub mod lean_toolchain
 pub use lean_toolchain::LEAN_HEADER_DIGEST
 pub use lean_toolchain::LEAN_HEADER_PATH
 pub use lean_toolchain::LEAN_VERSION
+pub use lean_toolchain::SUPPORTED_TOOLCHAINS
+pub use lean_toolchain::SupportedToolchain
+pub use lean_toolchain::supported_by_digest
+pub use lean_toolchain::supported_for
 pub mod lean_toolchain::manifest_validation
 pub struct lean_toolchain::manifest_validation::CapabilityManifest
 pub lean_toolchain::manifest_validation::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
