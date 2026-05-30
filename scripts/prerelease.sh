@@ -39,7 +39,7 @@ set -euo pipefail
 # The default mirrors `.github/workflows/release.yml::env.LEAN_VERSION_HEAD`.
 # Bumping the supported window requires editing both in lockstep — see
 # `docs/bump-toolchain.md`.
-DEFAULT_LEAN_VERSION="4.30.0"
+DEFAULT_LEAN_VERSION="4.31.0-rc1"
 
 LEAN_VERSION="$DEFAULT_LEAN_VERSION"
 RUN_FUZZ=1
@@ -347,6 +347,17 @@ for dir in \
 	log_step "lake build ($(basename "$dir"))"
 	(cd "$dir" && lake build)
 done
+
+# The shipped-crate template (templates/shipped-lean-crate) is built lazily by
+# the worker loader-regression tests (cargo build -> build.rs -> lake), so the
+# loop above does not build it. Its .lake oleans and the cargo target that
+# embeds the toolchain digest must be wiped when we re-pin, or a previous
+# toolchain's artifacts linger and the worker bootstrap fails reading them with
+# an "incompatible header" Lean exception. The toolchain sweep
+# (scripts/test-all-toolchains.sh) wipes the same paths for the same reason.
+log_step "Wiping stale shipped-crate template artifacts"
+rm -rf "$REPO_ROOT/templates/shipped-lean-crate/lean/.lake" \
+	"$REPO_ROOT/templates/shipped-lean-crate/target"
 
 run_gate "cargo fmt --check" \
 	cargo fmt --all --check
