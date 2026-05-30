@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "extraKnownMarketplaces": {
+    "lean-rs-skills": {
+      "source": {
+        "source": "github",
+        "repo": "jcreinhold/lean-rs-skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "lean-rs-skills@lean-rs-skills": true
+  }
+}
