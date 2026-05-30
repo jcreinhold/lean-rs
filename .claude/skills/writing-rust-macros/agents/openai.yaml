@@ -1,4 +1,0 @@
-interface:
-  display_name: "Writing Rust Macros"
-  short_description: "Design and debug Rust macros"
-  default_prompt: "Use $writing-rust-macros to design, implement, or debug a declarative or procedural Rust macro."

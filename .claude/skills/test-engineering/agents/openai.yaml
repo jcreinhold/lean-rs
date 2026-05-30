@@ -1,4 +1,0 @@
-interface:
-  display_name: "Test Engineering"
-  short_description: "Audit and improve high-value Rust tests"
-  default_prompt: "Use $test-engineering to audit this Rust code for missing high-value tests and add the smallest coverage that materially improves confidence."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Optimizing Lean Performance"
-  short_description: "Profile and fix slow Lean elaboration and proofs"
-  default_prompt: "Use $optimizing-lean-performance to profile and fix slow Lean elaboration, checking, tactics, or build behavior."
