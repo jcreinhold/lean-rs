@@ -6,9 +6,9 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 ## Supported Lean toolchain window
 
-`lean-rs` supports a **contiguous window of Lean 4 stable releases**, enumerated in the
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table is the single source of truth; this
-document mirrors it for narrative context. As of 2026-05-26:
+`lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
+being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table
+is the single source of truth; this document mirrors it for narrative context. As of 2026-05-30:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 |
 | --- | --- |
@@ -19,6 +19,7 @@ document mirrors it for narrative context. As of 2026-05-26:
 | 4.29.0 | `671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c` |
 | 4.29.1 | `2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc` |
 | 4.30.0 | `5a25125970f4f1dcf85a4c403463b387a8ff93535cd4a3054cafdee1759017d7` |
+| 4.31.0-rc1 | `99ef35d69709e38caf836cf9ebbdf94d4474801e04157b8a72622dbdc653ec87` |
 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
@@ -27,7 +28,9 @@ is the [bump procedure](../bump-toolchain.md).
 ([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1. The six
 releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases ≤ 4.25.x SIGSEGV inside
 `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
-on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release.
+on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The 4.31.0-rc1 row
+was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h` byte-identical in
+the relevant block to 4.30.0; all 87 `REQUIRED_SYMBOLS` resolve); it will be swapped for the 4.31.0 row once that ships.
 
 **Policy.**
 

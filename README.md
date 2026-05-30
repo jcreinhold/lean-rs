@@ -16,7 +16,7 @@ loading, error and panic boundaries, scheduling, diagnostics, batching, process 
 ## Prerequisites
 
 - [`elan`](https://github.com/leanprover/elan) and a Lean 4 toolchain in the [supported window](docs/version-matrix.md)
-  (currently 4.26.0–4.30.0). `elan` ships `lean` and `lake` together.
+  (currently 4.26.0–4.31.0-rc1). `elan` ships `lean` and `lake` together.
 - Rust stable (MSRV 1.91).
 - macOS or Linux. Windows is not supported.
 

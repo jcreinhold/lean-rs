@@ -9,6 +9,21 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Lean 4.31.0-rc1 added to the supported window
+
+`leanprover/lean4:v4.31.0-rc1` is now a supported and CI-tested toolchain (new `lean.h` digest; layout and
+`REQUIRED_SYMBOLS` probes both clean, no missing symbols), and is promoted to the CI/release/sanitizer head. The
+supported window is now 4.26.0 through 4.31.0-rc1.
+
+Adopting rc1 also fixed a latent bug in the host "attempt proof" shim, surfaced by Lean 4.31's stricter
+tactic-block indentation enforcement. When a candidate tactic was spliced into an existing proof, the bare `by`
+keyword atom could be selected as the insertion position and the candidate indented from an unrelated line,
+emitting it at column 0 — accepted leniently by Lean ≤ 4.30 but rejected as a parse error by Lean ≥ 4.31. The
+shim now models a selected proof position as a type that, by construction, is a real tactic at a positive source
+column, and derives the candidate's indentation from that tactic's own column, so insertion aligns with a sibling
+tactic the parser already accepted. This makes the host's bounded proof-attempt path behave identically across the
+supported window.
+
 ### Structured worker declaration search
 
 `lean-rs-worker-protocol` replaces the 0.1.16 declaration-search request/row shape with a structured bounded search

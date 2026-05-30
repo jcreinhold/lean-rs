@@ -1221,6 +1221,76 @@ fn attempt_proof_bad_candidate_returns_diagnostics_and_session_survives() {
     assert!(matches!(later, LeanWorkerModuleQueryOutcome::Ok { .. }));
 }
 
+/// Regression for the type-safe proof-splice fix: when the proof's tactic sits
+/// on the same line as `by` (not at the line's start), the `.default` selector
+/// must resolve the real tactic, not the bare `by` keyword atom, and the
+/// candidate must be indented to that tactic's column. Before the fix the `by`
+/// atom became `positions[0]` and the candidate was indented to the `by` line's
+/// leading whitespace (column 0) — which Lean >= 4.31 rejects with
+/// `unexpected identifier; expected command`. This is the smallest case that
+/// catches a regression of either degree of freedom (atom selection, or
+/// indentation derived from the wrong line).
+#[test]
+fn attempt_proof_single_line_by_tactic_aligns_and_closes() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/single-line.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by skip\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "trivial".to_owned(),
+            text: "trivial".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("single-line proof attempt dispatch succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    let row = &result.candidates[0];
+
+    // The selected position must be the real `skip` tactic, never the `by` atom.
+    let position = row
+        .proof_position
+        .as_ref()
+        .expect("single-line proof attempt reports a proof position");
+    assert_eq!(
+        position.tactic.value.trim(),
+        "skip",
+        "default selector must resolve the real tactic, not the `by` keyword: {position:?}",
+    );
+
+    // No parse error from a dedented (column-0) splice, on any Lean version.
+    for diagnostic in row
+        .diagnostics
+        .diagnostics
+        .iter()
+        .chain(row.downstream_diagnostics.diagnostics.iter())
+    {
+        assert!(
+            !diagnostic.message.contains("unexpected identifier; expected command"),
+            "candidate must not be spliced as a dedented top-level command: {diagnostic:?}",
+        );
+    }
+
+    // Aligned to `skip`'s column, `trivial` runs after `skip` and closes `True`.
+    assert_eq!(
+        row.status,
+        LeanWorkerProofAttemptStatus::Closed,
+        "aligned candidate should close the goal: {row:?}",
+    );
+}
+
 #[test]
 fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
     ensure_fixture_built();

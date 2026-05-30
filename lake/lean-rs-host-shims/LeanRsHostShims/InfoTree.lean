@@ -404,14 +404,6 @@ private def SourceDocument.bodyCursor (doc : SourceDocument) (line column : Nat)
 private def SourceDocument.bodySpanContains (span : ModuleSourceSpan) (line column : Nat) : Bool :=
   rangeContains span line column
 
-private def SourceDocument.lineText? (doc : SourceDocument) (line : Nat) : Option String :=
-  if line == 0 then
-    none
-  else
-    match doc.source.splitOn "\n" |>.drop (line - 1) with
-    | text :: _ => some text
-    | [] => none
-
 private def SourceDocument.rawOffset? (doc : SourceDocument) (line column : Nat) : Option String.Pos.Raw :=
   if line == 0 || column == 0 then
     none
@@ -432,19 +424,6 @@ private def SourceDocument.extractFileSpan? (doc : SourceDocument) (span : Modul
 
 private def SourceDocument.extractBodySpan? (doc : SourceDocument) (span : ModuleSourceSpan) : Option String :=
   doc.extractFileSpan? (doc.bodySpanToFile span)
-
-private def SourceDocument.indentationOfLine (doc : SourceDocument) (line : Nat) : String :=
-  match doc.lineText? line with
-  | none => ""
-  | some text =>
-    Id.run do
-      let mut out := ""
-      for ch in text.toList do
-        if ch == ' ' || ch == '\t' then
-          out := out.push ch
-        else
-          return out
-      out
 
 private structure RenderState where
   limit : Nat := renderByteLimit
@@ -912,16 +891,23 @@ private def collectTacticsInDeclaration (doc : SourceDocument) (decl : Declarati
     tactics ← tree.foldInfoM (init := tactics) fun ctx info acc => do
       match info with
       | .ofTacticInfo ti =>
-        match rangeOfStx doc.bodyFileMap ti.stx with
-        | some span =>
-          if rangeContains decl.bodySpanBodyCoords span.startLine span.startColumn then
-            pure <| acc.push {
-              span, ctx, mctxBefore := ti.mctxBefore, goalsBefore := ti.goalsBefore,
-              mctxAfter := ti.mctxAfter, goalsAfter := ti.goalsAfter
-            }
-          else
-            pure acc
-        | none => pure acc
+        -- The `by` keyword carries its own `TacticInfo` as a bare atom (the range
+        -- of just the `by` token). It is not an insertable tactic: selecting it
+        -- would splice the candidate before the first real tactic at the `by`
+        -- line's indentation — column 0 for a top-level declaration — which
+        -- Lean ≥ 4.31 rejects as a dedented command. Keep only real tactic nodes.
+        if ti.stx.isAtom then
+          pure acc
+        else match rangeOfStx doc.bodyFileMap ti.stx with
+          | some span =>
+            if rangeContains decl.bodySpanBodyCoords span.startLine span.startColumn then
+              pure <| acc.push {
+                span, ctx, mctxBefore := ti.mctxBefore, goalsBefore := ti.goalsBefore,
+                mctxAfter := ti.mctxAfter, goalsAfter := ti.goalsAfter
+              }
+            else
+              pure acc
+          | none => pure acc
       | _ => pure acc
   let sorted := tactics.qsort fun left right =>
     left.span.startLine < right.span.startLine ||
@@ -1550,8 +1536,24 @@ private def SourceDocument.splitFailureAtBodySpan
   let downstream := failure.diagnostics.filter (fun diagnostic => !doc.diagnosticStartsInBodySpan span diagnostic)
   ({ failure with diagnostics := localDiags }, { failure with diagnostics := downstream })
 
+/-- A resolved proof position: a source span at a positive (1-based) column.
+    `tacticInsertion?` accepts only this and derives the candidate's indentation
+    from `span.startColumn`, so a candidate can never be spliced at column 0 — a
+    top-level/command position that Lean ≥ 4.31 rejects. The bare `by` atom is
+    excluded earlier, in `collectTacticsInDeclaration`. -/
+private structure SelectedTactic where
+  span : ModuleSourceSpan
+  colPos : 0 < span.startColumn
+
+/-- Build a `SelectedTactic`, witnessing a positive column. Every span fed here
+    comes from `rangeOfStx`/`lineColumnAfterText`, whose columns are `_ + 1`, so
+    `none` is unreachable in practice; it keeps the invariant total without
+    leaking those internals into callers. -/
+private def SelectedTactic.ofSpan? (span : ModuleSourceSpan) : Option SelectedTactic :=
+  if h : 0 < span.startColumn then some { span, colPos := h } else none
+
 private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarget) :
-    IO (Except String (ModuleSourceSpan × Option DeclarationTargetInfo × Option ProofPositionSummary)) := do
+    IO (Except String (SelectedTactic × Option DeclarationTargetInfo × Option ProofPositionSummary)) := do
   match edit with
   | .declaration name selector =>
     match declarationTargetByName snapshot.candidates name with
@@ -1560,22 +1562,34 @@ private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarge
         | pure <| .error "resolved declaration is not available in the module snapshot"
       let positions ← collectTacticsInDeclaration snapshot.document decl snapshot.trees
       match selectProofPosition snapshot.document positions selector with
-      | some pos => pure <| .ok (pos.tactic.span, some decl.info, some pos.summary)
+      | some pos =>
+        match SelectedTactic.ofSpan? pos.tactic.span with
+        | some sel => pure <| .ok (sel, some decl.info, some pos.summary)
+        | none => pure <| .error "selected proof position is at an invalid column"
       | none =>
         match selector with
         | .afterText text occurrence? =>
           match sourceTextProofPosition? snapshot.document decl text occurrence? with
-          | some (span, summary) => pure <| .ok (span, some decl.info, some summary)
+          | some (span, summary) =>
+            match SelectedTactic.ofSpan? span with
+            | some sel => pure <| .ok (sel, some decl.info, some summary)
+            | none => pure <| .error "selected proof position is at an invalid column"
           | none => pure <| .error "declaration has no proof position matching the selector"
         | _ => pure <| .error "declaration has no proof position matching the selector"
     | .notFound => pure <| .error "declaration was not found in the module"
     | .ambiguous _ => pure <| .error "declaration name is ambiguous in the module"
 
-private def SourceDocument.tacticInsertion? (doc : SourceDocument) (span : ModuleSourceSpan)
+private def SourceDocument.tacticInsertion? (doc : SourceDocument) (selected : SelectedTactic)
     (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary) (text : String) :
     Option (String × ProofInsertionSite) := do
+  let span := selected.span
   let fileSpan := doc.bodySpanToFile span
-  let indent := doc.indentationOfLine fileSpan.endLine
+  -- Indent the candidate to the selected tactic's own column, not the end line's
+  -- leading whitespace. `selected.colPos` guarantees a positive column, so the
+  -- candidate aligns with a sibling tactic the parser already accepted
+  -- (`tacticSeq1Indented`/`colGe`) and never lands at column 0. This placement is
+  -- robust on both lenient (≤ 4.30) and strict (≥ 4.31) tactic-block parsers.
+  let indent := "".pushn ' ' (span.startColumn - 1)
   let fragment := "\n" ++ indentFragment indent text
   let pos ← doc.rawOffset? fileSpan.endLine fileSpan.endColumn
   let overlay := doc.replaceRawSpan fragment pos pos
@@ -1645,11 +1659,11 @@ private def classifyAttempt
 
 private def attemptCandidate
     (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (document : SourceDocument) (span : ModuleSourceSpan)
+    (heartbeats : UInt64) (diagBytes : USize) (document : SourceDocument) (selected : SelectedTactic)
     (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary)
     (candidate : ProofCandidate) : IO ProofAttemptRow := do
   let candidateText := renderStringBoundedWith request.budgets.perFieldBytes candidate.text
-  let some (overlay, site) := document.tacticInsertion? span declaration proofPosition candidate.text
+  let some (overlay, site) := document.tacticInsertion? selected declaration proofPosition candidate.text
     | return {
         id := candidate.id, status := .failed,
         candidateText,
@@ -1720,7 +1734,7 @@ private def attemptEnvelope
           outputTruncated := (renderStringBoundedWith request.budgets.perFieldBytes candidate.text).truncated
         }
     pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
-  | .ok (span, declaration, proofPosition) =>
+  | .ok (selected, declaration, proofPosition) =>
     let mut rows : Array ProofAttemptRow := #[]
     let mut spent : Nat := 0
     for candidate in candidates do
@@ -1738,7 +1752,7 @@ private def attemptEnvelope
         }
       else
         let row ←
-          attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes base.document span
+          attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes base.document selected
             declaration proofPosition candidate
         let bytes := attemptRowBytes row
         if spent + bytes > request.budgets.totalBytes then

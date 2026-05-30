@@ -65,7 +65,10 @@ Edit [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported
 
 Edit [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): add `"X.Y.Z"` to `matrix.lean_version`. If `X.Y.Z` is
 the new highest version, also update the head version in
-[`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml).
+[`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml) (`LEAN_VERSION_HEAD`) and
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) (`LEAN_VERSION_HEAD` **and** the `verify` matrix's
+`lean_version`), and move the head-gated `if: … matrix.lean_version == '<old head>'` steps in `ci.yml` (actionlint,
+public-API diff, nightly install) to the new head.
 
 ### 6. Run the local sweep
 
