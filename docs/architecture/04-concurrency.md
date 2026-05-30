@@ -17,8 +17,10 @@ Handles covered:
 - `LeanName<'lean>`, `LeanLevel<'lean>`, `LeanExpr<'lean>`, `LeanDeclaration<'lean>`, `LeanEvidence<'lean>`
 - `SessionPool<'lean>`, `PooledSession<'lean, 'p, 'c>`
 
-Each is pinned at compile time by `crates/lean-rs/tests/compile_fail/runtime_is_not_send_or_sync.rs`. An accidental
-`impl Send` from a refactor is caught by the `.stderr` snapshot before the change can merge.
+Each is pinned at compile time by `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs`. An accidental
+`impl Send` from a refactor is caught by the `.stderr` snapshot in the pinned `compile-fail` CI job
+([`.github/workflows/compile-fail.yml`](../../.github/workflows/compile-fail.yml), `RUN_TRYBUILD=1`) before the change
+can merge.
 
 ### Why the `'lean` parameter, on top of `OnceLock`
 

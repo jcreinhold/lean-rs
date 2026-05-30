@@ -28,6 +28,12 @@ static = []
 [build-dependencies]
 sha2 = { workspace = true }
 
+[dev-dependencies]
+# Drives the `tests/compile_fail/*.rs` negative cases from
+# `tests/compile_fail_surface.rs`; gated behind `RUN_TRYBUILD=1` so the
+# OS/rustc-sensitive `.stderr` snapshots run only in the pinned CI job.
+trybuild = "1"
+
 [lints]
 workspace = true
 
@@ -37,3 +43,9 @@ doctest = false
 [package.metadata.docs.rs]
 default-target = "x86_64-unknown-linux-gnu"
 targets = []
+
+# `tests/compile_fail/*.rs` are driven by trybuild from
+# `tests/compile_fail_surface.rs` via string-based `t.compile_fail(...)` calls,
+# which cargo-shear cannot see statically.
+[package.metadata.cargo-shear]
+ignored-paths = ["tests/compile_fail/*.rs"]

@@ -66,6 +66,48 @@ jobs:
         run: |
           echo "::notice::In-process Lean runtime tests are not ASan-instrumented in CI. Lean's shared runtime is uninstrumented and currently crashes Linux ASan before producing actionable Rust diagnostics. Loader regressions, normal workspace tests, worker containment tests, and release/manual ABI fuzzing remain the gates for those paths."
 
+  miri:
+    name: Miri (pure-Rust FFI boundary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT
+        # `lean-rs-sys/build.rs` reads `lean.h` from the sysroot to compute the
+        # header digest. Miri never executes the Lean runtime, so no Lake build
+        # and no `LD_LIBRARY_PATH` are needed—the `leanshared` link directive is
+        # ignored under Miri.
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: cargo miri setup
+        run: cargo +nightly miri setup
+
+      - name: Miri on lean-rs-sys pure-Rust boundary
+        # Validates `AtomicI32::from_ptr`, `o.cast::<LeanObjectRepr>()`, and
+        # field-offset provenance in the refcount mirror / header reads. The
+        # FFI-touching tests gate themselves out via `#[cfg_attr(miri, ignore)]`.
+        # Strict provenance is intentionally NOT enabled: Lean's scalar encoding
+        # (`lean_box`) is an int-to-pointer cast by ABI.
+        env:
+          MIRIFLAGS: "-Zmiri-tree-borrows"
+        run: cargo +nightly miri test -p lean-rs-sys
+
   fuzz:
     name: ABI fuzz smoke
     if: github.event_name == 'workflow_dispatch'

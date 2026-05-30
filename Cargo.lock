@@ -347,6 +347,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "trybuild",
 ]
 
 [[package]]
@@ -367,6 +368,7 @@ name = "lean-rs-sys"
 version = "0.1.17"
 dependencies = [
  "sha2",
+ "trybuild",
 ]
 
 [[package]]

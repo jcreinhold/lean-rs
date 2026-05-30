@@ -499,6 +499,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn box_unbox_uint64_round_trips() {
         ensure_runtime();
         for v in [0_u64, 1, u64::from(u32::MAX), u64::MAX] {
@@ -513,6 +514,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn box_unbox_usize_round_trips() {
         ensure_runtime();
         for v in [0_usize, 1, usize::MAX] {
@@ -526,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn box_unbox_uint32_round_trips() {
         ensure_runtime();
         for v in [0_u32, 1, u32::MAX] {
@@ -539,6 +542,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn box_unbox_float_round_trips() {
         ensure_runtime();
         for v in [0.0_f64, -1.5, core::f64::consts::PI, f64::INFINITY] {
@@ -559,6 +563,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn alloc_sarray_round_trips_payload_bytes() {
         ensure_runtime();
         use crate::array::{
@@ -584,6 +589,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn alloc_sarray_empty_is_valid() {
         ensure_runtime();
         use crate::array::{lean_alloc_sarray, lean_sarray_size};
@@ -597,6 +603,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn alloc_array_round_trips_object_slots() {
         ensure_runtime();
         use crate::array::{
@@ -627,6 +634,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn alloc_array_empty_is_valid() {
         ensure_runtime();
         use crate::array::{lean_alloc_array, lean_array_capacity, lean_array_size};
@@ -645,6 +653,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn scalar_box_unbox_remains_inline_for_small_nat() {
         // Sanity: the existing scalar `lean_box` / `lean_unbox` from
         // `crate::object` is a distinct path that must not interact with

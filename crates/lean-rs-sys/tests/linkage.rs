@@ -4,6 +4,10 @@
 use lean_rs_sys::REQUIRED_SYMBOLS;
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "asserts link-time symbol resolution; Miri does not link libleanshared"
+)]
 fn all_required_symbols_resolve_at_link_time() {
     let addresses: &[(*const (), &str)] = &[
         // init / runtime

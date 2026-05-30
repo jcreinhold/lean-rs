@@ -178,3 +178,70 @@ pub unsafe fn lean_dec(o: *mut lean_object) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Pure-Rust coverage of the refcount fast paths over a synthetic,
+    //! Rust-owned object header. These never cross the refcount to zero, so
+    //! the `lean_dec_ref_cold` extern is never reached and the tests run
+    //! unchanged under `cargo miri test`—where they validate the
+    //! `AtomicI32::from_ptr` provenance and alignment the FFI relies on.
+
+    use super::{lean_dec, lean_dec_ref, lean_inc, lean_inc_n, lean_inc_ref, lean_inc_ref_n};
+    use crate::object::lean_box;
+    use crate::repr::test_support::MockObject;
+
+    #[test]
+    fn single_threaded_inc_dec_round_trips() {
+        let obj = MockObject::new(1, 0, 0);
+        let o = obj.ptr();
+        // SAFETY: `o` is a valid non-scalar header; rc stays > 0 throughout,
+        // so the decrement never reaches the cold path.
+        unsafe {
+            lean_inc_ref(o);
+            assert_eq!(obj.rc(), 2);
+            lean_dec_ref(o);
+            assert_eq!(obj.rc(), 1);
+        }
+    }
+
+    #[test]
+    fn inc_ref_n_adds_in_place() {
+        let obj = MockObject::new(1, 0, 0);
+        let o = obj.ptr();
+        // SAFETY: as above; only the single-threaded store path runs.
+        unsafe {
+            lean_inc_ref_n(o, 9);
+        }
+        assert_eq!(obj.rc(), 10);
+    }
+
+    #[test]
+    fn multi_threaded_inc_decrements_negated_count() {
+        // Multi-threaded objects store the live count negated; an increment is
+        // a `fetch_sub`, so the field moves further negative.
+        let obj = MockObject::new(-1, 0, 0);
+        let o = obj.ptr();
+        // SAFETY: valid non-scalar header; the MT branch is a relaxed
+        // `fetch_sub` with no cold-path dispatch.
+        unsafe {
+            lean_inc_ref(o);
+        }
+        assert_eq!(obj.rc(), -2);
+    }
+
+    #[test]
+    fn scalar_pointers_are_left_untouched() {
+        // A scalar-tagged pointer never aliases an allocation; inc/dec must be
+        // pure pointer-bit no-ops that touch no memory.
+        // SAFETY: `lean_box` is pointer arithmetic; `lean_inc`/`lean_dec`
+        // inspect the scalar tag and return without dereferencing.
+        unsafe {
+            let scalar = lean_box(42);
+            lean_inc(scalar);
+            lean_inc_n(scalar, 7);
+            lean_dec(scalar);
+            assert_eq!(scalar, lean_box(42));
+        }
+    }
+}

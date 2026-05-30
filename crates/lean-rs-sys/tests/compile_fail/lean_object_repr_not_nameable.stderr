@@ -1,0 +1,13 @@
+error[E0603]: module `repr` is private
+ --> tests/compile_fail/lean_object_repr_not_nameable.rs:6:29
+  |
+6 |     let _repr: lean_rs_sys::repr::LeanObjectRepr;
+  |                             ^^^^  -------------- struct `LeanObjectRepr` is not publicly re-exported
+  |                             |
+  |                             private module
+  |
+note: the module `repr` is defined here
+ --> src/lib.rs
+  |
+  | pub(crate) mod repr;
+  | ^^^^^^^^^^^^^^^^^^^

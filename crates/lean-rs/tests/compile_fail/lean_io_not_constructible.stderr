@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/lean_io_not_constructible.rs:11:15
+   |
+11 |     let _io = LeanIo::<u64>(core::marker::PhantomData);
+   |               ^^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/module/exported.rs
+   |
+   | pub struct LeanIo<T>(PhantomData<fn() -> T>);
+   |                      ^^^^^^^^^^^^^^^^^^^^^^ private field

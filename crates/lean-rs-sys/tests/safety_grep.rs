@@ -59,6 +59,10 @@ fn read(path: &str) -> String {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "filesystem source scan, not unsafe-code coverage; needs isolation off under Miri"
+)]
 fn every_unsafe_fn_has_safety_section() {
     let mut missing: Vec<String> = Vec::new();
     for path in SOURCE_FILES {
@@ -106,6 +110,10 @@ fn every_unsafe_fn_has_safety_section() {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "filesystem source scan, not unsafe-code coverage; needs isolation off under Miri"
+)]
 fn every_unsafe_block_has_safety_comment() {
     let mut missing: Vec<String> = Vec::new();
     for path in SOURCE_FILES {
@@ -181,6 +189,10 @@ fn is_unsafe_block(trimmed: &str) -> bool {
 }
 
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "filesystem source scan, not unsafe-code coverage; needs isolation off under Miri"
+)]
 fn no_safe_public_functions_in_public_surface() {
     let mut violations: Vec<String> = Vec::new();
     for path in SOURCE_FILES {

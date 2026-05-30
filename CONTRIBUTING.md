@@ -28,7 +28,9 @@ Adding `unsafe` anywhere in the workspace requires:
 1. A `#![allow(unsafe_code)]` (or narrower) attribute on the smallest possible scope, justified in the PR description.
 1. A `// SAFETY:` comment on every `unsafe { ... }` block naming the invariant the caller (or context) is relying on.
 1. Tests that would fail under a plausible violation of that invariant when practical (Miri, sanitizer, refcount stress,
-   or focused unit tests on the unsafe boundary).
+   or focused unit tests on the unsafe boundary). For pure-Rust unsafe in `lean-rs-sys`, run the CI Miri lane locally
+   with `MIRIFLAGS="-Zmiri-tree-borrows" cargo +nightly miri test -p lean-rs-sys` (not `-Zmiri-strict-provenance`:
+   Lean's scalar encoding is an int-to-pointer cast by ABI).
 1. Reviewer sign-off from someone other than the author. Self-merging a new `unsafe` block is not allowed.
 
 The safe APIs in `lean-rs` must not require callers to know Lean reference-counting conventions. Leaking an unsafe

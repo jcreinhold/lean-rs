@@ -85,7 +85,9 @@ Per-file opt-outs require, in order:
    is the unique owner per `Obj<'lean>`'s `Drop`" is.
 3. **A test that would fail under a plausible violation** when practical—Miri on the Rust side of the boundary (Miri
    cannot validate the Lean C runtime itself), a sanitizer build, a refcount stress test, or a focused unit test on the
-   unsafe boundary.
+   unsafe boundary. The `miri` job in [`.github/workflows/sanitizer.yml`](../../.github/workflows/sanitizer.yml) runs
+   `cargo +nightly miri test -p lean-rs-sys` under `-Zmiri-tree-borrows` for exactly this pure-Rust boundary;
+   FFI-touching tests gate out with `#[cfg_attr(miri, ignore)]`.
 4. **Reviewer sign-off from someone other than the author.** Self-merging a new `unsafe` block is not allowed.
 
 ## Panic discipline

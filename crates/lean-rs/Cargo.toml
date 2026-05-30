@@ -86,6 +86,10 @@ criterion = { workspace = true }
 # override layers `fmt` + `env-filter` on top so production builds don't
 # pull either. Cargo unions the feature sets across the two declarations.
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+# Drives the `tests/compile_fail/*.rs` negative cases from
+# `tests/compile_fail_surface.rs`; gated behind `RUN_TRYBUILD=1` so the
+# OS/rustc-sensitive `.stderr` snapshots run only in the pinned CI job.
+trybuild = "1"
 
 [[bench]]
 harness = false
@@ -102,3 +106,9 @@ workspace = true
 
 [lib]
 doctest = false
+
+# `tests/compile_fail/*.rs` are driven by trybuild from
+# `tests/compile_fail_surface.rs` via string-based `t.compile_fail(...)` calls,
+# which cargo-shear cannot see statically.
+[package.metadata.cargo-shear]
+ignored-paths = ["tests/compile_fail/*.rs"]

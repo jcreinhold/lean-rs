@@ -1,0 +1,26 @@
+error[E0597]: `host` does not live long enough
+  --> tests/compile_fail/session_outlives_capabilities.rs:19:20
+   |
+18 |         let host = LeanHost::from_lake_project(runtime, "/tmp/nowhere").expect("host");
+   |             ---- binding `host` declared here
+19 |         let caps = host.load_shims_only().expect("capabilities");
+   |                    ^^^^ borrowed value does not live long enough
+20 |         session = caps.session(&[], None, None).expect("session");
+21 |     }
+   |     - `host` dropped here while still borrowed
+22 |     // `session` borrows `caps`, which dropped at the end of the inner block.
+23 |     let _escape = session;
+   |                   ------- borrow later used here
+
+error[E0597]: `caps` does not live long enough
+  --> tests/compile_fail/session_outlives_capabilities.rs:20:19
+   |
+19 |         let caps = host.load_shims_only().expect("capabilities");
+   |             ---- binding `caps` declared here
+20 |         session = caps.session(&[], None, None).expect("session");
+   |                   ^^^^ borrowed value does not live long enough
+21 |     }
+   |     - `caps` dropped here while still borrowed
+22 |     // `session` borrows `caps`, which dropped at the end of the inner block.
+23 |     let _escape = session;
+   |                   ------- borrow later used here

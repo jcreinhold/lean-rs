@@ -174,9 +174,12 @@ LeanSession<'lean, 'c>      ::session(&'c LeanCapabilities<'lean, '_>, imports, 
 LeanExpr<'lean>             // and the other `lean-rs` handles
 ```
 
-`'lean` is invisible at typical call sites (inferred from the runtime borrow). Compile-time enforcement: no handle
-outlives the runtime borrow; no service-layer type escapes to another thread (all types are `!Send + !Sync` by
-default—see the trybuild assertion at `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs`).
+`'lean` is invisible at typical call sites (inferred from the runtime borrow). Compile-time enforcement, pinned by the
+trybuild suite in `crates/lean-rs-host/tests/compile_fail/` (run by the pinned `compile-fail` CI job under
+`RUN_TRYBUILD=1`): no handle outlives the runtime borrow (`handle_outlives_runtime.rs`); a `LeanSession` does not
+outlive its `LeanCapabilities` borrow (`session_outlives_capabilities.rs`); a `PooledSession` does not outlive its
+`SessionPool` (`pooled_session_outlives_pool.rs`); and no service-layer type escapes to another thread—all types are
+`!Send + !Sync` by default (`runtime_is_not_send_or_sync.rs`).
 
 ## Error model
 

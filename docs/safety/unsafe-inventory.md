@@ -382,13 +382,27 @@ weekly cron, and manual dispatch. The ABI fuzz smoke is manual-only in the sanit
 `.github/workflows/release.yml`; it is not part of routine push/PR CI. The stable workspace matrix at
 `.github/workflows/ci.yml` is unchanged.
 
+### CI—Miri
+
+The `miri` job in `.github/workflows/sanitizer.yml` runs
+`MIRIFLAGS="-Zmiri-tree-borrows" cargo +nightly miri test -p lean-rs-sys` on every push to `main`, every pull request, a
+weekly cron, and manual dispatch. It validates the pure-Rust unsafe that `lean-rs-sys` leans on—the refcount mirror's
+`AtomicI32::from_ptr` fast paths (`single_threaded_inc_dec_round_trips`, `multi_threaded_inc_decrements_negated_count`,
+`inc_ref_n_adds_in_place`) and the `o.cast::<LeanObjectRepr>()` header reads (`object::tests`)—over a synthetic,
+Rust-owned `LeanObjectRepr` (`repr::test_support::MockObject`) that never crosses the refcount to zero, so the
+`lean_dec_ref_cold` extern is never reached. The FFI-touching tests gate themselves out with
+`#[cfg_attr(miri, ignore)]`. Strict provenance is intentionally **not** enabled: Lean's scalar encoding
+(`lean_box`/`lean_unbox`) is an int-to-pointer cast by ABI, which `-Zmiri-strict-provenance` rejects by design. The job
+needs only `LEAN_SYSROOT` (for the build-time header digest); it never executes the Lean runtime, so it skips the Lake
+build and `LD_LIBRARY_PATH` setup.
+
 ### Coverage gaps
 
 - **macOS AddressSanitizer is not yet run in CI.** ASan is available on `aarch64-apple-darwin` nightly, but the
   interaction between Lean's runtime (`libleanrt` links its own mimalloc) and ASan's allocator-shim on macOS has not
   been validated. Open future work.
-- **Miri does not cover the Lean C runtime.** Miri can validate the pure-Rust boundaries in `lean-rs-sys` (refcount
-  mirror's `AtomicI32::from_ptr`, layout casts in `repr` tests, `NonNull` arithmetic on mock pointers), but it cannot
-  execute `libleanshared`. The safety-test guidance in
-  [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md) accepts this by naming sanitizers and
-  stress tests as the alternative.
+- **Miri cannot execute the Lean C runtime.** The CI Miri lane (above) covers the pure-Rust boundary in `lean-rs-sys`
+  (refcount mirror's `AtomicI32::from_ptr`, header-field casts, scalar-pointer encoding), but Miri cannot interpret
+  `libleanshared`, so the live refcount discipline of `Obj`/`ObjRef`, callback unwinding, and thread-attach soundness
+  remain out of its scope. Those paths are covered by the sanitizer, fuzz, and stress tests named in
+  [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).

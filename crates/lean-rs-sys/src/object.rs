@@ -260,3 +260,79 @@ pub unsafe fn lean_is_shared(o: *mut lean_object) -> bool {
     // SAFETY: precondition above.
     unsafe { load_rc(o) > 1 }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Pure-Rust coverage of scalar encoding and the header/runtime-mode
+    //! reads over a synthetic, Rust-owned object header. No allocation crosses
+    //! into the Lean runtime, so these run unchanged under `cargo miri test`,
+    //! validating the `o.cast::<LeanObjectRepr>()` field-offset provenance and
+    //! the `AtomicI32::from_ptr` read in `load_rc`.
+
+    use super::{
+        lean_box, lean_is_ctor, lean_is_exclusive, lean_is_mt, lean_is_persistent, lean_is_scalar, lean_is_shared,
+        lean_is_st, lean_is_string, lean_obj_tag, lean_ptr_other, lean_ptr_tag, lean_unbox,
+    };
+    use crate::consts::{LEAN_MAX_CTOR_TAG, LEAN_STRING};
+    use crate::repr::test_support::MockObject;
+
+    #[test]
+    fn scalar_box_unbox_round_trips() {
+        // SAFETY: pointer-bit arithmetic only; no memory access.
+        unsafe {
+            for n in [0_usize, 1, 42, usize::MAX >> 1] {
+                let boxed = lean_box(n);
+                assert!(lean_is_scalar(boxed));
+                assert_eq!(lean_unbox(boxed), n);
+                // For scalars, the logical tag is the unboxed payload.
+                assert_eq!(lean_obj_tag(boxed), n as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn header_tag_and_other_read_back() {
+        let obj = MockObject::new(1, LEAN_STRING, 0x5a);
+        let o = obj.ptr();
+        // SAFETY: `o` is a valid non-scalar header; these read header bytes
+        // through the `LeanObjectRepr` cast.
+        unsafe {
+            assert!(!lean_is_scalar(o));
+            assert_eq!(lean_ptr_tag(o), LEAN_STRING);
+            assert_eq!(lean_ptr_other(o), 0x5a);
+            assert!(lean_is_string(o));
+            assert_eq!(lean_obj_tag(o), u32::from(LEAN_STRING));
+        }
+    }
+
+    #[test]
+    fn ctor_tag_predicate_tracks_the_boundary() {
+        let ctor = MockObject::new(1, LEAN_MAX_CTOR_TAG, 0);
+        let beyond = MockObject::new(1, LEAN_STRING, 0);
+        // SAFETY: both are valid non-scalar headers.
+        unsafe {
+            assert!(lean_is_ctor(ctor.ptr()));
+            assert!(!lean_is_ctor(beyond.ptr()));
+        }
+    }
+
+    #[test]
+    fn runtime_mode_reads_match_refcount_sign() {
+        // Single-threaded exclusive (rc == 1).
+        let st = MockObject::new(1, 0, 0);
+        // Single-threaded shared (rc > 1).
+        let shared = MockObject::new(3, 0, 0);
+        // Multi-threaded (rc < 0, negated live count).
+        let mt = MockObject::new(-2, 0, 0);
+        // Persistent (rc == 0).
+        let persistent = MockObject::new(0, 0, 0);
+        // SAFETY: all four are valid non-scalar headers; the reads go through
+        // `load_rc`'s `AtomicI32::from_ptr` relaxed load.
+        unsafe {
+            assert!(lean_is_st(st.ptr()) && lean_is_exclusive(st.ptr()));
+            assert!(lean_is_shared(shared.ptr()) && !lean_is_exclusive(shared.ptr()));
+            assert!(lean_is_mt(mt.ptr()) && !lean_is_st(mt.ptr()));
+            assert!(lean_is_persistent(persistent.ptr()) && !lean_is_st(persistent.ptr()));
+        }
+    }
+}

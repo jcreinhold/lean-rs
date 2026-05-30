@@ -138,6 +138,72 @@ pub(crate) struct LeanExternalObjectRepr {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    //! A pure-Rust stand-in for a Lean heap object header, used by the unit
+    //! tests of the header/refcount fast paths in [`crate::object`] and
+    //! [`crate::refcount`].
+    //!
+    //! The object lives in Rust-owned heap memory and is never handed to the
+    //! Lean runtime, so these tests run under both native `cargo test` and
+    //! `cargo miri test`—the latter validating the `AtomicI32::from_ptr`,
+    //! `o.cast::<LeanObjectRepr>()`, and field-offset provenance that the FFI
+    //! paths rely on. Callers must keep the refcount strictly positive on the
+    //! decrement side so no test ever dispatches to `lean_dec_ref_cold`, which
+    //! is an extern Miri cannot interpret.
+
+    use super::LeanObjectRepr;
+    use crate::types::lean_object;
+
+    /// Owns a single heap-allocated [`LeanObjectRepr`] and hands out a
+    /// `*mut lean_object` with read/write provenance over the whole header.
+    pub(crate) struct MockObject {
+        repr: *mut LeanObjectRepr,
+    }
+
+    impl MockObject {
+        /// Allocate a synthetic header with the given refcount and tag. The
+        /// `m_cs_sz` field is irrelevant to the fast paths and is zeroed.
+        pub(crate) fn new(m_rc: i32, m_tag: u8, m_other: u8) -> Self {
+            let boxed = Box::new(LeanObjectRepr {
+                m_rc,
+                m_cs_sz: 0,
+                m_other,
+                m_tag,
+            });
+            // `Box::into_raw` yields a pointer valid for reads and writes over
+            // the allocation until we reclaim it in `Drop`; the refcount
+            // mirrors mutate `m_rc` through a pointer derived from it.
+            Self {
+                repr: Box::into_raw(boxed),
+            }
+        }
+
+        /// The object as the opaque pointer the `lean_*` helpers accept.
+        pub(crate) fn ptr(&self) -> *mut lean_object {
+            self.repr.cast::<lean_object>()
+        }
+
+        /// Read the live refcount field directly (test assertions only).
+        pub(crate) fn rc(&self) -> i32 {
+            // SAFETY: `repr` is a live, uniquely-owned allocation for the
+            // lifetime of `self`; no concurrent access in single-threaded
+            // tests.
+            unsafe { (*self.repr).m_rc }
+        }
+    }
+
+    impl Drop for MockObject {
+        fn drop(&mut self) {
+            // SAFETY: reclaim the `Box` leaked by `into_raw` in `new`; `repr`
+            // has not been freed by any other path.
+            unsafe {
+                drop(Box::from_raw(self.repr));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use core::mem::{align_of, size_of};

@@ -1,0 +1,62 @@
+name: Compile-fail
+
+# Runs the trybuild `.stderr` snapshot suites on a single OS + the repo's
+# pinned stable toolchain (`rust-toolchain.toml`). These snapshots capture
+# `rustc` diagnostics whose wording/whitespace drifts across platforms and
+# toolchain versions, so they are gated behind `RUN_TRYBUILD=1` and run only
+# here—the per-PR `ci.yml` matrix does not. A stable-toolchain bump that
+# changes a diagnostic requires regenerating the snapshots with
+# `TRYBUILD=overwrite RUN_TRYBUILD=1 cargo test --test compile_fail_surface`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "24 8 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: compile-fail-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  LEAN_VERSION_HEAD: "4.31.0-rc1"
+
+jobs:
+  compile-fail:
+    name: Compile-fail snapshots (pinned stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # rust-toolchain.toml pins `channel = "stable"`; cargo resolves it for
+      # every command, so the snapshots match local regeneration on the same
+      # pinned stable.
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: compile-fail-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT
+        # `lean-rs-sys/build.rs` reads `lean.h` from the sysroot to compute the
+        # header digest. The negative cases fail to compile before any link
+        # step, so no Lake build or `libleanshared` runtime is needed.
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Run compile-fail snapshot suites
+        env:
+          RUN_TRYBUILD: "1"
+        run: |
+          cargo test -p lean-rs-sys -p lean-rs -p lean-rs-host \
+            --test compile_fail_surface
