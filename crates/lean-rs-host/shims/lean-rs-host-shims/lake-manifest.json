@@ -1,12 +1,17 @@
-{"version": "1.1.0",
- "packagesDir": ".lake/packages",
- "packages":
- [{"type": "path",
-   "scope": "",
-   "name": "lean_rs_interop_shims",
-   "manifestFile": "lake-manifest.json",
-   "inherited": false,
-   "dir": "../lean-rs-interop-shims",
-   "configFile": "lakefile.lean"}],
- "name": "lean_rs_host_shims",
- "lakeDir": ".lake"}
+{
+  "version": "1.1.0",
+  "packagesDir": ".lake/packages",
+  "packages": [
+    {
+      "type": "path",
+      "scope": "",
+      "name": "lean_rs_interop_shims",
+      "manifestFile": "lake-manifest.json",
+      "inherited": false,
+      "dir": "../lean-rs-interop-shims",
+      "configFile": "lakefile.lean"
+    }
+  ],
+  "name": "lean_rs_host_shims",
+  "lakeDir": ".lake"
+}
