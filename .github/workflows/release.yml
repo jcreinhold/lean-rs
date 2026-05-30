@@ -62,7 +62,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         lean_version: ["4.30.0"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -192,7 +192,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -323,7 +323,7 @@ jobs:
 
       - name: Create GitHub Release
         if: inputs.dry_run != true && github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: release-body.md
           prerelease: ${{ contains(github.ref_name, '-') }}

@@ -71,7 +71,7 @@ jobs:
         lean_version: ["4.30.0"]
         include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.full_matrix) && '[{"os":"ubuntu-latest","lean_version":"4.26.0"},{"os":"ubuntu-latest","lean_version":"4.27.0"},{"os":"ubuntu-latest","lean_version":"4.28.0"},{"os":"ubuntu-latest","lean_version":"4.28.1"},{"os":"ubuntu-latest","lean_version":"4.29.0"},{"os":"ubuntu-latest","lean_version":"4.29.1"},{"os":"macos-latest","lean_version":"4.26.0"},{"os":"macos-latest","lean_version":"4.27.0"},{"os":"macos-latest","lean_version":"4.28.0"},{"os":"macos-latest","lean_version":"4.28.1"},{"os":"macos-latest","lean_version":"4.29.0"},{"os":"macos-latest","lean_version":"4.29.1"},{"os":"macos-latest","lean_version":"4.30.0"}]' || '[]') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
