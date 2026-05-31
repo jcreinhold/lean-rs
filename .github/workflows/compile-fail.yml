@@ -33,9 +33,15 @@ jobs:
 
       # rust-toolchain.toml pins `channel = "stable"`; cargo resolves it for
       # every command, so the snapshots match local regeneration on the same
-      # pinned stable.
+      # pinned stable. `rust-src` is required: some `.stderr` snapshots quote
+      # the standard-library source (e.g. `PhantomData` in `core/src/marker.rs`)
+      # in "required because it appears within the type" notes, and rustc only
+      # renders that snippet when the std source is on disk. Regenerate
+      # snapshots with `rust-src` installed so they match this job.
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
 
       - uses: Swatinem/rust-cache@v2
         with:
