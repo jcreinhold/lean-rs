@@ -1331,7 +1331,9 @@ impl HostSessionState {
         if progress {
             emit_progress(writer, "verify_declaration", 1, Some(1));
         }
-        Ok(declaration_verification_outcome_wire(result))
+        Ok(taint_verification_under_memory_pressure(
+            declaration_verification_outcome_wire(result),
+        ))
     }
 
     fn list_declarations_strings(
@@ -2003,10 +2005,12 @@ fn module_query_selector_host(selector: LeanWorkerModuleQuerySelector) -> LeanRe
             id,
             declaration,
             position,
+            locals_raw,
         } => ModuleQuerySelector::ProofStateInDeclaration {
             id,
             declaration,
             position: proof_position_selector_host(&position),
+            locals_raw,
         },
         LeanWorkerModuleQuerySelector::TypeAt { id, line, column } => ModuleQuerySelector::TypeAt { id, line, column },
         LeanWorkerModuleQuerySelector::References { id, name } => ModuleQuerySelector::References { id, name },
@@ -2359,6 +2363,72 @@ fn proof_attempt_outcome_wire(outcome: ProofAttemptOutcome) -> LeanWorkerProofAt
     }
 }
 
+/// A verdict that names a genuine resolution — and so could be a degraded
+/// artifact of memory pressure rather than the truth. `Accepted` is excluded
+/// (verification is monotone); `Timeout`/`BudgetExceeded` are already honest
+/// degraded verdicts; `Unsupported` is a capability fact.
+fn verification_status_non_positive(status: LeanWorkerDeclarationVerificationStatus) -> bool {
+    use LeanWorkerDeclarationVerificationStatus as S;
+    matches!(status, S::NotFound | S::NeedsBuild | S::Rejected | S::Ambiguous)
+}
+
+/// Memory-pressure taint: a non-positive verdict produced while the child's RSS
+/// is at or above `LEAN_RS_VERIFY_RSS_TAINT_KIB` cannot be trusted to reflect a
+/// genuine resolution — the elaboration may have been silently degraded (no Lean
+/// diagnostic). Relabel it to `BudgetExceeded` with the axiom set unavailable so
+/// the caller sees "could not complete under memory pressure" rather than a
+/// misleading `NotFound`/`Rejected`. The ceiling is gated high (off by default)
+/// so genuine name-absent queries on a warm mathlib worker are not mislabeled,
+/// and a missing RSS sample never taints. This is the worker-internal,
+/// authoritative counterpart to the parent's post-hoc `worker_recycled` relabel.
+fn taint_verification_under_memory_pressure(
+    result: LeanWorkerDeclarationVerificationResult,
+) -> LeanWorkerDeclarationVerificationResult {
+    let ceiling = module_cache_env_u64("LEAN_RS_VERIFY_RSS_TAINT_KIB", 0);
+    apply_memory_pressure_taint(result, ceiling, current_rss_kib())
+}
+
+/// Pure core of [`taint_verification_under_memory_pressure`], parameterised on
+/// the ceiling and the sampled RSS so it is testable without environment or
+/// platform state. Taints only when the taint is enabled (`ceiling != 0`), an
+/// RSS sample is available, and it is at or above the ceiling.
+fn apply_memory_pressure_taint(
+    mut result: LeanWorkerDeclarationVerificationResult,
+    ceiling_kib: u64,
+    current_rss_kib: Option<u64>,
+) -> LeanWorkerDeclarationVerificationResult {
+    if ceiling_kib == 0 {
+        return result;
+    }
+    let Some(current_kib) = current_rss_kib else {
+        return result;
+    };
+    if current_kib < ceiling_kib {
+        return result;
+    }
+    // `HeaderParseFailed`, `Unsupported`, and any future variant carry no
+    // verdict to relabel.
+    let (LeanWorkerDeclarationVerificationResult::Ok {
+        verification_status: status,
+        facts,
+        ..
+    }
+    | LeanWorkerDeclarationVerificationResult::MissingImports {
+        verification_status: status,
+        facts,
+        ..
+    }) = &mut result
+    else {
+        return result;
+    };
+    if verification_status_non_positive(*status) {
+        *status = LeanWorkerDeclarationVerificationStatus::BudgetExceeded;
+        facts.axioms.clear();
+        facts.axioms_available = false;
+    }
+    result
+}
+
 fn declaration_verification_status_wire(
     status: DeclarationVerificationStatus,
 ) -> LeanWorkerDeclarationVerificationStatus {
@@ -2662,4 +2732,136 @@ fn emit_test_rows(writer: &ProtocolWriter, streams: &[String]) -> Result<u64, Pr
 #[allow(dead_code, reason = "reserved for future worker configuration paths")]
 fn _path_for_diagnostics(path: &Path) -> PathBuf {
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_memory_pressure_taint, verification_status_non_positive};
+    use lean_rs_worker_protocol::types::{
+        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
+        LeanWorkerDeclarationVerificationStatus,
+    };
+
+    fn ok_result(
+        status: LeanWorkerDeclarationVerificationStatus,
+        axioms_available: bool,
+    ) -> LeanWorkerDeclarationVerificationResult {
+        let mut facts = LeanWorkerDeclarationVerificationFacts::unavailable();
+        facts.axioms_available = axioms_available;
+        if axioms_available {
+            facts.axioms = vec!["propext".to_owned()];
+        }
+        LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status: status,
+            facts: Box::new(facts),
+            imports: Vec::new(),
+        }
+    }
+
+    /// The verdict status of an `Ok` result, or `None` for any other variant —
+    /// keeps the assertions free of `panic!`/wildcard matches on the
+    /// `non_exhaustive` result enum.
+    fn ok_status(result: &LeanWorkerDeclarationVerificationResult) -> Option<LeanWorkerDeclarationVerificationStatus> {
+        if let LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status, ..
+        } = result
+        {
+            Some(*verification_status)
+        } else {
+            None
+        }
+    }
+
+    /// `(axioms_available, axioms_is_empty)` of an `Ok` result's facts.
+    fn ok_axiom_state(result: &LeanWorkerDeclarationVerificationResult) -> Option<(bool, bool)> {
+        if let LeanWorkerDeclarationVerificationResult::Ok { facts, .. } = result {
+            Some((facts.axioms_available, facts.axioms.is_empty()))
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn taint_relabels_non_positive_verdict_at_or_above_ceiling() {
+        let tainted = apply_memory_pressure_taint(
+            ok_result(LeanWorkerDeclarationVerificationStatus::NotFound, true),
+            1000,
+            Some(5000),
+        );
+        assert_eq!(
+            ok_status(&tainted),
+            Some(LeanWorkerDeclarationVerificationStatus::BudgetExceeded)
+        );
+        // A degraded verdict marks the axiom set unavailable and drops any stale axioms.
+        assert_eq!(ok_axiom_state(&tainted), Some((false, true)));
+    }
+
+    #[test]
+    fn taint_disabled_when_ceiling_is_zero() {
+        let tainted = apply_memory_pressure_taint(
+            ok_result(LeanWorkerDeclarationVerificationStatus::NotFound, true),
+            0,
+            Some(50_000_000),
+        );
+        assert_eq!(
+            ok_status(&tainted),
+            Some(LeanWorkerDeclarationVerificationStatus::NotFound)
+        );
+    }
+
+    #[test]
+    fn taint_skipped_below_ceiling() {
+        let tainted = apply_memory_pressure_taint(
+            ok_result(LeanWorkerDeclarationVerificationStatus::NotFound, true),
+            5000,
+            Some(1000),
+        );
+        assert_eq!(
+            ok_status(&tainted),
+            Some(LeanWorkerDeclarationVerificationStatus::NotFound)
+        );
+    }
+
+    #[test]
+    fn taint_skipped_when_rss_sample_unavailable() {
+        let tainted = apply_memory_pressure_taint(
+            ok_result(LeanWorkerDeclarationVerificationStatus::NotFound, true),
+            1000,
+            None,
+        );
+        assert_eq!(
+            ok_status(&tainted),
+            Some(LeanWorkerDeclarationVerificationStatus::NotFound)
+        );
+    }
+
+    #[test]
+    fn taint_never_downgrades_accepted() {
+        let tainted = apply_memory_pressure_taint(
+            ok_result(LeanWorkerDeclarationVerificationStatus::Accepted, true),
+            1000,
+            Some(5000),
+        );
+        assert_eq!(
+            ok_status(&tainted),
+            Some(LeanWorkerDeclarationVerificationStatus::Accepted)
+        );
+    }
+
+    #[test]
+    fn non_positive_set_is_exactly_the_unresolved_verdicts() {
+        use LeanWorkerDeclarationVerificationStatus as S;
+        for status in [S::NotFound, S::NeedsBuild, S::Rejected, S::Ambiguous] {
+            assert!(
+                verification_status_non_positive(status),
+                "{status:?} should be non-positive"
+            );
+        }
+        for status in [S::Accepted, S::BudgetExceeded, S::Timeout, S::Unsupported] {
+            assert!(
+                !verification_status_non_positive(status),
+                "{status:?} should not be non-positive"
+            );
+        }
+    }
 }

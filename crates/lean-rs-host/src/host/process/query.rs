@@ -243,6 +243,9 @@ pub enum ModuleQuerySelector {
         id: String,
         declaration: String,
         position: ProofPositionSelector,
+        /// Render local hypotheses as raw, fully-elaborated `Expr` text rather
+        /// than the default notation-aware delaboration. Expert opt-out.
+        locals_raw: bool,
     },
     TypeAt {
         id: String,
@@ -389,6 +392,7 @@ impl<'lean> IntoLean<'lean> for ModuleQuerySelector {
                 id,
                 declaration,
                 position,
+                locals_raw,
             } => alloc_ctor_with_objects(
                 runtime,
                 6,
@@ -396,6 +400,7 @@ impl<'lean> IntoLean<'lean> for ModuleQuerySelector {
                     id.into_lean(runtime),
                     declaration.into_lean(runtime),
                     position.into_lean(runtime),
+                    u32::from(locals_raw).into_lean(runtime),
                 ],
             ),
         }

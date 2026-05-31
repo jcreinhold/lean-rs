@@ -15,10 +15,12 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
-    LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationFacts,
+    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
+    LeanWorkerDeclarationVerificationStatus, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
     LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
     LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
     LeanWorkerProofAttemptResult, LeanWorkerRendered,
 };
@@ -266,6 +268,11 @@ pub enum LeanWorkerRestartReason {
         operation: &'static str,
         duration: Duration,
     },
+    /// The child aborted (SIGABRT / fatal panic) during an in-flight request and
+    /// the supervisor respawned it. Used by the read-only verify/proof-state
+    /// guard that converts such an abort into a degraded verdict instead of a
+    /// hard error.
+    ChildAbort { operation: &'static str },
 }
 
 impl LeanWorkerRestartReason {
@@ -285,6 +292,7 @@ impl LeanWorkerRestartReason {
             Self::Idle { .. } => "idle",
             Self::Cancelled { .. } => "cancelled",
             Self::RequestTimeout { .. } => "timeout",
+            Self::ChildAbort { .. } => "child_abort",
         }
     }
 }
@@ -406,6 +414,10 @@ impl LeanWorkerStats {
             LeanWorkerRestartReason::RequestTimeout { .. } => {
                 self.timeout_restarts = self.timeout_restarts.saturating_add(1);
             }
+            // The general `restarts` counter and `last_restart_reason` already
+            // capture child aborts; `stable_cause() == "child_abort"` keys the
+            // parent's relabel, so no dedicated counter is warranted.
+            LeanWorkerRestartReason::ChildAbort { .. } => {}
         }
         self.last_restart_reason = Some(reason);
     }
@@ -1463,8 +1475,9 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
-        self.round_trip(
-            "worker_verify_declaration",
+        const OPERATION: &str = "worker_verify_declaration";
+        let outcome = self.round_trip(
+            OPERATION,
             Request::VerifyDeclaration {
                 request: request.clone(),
                 options: options.clone(),
@@ -1477,7 +1490,23 @@ impl LeanWorker {
                 Response::DeclarationVerification { result } => Ok(result),
                 other => Err(unexpected_response(operation, &other)),
             },
-        )
+        );
+        match outcome {
+            Ok(result) => Ok(result),
+            // A read-only verification must never surface a child abort as a hard
+            // error: the worker's own (best-effort) screen could not prevent a
+            // residual metavariable panic, so the supervisor respawns and reports
+            // the honest degraded verdict. Verification is monotone, so relabeling
+            // a non-result to `BudgetExceeded` never downgrades an `Accepted`.
+            Err(err) => {
+                self.recover_child_abort(OPERATION, err)?;
+                Ok(LeanWorkerDeclarationVerificationResult::Ok {
+                    verification_status: LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
+                    facts: Box::new(LeanWorkerDeclarationVerificationFacts::unavailable()),
+                    imports: Vec::new(),
+                })
+            }
+        }
     }
 
     #[allow(
@@ -1594,8 +1623,9 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
-        self.round_trip(
-            "worker_process_module_query_batch",
+        const OPERATION: &str = "worker_process_module_query_batch";
+        let outcome = self.round_trip(
+            OPERATION,
             Request::ProcessModuleQueryBatch {
                 source: source.to_owned(),
                 selectors: selectors.to_vec(),
@@ -1609,7 +1639,16 @@ impl LeanWorker {
                 Response::ProcessModuleQueryBatch { outcome } => Ok(outcome),
                 other => Err(unexpected_response(operation, &other)),
             },
-        )
+        );
+        match outcome {
+            Ok(outcome) => Ok(outcome),
+            // As with verification: a child abort during a read-only proof-state
+            // batch becomes a per-selector degraded item, not a hard error.
+            Err(err) => {
+                self.recover_child_abort(OPERATION, err)?;
+                Ok(degraded_query_batch_outcome(selectors))
+            }
+        }
     }
 
     #[expect(
@@ -1873,6 +1912,18 @@ impl LeanWorker {
         next.last_activity = Instant::now();
         *self = next;
         Ok(())
+    }
+
+    /// Absorb a child abort raised during a read-only request: respawn a fresh
+    /// child so subsequent requests succeed, then return `Ok(())` so the caller
+    /// can synthesise a degraded verdict. Any non-abort error (or a respawn
+    /// failure) propagates unchanged.
+    fn recover_child_abort(&mut self, operation: &'static str, err: LeanWorkerError) -> Result<(), LeanWorkerError> {
+        if matches!(err, LeanWorkerError::ChildPanicOrAbort { .. }) {
+            self.restart_with_reason(LeanWorkerRestartReason::ChildAbort { operation })
+        } else {
+            Err(err)
+        }
     }
 
     fn check_hard_rss_limit(&mut self, operation: &'static str) -> Result<(), LeanWorkerError> {
@@ -2414,6 +2465,27 @@ fn truncate_for_display(text: &str, max_bytes: usize) -> String {
     format!("{kept}… ({truncated_bytes} bytes truncated)")
 }
 
+/// Synthesise a degraded module-query batch outcome after a child abort: every
+/// requested selector reports `BudgetExceeded` so the caller sees an honest
+/// "could not complete under resource pressure" per id rather than a hard error.
+fn degraded_query_batch_outcome(selectors: &[LeanWorkerModuleQuerySelector]) -> LeanWorkerModuleQueryBatchOutcome {
+    let items = selectors
+        .iter()
+        .map(|selector| LeanWorkerModuleQueryBatchItem::BudgetExceeded {
+            id: selector.id().to_owned(),
+            message: "worker aborted during module query; result degraded under resource pressure".to_owned(),
+        })
+        .collect();
+    LeanWorkerModuleQueryBatchOutcome::Ok {
+        result: LeanWorkerModuleQueryBatchEnvelope {
+            items,
+            total_truncated: false,
+        },
+        imports: Vec::new(),
+        facts: LeanWorkerModuleQueryCacheFacts::uncached(0),
+    }
+}
+
 fn unexpected_response(operation: &'static str, response: &Response) -> LeanWorkerError {
     LeanWorkerError::Protocol {
         message: format!("worker sent unexpected {operation} response: {response:?}"),
@@ -2499,9 +2571,10 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{
-        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot,
-        LeanWorkerRestartReason, LeanWorkerStats, MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES,
-        truncate_for_display,
+        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationFacts, LeanWorkerError,
+        LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+        LeanWorkerModuleQuerySelector, LeanWorkerRestartReason, LeanWorkerStats, MAX_FRAME_BYTES,
+        MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, truncate_for_display,
     };
     use std::path::PathBuf;
     use std::time::Duration;
@@ -2614,6 +2687,56 @@ mod tests {
             .stable_cause(),
             "timeout"
         );
+        // The verify/proof-state abort guard surfaces the same `child_abort`
+        // cause the parent's relabel heuristic already keys on.
+        assert_eq!(
+            LeanWorkerRestartReason::ChildAbort { operation: "test" }.stable_cause(),
+            "child_abort"
+        );
+    }
+
+    #[test]
+    fn degraded_query_batch_outcome_marks_every_selector_budget_exceeded() {
+        let selectors = vec![
+            LeanWorkerModuleQuerySelector::ProofState {
+                id: "a".to_owned(),
+                line: 1,
+                column: 1,
+            },
+            LeanWorkerModuleQuerySelector::Diagnostics { id: "b".to_owned() },
+        ];
+        let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, .. } =
+            super::degraded_query_batch_outcome(&selectors)
+        else {
+            panic!("degraded outcome should be Ok with per-selector items");
+        };
+        assert!(imports.is_empty());
+        assert_eq!(result.items.len(), 2);
+        // `filter_map` keeps only `BudgetExceeded` items, so a non-degraded item
+        // would drop out and the id vector would no longer match.
+        let ids: Vec<&str> = result
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. } = item {
+                    Some(id.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn unavailable_verification_facts_report_axioms_uncomputed() {
+        let facts = LeanWorkerDeclarationVerificationFacts::unavailable();
+        assert!(
+            !facts.axioms_available,
+            "degraded facts must not claim a computed axiom set"
+        );
+        assert!(facts.axioms.is_empty());
+        assert!(facts.target.is_none());
     }
 
     #[test]

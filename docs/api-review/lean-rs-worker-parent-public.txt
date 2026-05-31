@@ -275,6 +275,8 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerR
 pub enum lean_rs_worker_parent::LeanWorkerRestartReason
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Cancelled
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Cancelled::operation: &'static str
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort::operation: &'static str
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Explicit
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Idle
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Idle::idle_for: core::time::Duration
@@ -747,6 +749,7 @@ pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::max_bytes(self, u64) 
 pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::max_entries(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::rss_guard_kib(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::ttl(self, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::verify_rss_taint_kib(self, u64) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerModuleCacheLimits
 pub fn lean_rs_worker_parent::LeanWorkerModuleCacheLimits::clone(&self) -> lean_rs_worker_parent::LeanWorkerModuleCacheLimits
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerModuleCacheLimits

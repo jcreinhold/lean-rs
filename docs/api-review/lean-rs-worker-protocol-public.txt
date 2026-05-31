@@ -963,6 +963,7 @@ pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofState::l
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::declaration: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::id: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::locals_raw: bool
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::ProofStateInDeclaration::position: lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::References
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::References::id: alloc::string::String
@@ -975,6 +976,8 @@ pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::TypeAt
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::TypeAt::column: u32
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::TypeAt::id: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::TypeAt::line: u32
+impl lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
+pub fn lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::id(&self) -> &str
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
 pub fn lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector
@@ -1729,6 +1732,8 @@ pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::diag
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::output_truncated: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::target: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::unresolved_goals: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+impl lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::unavailable() -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts

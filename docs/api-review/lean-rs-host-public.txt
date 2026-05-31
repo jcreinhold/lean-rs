@@ -1116,6 +1116,7 @@ pub lean_rs_host::host::process::ModuleQuerySelector::ProofState::line: u32
 pub lean_rs_host::host::process::ModuleQuerySelector::ProofStateInDeclaration
 pub lean_rs_host::host::process::ModuleQuerySelector::ProofStateInDeclaration::declaration: alloc::string::String
 pub lean_rs_host::host::process::ModuleQuerySelector::ProofStateInDeclaration::id: alloc::string::String
+pub lean_rs_host::host::process::ModuleQuerySelector::ProofStateInDeclaration::locals_raw: bool
 pub lean_rs_host::host::process::ModuleQuerySelector::ProofStateInDeclaration::position: lean_rs_host::ProofPositionSelector
 pub lean_rs_host::host::process::ModuleQuerySelector::References
 pub lean_rs_host::host::process::ModuleQuerySelector::References::id: alloc::string::String

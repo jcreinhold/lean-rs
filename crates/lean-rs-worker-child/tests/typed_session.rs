@@ -1014,6 +1014,78 @@ fn process_module_query_batch_returns_diagnostics_and_proof_state_through_worker
 }
 
 #[test]
+fn proof_state_in_declaration_renders_locals_pretty_by_default_and_raw_on_opt_out() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    // `h`'s type mentions notation (`+`, `=`) and a bound variable (`n`), so the
+    // pretty delaboration and the raw `Expr` form are observably different.
+    let source = "theorem t (n : Nat) (h : n + 0 = n) : n + 0 = n := by\n  exact h\n";
+
+    let mut local_type = |locals_raw: bool| -> String {
+        let outcome = session
+            .process_module_query_batch(
+                source,
+                &[LeanWorkerModuleQuerySelector::ProofStateInDeclaration {
+                    id: "state".to_owned(),
+                    declaration: "t".to_owned(),
+                    position: LeanWorkerProofPositionSelector::default(),
+                    locals_raw,
+                }],
+                &LeanWorkerOutputBudgets::default(),
+                &opts,
+                None,
+                None,
+            )
+            .expect("worker process_module_query_batch dispatch succeeds");
+        let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+            panic!("expected Ok batch outcome, got {outcome:?}");
+        };
+        let item = result
+            .items
+            .into_iter()
+            .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "state"))
+            .expect("proof-state item present");
+        let LeanWorkerModuleQueryBatchItem::Ok { result, .. } = item else {
+            panic!("expected Ok proof-state item");
+        };
+        let LeanWorkerModuleQueryBatchResult::ProofState(LeanWorkerProofStateResult::State { info }) = *result else {
+            panic!("expected proof-state result, got {result:?}");
+        };
+        let h = info
+            .locals
+            .into_iter()
+            .find(|local| local.name == "h")
+            .expect("local hypothesis h present");
+        h.type_str.value
+    };
+
+    let pretty = local_type(false);
+    assert!(
+        pretty.contains("n + 0 = n"),
+        "default locals should be pretty and notation-aware, got {pretty:?}",
+    );
+    assert!(
+        !pretty.contains("_uniq"),
+        "pretty locals must not leak raw `_uniq.NNNN` free-variable names, got {pretty:?}",
+    );
+
+    let raw = local_type(true);
+    assert!(
+        raw.contains("_uniq"),
+        "locals_raw should restore the raw `Expr` form with `_uniq.NNNN` names, got {raw:?}",
+    );
+    assert_ne!(
+        pretty, raw,
+        "raw and pretty renderings should differ for this hypothesis"
+    );
+}
+
+#[test]
 fn process_module_query_batch_obeys_total_budget_without_killing_worker() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();

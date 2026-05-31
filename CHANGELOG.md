@@ -9,6 +9,40 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Worker robustness: no verify crash, honest degraded verdict, pretty proof-state locals
+
+A heavy `verify_declaration` / `proof_state` workload run against a RED module while the worker thrashed against its RSS
+cap surfaced three defects in the read-only query path; all three are fixed.
+
+- **`verify_declaration` no longer aborts the child on a proof state degraded by memory pressure.** The
+  `Lean.MetavarContext.getDecl … unknown metavariable` panic on the proof-state walk is an uncatchable `abort()` under
+  the child's `LEAN_ABORT_ON_PANIC=1`, so it is contained at two layers. The shim screens a captured proof state for
+  dangling metavariables with the *total* `MetavarContext.findDecl?` (never the pure-`panic!` `getDecl`) before any
+  renderer dereferences it, rendering a degraded goal as `<goal unavailable: elaboration degraded under resource
+  pressure>` and routing the verdict to `BudgetExceeded` with `axioms_available = false`. As an authoritative backstop
+  for any residual transitive-mvar abort, the supervisor maps a `ChildPanicOrAbort` during a verify / query-batch
+  request to a synthesized degraded verdict (verify → `BudgetExceeded` with unavailable facts; batch → per-selector
+  `BudgetExceeded`) and records a `child_abort` restart, so the caller always gets a verdict and the next call is served
+  by a fresh child.
+- **`verify_declaration` no longer returns `NotFound` for a valid lemma degraded by memory pressure.** The Lean shim
+  reclassifies a `notFound` whose diagnostics carry a resource marker (deep recursion, interrupted, out of memory) to
+  `timeout` / `BudgetExceeded`, and the worker child taints a non-positive verdict (never `Accepted`) to `BudgetExceeded`
+  when its post-job RSS is at or above an internal, default-off ceiling. A clean name-absent query on a healthy worker
+  still returns `NotFound`.
+- **`proof_state.locals` now render pretty and notation-aware**, through the same delaborator as `goals_before` /
+  `goals_after`, instead of raw `Expr.toString` (`_uniq.NNNN`, ~6 KB/decl — the proximate RSS-spike trigger). A new
+  additive `locals_raw: bool` field on the `ProofStateInDeclaration` selector (`#[serde(default)]`, default `false`)
+  restores the raw form on request. The verify path and the try-proof-step goals path, which read only `goals_after`,
+  now render no locals at all.
+
+No new verification-status variant or protocol version bump: `BudgetExceeded` is reused for the degraded case and
+`locals_raw` is backward compatible via `#[serde(default)]`. The internal env var `LEAN_RS_VERIFY_RSS_TAINT_KIB`
+(plumbed from the pool's per-worker RSS ceiling) gates the child-side taint and defaults to off. See
+[`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md) for the degraded-verdict
+semantics and locals rendering modes, and
+[`docs/architecture/06-panic-containment.md`](docs/architecture/06-panic-containment.md) for the supervisor
+verdict-on-abort contract.
+
 ## [0.1.19] - 2026-05-31
 
 ### Bounded module-query cost on an incomplete import closure

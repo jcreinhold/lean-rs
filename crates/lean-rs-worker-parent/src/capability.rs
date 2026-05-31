@@ -496,6 +496,7 @@ pub struct LeanWorkerModuleCacheLimits {
     ttl_millis: Option<u64>,
     max_bytes: Option<u64>,
     rss_guard_kib: Option<u64>,
+    verify_rss_taint_kib: Option<u64>,
 }
 
 impl LeanWorkerModuleCacheLimits {
@@ -525,6 +526,18 @@ impl LeanWorkerModuleCacheLimits {
     #[must_use]
     pub fn rss_guard_kib(mut self, rss_guard_kib: u64) -> Self {
         self.rss_guard_kib = Some(rss_guard_kib.max(1));
+        self
+    }
+
+    /// Set the child RSS ceiling at or above which a non-positive
+    /// `verify_declaration` verdict (e.g. `NotFound`) is relabeled to
+    /// `BudgetExceeded`: near the cap the worker cannot distinguish a genuine
+    /// "name absent" from an elaboration silently degraded by memory pressure.
+    /// Leave unset (the default) to disable the taint; set it well above the
+    /// warm mathlib baseline so genuine name-absent queries are not mislabeled.
+    #[must_use]
+    pub fn verify_rss_taint_kib(mut self, verify_rss_taint_kib: u64) -> Self {
+        self.verify_rss_taint_kib = Some(verify_rss_taint_kib.max(1));
         self
     }
 }
@@ -1380,6 +1393,9 @@ fn apply_module_cache_limits(mut config: LeanWorkerConfig, limits: &LeanWorkerMo
     }
     if let Some(value) = limits.rss_guard_kib {
         config = config.env("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", value.to_string());
+    }
+    if let Some(value) = limits.verify_rss_taint_kib {
+        config = config.env("LEAN_RS_VERIFY_RSS_TAINT_KIB", value.to_string());
     }
     config
 }

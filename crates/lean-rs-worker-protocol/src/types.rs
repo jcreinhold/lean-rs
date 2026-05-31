@@ -568,6 +568,11 @@ pub enum LeanWorkerModuleQuerySelector {
         id: String,
         declaration: String,
         position: LeanWorkerProofPositionSelector,
+        /// Render local hypotheses as raw, fully-elaborated `Expr` text instead
+        /// of the default notation-aware delaboration. Defaults to `false`, so
+        /// older callers that omit the field get the pretty rendering.
+        #[serde(default)]
+        locals_raw: bool,
     },
     TypeAt {
         id: String,
@@ -589,6 +594,22 @@ pub enum LeanWorkerModuleQuerySelector {
         line: u32,
         column: u32,
     },
+}
+
+impl LeanWorkerModuleQuerySelector {
+    /// The caller-chosen correlation id carried by every selector variant.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Diagnostics { id }
+            | Self::ProofState { id, .. }
+            | Self::ProofStateInDeclaration { id, .. }
+            | Self::TypeAt { id, .. }
+            | Self::References { id, .. }
+            | Self::DeclarationTarget { id, .. }
+            | Self::SurroundingDeclaration { id, .. } => id,
+        }
+    }
 }
 
 /// Source span in the original file. Positions are 1-based.
@@ -791,6 +812,32 @@ pub struct LeanWorkerDeclarationVerificationFacts {
     /// genuine no-nontrivial-axioms result.
     #[serde(default)]
     pub axioms_available: bool,
+}
+
+impl LeanWorkerDeclarationVerificationFacts {
+    /// Facts for a verdict the worker could not substantiate — for example when
+    /// the child aborted mid-job and the supervisor synthesised a degraded
+    /// verdict. Every field is empty and `axioms_available` is `false`, so the
+    /// axiom set reads as "not computed" rather than "no axioms".
+    #[must_use]
+    pub fn unavailable() -> Self {
+        Self {
+            target: None,
+            diagnostics: LeanWorkerElabFailure {
+                diagnostics: Vec::new(),
+                truncated: false,
+            },
+            unresolved_goals: Vec::new(),
+            contains_sorry: false,
+            contains_admit: false,
+            contains_sorry_ax: false,
+            axioms: Vec::new(),
+            axioms_truncated: false,
+            output_truncated: false,
+            candidates: Vec::new(),
+            axioms_available: false,
+        }
+    }
 }
 
 /// Header-aware declaration verification outcome.

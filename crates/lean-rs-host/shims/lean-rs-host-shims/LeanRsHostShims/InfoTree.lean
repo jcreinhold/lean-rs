@@ -40,7 +40,7 @@ inductive ModuleQuerySelector where
   | references (id : String) (name : String)
   | declarationTarget (id : String) (name? : Option String) (line? column? : Option Nat)
   | surroundingDeclaration (id : String) (line : Nat) (column : Nat)
-  | proofStateInDeclaration (id declaration : String) (position : ProofPositionSelector)
+  | proofStateInDeclaration (id declaration : String) (position : ProofPositionSelector) (localsRaw : Nat)
   deriving Inhabited
 
 /-- Explicit byte budgets for batch projections. `perFieldBytes` caps individual
@@ -530,10 +530,50 @@ private def failureFromMessages (messages : MessageLog) (diagBytes : USize) (fil
   let (diags, trunc) ← LeanRsFixture.Elaboration.serializeMessages messages diagBytes fileLabel
   pure { diagnostics := diags, truncated := trunc }
 
+/-- Collect the metavariables that occur structurally in `e`, without ever
+    dereferencing an assignment. The `hasExprMVar` cached bit prunes whole
+    subtrees, so this is cheap on the common (mvar-free) case. -/
+private partial def collectExprMVars (e : Expr) (acc : Array MVarId) : Array MVarId :=
+  if !e.hasExprMVar then
+    acc
+  else
+    match e with
+    | .mvar id => acc.push id
+    | .app f a => collectExprMVars a (collectExprMVars f acc)
+    | .lam _ t b _ => collectExprMVars b (collectExprMVars t acc)
+    | .forallE _ t b _ => collectExprMVars b (collectExprMVars t acc)
+    | .letE _ t v b _ => collectExprMVars b (collectExprMVars v (collectExprMVars t acc))
+    | .mdata _ b => collectExprMVars b acc
+    | .proj _ _ s => collectExprMVars s acc
+    | _ => acc
+
+/-- A goal is *degraded* when the metavariable itself, or any metavariable
+    reachable structurally from its target type or local-context hypotheses, has
+    no declaration in `mctx`. Rendering such a goal drives `Meta.ppGoal` /
+    `instantiateMVars` into the *pure*, panicking `MetavarContext.getDecl`, which
+    aborts the worker process — an interrupted elaboration under memory pressure
+    leaves exactly this shape. The check is total: only `findDecl?` and a
+    structural walk, never an assignment dereference. It is best-effort (it
+    cannot see metavariables that only surface through delayed-assignment
+    binding), so the supervisor's process-level guard remains authoritative. -/
+private def goalDegraded (mctx : MetavarContext) (mvarId : MVarId) : Bool :=
+  match mctx.findDecl? mvarId with
+  | none => true
+  | some decl =>
+    let mvars := collectExprMVars decl.type #[]
+    let mvars := decl.lctx.foldl (init := mvars) fun acc localDecl =>
+      let acc := collectExprMVars localDecl.type acc
+      match localDecl.value? with
+      | some value => collectExprMVars value acc
+      | none => acc
+    mvars.any fun id => (mctx.findDecl? id).isNone
+
 private def renderGoal (ctx : ContextInfo) (mctx : MetavarContext) (mvarId : MVarId)
     (byteLimit : USize) (currentBytes : USize) : IO (String × USize × Bool) := do
   if currentBytes ≥ byteLimit then
     return ("<truncated>", currentBytes, true)
+  if goalDegraded mctx mvarId then
+    return ("<goal unavailable: elaboration degraded under resource pressure>", currentBytes, false)
   let s ← ctx.runMetaM .empty do
     setMCtx mctx
     try
@@ -635,6 +675,12 @@ private structure TacticCandidate where
   goalsBefore : List MVarId
   mctxAfter : MetavarContext
   goalsAfter : List MVarId
+
+/-- A captured tactic state is degraded when any before/after goal is degraded
+    against its respective metavariable context (see `goalDegraded`). -/
+private def tacticCandidateDegraded (candidate : TacticCandidate) : Bool :=
+  candidate.goalsBefore.any (goalDegraded candidate.mctxBefore) ||
+    candidate.goalsAfter.any (goalDegraded candidate.mctxAfter)
 
 private structure GoalAtAcc where
   line : Nat
@@ -976,48 +1022,93 @@ private def sourceTextProofPosition? (doc : SourceDocument) (decl : DeclarationC
   let span : ModuleSourceSpan := { startLine, startColumn, endLine, endColumn }
   some (span, { index := occurrence, tactic := { value := text, truncated := false } })
 
-private def collectLocalContextMeta (limit : Nat) (lctx : LocalContext) : MetaM (Array LocalInfo) :=
+/-- How a proof state's local hypotheses are rendered.
+
+    `pretty` delaborates each hypothesis type/value through the same
+    notation-aware path as `goals_*`; `raw` keeps the fully-elaborated structural
+    `Expr` form (`_uniq.NNNN` and all) for expert callers; `skip` renders no
+    locals at all — used by callers (verification, proof-step classification)
+    that read only the goals and discard the locals, so they never pay for
+    rendering a term they throw away. -/
+inductive LocalsRendering where
+  | skip
+  | raw
+  | pretty
+  deriving Inhabited
+
+/-- Render one local hypothesis expression. The `pretty` path runs inside the
+    caller's `MetaM` context, so free variables resolve to their user names and
+    notation fires; on any pretty-printer failure it falls back to the raw
+    structural form rather than dropping the hypothesis. -/
+private def renderLocalExpr (mode : LocalsRendering) (limit : Nat) (e : Expr) : MetaM RenderedInfo :=
+  match mode with
+  | .pretty =>
+    try
+      let fmt ← Meta.ppExpr e
+      pure (renderStringBoundedWith limit fmt.pretty)
+    catch _ =>
+      pure (renderExprBoundedWith limit e)
+  | _ => pure (renderExprBoundedWith limit e)
+
+private def collectLocalContextMeta (mode : LocalsRendering) (limit : Nat) (lctx : LocalContext) :
+    MetaM (Array LocalInfo) :=
   lctx.foldlM (init := #[]) fun acc localDecl => do
     if localDecl.isImplementationDetail then
       pure acc
     else
-      let value := localDecl.value?.map (renderExprBoundedWith limit)
+      let typeStr ← renderLocalExpr mode limit localDecl.type
+      let value ← localDecl.value?.mapM (renderLocalExpr mode limit)
       pure <| acc.push {
         name := localDecl.userName.toString
         binderInfo := (repr localDecl.binderInfo).pretty
-        typeStr := renderExprBoundedWith limit localDecl.type
+        typeStr
         value
       }
 
-private def collectTermLocals (limit : Nat) (ctx : ContextInfo) (lctx : LocalContext) : IO (Array LocalInfo) :=
-  ctx.runMetaM lctx (collectLocalContextMeta limit lctx)
+private def collectTermLocals (mode : LocalsRendering) (limit : Nat) (ctx : ContextInfo) (lctx : LocalContext) :
+    IO (Array LocalInfo) :=
+  match mode with
+  | .skip => pure #[]
+  | _ => ctx.runMetaM lctx (collectLocalContextMeta mode limit lctx)
 
-private def collectGoalLocals (limit : Nat) (ctx : ContextInfo) (mctx : MetavarContext) (goals : List MVarId) :
-    IO (Array LocalInfo) := do
-  let ctx := { ctx with mctx := mctx }
-  ctx.runMetaM {} do
-    match goals with
-    | goal :: _ =>
-      goal.withContext do
-        let decl ← goal.getDecl
-        collectLocalContextMeta limit decl.lctx
-    | [] => pure #[]
+private def collectGoalLocals (mode : LocalsRendering) (limit : Nat) (ctx : ContextInfo) (mctx : MetavarContext)
+    (goals : List MVarId) : IO (Array LocalInfo) := do
+  match mode with
+  | .skip => pure #[]
+  | _ =>
+    let ctx := { ctx with mctx := mctx }
+    ctx.runMetaM {} do
+      match goals with
+      | goal :: _ =>
+        goal.withContext do
+          let decl ← goal.getDecl
+          collectLocalContextMeta mode limit decl.lctx
+      | [] => pure #[]
 
-private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTree)
-    (candidates : Array DeclarationCandidate) (line column : Nat) (budgets : ModuleQueryOutputBudgets) :
-    IO ProofStateResult := do
+/-- Locate the smallest tactic state covering a body cursor, folding the info
+    trees once. Shared by the proof-state projections and the verification
+    degradation screen so each pays a single traversal. -/
+private def findTacticCandidate (doc : SourceDocument) (trees : PersistentArray InfoTree) (line column : Nat) :
+    IO (Option TacticCandidate) := do
   let (bodyCursorLine, bodyCursorColumn) := doc.bodyCursor line column
   let mut goalAcc : GoalAtAcc := { line := bodyCursorLine, column := bodyCursorColumn }
   for tree in trees do
     goalAcc ← tree.foldInfoM (init := goalAcc) (collectGoalAt doc.bodyFileMap)
+  pure goalAcc.best?
+
+private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTree)
+    (candidates : Array DeclarationCandidate) (line column : Nat) (budgets : ModuleQueryOutputBudgets)
+    (localsMode : LocalsRendering) : IO ProofStateResult := do
   let safeEdit := (declarationAt? doc candidates line column).map (·.info)
-  match goalAcc.best? with
+  match ← findTacticCandidate doc trees line column with
   | some candidate =>
+    if tacticCandidateDegraded candidate then
+      return .unavailable "proof state unavailable: elaboration degraded under resource pressure"
     let (before, bytesAfterBefore, truncBefore) ←
       renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
     let (after, _, truncAfter) ←
       renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
-    let locals ← collectGoalLocals budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
+    let locals ← collectGoalLocals localsMode budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
     let declName := candidate.ctx.parentDecl?.map (·.toString)
     pure <| .state {
       declarationName := declName
@@ -1031,6 +1122,7 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
       truncated := truncBefore || truncAfter
     }
   | none =>
+    let (bodyCursorLine, bodyCursorColumn) := doc.bodyCursor line column
     let mut termAcc : TypeAtAcc := { line := bodyCursorLine, column := bodyCursorColumn }
     for tree in trees do
       termAcc ← tree.foldInfoM (init := termAcc) (collectTypeAt doc.bodyFileMap)
@@ -1046,7 +1138,7 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
             pure (some (renderExprBoundedWith budgets.perFieldBytes ty))
         catch _ =>
           pure none
-      let locals ← collectTermLocals budgets.perFieldBytes candidate.ctx candidate.lctx
+      let locals ← collectTermLocals localsMode budgets.perFieldBytes candidate.ctx candidate.lctx
       let declName := candidate.ctx.parentDecl?.map (·.toString)
       pure <| .state {
         declarationName := declName
@@ -1061,13 +1153,16 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
       }
 
 private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCandidate)
-    (pos : ProofPosition) (budgets : ModuleQueryOutputBudgets) : IO ProofStateResult := do
+    (pos : ProofPosition) (budgets : ModuleQueryOutputBudgets) (localsMode : LocalsRendering) :
+    IO ProofStateResult := do
   let candidate := pos.tactic
+  if tacticCandidateDegraded candidate then
+    return .unavailable "proof state unavailable: elaboration degraded under resource pressure"
   let (before, bytesAfterBefore, truncBefore) ←
     renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
   let (after, _, truncAfter) ←
     renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
-  let locals ← collectGoalLocals budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
+  let locals ← collectGoalLocals localsMode budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
   pure <| .state {
     declarationName := some decl.info.declarationName
     namespaceName := decl.info.namespaceName
@@ -1082,14 +1177,15 @@ private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCan
 
 private def runProofStateInDeclaration (doc : SourceDocument) (trees : PersistentArray InfoTree)
     (candidates : Array DeclarationCandidate) (name : String) (selector : ProofPositionSelector)
-    (budgets : ModuleQueryOutputBudgets) (missing : Array String) : IO ProofStateResult := do
+    (budgets : ModuleQueryOutputBudgets) (missing : Array String) (localsMode : LocalsRendering) :
+    IO ProofStateResult := do
   match declarationTargetByName candidates name with
   | .target info =>
     let some decl := candidates.find? (fun candidate => candidate.info.declarationName == info.declarationName)
       | pure <| .unavailable "resolved declaration is not available in the module snapshot"
     let positions ← collectTacticsInDeclaration doc decl trees
     match selectProofPosition doc positions selector with
-    | some pos => proofStateFromPosition doc decl pos budgets
+    | some pos => proofStateFromPosition doc decl pos budgets localsMode
     | none => pure <| .unavailable "declaration has no proof position matching the selector"
   -- The name did not resolve against this overlay. Distinguish a genuine
   -- not-found (the open environment is complete) from an incomplete
@@ -1239,9 +1335,10 @@ private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocumen
     let failure ← failureFromMessages messages budgets.perFieldBytes.toUSize fileLabel
     pure <| .diagnostics (doc.offsetFailure failure)
   | .proofState _ line column =>
-    pure <| .proofState (← runProofState doc trees candidates line column budgets)
-  | .proofStateInDeclaration _ declaration position =>
-    pure <| .proofState (← runProofStateInDeclaration doc trees candidates declaration position budgets missing)
+    pure <| .proofState (← runProofState doc trees candidates line column budgets .pretty)
+  | .proofStateInDeclaration _ declaration position localsRaw =>
+    let localsMode := if localsRaw != 0 then LocalsRendering.raw else LocalsRendering.pretty
+    pure <| .proofState (← runProofStateInDeclaration doc trees candidates declaration position budgets missing localsMode)
   | .typeAt _ line column =>
     pure <| .typeAt (← runTypeAtWith doc trees line column budgets.perFieldBytes)
   | .references _ name =>
@@ -1707,6 +1804,20 @@ private def diagnosticMentionsHeartbeat (failure : LeanRsFixture.Elaboration.Ela
     (msg.splitOn "heartbeat").length > 1 || (msg.splitOn "Heartbeats").length > 1 ||
       (msg.splitOn "maximum number of heartbeats").length > 1
 
+/-- The elaboration hit a resource ceiling other than heartbeats — a recursion
+    depth blow-up, an explicit interruption, or an allocation failure. Unlike a
+    genuine "name absent" result, a `notFound` accompanied by one of these is a
+    job the worker could not complete, not a trustworthy answer; the caller
+    relabels it to `budgetExceeded`. -/
+private def diagnosticIndicatesResourceLimit (failure : LeanRsFixture.Elaboration.ElabFailure) : Bool :=
+  failure.diagnostics.any fun diagnostic =>
+    let msg := diagnostic.message
+    (msg.splitOn "deep recursion").length > 1 ||
+      (msg.splitOn "maximum recursion depth").length > 1 ||
+      (msg.splitOn "(interrupted)").length > 1 ||
+      (msg.splitOn "out of memory").length > 1 ||
+      (msg.splitOn "excessive memory").length > 1
+
 private def renderedGoalInfos (goals : Array String) (limit : Nat) : Array RenderedInfo :=
   goals.map fun goal =>
     if goal.utf8ByteSize ≤ limit then
@@ -1774,7 +1885,7 @@ private def attemptCandidate
     let cursorLine := site.insertedFileSpan.endLine
     let cursorColumn := site.insertedFileSpan.endColumn
     let proofState ←
-      runProofState snapshot.document snapshot.trees snapshot.candidates cursorLine cursorColumn request.budgets
+      runProofState snapshot.document snapshot.trees snapshot.candidates cursorLine cursorColumn request.budgets .skip
     let (goals, proofStateTruncated) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
     let status := classifyAttempt localFailure goals
     return {
@@ -1882,10 +1993,22 @@ private def collectAxiomNames (env : Environment) (declName : Name) (heartbeats 
     pure (some (out, truncated))
   | .error _ => pure none
 
+/-- Build the verification facts for a resolved target, given the tactic state
+    already located by the caller (`candidate?`; `none` for a term-mode proof or
+    an unresolved/ambiguous target).
+
+    The returned `Bool` is the *degraded* flag: when the captured proof state
+    carries dangling metavariables (an interrupted elaboration under resource
+    pressure), every metavariable-touching post-elaboration walk — goal
+    rendering and `collectAxioms` — is both unsafe (it can reach the pure,
+    process-aborting `MetavarContext.getDecl`) and untrustworthy. In that case
+    the goals walk and the axiom walk are skipped and the axiom set is reported
+    unavailable, so the verdict can be the honest `budgetExceeded`. -/
 private def verificationFacts
     (request : DeclarationVerificationRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
-    (target? : Option DeclarationTargetInfo) (candidates : Array DeclarationTargetInfo) (heartbeats : UInt64) :
-    IO DeclarationVerificationFacts := do
+    (target? : Option DeclarationTargetInfo) (candidate? : Option TacticCandidate)
+    (candidates : Array DeclarationTargetInfo) (heartbeats : UInt64) :
+    IO (DeclarationVerificationFacts × Bool) := do
   let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
   let bodyText :=
     match target? with
@@ -1894,24 +2017,26 @@ private def verificationFacts
   let containsSorry := containsSubstr bodyText "sorry"
   let containsAdmit := containsSubstr bodyText "admit"
   let containsSorryAx := containsSubstr request.source "sorryAx"
+  let degraded := candidate?.any tacticCandidateDegraded
   let unresolvedGoals ←
-    match target? with
-    | none => pure #[]
-    | some target => do
-      let proofState ← runProofState snapshot.document snapshot.trees snapshot.candidates
-        target.bodySpan.startLine target.bodySpan.startColumn request.budgets
-      let (goals, _) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
-      pure goals
-  -- Real axiom dependency walk. Only attempted when requested and a single
-  -- declaration resolved; otherwise the set is honestly "unavailable".
+    if degraded then pure #[]
+    else match candidate? with
+      | none => pure #[]
+      | some candidate => do
+        let (goals, _, _) ← renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter
+          request.budgets.perFieldBytes.toUSize 0
+        pure (renderedGoalInfos goals request.budgets.perFieldBytes)
+  -- Real axiom dependency walk. Only attempted when requested, a single
+  -- declaration resolved, and the proof state is not degraded; otherwise the
+  -- set is honestly "unavailable".
   let (axioms, axiomsAvailable, axiomsTruncated) ←
-    match target?, request.reportAxioms != 0 with
-    | some target, true => do
+    match target?, request.reportAxioms != 0, degraded with
+    | some target, true, false => do
       match ← collectAxiomNames snapshot.env target.declarationName.toName heartbeats request.budgets.perFieldBytes with
       | some (names, truncated) => pure (names, true, truncated)
       | none => pure (#[], false, false)
-    | _, _ => pure (#[], false, false)
-  pure {
+    | _, _, _ => pure (#[], false, false)
+  pure ({
     target := target?,
     diagnostics := failure,
     unresolvedGoals,
@@ -1926,12 +2051,18 @@ private def verificationFacts
       match failure.truncated with
       | LeanRsFixture.Elaboration.Truncation.truncated => true
       | LeanRsFixture.Elaboration.Truncation.complete => false
-  }
+  }, degraded)
 
-private def verificationStatus (policy : Nat) (facts : DeclarationVerificationFacts) :
+private def verificationStatus (policy : Nat) (degraded : Bool) (facts : DeclarationVerificationFacts) :
     DeclarationVerificationStatus :=
   if diagnosticMentionsHeartbeat facts.diagnostics then
     .timeout
+  -- An interrupted elaboration left dangling metavariables: the worker could
+  -- not complete the check, so it reports `budgetExceeded` rather than vouching
+  -- for `accepted`/`rejected` on a degraded term. Verification is monotone, so
+  -- this never downgrades an honest `accepted`.
+  else if degraded then
+    .budgetExceeded
   else if diagnosticHasError facts.diagnostics then
     .rejected
   else if !facts.unresolvedGoals.isEmpty then
@@ -2179,19 +2310,26 @@ def verifyDeclaration
     let (status, facts) ←
       match targetResult with
       | .target info => do
-        let facts ← verificationFacts request snapshot fileLabel (some info) #[] heartbeats
-        pure (verificationStatus request.sorryPolicy facts, facts)
-      -- The name did not resolve. An incomplete environment (missing imports)
-      -- may define it elsewhere; report `needsBuild` so the verdict is honest
-      -- rather than a bare `notFound`.
+        let candidate? ← findTacticCandidate snapshot.document snapshot.trees
+          info.bodySpan.startLine info.bodySpan.startColumn
+        let (facts, degraded) ← verificationFacts request snapshot fileLabel (some info) candidate? #[] heartbeats
+        pure (verificationStatus request.sorryPolicy degraded facts, facts)
+      -- The name did not resolve. Three honest outcomes: an incomplete
+      -- environment (missing imports) may define it elsewhere (`needsBuild`); a
+      -- resource-exhausted elaboration could not be trusted to have searched
+      -- (`timeout`/`budgetExceeded`); otherwise it is genuinely absent.
       | .notFound => do
-        let facts ← verificationFacts request snapshot fileLabel none #[] heartbeats
-        let status := if snapshot.missing.isEmpty then .notFound else .needsBuild
+        let (facts, _) ← verificationFacts request snapshot fileLabel none none #[] heartbeats
+        let status :=
+          if !snapshot.missing.isEmpty then .needsBuild
+          else if diagnosticMentionsHeartbeat facts.diagnostics then .timeout
+          else if diagnosticIndicatesResourceLimit facts.diagnostics then .budgetExceeded
+          else .notFound
         pure (status, facts)
       -- Genuinely multiply-defined: attach the competing declarations so the
       -- verdict is actionable.
       | .ambiguous candidates => do
-        let facts ← verificationFacts request snapshot fileLabel none candidates heartbeats
+        let (facts, _) ← verificationFacts request snapshot fileLabel none none candidates heartbeats
         pure (.ambiguous, facts)
     if snapshot.missing.isEmpty then
       pure <| .ok status facts snapshot.imports

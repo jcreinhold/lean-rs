@@ -200,6 +200,38 @@ in-progress toolchain bump carrying its own kernel metavar errors), not a defect
 in-shim panic guard is added because there is no reachable panic to guard: the containment boundary is, and
 remains, the process. The supervisor's restart-and-retry is the recovery contract for the residual case.
 
+### A reachable abort: the proof-state walk under memory pressure
+
+A later field re-evaluation (report 14) hit the same `Lean.MetavarContext.getDecl … unknown metavariable` abort,
+but on a *different and reproducible* path: a `verify_declaration` / `proof_state` query whose captured proof state
+references a metavariable whose decl was **evicted under memory pressure**. Unlike the ambiguity case, this one is a
+real defect of the projection path — the proof-state walk (`renderGoal` / `Meta.ppGoal`, and locals collection via
+`instantiateMVars`) reaches the pure `getDecl` on a transitively-referenced dangling mvar. The dangling mvar lives in
+the InfoTree-captured `mctx`, not in the final environment constant, so a constant-only gate would neither catch nor
+explain it.
+
+Because the panic is uncatchable, the containment boundary is still the process — but a read-only query that aborts
+on resource pressure is a poor contract, so this case is addressed at three layers, each owning a different volatile
+decision (the layering and the degraded-verdict semantics are detailed in
+[`info-tree-projection.md`](info-tree-projection.md)):
+
+- **In-shim structural screen.** A *total* predicate (`MetavarContext.findDecl?`, never `getDecl`) screens a captured
+  proof state for dangling mvars before any renderer dereferences it, and the status router maps a degraded target to
+  `BudgetExceeded`. This prevents the directly-reachable abort with no respawn. It is best-effort prevention, not a
+  soundness boundary — it cannot prove totality against a mvar reachable only through delayed-assignment machinery.
+- **Supervisor verdict-on-abort.** `worker_verify_declaration` and `worker_process_module_query_batch` catch a
+  `ChildPanicOrAbort` during the request and return a synthesized `BudgetExceeded` verdict (verify) or per-selector
+  degraded batch outcome, recording a `ChildAbort` restart (`stable_cause = "child_abort"`). This is the authoritative
+  half: it always yields a verdict for any residual transitive-mvar abort the screen misses, and the next call is
+  served by a fresh child. It deliberately expands the panic-containment contract into `lean-rs-worker-parent`,
+  because an uncatchable `panic!` can only be made non-fatal at the process boundary.
+- **Worker-child RSS taint** for the *silent* degradation (a bare `NotFound` with no abort and no diagnostic); see
+  [`info-tree-projection.md`](info-tree-projection.md).
+
+This does not contradict the ambiguity finding above: the ambiguity path has no reachable panic and gets no guard;
+the proof-state-under-pressure path does, and gets the layered defence. Both conclusions are reached the same way —
+reproduce, then guard only what is actually reachable.
+
 ## References
 
 - Rust `std::panic::catch_unwind`: <https://doc.rust-lang.org/std/panic/fn.catch_unwind.html>
