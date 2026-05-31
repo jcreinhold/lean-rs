@@ -110,9 +110,21 @@ The workflow:
 10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease
     automatically.
 
-**If the workflow fails after one crate has published**, crates.io versions are immutable—do not retry with the same
-version. Bump the failed crate's patch version, repeat steps 1–3, and re-tag at the new merge commit. The tag-vs-version
-assertion prevents re-tagging against the wrong workspace version.
+**If the workflow fails after one crate has published** (a partial release), crates.io versions are immutable, so a
+plain re-run of the tag release fails: `cargo publish --workspace` rejects the run with `crate <name>@<ver> already
+exists` before it reaches the crates that did not upload. The common cause is the tail crate losing cargo's index-
+propagation race (`no packages ready to publish but 1 packages remain in plan ... awaiting confirmation`).
+
+Recover **without burning a version** by running the `release-recover.yml` workflow (Actions → "Release recovery" →
+Run workflow), passing the same `version` (e.g. `0.1.17`). It walks the crates in dependency order, skips any already on
+crates.io at that version, publishes only the missing ones one at a time, and ensures the GitHub Release exists. It is
+idempotent—safe to re-run; a fully published version is a no-op. Run it with `dry_run: true` first to verify-build the
+missing crates without uploading. The workspace version on the default branch must equal the `version` input, since the
+recovery uploads the crate contents on that ref (workflow-only commits since the tag do not change crate contents).
+
+Only when a crate's *contents* must change (e.g. a genuine build break, not a propagation race) is the version immutable
+in the sense that matters: bump the patch version, repeat steps 1–3, and re-tag at the new merge commit. The tag-vs-
+version assertion prevents re-tagging against the wrong workspace version.
 
 ## Step 7—Post-publish
 

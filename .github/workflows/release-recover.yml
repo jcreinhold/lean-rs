@@ -1,0 +1,173 @@
+name: Release recovery
+
+# Idempotent completion of a PARTIAL release. The happy path is the tag-driven
+# `release.yml`, which runs `cargo publish --workspace`. That single command
+# uploads the workspace in dependency order, but it is all-or-nothing on re-run:
+# once any crate version is on the index, re-invoking it fails with
+# `crate <name>@<ver> already exists on crates.io index` before it can reach the
+# crates that did NOT upload (e.g. a tail crate that lost cargo's index-
+# propagation race: "no packages ready to publish but 1 packages remain in plan
+# ... awaiting confirmation").
+#
+# This workflow recovers from that state WITHOUT burning a version. It walks the
+# crates in dependency order, skips any already on crates.io at the requested
+# version, and publishes only the missing ones one at a time (so each upload is
+# in the index before the next crate's verify build resolves it). It then
+# ensures the GitHub Release exists. It is safe to re-run: a fully published
+# version is a no-op.
+#
+# Manual trigger only. `version` must equal the workspace version (the crate
+# contents on this ref are what get uploaded). crates.io versions are immutable,
+# so this never overwrites — it only fills gaps.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to complete, without the leading v (e.g. 0.1.17). Must match the workspace version."
+        type: string
+        required: true
+      dry_run:
+        description: "Verify-build the missing crates with --dry-run; do not upload or touch the release."
+        type: boolean
+        default: false
+
+concurrency:
+  # Never let two recovery runs (or a recovery and the tag release) publish the
+  # same version concurrently.
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # ensure-release uses softprops/action-gh-release.
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Head of the supported Lean window — the publish verify build runs against
+  # it, mirroring release.yml's publish job. Keep in lockstep with release.yml.
+  LEAN_VERSION_HEAD: "4.31.0-rc1"
+
+jobs:
+  recover:
+    name: Recover v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-recover-${{ env.LEAN_VERSION_HEAD }}
+
+      - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:v${{ env.LEAN_VERSION_HEAD }}
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Export LEAN_SYSROOT (shell-expanded)
+        run: |
+          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Pin workspace to Lean ${{ env.LEAN_VERSION_HEAD }}
+        run: |
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > crates/lean-rs/shims/lean-rs-interop-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > crates/lean-rs-host/shims/lean-rs-interop-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > crates/lean-rs-host/shims/lean-rs-host-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > fixtures/lean/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ env.LEAN_VERSION_HEAD }}" > fixtures/interop-shims/lean-toolchain
+
+      - name: Build Lake packages
+        run: |
+          (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-interop-shims && lake build)
+          (cd crates/lean-rs-host/shims/lean-rs-host-shims && lake build)
+          (cd fixtures/lean && lake build)
+          (cd fixtures/interop-shims && lake build)
+          lean_lib_paths="$GITHUB_WORKSPACE/crates/lean-rs/shims/lean-rs-interop-shims/.lake/build/lib"
+          lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-interop-shims/.lake/build/lib"
+          lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/crates/lean-rs-host/shims/lean-rs-host-shims/.lake/build/lib"
+          lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/lean/.lake/build/lib"
+          lean_lib_paths="$lean_lib_paths:$GITHUB_WORKSPACE/fixtures/interop-shims/.lake/build/lib"
+          echo "LD_LIBRARY_PATH=$lean_lib_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      - name: Verify input version matches workspace
+        run: |
+          set -euo pipefail
+          wsver=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
+          if [ "${{ inputs.version }}" != "$wsver" ]; then
+            echo "::error::Requested version ${{ inputs.version }} != workspace version $wsver. Recovery uploads the crate contents on this ref; check out the matching commit or fix the input."
+            exit 1
+          fi
+          echo "Workspace version $wsver matches requested version."
+
+      - name: Publish missing crates (idempotent, dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          dry="${{ inputs.dry_run }}"
+          # Dependency (topological) order — same list release.yml's public-API
+          # diff iterates, which is a valid publish order.
+          crates="lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child"
+          published=0
+          skipped=0
+          for c in $crates; do
+            # crates.io returns 200 for an existing version, 404 otherwise.
+            if curl -sf -o /dev/null \
+                 -H "User-Agent: lean-rs-release-recover (github.com/jcreinhold/lean-rs)" \
+                 "https://crates.io/api/v1/crates/$c/$version"; then
+              echo "✓ $c@$version already on crates.io — skipping"
+              skipped=$((skipped + 1))
+              continue
+            fi
+            echo "→ $c@$version is missing — publishing"
+            if [ "$dry" = "true" ]; then
+              cargo publish -p "$c" --dry-run
+            else
+              # Single-crate publish waits for the upload to land in the index
+              # before returning, so the next crate's verify build resolves it.
+              cargo publish -p "$c"
+            fi
+            published=$((published + 1))
+          done
+          echo "Recovery summary: published=$published skipped=$skipped (dry_run=$dry)"
+          if [ "$dry" != "true" ] && [ "$published" = "0" ]; then
+            echo "Nothing to publish — $version was already complete on crates.io."
+          fi
+
+      - name: Extract CHANGELOG section
+        if: inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > release-body.md
+          if [ ! -s release-body.md ]; then
+            echo "::error::No CHANGELOG section for [$version]."
+            exit 1
+          fi
+          echo "--- Release body ---"
+          cat release-body.md
+          echo "--- End release body ---"
+
+      - name: Ensure GitHub Release exists
+        # softprops/action-gh-release upserts: it creates the release for the
+        # existing tag if absent, or updates the body if it already exists.
+        if: inputs.dry_run != true
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ inputs.version }}
+          body_path: release-body.md
+          prerelease: ${{ contains(inputs.version, '-') }}
+          make_latest: ${{ contains(inputs.version, '-') && 'false' || 'true' }}
