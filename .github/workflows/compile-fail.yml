@@ -50,9 +50,17 @@ jobs:
       - name: Export LEAN_SYSROOT
         # `lean-rs-sys/build.rs` reads `lean.h` from the sysroot to compute the
         # header digest. The negative cases fail to compile before any link
-        # step, so no Lake build or `libleanshared` runtime is needed.
+        # step, so no `libleanshared` runtime is needed.
         run: |
           echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---v${{ env.LEAN_VERSION_HEAD }}" >> "$GITHUB_ENV"
+
+      - name: Build Lean fixture
+        # The `lean-rs` / `lean-rs-host` snapshot suites pull in
+        # `lean-toolchain`, whose build script digests the workspace Lake
+        # fixture and aborts when its compiled artifacts are absent. The
+        # trybuild snapshots never run Lean, but the host crates must still
+        # build, so the fixture olean + dylib have to exist.
+        run: (cd fixtures/lean && lake build)
 
       - name: Run compile-fail snapshot suites
         env:
