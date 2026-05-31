@@ -1853,6 +1853,102 @@ end B
     }
 }
 
+// Prompt 13 Part 1: faithful reproduction of the field `child_abort` scenario.
+// Unlike the test above (which only defines two same-short-name declarations and
+// never elaborates an ambiguous *reference*), this source `open`s both namespaces
+// and uses the bare name, forcing Lean to emit an "ambiguous, possible
+// interpretations" elaboration error. Rendering that message
+// (`serializeMessages` -> `MessageData.toString`) is the one metavar-touching
+// step on the `Ambiguous` verdict path, so it is where a
+// `Lean.MetavarContext.getDecl … unknown metavariable` panic + SIGABRT would
+// surface (report 61 §3). The invariant under test: a read-only resolution query
+// must resolve correctly *and* leave the child alive — the supervisor must not
+// have to restart it (`retry_count` stayed 0 in the field's healthy case).
+#[test]
+fn verify_declaration_ambiguous_open_reference_does_not_restart_child() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/ambiguous-open.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+
+    // Scope the session so its mutable borrow of `worker` ends before we read
+    // lifecycle stats.
+    {
+        let mut session = worker
+            .open_session(&elaboration_session_config(), None, None)
+            .expect("worker session opens");
+
+        let source = "\
+namespace AmbigA
+def collide : Nat := 0
+end AmbigA
+
+namespace AmbigB
+def collide : Nat := 1
+end AmbigB
+
+open AmbigA AmbigB
+
+example : Nat := collide
+";
+        let request = LeanWorkerDeclarationVerificationRequest {
+            source: source.to_owned(),
+            target: LeanWorkerDeclarationVerificationTarget::Name {
+                name: "collide".to_owned(),
+            },
+            sorry_policy: LeanWorkerSorryPolicy::Deny,
+            report_axioms: true,
+            budgets: LeanWorkerOutputBudgets::default(),
+        };
+
+        let result = session
+            .verify_declaration(&request, &opts, None, None)
+            .expect("verification dispatch succeeds");
+        match result {
+            LeanWorkerDeclarationVerificationResult::Ok {
+                verification_status,
+                facts,
+                ..
+            } => {
+                assert_eq!(
+                    verification_status,
+                    LeanWorkerDeclarationVerificationStatus::Ambiguous,
+                    "a short name defined in two open namespaces must resolve to Ambiguous",
+                );
+                let names: Vec<&str> = facts.candidates.iter().map(|c| c.declaration_name.as_str()).collect();
+                assert!(
+                    names.contains(&"AmbigA.collide") && names.contains(&"AmbigB.collide"),
+                    "candidates should name both competing declarations, got {names:?}",
+                );
+                // Prove the suspect path actually ran: the bare `collide`
+                // reference must have produced an ambiguity diagnostic that
+                // `serializeMessages` rendered. Without this, a future change
+                // that stops elaborating the reference would silently turn this
+                // into a degenerate clean-elaboration test that no longer guards
+                // the metavar-rendering boundary.
+                assert!(
+                    facts
+                        .diagnostics
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.message.to_lowercase().contains("ambiguous")),
+                    "the open-namespace reference must yield a rendered ambiguity diagnostic, got {:?}",
+                    facts.diagnostics.diagnostics,
+                );
+            }
+            other => panic!("expected ambiguous verification, got {other:?}"),
+        }
+    }
+
+    // The field defect was `call_restart.cause = "child_abort"` with
+    // `retry_count = 1`: a kernel panic aborted the child on this read-only query
+    // and the supervisor silently restarted it. Assert that did not happen.
+    assert_eq!(
+        worker.stats().restarts,
+        0,
+        "an ambiguous-name resolution query must not crash the child (no supervisor restart)",
+    );
+}
+
 // Prompt 12 target A2: a source whose header imports a module absent from the
 // open session environment, queried for a name it does not define, yields the
 // typed `NeedsBuild` verdict inside the `MissingImports` outcome that names the
@@ -1901,6 +1997,98 @@ theorem present : True := by trivial
             );
         }
         other => panic!("expected MissingImports/NeedsBuild outcome, got {other:?}"),
+    }
+}
+
+// Prompt 13 Part 2: a module query against a file with an incomplete import
+// closure must degrade in O(parse-header), not pay a full failing body
+// elaboration whose output the parent discards. The body here references an
+// undefined symbol: if it were elaborated against the import-incomplete
+// environment it would emit an unknown-identifier error and `elaboration_micros`
+// would be non-zero. The short-circuit skips `processCommands` entirely, so the
+// `Diagnostics` selector is empty and `elaboration_micros` stays 0 — the per-file
+// cost attribution that bounds a project-scope scan's worst case.
+#[test]
+fn module_query_on_incomplete_closure_skips_body_elaboration() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/scan/incomplete-closure.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "\
+import LeanRsFixture.DoesNotExist
+
+theorem present : True := totallyUndefinedSymbol
+";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[
+                LeanWorkerModuleQuerySelector::Diagnostics {
+                    id: "diagnostics".to_owned(),
+                },
+                LeanWorkerModuleQuerySelector::References {
+                    id: "refs".to_owned(),
+                    name: "present".to_owned(),
+                },
+            ],
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query_batch dispatch succeeds");
+
+    let LeanWorkerModuleQueryBatchOutcome::MissingImports { result, missing, .. } = &outcome else {
+        panic!("expected MissingImports batch outcome, got {outcome:?}");
+    };
+    assert!(
+        missing.iter().any(|m| m == "LeanRsFixture.DoesNotExist"),
+        "the absent import should be named in `missing`, got {missing:?}",
+    );
+
+    // The skip is exact: `elaboration_micros` is hard-set to 0 because
+    // `processCommands` never ran, not merely measured-fast.
+    assert_eq!(
+        batch_facts(&outcome).timings.elaboration_micros,
+        0,
+        "an incomplete-closure query must not elaborate the body",
+    );
+
+    // Behavioural proof of the skip: had the body been elaborated, the undefined
+    // `totallyUndefinedSymbol` reference would surface as an error diagnostic.
+    let diagnostics = result
+        .items
+        .iter()
+        .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "diagnostics"))
+        .expect("diagnostics item present");
+    match diagnostics {
+        LeanWorkerModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            LeanWorkerModuleQueryBatchResult::Diagnostics(failure) => assert!(
+                failure.diagnostics.is_empty(),
+                "skipped elaboration must not surface body diagnostics, got {failure:?}",
+            ),
+            other => panic!("expected diagnostics result, got {other:?}"),
+        },
+        other => panic!("expected diagnostics Ok item, got {other:?}"),
+    }
+
+    let references = result
+        .items
+        .iter()
+        .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "refs"))
+        .expect("references item present");
+    match references {
+        LeanWorkerModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            LeanWorkerModuleQueryBatchResult::References(refs) => assert!(
+                refs.references.is_empty(),
+                "an incomplete-closure scan returns no references, got {refs:?}",
+            ),
+            other => panic!("expected references result, got {other:?}"),
+        },
+        other => panic!("expected references Ok item, got {other:?}"),
     }
 }
 

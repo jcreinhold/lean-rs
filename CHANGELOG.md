@@ -9,6 +9,29 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Bounded module-query cost on an incomplete import closure
+
+A module query (`verify_declaration`, `proof_state`, `find_references`, batched selectors) against a file whose import
+closure is incomplete (`MissingImports`) no longer elaborates the body. With the imports absent the environment lacks
+the file's symbols, so a full elaboration only produced unknown-symbol errors whose projection the caller already
+discards as a `needs_build` / `files_skipped` degrade. The Lean shim now short-circuits to an empty projection with
+`elaboration_micros = 0`, bounding each per-file query in a project-scope scan to header parsing instead of a full
+failing elaboration. No protocol or API change; the `MissingImports` outcome and `missing` list are unchanged. The
+remaining cross-query cost on a large scan — cold header re-import after an RSS-driven worker cycle — is documented in
+[`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md) with its mitigations
+(`limit`, or build the project first).
+
+### Worker robustness: read-only resolution queries inside the panic boundary
+
+A field re-evaluation recorded a one-off child abort (`Lean.MetavarContext.getDecl … unknown metavariable` → `SIGABRT`)
+during a genuine-ambiguity `verify_declaration`. A faithful deterministic reproduction on the same toolchain (two `open`
+namespaces exporting the same short name, a bare reference forcing Lean's ambiguous-overload error, the offending message
+rendered) does not abort the child: the verdict resolves with both candidates and the supervisor performs no restart.
+The abort was therefore incidental metavar churn, not a defect of the resolution path. A regression test pins the
+no-restart invariant, and [`docs/architecture/06-panic-containment.md`](docs/architecture/06-panic-containment.md)
+records why a read-only query is still inside the process panic boundary (a Lean `panic!` under `LEAN_ABORT_ON_PANIC=1`
+is uncatchable across the FFI, and relaxing it would let a defaulted value masquerade as a real verdict).
+
 ## [0.1.18] - 2026-05-31
 
 ### Honest resolution verdicts on the worker query surface (protocol 7 → 8)

@@ -1273,6 +1273,13 @@ private def batchEnvelopeFromFailure (selectors : Array ModuleQuerySelector)
     | _ => .ok (selectorId selector) (emptyBatchResultFor selector)
   { items, totalTruncated := false }
 
+/-- Empty (not failed) results for every selector. Used when an incomplete
+    import closure short-circuits elaboration: the parent reads `missing` to
+    degrade to `needs_build` / `files_skipped` and ignores this payload. -/
+private def emptyBatchEnvelope (selectors : Array ModuleQuerySelector) : ModuleQueryBatchEnvelope :=
+  { items := selectors.map fun selector => .ok (selectorId selector) (emptyBatchResultFor selector)
+    totalTruncated := false }
+
 private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
     (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (missing : Array String) :
@@ -1459,15 +1466,44 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let head := commandState.scopes.headD { header := "", opts }
     commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
   let elabStart ← IO.monoMsNow
+  let headerSource := String.Pos.Raw.extract source 0 parserState.pos
+  let bodySource := String.Pos.Raw.extract source parserState.pos source.rawEndPos
+  let lineOffset := countNewlines headerSource
+  let document := SourceDocument.fromSources source bodySource lineOffset
+  -- Incomplete import closure: the open environment is missing this file's
+  -- imports (`processHeader` was already skipped above), so a full
+  -- `processCommands` run would only emit unknown-symbol errors, and the parent
+  -- discards that output as a `needs_build` / `files_skipped` degrade. Skip the
+  -- body elaboration so a project-scope scan pays O(parse-header) per
+  -- incomplete file instead of a full failing elaboration. The unprocessed
+  -- `commandState` supplies a genuinely empty info-tree snapshot, and
+  -- `elaborationMicros` stays 0 — the per-file cost attribution the caller reads.
+  if !missing.isEmpty then
+    let nowMs ← IO.monoMsNow
+    let snapshot : ModuleSnapshot := {
+      fileIdentity := policy.fileIdentity
+      key := policy.key
+      document
+      messages := commandState.messages
+      trees := commandState.infoState.trees
+      candidates := #[]
+      imports := userImports
+      missing
+      env := commandState.env
+      approxBytes := approxSnapshotBytes source commandState.messages commandState.infoState.trees #[]
+      lastUsedMs := nowMs
+    }
+    return .ok (snapshot, {
+      headerImportMicros := u64 headerMicros
+      elaborationMicros := 0
+      projectionMicros := 0
+      renderingMicros := 0
+    })
   try
-    let headerSource := String.Pos.Raw.extract source 0 parserState.pos
-    let bodySource := String.Pos.Raw.extract source parserState.pos source.rawEndPos
-    let lineOffset := countNewlines headerSource
     let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
     let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
     let elabMicros ← elapsedMicrosSince elabStart
     let finalCmdState := st.commandState
-    let document := SourceDocument.fromSources source bodySource lineOffset
     let candidates ← declarationCandidates document finalCmdState.infoState.trees
     let approxBytes := approxSnapshotBytes source finalCmdState.messages finalCmdState.infoState.trees candidates
     let nowMs ← IO.monoMsNow
@@ -1941,6 +1977,13 @@ def processModuleQuery
     if missing.isEmpty then .ok result userImports
     else .missingImports result userImports missing
 
+  -- Incomplete import closure: skip body elaboration and degrade immediately
+  -- (see `buildModuleSnapshot`). The parent renders `missing` as `needs_build`
+  -- / `files_skipped` and ignores this empty payload, so a full failing
+  -- elaboration would be wasted work on a project-scope scan.
+  if !missing.isEmpty then
+    return wrapOutcome (emptyResultFor query)
+
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
@@ -2004,6 +2047,12 @@ def processModuleQueryBatch
   let wrapOutcome (result : ModuleQueryBatchEnvelope) : ModuleQueryBatchOutcome :=
     if missing.isEmpty then .ok result userImports
     else .missingImports result userImports missing
+
+  -- Incomplete import closure: skip body elaboration and degrade immediately
+  -- (see `buildModuleSnapshot`). The parent reads `missing` to degrade and
+  -- ignores this empty payload.
+  if !missing.isEmpty then
+    return wrapOutcome (emptyBatchEnvelope selectors)
 
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then

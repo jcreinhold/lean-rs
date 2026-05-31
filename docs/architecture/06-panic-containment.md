@@ -172,6 +172,34 @@ Regression cover:
 that panic-to-fatal-exit detection completes within 10 seconds. Without the rlimit fix, the same test takes 30–110
 seconds on Linux runners with `apport`.
 
+## Read-only resolution queries are inside this boundary too
+
+A read-only query (`verify_declaration`, `proof_state`, `find_references`, …) does not mutate any committed
+environment, so it is tempting to treat it as recoverable: surely *resolving a name* could never need to crash
+the child. It can. A resolution query still drives Lean elaboration and renders the resulting `MessageData`
+(`serializeMessages` → `MessageData.toString`), and any of those steps can hit a Lean `panic!` — for example
+`Lean.MetavarContext.getDecl`'s "unknown metavariable" assertion. Under the worker child's
+`LEAN_ABORT_ON_PANIC=1` that `panic!` is an `abort()`, not a catchable Lean exception: the `try`/`catch` blocks
+around projection rendering (e.g. `renderGoal` in `InfoTree.lean`) catch `Exception`, never a panic. The
+soundness argument above is the reason this cannot be relaxed query-by-query: disabling abort-on-panic would let
+the `panic!` return an `Inhabited` default `MetavarDecl`/`Declaration` instead, and a *defaulted* value rendered
+into a verdict is indistinguishable from a real one — a read-only query would then silently report fabricated
+candidates or a fabricated "verified" status. A visible child abort that the supervisor restarts and retries is
+strictly safer than a quiet wrong answer.
+
+A field re-evaluation (report 61 §3) recorded exactly such an abort
+(`call_restart.cause = "child_abort"`, `PANIC at Lean.MetavarContext.getDecl … unknown metavariable`) during a
+genuine-ambiguity `verify_declaration`, but flagged low confidence on causation and noted the immediately
+following `proof_state` ambiguity call ran clean. Reproducing it deterministically on the same toolchain
+(`v4.31.0-rc1`) — two `open` namespaces exporting the same short name, a bare reference forcing Lean's
+"ambiguous, possible interpretations" error, the offending message rendered — does **not** abort the child:
+`crates/lean-rs-worker-child/tests/typed_session.rs::verify_declaration_ambiguous_open_reference_does_not_restart_child`
+asserts the verdict resolves with both candidates, the ambiguity diagnostic is rendered, and
+`worker.stats().restarts == 0`. The field abort was therefore incidental metavar churn (the red tree was an
+in-progress toolchain bump carrying its own kernel metavar errors), not a defect of the ambiguity path. No
+in-shim panic guard is added because there is no reachable panic to guard: the containment boundary is, and
+remains, the process. The supervisor's restart-and-retry is the recovery contract for the residual case.
+
 ## References
 
 - Rust `std::panic::catch_unwind`: <https://doc.rust-lang.org/std/panic/fn.catch_unwind.html>
