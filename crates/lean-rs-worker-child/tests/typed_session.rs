@@ -1358,6 +1358,10 @@ fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
             assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::Accepted);
             assert!(!facts.contains_sorry);
             assert!(facts.unresolved_goals.is_empty());
+            assert!(
+                facts.axioms_available,
+                "a resolved declaration with report_axioms should run the axiom walk (axioms_available=true)"
+            );
         }
         other => panic!("expected accepted verification, got {other:?}"),
     }
@@ -1722,4 +1726,239 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
         }
         other => panic!("expected Ok module outcome, got {other:?}"),
     }
+}
+
+// Regression for prompt 12: a `module` + `@[expose] public section` overlay
+// with a single namespaced theorem resolves to a unique declaration against a
+// complete (green) session env — for both the short name and the
+// fully-qualified name. The field report's spurious `ambiguous` verdict is
+// degraded-environment-specific, NOT a `module`/`public section`
+// double-counting artifact, so the unique-resolution path must stay clean.
+#[test]
+fn module_public_section_resolves_to_unique_declaration() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/module.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "\
+module
+
+@[expose] public section
+namespace SSet.boundary
+
+theorem isPushout : True := by
+  trivial
+
+end SSet.boundary
+end
+";
+    for name in ["isPushout", "SSet.boundary.isPushout"] {
+        let request = LeanWorkerDeclarationVerificationRequest {
+            source: source.to_owned(),
+            target: LeanWorkerDeclarationVerificationTarget::Name { name: name.to_owned() },
+            sorry_policy: LeanWorkerSorryPolicy::Deny,
+            report_axioms: true,
+            budgets: LeanWorkerOutputBudgets::default(),
+        };
+        let result = session
+            .verify_declaration(&request, &opts, None, None)
+            .expect("verification dispatch succeeds");
+        match result {
+            LeanWorkerDeclarationVerificationResult::Ok {
+                verification_status,
+                facts,
+                ..
+            } => {
+                assert_eq!(
+                    verification_status,
+                    LeanWorkerDeclarationVerificationStatus::Accepted,
+                    "module/public-section overlay must resolve uniquely for target {name:?}, not report Ambiguous",
+                );
+                assert_eq!(
+                    facts.target.as_ref().map(|t| t.declaration_name.as_str()),
+                    Some("SSet.boundary.isPushout"),
+                    "resolved target should be the fully-qualified namespaced theorem for {name:?}",
+                );
+            }
+            other => panic!("expected accepted verification for {name:?}, got {other:?}"),
+        }
+    }
+}
+
+// Prompt 12 target B: a short name that genuinely matches declarations in two
+// different namespaces resolves to `Ambiguous` carrying the competing
+// declarations (post-dedup, these survive because they have distinct
+// fully-qualified `declaration_name`s). `target` is `None` for an ambiguous
+// verdict.
+#[test]
+fn verify_declaration_reports_ambiguous_with_candidates() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/ambiguous.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "\
+namespace A
+theorem dup : True := by trivial
+end A
+
+namespace B
+theorem dup : True := by trivial
+end B
+";
+    let request = LeanWorkerDeclarationVerificationRequest {
+        source: source.to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name { name: "dup".to_owned() },
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .verify_declaration(&request, &opts, None, None)
+        .expect("verification dispatch succeeds");
+    match result {
+        LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status,
+            facts,
+            ..
+        } => {
+            assert_eq!(
+                verification_status,
+                LeanWorkerDeclarationVerificationStatus::Ambiguous,
+                "a short name defined in two namespaces must resolve to Ambiguous",
+            );
+            assert!(
+                facts.candidates.len() >= 2,
+                "Ambiguous must carry the competing declarations, got {:?}",
+                facts.candidates,
+            );
+            assert!(
+                facts.target.is_none(),
+                "an ambiguous verdict has no single resolved target, got {:?}",
+                facts.target,
+            );
+            let names: Vec<&str> = facts.candidates.iter().map(|c| c.declaration_name.as_str()).collect();
+            assert!(
+                names.contains(&"A.dup") && names.contains(&"B.dup"),
+                "candidates should name both namespaced declarations, got {names:?}",
+            );
+        }
+        other => panic!("expected ambiguous verification, got {other:?}"),
+    }
+}
+
+// Prompt 12 target A2: a source whose header imports a module absent from the
+// open session environment, queried for a name it does not define, yields the
+// typed `NeedsBuild` verdict inside the `MissingImports` outcome that names the
+// absent module — not a bare `NotFound` or an infrastructure error string.
+#[test]
+fn verify_declaration_reports_needs_build_for_unbuilt_import() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/needs-build.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "\
+import LeanRsFixture.DoesNotExist
+
+theorem present : True := by trivial
+";
+    let request = LeanWorkerDeclarationVerificationRequest {
+        source: source.to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name {
+            name: "notDefinedHere".to_owned(),
+        },
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .verify_declaration(&request, &opts, None, None)
+        .expect("verification dispatch succeeds");
+    match result {
+        LeanWorkerDeclarationVerificationResult::MissingImports {
+            verification_status,
+            missing,
+            ..
+        } => {
+            assert_eq!(
+                verification_status,
+                LeanWorkerDeclarationVerificationStatus::NeedsBuild,
+                "an unresolved name under incomplete imports must report NeedsBuild",
+            );
+            assert!(
+                missing.iter().any(|m| m == "LeanRsFixture.DoesNotExist"),
+                "the absent import should be named in `missing`, got {missing:?}",
+            );
+        }
+        other => panic!("expected MissingImports/NeedsBuild outcome, got {other:?}"),
+    }
+}
+
+// Prompt 12 target C: inspection renders the statement notation-aware under
+// `Pretty` (the default) and falls back to the raw `Expr.toString` form under
+// `Raw`. Each path reports the rendering it actually used, and for a
+// universe-polymorphic constant the two forms differ (raw carries `@`/universe
+// annotations that pretty printing with `pp.universes false` suppresses).
+#[test]
+fn inspect_declaration_pretty_and_raw_rendering_differ() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+
+    let request_for = |rendering| LeanWorkerDeclarationInspectionRequest {
+        name: "Nat.rec".to_owned(),
+        fields: LeanWorkerDeclarationInspectionFields {
+            docstring: false,
+            rendering,
+            ..LeanWorkerDeclarationInspectionFields::default()
+        },
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 4096,
+            total_bytes: 8192,
+        },
+    };
+
+    let pretty = match session
+        .inspect_declaration(&request_for(LeanWorkerRendering::Pretty), None, None)
+        .expect("pretty inspect dispatch succeeds")
+    {
+        LeanWorkerDeclarationInspectionResult::Found { declaration } => declaration,
+        other => panic!("Nat.rec should be found, got {other:?}"),
+    };
+    let raw = match session
+        .inspect_declaration(&request_for(LeanWorkerRendering::Raw), None, None)
+        .expect("raw inspect dispatch succeeds")
+    {
+        LeanWorkerDeclarationInspectionResult::Found { declaration } => declaration,
+        other => panic!("Nat.rec should be found, got {other:?}"),
+    };
+
+    assert_eq!(
+        pretty.statement_rendering,
+        Some(LeanWorkerRendering::Pretty),
+        "the pretty-printer is available, so a Pretty request must report Pretty",
+    );
+    assert_eq!(
+        raw.statement_rendering,
+        Some(LeanWorkerRendering::Raw),
+        "a Raw request must report Raw",
+    );
+    let pretty_statement = pretty.statement.expect("pretty statement renders").value;
+    let raw_statement = raw.statement.expect("raw statement renders").value;
+    assert_ne!(
+        pretty_statement, raw_statement,
+        "pretty (notation, no universes) and raw (Expr.toString) forms of Nat.rec should differ",
+    );
 }

@@ -7,7 +7,48 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.1.18] - 2026-05-31
+
+### Honest resolution verdicts on the worker query surface (protocol 7 → 8)
+
+The worker's source-snapshot query path (`verify_declaration`, `proof_state`) now reports *why* a name failed to resolve
+as a typed verdict instead of an infrastructure-flavoured string. `LeanWorkerProofStateResult` gains
+`Ambiguous { candidates }` and `NeedsBuild { missing }`; `Unavailable { message }` is retained only for genuine
+non-resolution failures (no proof position matched the selector, snapshot inconsistency), which are not resolution
+verdicts. `LeanWorkerDeclarationVerificationStatus` gains `NeedsBuild` (its outcome is the existing
+`MissingImports { missing }`, which already names the absent modules — no new field). These replace the previous
+behaviour where an unresolved name in an incomplete environment surfaced as `Unavailable { "declaration name is
+ambiguous in the module" }` or as `Ambiguous` with no candidates. The verdict is classified once in the Lean shim at the
+source-resolution boundary and mapped onto each result, so the rule the consumer applies is purely structural:
+`≥ 2 candidates ⇒ ambiguous`, else `needs_build`. Env-based resolution (`inspect_declaration`, `find_references`, search)
+is unique by construction and keeps no ambiguity variant.
+
+### Structural candidates for genuine ambiguity
+
+`LeanWorkerDeclarationVerificationFacts` gains `candidates: Vec<LeanWorkerDeclarationTargetInfo>` (`#[serde(default)]`),
+populated only when the status is `Ambiguous` (`target` stays `None` then). A candidate carries `namespace_name` as the
+disambiguator; no `module` field is added because source-snapshot candidates have no loaded module (it would be `None`
+everywhere). Behind this, the Lean shim deduplicates resolution candidates by declaration name before the
+arity decision, so a once-defined declaration in a `module` / `@[expose] public section` file resolves cleanly instead
+of spuriously reporting `Ambiguous` against identical copies of itself.
+
+### Real axiom collection with a typed availability flag
+
+`verify_declaration` with `report_axioms: true` now runs an actual `Lean.collectAxioms` walk over the resolved
+declaration in the elaborated environment (heartbeat- and byte-bounded), replacing the previous textual heuristic that
+returned `["sorryAx"]` iff the source mentioned `sorry`/`admit` and otherwise `[]`. `LeanWorkerDeclarationVerificationFacts`
+gains `axioms_available: bool` (`#[serde(default)]`): `true` with `axioms: []` means the walk ran and found no
+nontrivial axioms; `false` means the walk could not run (target unresolved, budget exhausted). This defines the
+misleading empty list — which conflated "checked, none" with "never checked" — out of existence.
+
+### Pretty, notation-aware inspection statements
+
+`LeanWorkerDeclarationInspectionFields` gains `rendering: LeanWorkerRendering` (default `Pretty`), and
+`LeanWorkerDeclarationInspection` reports the path actually used via `statement_rendering: Option<LeanWorkerRendering>`.
+Under `Pretty` the statement is rendered with `Lean.PrettyPrinter.ppExpr` (notation on, `pp.universes false`) instead of
+the raw fully-elaborated `Expr.toString`; on exception or heartbeat exhaustion it falls back to the raw form and reports
+`Raw`. The rendering knob is confined to inspection — it is not added to the shared `LeanWorkerRenderedInfo`, which would
+over-expose every consumer (goals, type-at) for a knob only inspection uses.
 
 ## [0.1.17] - 2026-05-30
 

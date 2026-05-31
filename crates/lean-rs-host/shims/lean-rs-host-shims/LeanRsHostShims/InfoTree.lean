@@ -139,6 +139,8 @@ structure ProofStateInfo where
 inductive ProofStateResult where
   | state (info : ProofStateInfo)
   | unavailable (message : String)
+  | ambiguous (candidates : Array DeclarationTargetInfo)
+  | needsBuild (missing : Array String)
   deriving Inhabited
 
 inductive SurroundingDeclarationResult where
@@ -328,6 +330,7 @@ inductive DeclarationVerificationStatus where
   | timeout
   | budgetExceeded
   | unsupported
+  | needsBuild
   deriving Inhabited
 
 structure DeclarationVerificationFacts where
@@ -340,6 +343,13 @@ structure DeclarationVerificationFacts where
   axioms : Array String
   axiomsTruncated : Bool
   outputTruncated : Bool
+  /-- Competing declarations when `status = ambiguous`; empty otherwise. -/
+  candidates : Array DeclarationTargetInfo
+  /-- `false` when the axiom dependency set could not be computed (the target
+      did not resolve, or `collectAxioms` was not run): an empty `axioms` then
+      means "not computed", not "no axioms". `true` with empty `axioms` means a
+      genuine no-nontrivial-axioms result. -/
+  axiomsAvailable : Bool
   deriving Inhabited
 
 inductive DeclarationVerificationOutcome where
@@ -815,9 +825,28 @@ private def declarationCandidates (doc : SourceDocument) (trees : PersistentArra
     out ← tree.foldInfoM (init := out) (collectDeclarations doc)
   pure out
 
+/-- Collapse candidates that name the *same* declaration. Source-snapshot
+    candidates are collected from `CommandInfo` nodes (`declarationCandidates`),
+    and a single declaration can be recorded more than once — e.g. when a
+    degraded environment re-elaborates a command. Two candidates are the same
+    declaration iff they share a fully-qualified `declarationName`; Lean forbids
+    two distinct valid declarations from sharing one, so this can never merge a
+    genuine collision. It keeps the first occurrence, preserving declaration
+    order. Genuine ambiguity (a short name matching declarations in different
+    namespaces) survives because those carry distinct `declarationName`s. -/
+private def dedupByDeclarationName (candidates : Array DeclarationCandidate) : Array DeclarationCandidate := Id.run do
+  let mut seen : Array String := #[]
+  let mut out : Array DeclarationCandidate := #[]
+  for candidate in candidates do
+    if seen.contains candidate.info.declarationName then
+      continue
+    seen := seen.push candidate.info.declarationName
+    out := out.push candidate
+  pure out
+
 private def declarationTargetByName (candidates : Array DeclarationCandidate) (name : String) :
     DeclarationTargetResult :=
-  let matched := candidates.filter fun candidate =>
+  let matched := dedupByDeclarationName <| candidates.filter fun candidate =>
     candidate.info.declarationName == name || candidate.info.shortName == name
   match matched with
   | #[] => .notFound
@@ -1053,7 +1082,7 @@ private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCan
 
 private def runProofStateInDeclaration (doc : SourceDocument) (trees : PersistentArray InfoTree)
     (candidates : Array DeclarationCandidate) (name : String) (selector : ProofPositionSelector)
-    (budgets : ModuleQueryOutputBudgets) : IO ProofStateResult := do
+    (budgets : ModuleQueryOutputBudgets) (missing : Array String) : IO ProofStateResult := do
   match declarationTargetByName candidates name with
   | .target info =>
     let some decl := candidates.find? (fun candidate => candidate.info.declarationName == info.declarationName)
@@ -1062,8 +1091,15 @@ private def runProofStateInDeclaration (doc : SourceDocument) (trees : Persisten
     match selectProofPosition doc positions selector with
     | some pos => proofStateFromPosition doc decl pos budgets
     | none => pure <| .unavailable "declaration has no proof position matching the selector"
-  | .notFound => pure <| .unavailable "declaration was not found in the module"
-  | .ambiguous _ => pure <| .unavailable "declaration name is ambiguous in the module"
+  -- The name did not resolve against this overlay. Distinguish a genuine
+  -- not-found (the open environment is complete) from an incomplete
+  -- environment whose missing imports may define the name elsewhere.
+  | .notFound =>
+    if missing.isEmpty then
+      pure <| .unavailable "declaration was not found in the module"
+    else
+      pure <| .needsBuild missing
+  | .ambiguous candidates => pure <| .ambiguous candidates
 
 private def emptyResultFor (query : ModuleQuery) : ModuleQueryResult :=
   match query with
@@ -1162,6 +1198,10 @@ private def referencesBytes (result : ReferencesResult) : Nat :=
 
 private def proofStateBytes : ProofStateResult → Nat
   | .unavailable message => message.utf8ByteSize
+  | .ambiguous candidates =>
+    candidates.foldl (init := 0) fun bytes candidate => bytes + declarationTargetInfoBytes candidate
+  | .needsBuild missing =>
+    missing.foldl (init := 0) fun bytes name => bytes + name.utf8ByteSize
   | .state info =>
     (match info.declarationName with | some name => name.utf8ByteSize | none => 0) +
       info.namespaceName.utf8ByteSize +
@@ -1192,7 +1232,7 @@ private def batchResultBytes : ModuleQueryBatchResult → Nat
 
 private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
-    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (missing : Array String) :
     IO ModuleQueryBatchResult := do
   match selector with
   | .diagnostics _ =>
@@ -1201,7 +1241,7 @@ private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocumen
   | .proofState _ line column =>
     pure <| .proofState (← runProofState doc trees candidates line column budgets)
   | .proofStateInDeclaration _ declaration position =>
-    pure <| .proofState (← runProofStateInDeclaration doc trees candidates declaration position budgets)
+    pure <| .proofState (← runProofStateInDeclaration doc trees candidates declaration position budgets missing)
   | .typeAt _ line column =>
     pure <| .typeAt (← runTypeAtWith doc trees line column budgets.perFieldBytes)
   | .references _ name =>
@@ -1235,7 +1275,7 @@ private def batchEnvelopeFromFailure (selectors : Array ModuleQuerySelector)
 
 private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
-    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
+    (budgets : ModuleQueryOutputBudgets) (fileLabel : String) (missing : Array String) :
     IO ModuleQueryBatchEnvelope := do
   let totalLimit := budgets.totalBytes
   let mut items : Array ModuleQueryBatchItem := #[]
@@ -1248,7 +1288,7 @@ private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelect
       totalTruncated := true
     else
       try
-        let result ← batchResultFor selector doc messages trees candidates budgets fileLabel
+        let result ← batchResultFor selector doc messages trees candidates budgets fileLabel missing
         let bytes := batchResultBytes result
         if spent + bytes > totalLimit then
           items := items.push (.budgetExceeded id "module query selector would exceed the batch total byte budget")
@@ -1261,10 +1301,11 @@ private def runBatchSelectorsWithCandidates (selectors : Array ModuleQuerySelect
   pure { items, totalTruncated }
 
 private def runBatchSelectors (selectors : Array ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
-    (trees : PersistentArray InfoTree) (budgets : ModuleQueryOutputBudgets) (fileLabel : String) :
+    (trees : PersistentArray InfoTree) (budgets : ModuleQueryOutputBudgets) (fileLabel : String)
+    (missing : Array String) :
     IO ModuleQueryBatchEnvelope := do
   let candidates ← declarationCandidates doc trees
-  runBatchSelectorsWithCandidates selectors doc messages trees candidates budgets fileLabel
+  runBatchSelectorsWithCandidates selectors doc messages trees candidates budgets fileLabel missing
 
 private def batchEnvelopeBytes (envelope : ModuleQueryBatchEnvelope) : Nat :=
   envelope.items.foldl (init := 0) fun bytes item =>
@@ -1290,6 +1331,11 @@ private structure ModuleSnapshot where
   candidates : Array DeclarationCandidate
   imports : Array String
   missing : Array String
+  /-- The environment after elaborating the overlay, used to walk a verified
+      declaration's axiom dependencies. The `InfoTree`s already pin this env
+      graph transitively, so storing the reference adds negligible memory
+      beyond the trees already retained. -/
+  env : Environment
   approxBytes : Nat
   lastUsedMs : Nat
 
@@ -1434,6 +1480,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       candidates
       imports := userImports
       missing
+      env := finalCmdState.env
       approxBytes
       lastUsedMs := nowMs
     }
@@ -1636,7 +1683,7 @@ private def proofStateGoalsAfter (result : ProofStateResult) (limit : Nat) : Arr
   match result with
   | .state info =>
     (renderedGoalInfos info.goalsAfter limit, info.truncated)
-  | .unavailable _ => (#[], false)
+  | .unavailable _ | .ambiguous _ | .needsBuild _ => (#[], false)
 
 private def attemptRowBytes (row : ProofAttemptRow) : Nat :=
   row.id.utf8ByteSize + renderedBytes row.candidateText +
@@ -1771,9 +1818,38 @@ private def resolveVerificationTarget (snapshot : ModuleSnapshot) (target : Decl
   | .name name => declarationTargetByName snapshot.candidates name
   | .span span => declarationTargetByPosition snapshot.document snapshot.candidates span.startLine span.startColumn
 
+/-- Walk a verified declaration's axiom dependencies via `Lean.collectAxioms`
+    over the overlay's elaborated environment, bounded by the same heartbeat
+    budget as elaboration and by `perFieldBytes`. Returns `none` when the walk
+    could not run (the constant is absent or the budget tripped before any
+    result) so the caller can report "axioms unavailable" rather than an empty
+    list that reads as "no axioms". The returned `Bool` is `true` when the byte
+    budget truncated an otherwise-successful walk. -/
+private def collectAxiomNames (env : Environment) (declName : Name) (heartbeats : UInt64) (perFieldBytes : Nat) :
+    IO (Option (Array String × Bool)) := do
+  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let coreCtx : Core.Context := { fileName := "<verify-axioms>", fileMap := default, options := opts }
+  let coreState : Core.State := { env }
+  let action : CoreM (Array Name) := collectAxioms declName
+  match ← ((action coreCtx).run' coreState).toBaseIO with
+  | .ok names =>
+    let mut out : Array String := #[]
+    let mut spent := 0
+    let mut truncated := false
+    for name in names do
+      let rendered := name.toString
+      if spent + rendered.utf8ByteSize > perFieldBytes then
+        truncated := true
+      else
+        out := out.push rendered
+        spent := spent + rendered.utf8ByteSize
+    pure (some (out, truncated))
+  | .error _ => pure none
+
 private def verificationFacts
     (request : DeclarationVerificationRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
-    (target? : Option DeclarationTargetInfo) : IO DeclarationVerificationFacts := do
+    (target? : Option DeclarationTargetInfo) (candidates : Array DeclarationTargetInfo) (heartbeats : UInt64) :
+    IO DeclarationVerificationFacts := do
   let failure ← failureFromMessages snapshot.messages request.budgets.perFieldBytes.toUSize fileLabel
   let bodyText :=
     match target? with
@@ -1790,11 +1866,15 @@ private def verificationFacts
         target.bodySpan.startLine target.bodySpan.startColumn request.budgets
       let (goals, _) := proofStateGoalsAfter proofState request.budgets.perFieldBytes
       pure goals
-  let axioms :=
-    if request.reportAxioms != 0 && (containsSorry || containsAdmit || containsSorryAx) then
-      #["sorryAx"]
-    else
-      #[]
+  -- Real axiom dependency walk. Only attempted when requested and a single
+  -- declaration resolved; otherwise the set is honestly "unavailable".
+  let (axioms, axiomsAvailable, axiomsTruncated) ←
+    match target?, request.reportAxioms != 0 with
+    | some target, true => do
+      match ← collectAxiomNames snapshot.env target.declarationName.toName heartbeats request.budgets.perFieldBytes with
+      | some (names, truncated) => pure (names, true, truncated)
+      | none => pure (#[], false, false)
+    | _, _ => pure (#[], false, false)
   pure {
     target := target?,
     diagnostics := failure,
@@ -1803,7 +1883,9 @@ private def verificationFacts
     containsAdmit,
     containsSorryAx,
     axioms,
-    axiomsTruncated := false,
+    axiomsTruncated,
+    candidates,
+    axiomsAvailable,
     outputTruncated :=
       match failure.truncated with
       | LeanRsFixture.Elaboration.Truncation.truncated => true
@@ -1953,6 +2035,7 @@ def processModuleQueryBatch
     let document := SourceDocument.fromSources source bodySource lineOffset
     let result ←
       runBatchSelectors selectors document finalCmdState.messages finalCmdState.infoState.trees budgets fileLabel
+        missing
     return wrapOutcome result
   catch ex =>
     let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
@@ -1965,7 +2048,7 @@ private def projectCachedSnapshot (snapshot : ModuleSnapshot) (selectors : Array
   let projectionStart ← IO.monoMsNow
   let envelope ←
     runBatchSelectorsWithCandidates selectors snapshot.document snapshot.messages snapshot.trees snapshot.candidates
-      budgets fileLabel
+      budgets fileLabel snapshot.missing
   let projectionMicros ← elapsedMicrosSince projectionStart
   let timings := { baseTimings with projectionMicros := u64 projectionMicros }
   let facts := cacheFacts status timings (batchEnvelopeBytes envelope) cache
@@ -2047,13 +2130,19 @@ def verifyDeclaration
     let (status, facts) ←
       match targetResult with
       | .target info => do
-        let facts ← verificationFacts request snapshot fileLabel (some info)
+        let facts ← verificationFacts request snapshot fileLabel (some info) #[] heartbeats
         pure (verificationStatus request.sorryPolicy facts, facts)
+      -- The name did not resolve. An incomplete environment (missing imports)
+      -- may define it elsewhere; report `needsBuild` so the verdict is honest
+      -- rather than a bare `notFound`.
       | .notFound => do
-        let facts ← verificationFacts request snapshot fileLabel none
-        pure (.notFound, facts)
-      | .ambiguous _ => do
-        let facts ← verificationFacts request snapshot fileLabel none
+        let facts ← verificationFacts request snapshot fileLabel none #[] heartbeats
+        let status := if snapshot.missing.isEmpty then .notFound else .needsBuild
+        pure (status, facts)
+      -- Genuinely multiply-defined: attach the competing declarations so the
+      -- verdict is actionable.
+      | .ambiguous candidates => do
+        let facts ← verificationFacts request snapshot fileLabel none candidates heartbeats
         pure (.ambiguous, facts)
     if snapshot.missing.isEmpty then
       pure <| .ok status facts snapshot.imports

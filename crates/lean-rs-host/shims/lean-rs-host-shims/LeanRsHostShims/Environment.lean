@@ -117,6 +117,10 @@ structure DeclarationInspectionFields where
   docstring : Nat
   attributes : Nat
   flags : Nat
+  /-- Requested statement rendering: `1` = notation-aware pretty (delaborated,
+      `pp.universes false`), `0` = raw `Expr.toString`. Pretty falls back to raw
+      when the pretty-printer cannot render the term. -/
+  rendering : Nat
   deriving Inhabited
 
 structure DeclarationInspectionBudgets where
@@ -153,6 +157,10 @@ structure DeclarationInspection where
   attributes : Array String
   proofSearch : DeclarationProofSearchFacts
   flags : DeclarationFlags
+  /-- Rendering that actually produced `statement`: `1` = pretty, `0` = raw,
+      `none` when no statement was requested. Lets the caller tell whether the
+      pretty path fired or fell back to the raw term. -/
+  statementRendering : Option Nat
   deriving Inhabited
 
 inductive DeclarationInspectionResult where
@@ -721,6 +729,25 @@ private def boundText (text : String) (perFieldBytes totalRemaining : Nat) : Dec
   let truncated := fieldTruncated || text.utf8ByteSize > totalRemaining
   ({ value, truncated := natOfBool truncated }, value.utf8ByteSize)
 
+/-- Pretty-print an `Expr` via `Lean.PrettyPrinter.ppExpr` with `pp.universes`
+    disabled, so a declaration's statement reads like an editor `hover` rather
+    than a fully-elaborated term with every universe and instance argument
+    spelled out. Heartbeat-bounded; returns `none` when the pretty-printer
+    raises (deeply nested term under the budget, or any rendering error) so the
+    caller can fall back to the raw `Expr.toString` form. -/
+private def ppExprBounded (env : Environment) (expr : Expr) (heartbeats : UInt64) : IO (Option String) := do
+  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let opts := opts.setBool `pp.universes false
+  let coreCtx : Core.Context := { fileName := "<declaration-inspection>", fileMap := default, options := opts }
+  let coreState : Core.State := { env }
+  let metaAction : Meta.MetaM String := do
+    let fmt ← Lean.PrettyPrinter.ppExpr expr
+    pure fmt.pretty
+  let coreAction : CoreM String := metaAction.run' {} {}
+  match ← ((coreAction coreCtx).run' coreState).toBaseIO with
+  | .ok rendered => pure (some rendered)
+  | .error _ => pure none
+
 private def isSimpDeclarationCore (declName : Name) : CoreM Bool := do
   let some ext ← Lean.Meta.getSimpExtension? `simp | return false
   let thms ← ext.getTheorems
@@ -791,7 +818,7 @@ private def inspectionAttributes (info : ConstantInfo) (facts : DeclarationProof
 
 @[export lean_rs_host_env_inspect_declaration]
 def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRequest) (sourceRoots : Array String)
-    : IO DeclarationInspectionResult := do
+    (heartbeats : UInt64) : IO DeclarationInspectionResult := do
   let declName := request.name.toName
   let some info := env.find? declName
     | return .notFound request.name
@@ -816,11 +843,22 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
       #[]
   let mut spent := 0
   let mut statement := none
+  let mut statementRendering := none
   if request.fields.statement != 0 then
-    let (rendered, used) := boundText (toString info.type) request.budgets.perFieldBytes
+    -- Pretty (notation-aware, `pp.universes false`) when requested and the
+    -- pretty-printer succeeds; otherwise the raw fully-elaborated term.
+    let (text, usedRendering) ←
+      if request.fields.rendering != 0 then
+        match ← ppExprBounded env info.type heartbeats with
+        | some pretty => pure (pretty, 1)
+        | none => pure (toString info.type, 0)
+      else
+        pure (toString info.type, 0)
+    let (rendered, used) := boundText text request.budgets.perFieldBytes
       (request.budgets.totalBytes - spent)
     spent := spent + used
     statement := some rendered
+    statementRendering := some usedRendering
   let mut docstring := none
   if request.fields.docstring != 0 then
     match ← findDocString? env declName false with
@@ -840,6 +878,7 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
     attributes
     proofSearch := facts
     flags := if request.fields.flags != 0 then flags else default
+    statementRendering
   }
 
 /-- Bulk variant of [`envQueryDeclaration`]: a single IO traversal that

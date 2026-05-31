@@ -185,6 +185,7 @@ pub enum DeclarationVerificationStatus {
     Timeout,
     BudgetExceeded,
     Unsupported,
+    NeedsBuild,
 }
 
 /// Bounded facts returned by declaration verification.
@@ -203,6 +204,8 @@ pub struct DeclarationVerificationFacts {
     pub axioms: Vec<String>,
     pub axioms_truncated: bool,
     pub output_truncated: bool,
+    pub candidates: Vec<DeclarationTargetInfo>,
+    pub axioms_available: bool,
 }
 
 /// Header-aware declaration verification outcome.
@@ -965,8 +968,9 @@ impl DeclarationVerificationStatus {
             4 => Ok(Self::Timeout),
             5 => Ok(Self::BudgetExceeded),
             6 => Ok(Self::Unsupported),
+            7 => Ok(Self::NeedsBuild),
             other => Err(conversion_error(format!(
-                "expected Lean DeclarationVerificationStatus ctor (tag 0..=6), found tag {other}"
+                "expected Lean DeclarationVerificationStatus ctor (tag 0..=7), found tag {other}"
             ))),
         }
     }
@@ -979,8 +983,9 @@ impl<'lean> TryFromLean<'lean> for DeclarationVerificationFacts {
         let contains_sorry_ax = bool_tail(&obj, 2, "DeclarationVerificationFacts.containsSorryAx")?;
         let axioms_truncated = bool_tail(&obj, 3, "DeclarationVerificationFacts.axiomsTruncated")?;
         let output_truncated = bool_tail(&obj, 4, "DeclarationVerificationFacts.outputTruncated")?;
-        let [target, diagnostics, unresolved_goals, axioms] =
-            take_ctor_objects::<4>(obj, 0, "DeclarationVerificationFacts")?;
+        let axioms_available = bool_tail(&obj, 5, "DeclarationVerificationFacts.axiomsAvailable")?;
+        let [target, diagnostics, unresolved_goals, axioms, candidates] =
+            take_ctor_objects::<5>(obj, 0, "DeclarationVerificationFacts")?;
         Ok(Self {
             target: Option::<DeclarationTargetInfo>::try_from_lean(target)?,
             diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
@@ -991,6 +996,8 @@ impl<'lean> TryFromLean<'lean> for DeclarationVerificationFacts {
             axioms: Vec::<String>::try_from_lean(axioms)?,
             axioms_truncated,
             output_truncated,
+            candidates: Vec::<DeclarationTargetInfo>::try_from_lean(candidates)?,
+            axioms_available,
         })
     }
 }
@@ -1085,6 +1092,8 @@ impl<'lean> TryFromLean<'lean> for ProofStateInfo {
 pub enum ProofStateResult {
     State(Box<ProofStateInfo>),
     Unavailable { message: String },
+    Ambiguous { candidates: Vec<DeclarationTargetInfo> },
+    NeedsBuild { missing: Vec<String> },
 }
 
 impl<'lean> TryFromLean<'lean> for ProofStateResult {
@@ -1100,8 +1109,20 @@ impl<'lean> TryFromLean<'lean> for ProofStateResult {
                     message: String::try_from_lean(message)?,
                 })
             }
+            2 => {
+                let [candidates] = take_ctor_objects::<1>(obj, 2, "ProofStateResult::ambiguous")?;
+                Ok(Self::Ambiguous {
+                    candidates: Vec::<DeclarationTargetInfo>::try_from_lean(candidates)?,
+                })
+            }
+            3 => {
+                let [missing] = take_ctor_objects::<1>(obj, 3, "ProofStateResult::needsBuild")?;
+                Ok(Self::NeedsBuild {
+                    missing: Vec::<String>::try_from_lean(missing)?,
+                })
+            }
             other => Err(conversion_error(format!(
-                "expected Lean ProofStateResult ctor (tag 0..=1), found tag {other}"
+                "expected Lean ProofStateResult ctor (tag 0..=3), found tag {other}"
             ))),
         }
     }

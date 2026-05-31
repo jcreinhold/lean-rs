@@ -573,6 +573,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::Le
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Accepted
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Ambiguous
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::BudgetExceeded
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::NeedsBuild
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::NotFound
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Rejected
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationStatus::Timeout
@@ -1102,6 +1103,10 @@ impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerPro
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector
 #[non_exhaustive] pub enum lean_rs_worker_protocol::types::LeanWorkerProofStateResult
+pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::Ambiguous
+pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::Ambiguous::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::NeedsBuild
+pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::NeedsBuild::missing: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::State
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::State::info: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerProofStateInfo>
 pub lean_rs_worker_protocol::types::LeanWorkerProofStateResult::Unavailable
@@ -1350,6 +1355,7 @@ pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::name: alloc
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::proof_search: lean_rs_worker_protocol::types::LeanWorkerDeclarationProofSearchFacts
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::source: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerSourceRange>
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::statement: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::statement_rendering: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerRendering>
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
 pub fn lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspection
@@ -1373,6 +1379,7 @@ pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::attributes: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::docstring: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::flags: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::rendering: lean_rs_worker_protocol::types::LeanWorkerRendering
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::source: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields::statement: bool
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionFields
@@ -1712,7 +1719,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types:
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerDeclarationType
 pub struct lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::axioms_available: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::axioms_truncated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerDeclarationTargetInfo>
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_admit: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_sorry: bool
 pub lean_rs_worker_protocol::types::LeanWorkerDeclarationVerificationFacts::contains_sorry_ax: bool

@@ -106,6 +106,7 @@ pub lean_rs_host::host::declaration_search::DeclarationInspection::name: alloc::
 pub lean_rs_host::host::declaration_search::DeclarationInspection::proof_search: lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub lean_rs_host::host::declaration_search::DeclarationInspection::source: core::option::Option<lean_rs_host::LeanSourceRange>
 pub lean_rs_host::host::declaration_search::DeclarationInspection::statement: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
+pub lean_rs_host::host::declaration_search::DeclarationInspection::statement_pretty: core::option::Option<bool>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspection
 pub fn lean_rs_host::host::declaration_search::DeclarationInspection::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspection
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspection
@@ -152,6 +153,7 @@ pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::docstri
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::flags: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::source: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::statement: bool
+pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::statement_pretty: bool
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionFields
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionFields::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionFields
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionFields
@@ -836,6 +838,7 @@ pub enum lean_rs_host::host::process::DeclarationVerificationStatus
 pub lean_rs_host::host::process::DeclarationVerificationStatus::Accepted
 pub lean_rs_host::host::process::DeclarationVerificationStatus::Ambiguous
 pub lean_rs_host::host::process::DeclarationVerificationStatus::BudgetExceeded
+pub lean_rs_host::host::process::DeclarationVerificationStatus::NeedsBuild
 pub lean_rs_host::host::process::DeclarationVerificationStatus::NotFound
 pub lean_rs_host::host::process::DeclarationVerificationStatus::Rejected
 pub lean_rs_host::host::process::DeclarationVerificationStatus::Timeout
@@ -1246,6 +1249,10 @@ impl core::marker::UnsafeUnpin for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofPositionSelector
 pub enum lean_rs_host::host::process::ProofStateResult
+pub lean_rs_host::host::process::ProofStateResult::Ambiguous
+pub lean_rs_host::host::process::ProofStateResult::Ambiguous::candidates: alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>
+pub lean_rs_host::host::process::ProofStateResult::NeedsBuild
+pub lean_rs_host::host::process::ProofStateResult::NeedsBuild::missing: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_host::host::process::ProofStateResult::State(alloc::boxed::Box<lean_rs_host::host::process::ProofStateInfo>)
 pub lean_rs_host::host::process::ProofStateResult::Unavailable
 pub lean_rs_host::host::process::ProofStateResult::Unavailable::message: alloc::string::String
@@ -1358,7 +1365,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::De
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationTargetInfo
 pub struct lean_rs_host::host::process::DeclarationVerificationFacts
 pub lean_rs_host::host::process::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::DeclarationVerificationFacts::axioms_available: bool
 pub lean_rs_host::host::process::DeclarationVerificationFacts::axioms_truncated: bool
+pub lean_rs_host::host::process::DeclarationVerificationFacts::candidates: alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>
 pub lean_rs_host::host::process::DeclarationVerificationFacts::contains_admit: bool
 pub lean_rs_host::host::process::DeclarationVerificationFacts::contains_sorry: bool
 pub lean_rs_host::host::process::DeclarationVerificationFacts::contains_sorry_ax: bool
@@ -1880,6 +1889,7 @@ pub enum lean_rs_host::host::DeclarationVerificationStatus
 pub lean_rs_host::host::DeclarationVerificationStatus::Accepted
 pub lean_rs_host::host::DeclarationVerificationStatus::Ambiguous
 pub lean_rs_host::host::DeclarationVerificationStatus::BudgetExceeded
+pub lean_rs_host::host::DeclarationVerificationStatus::NeedsBuild
 pub lean_rs_host::host::DeclarationVerificationStatus::NotFound
 pub lean_rs_host::host::DeclarationVerificationStatus::Rejected
 pub lean_rs_host::host::DeclarationVerificationStatus::Timeout
@@ -2054,6 +2064,7 @@ pub lean_rs_host::host::DeclarationInspection::name: alloc::string::String
 pub lean_rs_host::host::DeclarationInspection::proof_search: lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub lean_rs_host::host::DeclarationInspection::source: core::option::Option<lean_rs_host::LeanSourceRange>
 pub lean_rs_host::host::DeclarationInspection::statement: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
+pub lean_rs_host::host::DeclarationInspection::statement_pretty: core::option::Option<bool>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspection
 pub fn lean_rs_host::host::declaration_search::DeclarationInspection::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspection
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspection
@@ -2100,6 +2111,7 @@ pub lean_rs_host::host::DeclarationInspectionFields::docstring: bool
 pub lean_rs_host::host::DeclarationInspectionFields::flags: bool
 pub lean_rs_host::host::DeclarationInspectionFields::source: bool
 pub lean_rs_host::host::DeclarationInspectionFields::statement: bool
+pub lean_rs_host::host::DeclarationInspectionFields::statement_pretty: bool
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionFields
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionFields::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionFields
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionFields
@@ -2374,7 +2386,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 pub struct lean_rs_host::host::DeclarationVerificationFacts
 pub lean_rs_host::host::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::DeclarationVerificationFacts::axioms_available: bool
 pub lean_rs_host::host::DeclarationVerificationFacts::axioms_truncated: bool
+pub lean_rs_host::host::DeclarationVerificationFacts::candidates: alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>
 pub lean_rs_host::host::DeclarationVerificationFacts::contains_admit: bool
 pub lean_rs_host::host::DeclarationVerificationFacts::contains_sorry: bool
 pub lean_rs_host::host::DeclarationVerificationFacts::contains_sorry_ax: bool
@@ -2981,6 +2995,7 @@ pub enum lean_rs_host::DeclarationVerificationStatus
 pub lean_rs_host::DeclarationVerificationStatus::Accepted
 pub lean_rs_host::DeclarationVerificationStatus::Ambiguous
 pub lean_rs_host::DeclarationVerificationStatus::BudgetExceeded
+pub lean_rs_host::DeclarationVerificationStatus::NeedsBuild
 pub lean_rs_host::DeclarationVerificationStatus::NotFound
 pub lean_rs_host::DeclarationVerificationStatus::Rejected
 pub lean_rs_host::DeclarationVerificationStatus::Timeout
@@ -3216,6 +3231,7 @@ pub lean_rs_host::DeclarationInspection::name: alloc::string::String
 pub lean_rs_host::DeclarationInspection::proof_search: lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub lean_rs_host::DeclarationInspection::source: core::option::Option<lean_rs_host::LeanSourceRange>
 pub lean_rs_host::DeclarationInspection::statement: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
+pub lean_rs_host::DeclarationInspection::statement_pretty: core::option::Option<bool>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspection
 pub fn lean_rs_host::host::declaration_search::DeclarationInspection::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspection
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspection
@@ -3262,6 +3278,7 @@ pub lean_rs_host::DeclarationInspectionFields::docstring: bool
 pub lean_rs_host::DeclarationInspectionFields::flags: bool
 pub lean_rs_host::DeclarationInspectionFields::source: bool
 pub lean_rs_host::DeclarationInspectionFields::statement: bool
+pub lean_rs_host::DeclarationInspectionFields::statement_pretty: bool
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionFields
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionFields::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionFields
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionFields
@@ -3536,7 +3553,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 pub struct lean_rs_host::DeclarationVerificationFacts
 pub lean_rs_host::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::DeclarationVerificationFacts::axioms_available: bool
 pub lean_rs_host::DeclarationVerificationFacts::axioms_truncated: bool
+pub lean_rs_host::DeclarationVerificationFacts::candidates: alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>
 pub lean_rs_host::DeclarationVerificationFacts::contains_admit: bool
 pub lean_rs_host::DeclarationVerificationFacts::contains_sorry: bool
 pub lean_rs_host::DeclarationVerificationFacts::contains_sorry_ax: bool

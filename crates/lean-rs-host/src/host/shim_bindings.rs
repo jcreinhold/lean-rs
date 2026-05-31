@@ -70,7 +70,7 @@ macro_rules! host_shim_exports {
             mandatory env_search_declarations => "lean_rs_host_env_search_declarations"
                 => [(Obj<'lean>, DeclarationSearchRequest, Vec<String>)] => [LeanIo<DeclarationSearchResult>];
             optional env_inspect_declaration => "lean_rs_host_env_inspect_declaration"
-                => [(Obj<'lean>, DeclarationInspectionRequest, Vec<String>)] => [LeanIo<DeclarationInspectionResult>];
+                => [(Obj<'lean>, DeclarationInspectionRequest, Vec<String>, u64)] => [LeanIo<DeclarationInspectionResult>];
             mandatory env_expr_to_string_raw => "lean_rs_host_env_expr_to_string_raw"
                 => [(LeanExpr<'lean>,)] => [String];
             mandatory elaborate => "lean_rs_host_elaborate"

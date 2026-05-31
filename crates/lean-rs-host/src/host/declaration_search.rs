@@ -131,6 +131,10 @@ pub struct DeclarationInspectionFields {
     pub docstring: bool,
     pub attributes: bool,
     pub flags: bool,
+    /// Render `statement` notation-aware (`pp.universes false`) when `true`,
+    /// falling back to the raw term if the pretty-printer cannot render it;
+    /// the fully-elaborated raw form when `false`.
+    pub statement_pretty: bool,
 }
 
 impl Default for DeclarationInspectionFields {
@@ -141,6 +145,7 @@ impl Default for DeclarationInspectionFields {
             docstring: true,
             attributes: true,
             flags: true,
+            statement_pretty: true,
         }
     }
 }
@@ -208,6 +213,9 @@ pub struct DeclarationInspection {
     pub attributes: Vec<String>,
     pub proof_search: DeclarationProofSearchFacts,
     pub flags: DeclarationFlags,
+    /// Rendering that produced `statement`: `Some(true)` = pretty, `Some(false)`
+    /// = raw, `None` when no statement was requested.
+    pub statement_pretty: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -289,6 +297,7 @@ impl<'lean> IntoLean<'lean> for DeclarationInspectionFields {
                 nat_from_bool(runtime, self.docstring),
                 nat_from_bool(runtime, self.attributes),
                 nat_from_bool(runtime, self.flags),
+                nat_from_bool(runtime, self.statement_pretty),
             ],
         )
     }
@@ -513,7 +522,21 @@ impl<'lean> TryFromLean<'lean> for DeclarationInspection {
             attributes,
             proof_search,
             flags,
-        ] = take_ctor_objects::<9>(obj, 0, "DeclarationInspection")?;
+            statement_rendering,
+        ] = take_ctor_objects::<10>(obj, 0, "DeclarationInspection")?;
+        // `statementRendering : Option Nat` (1 = pretty, 0 = raw) → Option<bool>.
+        let statement_pretty = match view(&statement_rendering).sum_tag()? {
+            0 => None,
+            1 => {
+                let [nat] = take_ctor_objects::<1>(statement_rendering, 1, "DeclarationInspection.statementRendering")?;
+                Some(bool_from_nat(nat)?)
+            }
+            other => {
+                return Err(conversion_error(format!(
+                    "expected Lean Option ctor (tag 0..=1) for statementRendering, found tag {other}"
+                )));
+            }
+        };
         Ok(Self {
             name: String::try_from_lean(name)?,
             kind: String::try_from_lean(kind)?,
@@ -524,6 +547,7 @@ impl<'lean> TryFromLean<'lean> for DeclarationInspection {
             attributes: Vec::<String>::try_from_lean(attributes)?,
             proof_search: DeclarationProofSearchFacts::try_from_lean(proof_search)?,
             flags: DeclarationFlags::try_from_lean(flags)?,
+            statement_pretty,
         })
     }
 }

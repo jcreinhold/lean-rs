@@ -1179,7 +1179,15 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         };
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = inspect.call(self.environment.clone(), request.clone(), source_roots);
+        // Bound the optional notation-aware statement rendering by the default
+        // heartbeat budget; a deeply nested term that exceeds it falls back to
+        // the raw `Expr.toString` form inside the shim.
+        let result = inspect.call(
+            self.environment.clone(),
+            request.clone(),
+            source_roots,
+            lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT,
+        );
         self.record_call(0, t.elapsed());
         result
     }

@@ -420,6 +420,16 @@ pub struct LeanWorkerDeclarationInspectionFields {
     pub docstring: bool,
     pub attributes: bool,
     pub flags: bool,
+    /// How to render `statement`. Defaults to
+    /// [`LeanWorkerRendering::Pretty`] (notation-aware, `pp.universes false`),
+    /// which falls back to [`LeanWorkerRendering::Raw`] when the pretty-printer
+    /// cannot render the term. Request `Raw` for the fully-elaborated form.
+    #[serde(default = "rendering_pretty")]
+    pub rendering: LeanWorkerRendering,
+}
+
+fn rendering_pretty() -> LeanWorkerRendering {
+    LeanWorkerRendering::Pretty
 }
 
 impl Default for LeanWorkerDeclarationInspectionFields {
@@ -430,6 +440,7 @@ impl Default for LeanWorkerDeclarationInspectionFields {
             docstring: true,
             attributes: true,
             flags: true,
+            rendering: LeanWorkerRendering::Pretty,
         }
     }
 }
@@ -480,6 +491,11 @@ pub struct LeanWorkerDeclarationInspection {
     pub attributes: Vec<String>,
     pub proof_search: LeanWorkerDeclarationProofSearchFacts,
     pub flags: LeanWorkerDeclarationFlags,
+    /// Rendering that actually produced `statement`: `Some(Pretty)` or
+    /// `Some(Raw)`, or `None` when no statement was requested. Lets the caller
+    /// tell whether the pretty path fired or fell back to the raw term.
+    #[serde(default)]
+    pub statement_rendering: Option<LeanWorkerRendering>,
 }
 
 /// Outcome of inspecting one selected declaration.
@@ -742,6 +758,11 @@ pub enum LeanWorkerDeclarationVerificationStatus {
     Timeout,
     BudgetExceeded,
     Unsupported,
+    /// The name did not resolve because the open environment is incomplete.
+    /// The enclosing
+    /// [`LeanWorkerDeclarationVerificationResult::MissingImports`] names the
+    /// unbuilt modules.
+    NeedsBuild,
 }
 
 /// Bounded facts returned by declaration verification.
@@ -760,6 +781,16 @@ pub struct LeanWorkerDeclarationVerificationFacts {
     pub axioms: Vec<String>,
     pub axioms_truncated: bool,
     pub output_truncated: bool,
+    /// Competing declarations when `verification_status` is `Ambiguous`; empty
+    /// otherwise.
+    #[serde(default)]
+    pub candidates: Vec<LeanWorkerDeclarationTargetInfo>,
+    /// `false` when the axiom dependency set could not be computed (the target
+    /// did not resolve, or the walk was not requested): an empty `axioms` then
+    /// means "not computed", not "no axioms". `true` with empty `axioms` is a
+    /// genuine no-nontrivial-axioms result.
+    #[serde(default)]
+    pub axioms_available: bool,
 }
 
 /// Header-aware declaration verification outcome.
@@ -869,12 +900,30 @@ pub struct LeanWorkerProofStateInfo {
 }
 
 /// Result for `LeanWorkerModuleQuerySelector::ProofState`.
+///
+/// `Ambiguous` and `NeedsBuild` are typed resolution verdicts that replace the
+/// free-text `Unavailable` messages the parent used to string-match: a name is
+/// genuinely multiply-defined (`Ambiguous`, with the competing declarations) or
+/// could not resolve because the open environment is incomplete (`NeedsBuild`,
+/// naming the unbuilt imports). `Unavailable` remains for the residual
+/// non-resolution failures (no proof position matched the selector, the
+/// resolved declaration is not in the snapshot).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum LeanWorkerProofStateResult {
-    State { info: Box<LeanWorkerProofStateInfo> },
-    Unavailable { message: String },
+    State {
+        info: Box<LeanWorkerProofStateInfo>,
+    },
+    Unavailable {
+        message: String,
+    },
+    Ambiguous {
+        candidates: Vec<LeanWorkerDeclarationTargetInfo>,
+    },
+    NeedsBuild {
+        missing: Vec<String>,
+    },
 }
 
 /// Result for `LeanWorkerModuleQuerySelector::SurroundingDeclaration`.

@@ -1848,6 +1848,7 @@ fn declaration_inspection_fields_host(fields: LeanWorkerDeclarationInspectionFie
         docstring: fields.docstring,
         attributes: fields.attributes,
         flags: fields.flags,
+        statement_pretty: matches!(fields.rendering, LeanWorkerRendering::Pretty),
     }
 }
 
@@ -1955,6 +1956,13 @@ fn declaration_inspection_wire(declaration: DeclarationInspection) -> LeanWorker
         attributes: declaration.attributes,
         proof_search: declaration_proof_search_facts_wire(declaration.proof_search),
         flags: declaration_flags_wire(declaration.flags),
+        statement_rendering: declaration.statement_pretty.map(|pretty| {
+            if pretty {
+                LeanWorkerRendering::Pretty
+            } else {
+                LeanWorkerRendering::Raw
+            }
+        }),
     }
 }
 
@@ -2362,6 +2370,7 @@ fn declaration_verification_status_wire(
         DeclarationVerificationStatus::Timeout => LeanWorkerDeclarationVerificationStatus::Timeout,
         DeclarationVerificationStatus::BudgetExceeded => LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
         DeclarationVerificationStatus::Unsupported => LeanWorkerDeclarationVerificationStatus::Unsupported,
+        DeclarationVerificationStatus::NeedsBuild => LeanWorkerDeclarationVerificationStatus::NeedsBuild,
     }
 }
 
@@ -2376,6 +2385,8 @@ fn declaration_verification_facts_wire(facts: DeclarationVerificationFacts) -> L
         axioms: facts.axioms,
         axioms_truncated: facts.axioms_truncated,
         output_truncated: facts.output_truncated,
+        candidates: facts.candidates.into_iter().map(declaration_target_info_wire).collect(),
+        axioms_available: facts.axioms_available,
     }
 }
 
@@ -2428,6 +2439,10 @@ fn proof_state_result_wire(result: ProofStateResult) -> LeanWorkerProofStateResu
             info: Box::new(proof_state_info_wire(*info)),
         },
         ProofStateResult::Unavailable { message } => LeanWorkerProofStateResult::Unavailable { message },
+        ProofStateResult::Ambiguous { candidates } => LeanWorkerProofStateResult::Ambiguous {
+            candidates: candidates.into_iter().map(declaration_target_info_wire).collect(),
+        },
+        ProofStateResult::NeedsBuild { missing } => LeanWorkerProofStateResult::NeedsBuild { missing },
     }
 }
 

@@ -34,7 +34,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -680,12 +680,63 @@ mod tests {
         LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
         LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
         LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
-        LeanWorkerProofPositionSummary, LeanWorkerRenderedInfo, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
-        LeanWorkerTypeAtResult,
+        LeanWorkerProofPositionSummary, LeanWorkerProofStateResult, LeanWorkerRenderedInfo, LeanWorkerRendering,
+        LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
         serde_json::value::to_raw_value(value).expect("test JSON converts to raw value")
+    }
+
+    fn assert_frame_round_trips(message: &Message) {
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, message.clone(), MAX_FRAME_BYTES).expect("frame writes");
+        let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("frame reads");
+        assert_eq!(&frame.message, message);
+    }
+
+    fn declaration_target_info_fixture(declaration_name: &str) -> LeanWorkerDeclarationTargetInfo {
+        let span = LeanWorkerModuleSourceSpan {
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 10,
+        };
+        let short_name = declaration_name.rsplit('.').next().unwrap_or(declaration_name);
+        LeanWorkerDeclarationTargetInfo {
+            short_name: short_name.to_owned(),
+            declaration_name: declaration_name.to_owned(),
+            namespace_name: declaration_name
+                .strip_suffix(&format!(".{short_name}"))
+                .unwrap_or("")
+                .to_owned(),
+            declaration_kind: "theorem".to_owned(),
+            declaration_span: span.clone(),
+            name_span: span.clone(),
+            body_span: span,
+        }
+    }
+
+    fn verification_facts_fixture(
+        candidates: Vec<LeanWorkerDeclarationTargetInfo>,
+        axioms_available: bool,
+    ) -> LeanWorkerDeclarationVerificationFacts {
+        LeanWorkerDeclarationVerificationFacts {
+            target: None,
+            diagnostics: LeanWorkerElabFailure {
+                diagnostics: Vec::new(),
+                truncated: false,
+            },
+            unresolved_goals: Vec::new(),
+            contains_sorry: false,
+            contains_admit: false,
+            contains_sorry_ax: false,
+            axioms: Vec::new(),
+            axioms_truncated: false,
+            output_truncated: false,
+            candidates,
+            axioms_available,
+        }
     }
 
     #[test]
@@ -914,6 +965,7 @@ mod tests {
                     docstring: true,
                     attributes: true,
                     flags: true,
+                    rendering: LeanWorkerRendering::Pretty,
                 },
                 budgets: LeanWorkerOutputBudgets {
                     per_field_bytes: 128,
@@ -956,6 +1008,7 @@ mod tests {
                         class_name: None,
                     },
                     flags: LeanWorkerDeclarationFlags::default(),
+                    statement_rendering: Some(LeanWorkerRendering::Pretty),
                 }),
             },
         });
@@ -1207,9 +1260,11 @@ mod tests {
                     contains_sorry: false,
                     contains_admit: false,
                     contains_sorry_ax: false,
-                    axioms: Vec::new(),
+                    axioms: vec!["propext".to_owned(), "Classical.choice".to_owned()],
                     axioms_truncated: false,
                     output_truncated: false,
+                    candidates: Vec::new(),
+                    axioms_available: true,
                 }),
                 imports: Vec::new(),
             },
@@ -1218,5 +1273,97 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("verification response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("verification response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn verification_needs_build_and_ambiguous_round_trip() {
+        // NeedsBuild verdict: the enclosing MissingImports outcome names the
+        // unbuilt modules; the status is the typed resolution verdict.
+        let needs_build = Message::Response(Response::DeclarationVerification {
+            result: LeanWorkerDeclarationVerificationResult::MissingImports {
+                verification_status: LeanWorkerDeclarationVerificationStatus::NeedsBuild,
+                facts: Box::new(verification_facts_fixture(Vec::new(), false)),
+                imports: vec!["Mathlib.Tactic".to_owned()],
+                missing: vec!["Mathlib.Unbuilt.Dep".to_owned()],
+            },
+        });
+        assert_frame_round_trips(&needs_build);
+
+        // Ambiguous verdict carries the competing declarations.
+        let ambiguous = Message::Response(Response::DeclarationVerification {
+            result: LeanWorkerDeclarationVerificationResult::Ok {
+                verification_status: LeanWorkerDeclarationVerificationStatus::Ambiguous,
+                facts: Box::new(verification_facts_fixture(
+                    vec![
+                        declaration_target_info_fixture("A.foo"),
+                        declaration_target_info_fixture("B.foo"),
+                    ],
+                    false,
+                )),
+                imports: Vec::new(),
+            },
+        });
+        assert_frame_round_trips(&ambiguous);
+    }
+
+    #[test]
+    fn proof_state_ambiguous_and_needs_build_round_trip() {
+        let ambiguous = Message::Response(Response::ProcessModuleQueryBatch {
+            outcome: LeanWorkerModuleQueryBatchOutcome::Ok {
+                result: LeanWorkerModuleQueryBatchEnvelope {
+                    items: vec![LeanWorkerModuleQueryBatchItem::Ok {
+                        id: "state".to_owned(),
+                        result: Box::new(LeanWorkerModuleQueryBatchResult::ProofState(
+                            LeanWorkerProofStateResult::Ambiguous {
+                                candidates: vec![
+                                    declaration_target_info_fixture("A.foo"),
+                                    declaration_target_info_fixture("B.foo"),
+                                ],
+                            },
+                        )),
+                    }],
+                    total_truncated: false,
+                },
+                imports: Vec::new(),
+                facts: LeanWorkerModuleQueryCacheFacts::uncached(0),
+            },
+        });
+        assert_frame_round_trips(&ambiguous);
+
+        let needs_build = Message::Response(Response::ProcessModuleQueryBatch {
+            outcome: LeanWorkerModuleQueryBatchOutcome::Ok {
+                result: LeanWorkerModuleQueryBatchEnvelope {
+                    items: vec![LeanWorkerModuleQueryBatchItem::Ok {
+                        id: "state".to_owned(),
+                        result: Box::new(LeanWorkerModuleQueryBatchResult::ProofState(
+                            LeanWorkerProofStateResult::NeedsBuild {
+                                missing: vec!["Mathlib.Unbuilt.Dep".to_owned()],
+                            },
+                        )),
+                    }],
+                    total_truncated: false,
+                },
+                imports: Vec::new(),
+                facts: LeanWorkerModuleQueryCacheFacts::uncached(0),
+            },
+        });
+        assert_frame_round_trips(&needs_build);
+    }
+
+    #[test]
+    fn inspection_fields_default_rendering_is_pretty() {
+        // A request serialized without an explicit `rendering` deserializes to
+        // Pretty (the `#[serde(default)]`), so older callers get the useful
+        // notation-aware form by default.
+        let json = serde_json::json!({
+            "source": true,
+            "statement": true,
+            "docstring": false,
+            "attributes": false,
+            "flags": false,
+        });
+        let fields: LeanWorkerDeclarationInspectionFields =
+            serde_json::from_value(json).expect("fields without rendering deserialize");
+        assert_eq!(fields.rendering, LeanWorkerRendering::Pretty);
     }
 }
