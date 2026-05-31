@@ -85,6 +85,17 @@ Tags containing `-` (e.g. `vX.Y.Z-rc.1`) are auto-marked prerelease.
 
 ## When publish fails mid-run
 
-If the workflow fails **after** a crate has published, do **not** retry the same version — crates.io versions are
-immutable. Bump the patch version, repeat steps 2–5, and re-tag at the new merge commit. See `docs/release.md` for the
-full recovery and the CI-unavailable fallback.
+crates.io versions are immutable, so the fix depends on *why* it failed.
+
+**Partial publish** (the common case) — some crates uploaded, the rest did not, often the tail crate losing cargo's
+index-propagation race (`no packages ready to publish ... awaiting confirmation`). The crate *contents* are fine; only
+the upload is incomplete. Do **not** bump the version and do **not** re-run the tag release — `cargo publish
+--workspace` rejects a re-run with `crate <name>@<ver> already exists` before it reaches the missing crates. Run the
+**`release-recover.yml`** workflow instead (Actions → "Release recovery") with the same `version`: it skips crates
+already on crates.io, publishes only the missing ones one at a time, and ensures the GitHub Release. It is idempotent —
+preview with `dry_run: true`, then run for real.
+
+**Contents must change** — a genuine build break, not a propagation race. Bump the patch version, repeat steps 2–5, and
+re-tag at the new merge commit; the already-published crates keep their old version.
+
+See `docs/release.md` for the full recovery and the CI-unavailable fallback.

@@ -122,9 +122,9 @@ idempotent—safe to re-run; a fully published version is a no-op. Run it with `
 missing crates without uploading. The workspace version on the default branch must equal the `version` input, since the
 recovery uploads the crate contents on that ref (workflow-only commits since the tag do not change crate contents).
 
-Only when a crate's *contents* must change (e.g. a genuine build break, not a propagation race) is the version immutable
-in the sense that matters: bump the patch version, repeat steps 1–3, and re-tag at the new merge commit. The tag-vs-
-version assertion prevents re-tagging against the wrong workspace version.
+Only when a crate's *contents* must change (a genuine build break, not a propagation race) do you bump the patch
+version: repeat steps 1–3 and re-tag at the new merge commit. The tag-vs-version assertion prevents re-tagging against
+the wrong workspace version.
 
 ## Step 7—Post-publish
 
