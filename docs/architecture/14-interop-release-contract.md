@@ -88,8 +88,8 @@ cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 1
 ```
 
 The sanitizer workflow must continue to run the callback trampoline, callback registry, panic containment, host
-progress, and worker fatal-exit fixtures on Linux ASan, plus the `miri` job that validates the pure-Rust FFI boundary
-in `lean-rs-sys` under `-Zmiri-tree-borrows`. The pinned `compile-fail` workflow
+progress, and worker fatal-exit fixtures on Linux ASan, plus the `miri` job that validates the pure-Rust FFI boundary in
+`lean-rs-sys` under `-Zmiri-tree-borrows`. The pinned `compile-fail` workflow
 ([`.github/workflows/compile-fail.yml`](../../.github/workflows/compile-fail.yml)) must continue to run the trybuild
 `.stderr` snapshot suites (`RUN_TRYBUILD=1`) that pin the opacity, unsafe-boundary, lifetime, and `!Send`/`!Sync`
 invariants of the public surface. Public API baselines under [`../api-review/`](../api-review/) are regenerated in the

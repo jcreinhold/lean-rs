@@ -10,16 +10,19 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table
 is the single source of truth; this document mirrors it for narrative context. As of 2026-05-30:
 
-| Lean versions (header-identical) | `lean.h` SHA-256 |
+| Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
-| 4.26.0 | `e0ea3efaccceb5b75c7e9e1ab92952c8aa85c3faee28ee949dfeb8ab428ad218` |
-| 4.27.0 | `42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13` |
-| 4.28.0 | `624726e5f1f10fd77cd95b8fe8f30389312e57c8fc98e6c2f1989289bdb5fb0e` |
-| 4.28.1 | `648ecfb615ef0222cd63b5f1bbbc379a06749bc0f5f4c2eb16ffca26fd18fe81` |
-| 4.29.0 | `671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c` |
-| 4.29.1 | `2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc` |
-| 4.30.0 | `5a25125970f4f1dcf85a4c403463b387a8ff93535cd4a3054cafdee1759017d7` |
-| 4.31.0-rc1 | `99ef35d69709e38caf836cf9ebbdf94d4474801e04157b8a72622dbdc653ec87` |
+| 4.26.0 | `e0ea3efaccce…` |
+| 4.27.0 | `42255d180910…` |
+| 4.28.0 | `624726e5f1f1…` |
+| 4.28.1 | `648ecfb615ef…` |
+| 4.29.0 | `671683950ef4…` |
+| 4.29.1 | `2e481a0dac72…` |
+| 4.30.0 | `5a25125970f4…` |
+| 4.31.0-rc1 | `99ef35d69709…` |
+
+Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs), which the build script hash-checks against.
 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).

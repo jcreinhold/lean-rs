@@ -1,8 +1,9 @@
 # Downstream Worker Replacement Fixture
 
 A boundary check showing that the generic worker foundation can replace the subprocess worker used by a `lean-dup`-class
-tool. The worker crates pool hosts the operational responsibilities; downstream crates keep their schemas and semantic
-policy. This is not a `lean-dup` implementation and not a migration guide.
+tool (a downstream tool that drives Lean through its own child process). The worker crates pool hosts the operational
+responsibilities; downstream crates keep their schemas and semantic policy. This is not a `lean-dup` implementation and
+not a migration guide.
 
 ## What The Fixture Covers
 
