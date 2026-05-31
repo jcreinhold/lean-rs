@@ -9,6 +9,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-05-31
+
 ### Bounded module-query cost on an incomplete import closure
 
 A module query (`verify_declaration`, `proof_state`, `find_references`, batched selectors) against a file whose import
