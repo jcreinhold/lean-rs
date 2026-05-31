@@ -7,7 +7,7 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.1.17] - 2026-05-30
 
 ### Version-range `cfg` flags for per-toolchain gating
 
@@ -25,8 +25,6 @@ every version token and minor boundary the window spans, so gating on a non-acti
 from `lean-rs-sys`, alongside the existing `LEAN_VERSION` / `LEAN_HEADER_DIGEST` / `required_symbols()` surface. This
 lets a consumer answer "is this pin inside the supported window?" and "does this `lean.h` digest match a known
 toolchain?" through the non-FFI facade, without a direct `lean-rs-sys` dependency (which carries link directives).
-
-## [0.1.17] - 2026-05-30
 
 ### Guarded the bundled interop shim copy against drift
 
