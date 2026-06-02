@@ -1363,6 +1363,158 @@ fn attempt_proof_single_line_by_tactic_aligns_and_closes() {
     );
 }
 
+/// Regression for the pristine-entry proof position (`le_saturatedClosure`
+/// repro). A from-scratch tactic block that re-introduces the declaration's
+/// binders must elaborate against the pristine entry goal, not the goal *after*
+/// the first tactic has already run. The `Default` selector splices after the
+/// first tactic, so `intro p hp` fails ("no binders to introduce" once `intro p
+/// hp` already ran) — the trap. The `Entry` selector splices *before* the first
+/// tactic, so the same block closes the goal.
+#[test]
+fn attempt_proof_entry_selector_accepts_from_scratch_block_where_default_traps() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/entry.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "theorem t : ∀ (p : Prop), p → p := by\n  intro p hp\n  exact hp\n";
+    let from_scratch = || {
+        vec![LeanWorkerProofCandidate {
+            id: "from-scratch".to_owned(),
+            text: "intro p hp; exact hp".to_owned(),
+        }]
+    };
+
+    // Entry: the candidate runs against the pristine `⊢ ∀ (p : Prop), p → p` and
+    // closes it.
+    let entry = session
+        .attempt_proof(
+            &LeanWorkerProofAttemptRequest {
+                source: source.to_owned(),
+                edit: LeanWorkerProofEditTarget::Declaration {
+                    name: "t".to_owned(),
+                    position: LeanWorkerProofPositionSelector::Entry,
+                },
+                candidates: from_scratch(),
+                budgets: LeanWorkerOutputBudgets::default(),
+            },
+            &opts,
+            None,
+            None,
+        )
+        .expect("entry-selector attempt dispatch succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = entry else {
+        panic!("expected Ok proof attempt, got {entry:?}");
+    };
+    let row = &result.candidates[0];
+    for diagnostic in row
+        .diagnostics
+        .diagnostics
+        .iter()
+        .chain(row.downstream_diagnostics.diagnostics.iter())
+    {
+        assert!(
+            !diagnostic.message.contains("unexpected identifier; expected command"),
+            "entry candidate must not be spliced as a dedented top-level command: {diagnostic:?}",
+        );
+    }
+    assert_eq!(
+        row.status,
+        LeanWorkerProofAttemptStatus::Closed,
+        "from-scratch block must close the goal against the pristine entry state: {row:?}",
+    );
+    assert!(row.goals.is_empty(), "closed entry proof should have no goals: {row:?}");
+
+    // Default: the same block is spliced after `intro p hp`, so re-introducing
+    // the binders fails — the trap the Entry variant closes.
+    let default = session
+        .attempt_proof(
+            &LeanWorkerProofAttemptRequest {
+                source: source.to_owned(),
+                edit: LeanWorkerProofEditTarget::Declaration {
+                    name: "t".to_owned(),
+                    position: LeanWorkerProofPositionSelector::Default,
+                },
+                candidates: from_scratch(),
+                budgets: LeanWorkerOutputBudgets::default(),
+            },
+            &opts,
+            None,
+            None,
+        )
+        .expect("default-selector attempt dispatch succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = default else {
+        panic!("expected Ok proof attempt, got {default:?}");
+    };
+    let row = &result.candidates[0];
+    assert_ne!(
+        row.status,
+        LeanWorkerProofAttemptStatus::Closed,
+        "default selector splices after the first tactic, so the from-scratch block must not close: {row:?}",
+    );
+    assert!(
+        row.diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "error"),
+        "default-position failure should carry a candidate-local error: {:?}",
+        row.diagnostics,
+    );
+}
+
+/// The `Entry` selector exposes the pristine entry goal as a `proof_state`:
+/// `goals_before` and `goals_after` are both the untouched entry goal, since no
+/// tactic has run at the entry point.
+#[test]
+fn proof_state_entry_selector_renders_pristine_entry_goal() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let source = "theorem t : ∀ (p : Prop), p → p := by\n  intro p hp\n  exact hp\n";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[LeanWorkerModuleQuerySelector::ProofStateInDeclaration {
+                id: "entry".to_owned(),
+                declaration: "t".to_owned(),
+                position: LeanWorkerProofPositionSelector::Entry,
+                locals_raw: false,
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &LeanWorkerElabOptions::new(),
+            None,
+            None,
+        )
+        .expect("entry proof-state batch dispatch succeeds");
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    let item = result
+        .items
+        .into_iter()
+        .find(|item| matches!(item, LeanWorkerModuleQueryBatchItem::Ok { id, .. } if id == "entry"))
+        .expect("entry proof-state item present");
+    let LeanWorkerModuleQueryBatchItem::Ok { result, .. } = item else {
+        panic!("expected Ok proof-state item");
+    };
+    let LeanWorkerModuleQueryBatchResult::ProofState(LeanWorkerProofStateResult::State { info }) = *result else {
+        panic!("expected proof-state result, got {result:?}");
+    };
+    assert_eq!(
+        info.goals_before, info.goals_after,
+        "at the entry, no tactic has run, so before and after goals match: {info:?}",
+    );
+    assert!(
+        info.goals_before
+            .iter()
+            .any(|goal| goal.contains("∀ (p : Prop), p → p")),
+        "entry goal should be the pristine declaration goal: {info:?}",
+    );
+}
+
 #[test]
 fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
     ensure_fixture_built();

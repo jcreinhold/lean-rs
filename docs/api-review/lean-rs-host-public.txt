@@ -1228,6 +1228,7 @@ pub lean_rs_host::host::process::ProofPositionSelector::AfterText
 pub lean_rs_host::host::process::ProofPositionSelector::AfterText::occurrence: core::option::Option<u32>
 pub lean_rs_host::host::process::ProofPositionSelector::AfterText::text: alloc::string::String
 pub lean_rs_host::host::process::ProofPositionSelector::Default
+pub lean_rs_host::host::process::ProofPositionSelector::Entry
 pub lean_rs_host::host::process::ProofPositionSelector::Index
 pub lean_rs_host::host::process::ProofPositionSelector::Index::index: u32
 impl core::clone::Clone for lean_rs_host::ProofPositionSelector
@@ -2010,6 +2011,7 @@ pub lean_rs_host::host::ProofPositionSelector::AfterText
 pub lean_rs_host::host::ProofPositionSelector::AfterText::occurrence: core::option::Option<u32>
 pub lean_rs_host::host::ProofPositionSelector::AfterText::text: alloc::string::String
 pub lean_rs_host::host::ProofPositionSelector::Default
+pub lean_rs_host::host::ProofPositionSelector::Entry
 pub lean_rs_host::host::ProofPositionSelector::Index
 pub lean_rs_host::host::ProofPositionSelector::Index::index: u32
 impl core::clone::Clone for lean_rs_host::ProofPositionSelector
@@ -3177,6 +3179,7 @@ pub lean_rs_host::ProofPositionSelector::AfterText
 pub lean_rs_host::ProofPositionSelector::AfterText::occurrence: core::option::Option<u32>
 pub lean_rs_host::ProofPositionSelector::AfterText::text: alloc::string::String
 pub lean_rs_host::ProofPositionSelector::Default
+pub lean_rs_host::ProofPositionSelector::Entry
 pub lean_rs_host::ProofPositionSelector::Index
 pub lean_rs_host::ProofPositionSelector::Index::index: u32
 impl core::clone::Clone for lean_rs_host::ProofPositionSelector

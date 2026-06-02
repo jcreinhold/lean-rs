@@ -1082,6 +1082,7 @@ pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText
 pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText::occurrence: core::option::Option<u32>
 pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::AfterText::text: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Default
+pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Entry
 pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Index
 pub lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector::Index::index: u32
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofPositionSelector

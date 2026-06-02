@@ -28,6 +28,10 @@ inductive ProofPositionSelector where
   | default
   | index (index : Nat)
   | afterText (text : String) (occurrence : Option Nat)
+  -- `entry` is appended last so the constructor tags of the prior variants stay
+  -- fixed (`default` = 0, `index` = 1, `afterText` = 2, `entry` = 3); the Rust
+  -- `IntoLean` marshaller hands a nullary `entry` across as the scalar `3u8`.
+  | entry
   deriving Inhabited
 
 /-- One selector in a batched module-processing request. Each selector carries
@@ -993,6 +997,20 @@ private def collectTacticsInDeclaration (doc : SourceDocument) (decl : Declarati
   pure <| minimal.mapIdx fun idx tactic =>
     { index := idx, tactic, summary := tacticSummary doc idx tactic.span }
 
+/-- Where a `try_proof_step` candidate is spliced relative to the resolved
+    tactic. Every selector except `entry` resolves to a tactic state and splices
+    `after` it; `entry` anchors on the first tactic's pre-state and splices
+    `before` it, so a from-scratch tactic block elaborates against the pristine
+    entry goal. Kept orthogonal to *which* position is selected. -/
+private inductive TacticPlacement where
+  | before
+  | after
+  deriving Inhabited
+
+private def selectorPlacement : ProofPositionSelector → TacticPlacement
+  | .entry => .before
+  | _ => .after
+
 private def selectProofPosition (_doc : SourceDocument) (positions : Array ProofPosition)
     (selector : ProofPositionSelector) : Option ProofPosition :=
   match selector with
@@ -1003,6 +1021,10 @@ private def selectProofPosition (_doc : SourceDocument) (positions : Array Proof
     let occurrence := occurrence?.getD 0
     let hits := positions.filter fun pos => pos.summary.tactic.value.trimAscii == wanted
     hits[occurrence]?
+  -- The pristine entry goal is the first tactic's pre-state, so `entry` anchors
+  -- on `positions[0]`; `selectorPlacement` makes the splice land *before* it.
+  -- Requires at least one elaborated tactic to anchor that pre-state.
+  | .entry => positions[0]?
 
 private def prefixBeforeOccurrence? (haystack needle : String) (occurrence : Nat) : Option String :=
   let parts := haystack.splitOn needle
@@ -1153,15 +1175,21 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
       }
 
 private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCandidate)
-    (pos : ProofPosition) (budgets : ModuleQueryOutputBudgets) (localsMode : LocalsRendering) :
-    IO ProofStateResult := do
+    (pos : ProofPosition) (placement : TacticPlacement) (budgets : ModuleQueryOutputBudgets)
+    (localsMode : LocalsRendering) : IO ProofStateResult := do
   let candidate := pos.tactic
   if tacticCandidateDegraded candidate then
     return .unavailable "proof state unavailable: elaboration degraded under resource pressure"
   let (before, bytesAfterBefore, truncBefore) ←
     renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
-  let (after, _, truncAfter) ←
-    renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
+  -- At the pristine entry (`before`) no tactic has run, so the "after" state is
+  -- still the entry goal: render `goalsBefore` for both, mirroring how the
+  -- candidate would elaborate against an untouched goal.
+  let (after, _, truncAfter) ← match placement with
+    | .before =>
+      renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize bytesAfterBefore
+    | .after =>
+      renderGoals candidate.ctx candidate.mctxAfter candidate.goalsAfter budgets.perFieldBytes.toUSize bytesAfterBefore
   let locals ← collectGoalLocals localsMode budgets.perFieldBytes candidate.ctx candidate.mctxBefore candidate.goalsBefore
   pure <| .state {
     declarationName := some decl.info.declarationName
@@ -1185,7 +1213,7 @@ private def runProofStateInDeclaration (doc : SourceDocument) (trees : Persisten
       | pure <| .unavailable "resolved declaration is not available in the module snapshot"
     let positions ← collectTacticsInDeclaration doc decl trees
     match selectProofPosition doc positions selector with
-    | some pos => proofStateFromPosition doc decl pos budgets localsMode
+    | some pos => proofStateFromPosition doc decl pos (selectorPlacement selector) budgets localsMode
     | none => pure <| .unavailable "declaration has no proof position matching the selector"
   -- The name did not resolve against this overlay. Distinguish a genuine
   -- not-found (the open environment is complete) from an incomplete
@@ -1716,21 +1744,24 @@ private def SourceDocument.splitFailureAtBodySpan
   let downstream := failure.diagnostics.filter (fun diagnostic => !doc.diagnosticStartsInBodySpan span diagnostic)
   ({ failure with diagnostics := localDiags }, { failure with diagnostics := downstream })
 
-/-- A resolved proof position: a source span at a positive (1-based) column.
-    `tacticInsertion?` accepts only this and derives the candidate's indentation
-    from `span.startColumn`, so a candidate can never be spliced at column 0 — a
+/-- A resolved proof position: a source span at a positive (1-based) column,
+    plus where the candidate is spliced relative to it. `tacticInsertion?`
+    accepts only this and derives the candidate's indentation from
+    `span.startColumn`, so a candidate can never be spliced at column 0 — a
     top-level/command position that Lean ≥ 4.31 rejects. The bare `by` atom is
     excluded earlier, in `collectTacticsInDeclaration`. -/
 private structure SelectedTactic where
   span : ModuleSourceSpan
+  placement : TacticPlacement
   colPos : 0 < span.startColumn
 
 /-- Build a `SelectedTactic`, witnessing a positive column. Every span fed here
     comes from `rangeOfStx`/`lineColumnAfterText`, whose columns are `_ + 1`, so
     `none` is unreachable in practice; it keeps the invariant total without
     leaking those internals into callers. -/
-private def SelectedTactic.ofSpan? (span : ModuleSourceSpan) : Option SelectedTactic :=
-  if h : 0 < span.startColumn then some { span, colPos := h } else none
+private def SelectedTactic.ofSpan? (placement : TacticPlacement) (span : ModuleSourceSpan) :
+    Option SelectedTactic :=
+  if h : 0 < span.startColumn then some { span, placement, colPos := h } else none
 
 private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarget) :
     IO (Except String (SelectedTactic × Option DeclarationTargetInfo × Option ProofPositionSummary)) := do
@@ -1743,7 +1774,7 @@ private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarge
       let positions ← collectTacticsInDeclaration snapshot.document decl snapshot.trees
       match selectProofPosition snapshot.document positions selector with
       | some pos =>
-        match SelectedTactic.ofSpan? pos.tactic.span with
+        match SelectedTactic.ofSpan? (selectorPlacement selector) pos.tactic.span with
         | some sel => pure <| .ok (sel, some decl.info, some pos.summary)
         | none => pure <| .error "selected proof position is at an invalid column"
       | none =>
@@ -1751,7 +1782,8 @@ private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarge
         | .afterText text occurrence? =>
           match sourceTextProofPosition? snapshot.document decl text occurrence? with
           | some (span, summary) =>
-            match SelectedTactic.ofSpan? span with
+            -- The source-text fallback always splices after the matched text.
+            match SelectedTactic.ofSpan? .after span with
             | some sel => pure <| .ok (sel, some decl.info, some summary)
             | none => pure <| .error "selected proof position is at an invalid column"
           | none => pure <| .error "declaration has no proof position matching the selector"
@@ -1770,27 +1802,64 @@ private def SourceDocument.tacticInsertion? (doc : SourceDocument) (selected : S
   -- (`tacticSeq1Indented`/`colGe`) and never lands at column 0. This placement is
   -- robust on both lenient (≤ 4.30) and strict (≥ 4.31) tactic-block parsers.
   let indent := "".pushn ' ' (span.startColumn - 1)
-  let fragment := "\n" ++ indentFragment indent text
-  let pos ← doc.rawOffset? fileSpan.endLine fileSpan.endColumn
-  let overlay := doc.replaceRawSpan fragment pos pos
-  let (fileEndLine, fileEndColumn) := lineColumnAfterText fileSpan.endLine fileSpan.endColumn fragment
-  let (bodyEndLine, bodyEndColumn) := lineColumnAfterText span.endLine span.endColumn fragment
-  let insertedFileSpan := {
-    startLine := fileSpan.endLine, startColumn := fileSpan.endColumn,
-    endLine := fileEndLine, endColumn := fileEndColumn
-  }
-  let insertedBodySpan := {
-    startLine := span.endLine, startColumn := span.endColumn,
-    endLine := bodyEndLine, endColumn := bodyEndColumn
-  }
-  some (overlay, {
-    tacticBodySpan := span,
-    tacticFileSpan := fileSpan,
-    insertedBodySpan,
-    insertedFileSpan,
-    declaration,
-    proofPosition
-  })
+  match selected.placement with
+  | .after =>
+    -- Splice on a fresh line after the selected tactic; the candidate runs
+    -- against that tactic's `goalsAfter`.
+    let fragment := "\n" ++ indentFragment indent text
+    let pos ← doc.rawOffset? fileSpan.endLine fileSpan.endColumn
+    let overlay := doc.replaceRawSpan fragment pos pos
+    let (fileEndLine, fileEndColumn) := lineColumnAfterText fileSpan.endLine fileSpan.endColumn fragment
+    let (bodyEndLine, bodyEndColumn) := lineColumnAfterText span.endLine span.endColumn fragment
+    let insertedFileSpan := {
+      startLine := fileSpan.endLine, startColumn := fileSpan.endColumn,
+      endLine := fileEndLine, endColumn := fileEndColumn
+    }
+    let insertedBodySpan := {
+      startLine := span.endLine, startColumn := span.endColumn,
+      endLine := bodyEndLine, endColumn := bodyEndColumn
+    }
+    some (overlay, {
+      tacticBodySpan := span,
+      tacticFileSpan := fileSpan,
+      insertedBodySpan,
+      insertedFileSpan,
+      declaration,
+      proofPosition
+    })
+  | .before =>
+    -- Splice before the first tactic, on its own line(s) aligned to the tactic's
+    -- column, so a from-scratch tactic block runs against the pristine entry
+    -- goal. Insert at the start of the tactic's line (column 1 — a valid raw
+    -- offset; only column 0 is rejected): `body` carries its own `indent`, then a
+    -- newline leaves the original tactic line below it untouched, never dedented.
+    let body := indentFragment indent text
+    let fragment := body ++ "\n"
+    let pos ← doc.rawOffset? fileSpan.startLine 1
+    let overlay := doc.replaceRawSpan fragment pos pos
+    -- The inserted span covers just the candidate `body` (not the trailing
+    -- newline), so the post-splice cursor lands at the end of the candidate's
+    -- last tactic and `splitFailureAtBodySpan` attributes the original tactics'
+    -- downstream errors (e.g. "no goals" once the candidate closes them) as
+    -- downstream rather than candidate-local.
+    let (fileEndLine, fileEndColumn) := lineColumnAfterText fileSpan.startLine 1 body
+    let (bodyEndLine, bodyEndColumn) := lineColumnAfterText span.startLine 1 body
+    let insertedFileSpan := {
+      startLine := fileSpan.startLine, startColumn := 1,
+      endLine := fileEndLine, endColumn := fileEndColumn
+    }
+    let insertedBodySpan := {
+      startLine := span.startLine, startColumn := 1,
+      endLine := bodyEndLine, endColumn := bodyEndColumn
+    }
+    some (overlay, {
+      tacticBodySpan := span,
+      tacticFileSpan := fileSpan,
+      insertedBodySpan,
+      insertedFileSpan,
+      declaration,
+      proofPosition
+    })
 
 private def diagnosticHasError (failure : LeanRsFixture.Elaboration.ElabFailure) : Bool :=
   failure.diagnostics.any fun diagnostic =>

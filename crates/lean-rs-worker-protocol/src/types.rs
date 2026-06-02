@@ -633,10 +633,14 @@ pub struct LeanWorkerRenderedInfo {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum LeanWorkerProofPositionSelector {
-    /// Select the first tactic state in declaration order.
+    /// Select the first tactic state in declaration order — the point *after*
+    /// the first tactic has run. A `try_proof_step` candidate is spliced after
+    /// that tactic, so a from-scratch tactic block does not elaborate against
+    /// the pristine entry goal; use [`Entry`](Self::Entry) for that.
     #[default]
     Default,
-    /// Select the `index`-th tactic state in declaration order.
+    /// Select the `index`-th tactic state in declaration order — the point
+    /// after the index-th tactic has run.
     Index { index: u32 },
     /// Select the tactic whose source text exactly matches `text`.
     AfterText {
@@ -644,6 +648,13 @@ pub enum LeanWorkerProofPositionSelector {
         #[serde(default)]
         occurrence: Option<u32>,
     },
+    /// Select the goal state *before any tactic runs* — the pristine entry goal
+    /// of the declaration's proof. A `try_proof_step` candidate is spliced
+    /// *before* the first tactic, so a from-scratch tactic block elaborates
+    /// against this goal (the one `proof_state` reports as `goals_before` of the
+    /// first position). Anchors on the first enumerated tactic's pre-state, so
+    /// the declaration must have at least one elaborated tactic.
+    Entry,
 }
 
 /// Target for a non-mutating proof attempt over an in-memory source overlay.

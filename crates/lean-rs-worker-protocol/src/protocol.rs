@@ -1230,6 +1230,38 @@ mod tests {
     }
 
     #[test]
+    fn proof_position_selector_tags_are_stable_and_round_trip() {
+        let cases = [
+            (
+                LeanWorkerProofPositionSelector::Default,
+                serde_json::json!({"kind": "default"}),
+            ),
+            (
+                LeanWorkerProofPositionSelector::Index { index: 3 },
+                serde_json::json!({"kind": "index", "index": 3}),
+            ),
+            (
+                LeanWorkerProofPositionSelector::AfterText {
+                    text: "intro x".to_owned(),
+                    occurrence: Some(1),
+                },
+                serde_json::json!({"kind": "after_text", "text": "intro x", "occurrence": 1}),
+            ),
+            (
+                LeanWorkerProofPositionSelector::Entry,
+                serde_json::json!({"kind": "entry"}),
+            ),
+        ];
+        for (selector, expected) in cases {
+            let value = serde_json::to_value(&selector).expect("selector serializes");
+            assert_eq!(value, expected, "selector tag must be stable: {selector:?}");
+            let parsed: LeanWorkerProofPositionSelector =
+                serde_json::from_value(expected).expect("selector deserializes");
+            assert_eq!(parsed, selector, "selector must round-trip through JSON");
+        }
+    }
+
+    #[test]
     fn declaration_verification_request_and_response_round_trip() {
         let request = Message::Request(Request::VerifyDeclaration {
             request: LeanWorkerDeclarationVerificationRequest {

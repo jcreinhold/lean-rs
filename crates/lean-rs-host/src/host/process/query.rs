@@ -57,15 +57,17 @@ impl Default for ModuleQueryOutputBudgets {
 /// Intent selector for one proof position inside a declaration.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ProofPositionSelector {
+    /// The first tactic state — the point after the first tactic has run.
     #[default]
     Default,
-    Index {
-        index: u32,
-    },
-    AfterText {
-        text: String,
-        occurrence: Option<u32>,
-    },
+    /// The `index`-th tactic state — after the index-th tactic has run.
+    Index { index: u32 },
+    /// The tactic whose source text exactly matches `text`.
+    AfterText { text: String, occurrence: Option<u32> },
+    /// The goal state before any tactic runs — the pristine entry goal. A proof
+    /// attempt splices its candidate before the first tactic, so a from-scratch
+    /// tactic block elaborates against this goal.
+    Entry,
 }
 
 /// Target for a non-mutating proof attempt.
@@ -508,6 +510,7 @@ impl<'lean> IntoLean<'lean> for ProofPositionSelector {
             Self::AfterText { text, occurrence } => {
                 alloc_ctor_with_objects(runtime, 2, [text.into_lean(runtime), occurrence.into_lean(runtime)])
             }
+            Self::Entry => 3u8.into_lean(runtime),
         }
     }
 }

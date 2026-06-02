@@ -84,6 +84,31 @@ locals collector so the concern lives in one place:
 `false` → `pretty`, `true` → `raw`. The general `proofState` selector is always `pretty` (no flag — the surface stays
 tight). The field is backward compatible: an older client that omits it deserializes to `false`, i.e. pretty locals.
 
+## Proof-position selectors and splice placement
+
+A proof position is selected by `ProofPositionSelector`, which resolves to one enumerated tactic state and a *splice
+placement* — where a `try_proof_step` candidate is inserted relative to that tactic. The two concerns are kept
+orthogonal: the selector picks *which* goal; an internal `TacticPlacement` (`before` / `after`) picks *where* the
+candidate lands.
+
+- **`Default` / `Index { index }`**: the first / index-th tactic state — the point *after* that tactic has run.
+  `goals_before` is its pre-tactic state, `goals_after` its post-tactic state. A candidate is spliced on a fresh line
+  *after* the tactic (placement `after`), so it continues from `goals_after`.
+- **`AfterText { text, occurrence }`**: the tactic whose source matches `text`; placement `after`. Falls back to a
+  source-text search when no enumerated tactic matches.
+- **`Entry`**: the goal state *before any tactic runs* — the pristine entry goal of the proof. It anchors on the first
+  enumerated tactic's pre-state (so the declaration must have at least one elaborated tactic) and uses placement
+  `before`: the candidate is spliced *before* the first tactic, aligned to that tactic's column at the start of its line,
+  so a from-scratch tactic block elaborates against the untouched goal. The original tactics follow below the inserted
+  span; once the candidate closes the goal their "no goals" errors fall *outside* the candidate's body span and are
+  reported as downstream, not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after` (the
+  entry goal is unchanged, since nothing has run).
+
+This closes a trap at the `Default` position: `proof_state`'s `goals_before` shows the pristine entry goal, but a
+`Default` `try_proof_step` splices *after* the first tactic — so a from-scratch block (e.g. `intro …; exact …`) is run
+with the first binder already introduced and fails. `Entry` makes the pristine goal a reachable splice point, not just
+an observable one.
+
 ## Degraded verdicts under resource pressure
 
 A read-only `verify_declaration` / `proof_state` query elaborated under memory pressure can be *degraded*: the captured

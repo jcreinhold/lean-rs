@@ -2062,6 +2062,7 @@ fn proof_position_selector_host(selector: &LeanWorkerProofPositionSelector) -> l
                 occurrence: *occurrence,
             }
         }
+        LeanWorkerProofPositionSelector::Entry => lean_rs_host::ProofPositionSelector::Entry,
         _ => lean_rs_host::ProofPositionSelector::Default,
     }
 }

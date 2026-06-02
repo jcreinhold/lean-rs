@@ -9,6 +9,18 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Pristine-entry proof position (`ProofPositionSelector::Entry`)
+
+- **New `Entry` proof-position selector — the goal state before any tactic runs.** `proof_state` already exposed the
+  pristine entry goal as the `goals_before` of the first position, but `try_proof_step` could only splice a candidate
+  *after* the first tactic, so a from-scratch tactic block (e.g. `intro …; exact …`) read from `goals_before` ran with
+  the first binder already introduced and failed. `Entry` anchors on the first tactic's pre-state and splices the
+  candidate *before* the first tactic (aligned to its column, never dedented to a top-level command), so a from-scratch
+  block elaborates against the untouched goal and the original tactics' downstream errors are reported as downstream,
+  not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after`. The variant is additive on the
+  `#[non_exhaustive]` `LeanWorkerProofPositionSelector` (wire) and `ProofPositionSelector` (host); `Index { index }`
+  keeps its existing "index-th tactic state" meaning. See [`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md).
+
 ### Worker robustness: no verify crash, honest degraded verdict, pretty proof-state locals
 
 A heavy `verify_declaration` / `proof_state` workload run against a RED module while the worker thrashed against its RSS
