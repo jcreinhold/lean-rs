@@ -7,7 +7,7 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.1.20]
 
 ### Pristine-entry proof position (`ProofPositionSelector::Entry`)
 
