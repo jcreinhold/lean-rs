@@ -27,7 +27,8 @@ use lean_rs_host::{
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
     DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
     DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanElabFailure,
-    LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity, LeanSourceRange,
+    LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
+    LeanSourceRange,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -48,7 +49,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
     LeanWorkerDeclarationVerificationTarget, LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerImportStats, LeanWorkerKernelResult,
     LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
     LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
@@ -58,8 +59,8 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
     LeanWorkerProofAttemptStatus, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
     LeanWorkerProofPositionSummary, LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult,
-    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
-    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSessionImportProfile,
+    LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
@@ -111,6 +112,36 @@ fn write_response(writer: &ProtocolWriter, response: Response) -> Result<(), Pro
         })),
         Err(err) => Err(err),
     }
+}
+
+fn worker_import_stats(stats: &LeanImportStats) -> LeanWorkerImportStats {
+    LeanWorkerImportStats {
+        direct_import_names: stats.direct_import_names.clone(),
+        effective_module_count: stats.effective_module_count,
+        compacted_region_count: stats.compacted_region_count,
+        memory_mapped_region_count: stats.memory_mapped_region_count,
+        imported_bytes: stats.imported_bytes,
+        imported_constant_count: stats.imported_constant_count,
+        extension_count: stats.extension_count,
+        total_imported_extension_entries: stats.total_imported_extension_entries,
+        import_level: stats.import_level.clone(),
+        import_all: stats.import_all,
+        load_exts: stats.load_exts,
+    }
+}
+
+fn host_import_profile(profile: LeanWorkerSessionImportProfile) -> LeanResult<LeanSessionImportProfile> {
+    Ok(match profile {
+        LeanWorkerSessionImportProfile::ExportedPublic => LeanSessionImportProfile::ExportedPublic,
+        LeanWorkerSessionImportProfile::Server => LeanSessionImportProfile::Server,
+        LeanWorkerSessionImportProfile::Private => LeanSessionImportProfile::Private,
+        LeanWorkerSessionImportProfile::FullPrivateCompat => LeanSessionImportProfile::FullPrivateCompat,
+        _ => {
+            return Err(host_internal(
+                "worker child received an unsupported host session import profile".to_owned(),
+            ));
+        }
+    })
 }
 
 pub(crate) fn run_stdio() -> ExitCode {
@@ -293,12 +324,14 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 project_root,
                 mode,
                 imports,
+                import_profile,
             } => {
-                let response = match HostSessionState::open(runtime, &project_root, &mode, &imports) {
+                let response = match HostSessionState::open(runtime, &project_root, &mode, &imports, import_profile) {
                     Ok(mut state) => {
                         drop(state.clear_module_snapshot_cache());
+                        let import_stats = worker_import_stats(state.session.import_stats());
                         host_session = Some(state);
-                        Response::HostSessionOpened
+                        Response::HostSessionOpened { import_stats }
                     }
                     Err(err) => error_response(&err),
                 };
@@ -833,6 +866,7 @@ impl HostSessionState {
         project_root: &str,
         mode: &HostSessionMode,
         imports: &[String],
+        import_profile: LeanWorkerSessionImportProfile,
     ) -> LeanResult<Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
         let (capabilities, worker_bindings) = match mode {
@@ -866,7 +900,8 @@ impl HostSessionState {
             }
         };
         let import_refs: Vec<&str> = imports.iter().map(String::as_str).collect();
-        let session = capabilities.session(&import_refs, None, None)?;
+        let session =
+            capabilities.session_with_profile(&import_refs, host_import_profile(import_profile)?, None, None)?;
         Ok(Self {
             host,
             capabilities,

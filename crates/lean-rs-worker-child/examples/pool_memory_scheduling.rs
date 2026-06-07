@@ -47,7 +47,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     fixture_import_reuse(&worker_binary)?;
     mathlib_shaped_fallback(&worker_binary)?;
-    repeated_cycle_reuse(&worker_binary)?;
+    repeated_session_reuse(&worker_binary)?;
 
     println!(
         "parent_rss_end_kib={}",
@@ -98,7 +98,7 @@ fn mathlib_shaped_fallback(worker_binary: &Path) -> Result<(), LeanWorkerError> 
     Ok(())
 }
 
-fn repeated_cycle_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
+fn repeated_session_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
     let builder = builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::memory_bounded(
         1,
         env_u64("LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
@@ -109,17 +109,17 @@ fn repeated_cycle_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
         let response = lease.run_json_command(
             &json_command(),
             &FixtureRequest {
-                source: format!("max-import-cycle-{iteration}"),
+                source: format!("bounded-reuse-no-cycle-{iteration}"),
             },
             None,
             None,
         )?;
         println!(
-            "small_max_import_cycle iteration={iteration} accepted={} kind={}",
+            "bounded_reuse_no_cycle iteration={iteration} accepted={} kind={}",
             response.accepted, response.kind
         );
     }
-    print_snapshot("small_max_import_cycle", &pool);
+    print_snapshot("bounded_reuse_no_cycle", &pool);
     Ok(())
 }
 
@@ -164,6 +164,26 @@ fn print_snapshot(name: &str, pool: &LeanWorkerPool) {
         snapshot.memory_budget_rejections,
         snapshot.queue_timeouts,
         snapshot.last_restart_reason,
+    );
+    if let Some(import_stats) = snapshot.last_import_stats.as_ref() {
+        report_import_stats(name, import_stats);
+    }
+}
+
+fn report_import_stats(label: &str, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {
+    println!(
+        "import_stats={label} iteration=0 profile_mode=worker-pool direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
+        stats.direct_import_names.join(","),
+        stats.effective_module_count,
+        stats.compacted_region_count,
+        stats.memory_mapped_region_count,
+        stats.imported_bytes,
+        stats.imported_constant_count,
+        stats.extension_count,
+        stats.total_imported_extension_entries,
+        stats.import_level,
+        stats.import_all,
+        stats.load_exts,
     );
 }
 

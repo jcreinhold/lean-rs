@@ -16,6 +16,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationVerificationResult, LeanWorkerElabOptions, LeanWorkerModuleQuery,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
     LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
+    LeanWorkerSessionImportProfile,
 };
 use lean_rs_worker_protocol::worker_exports::{
     doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
@@ -62,6 +63,7 @@ pub struct LeanWorkerCapabilityBuilder {
     package: String,
     lib_name: String,
     imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
     built_dylib_path: Option<PathBuf>,
     built_manifest_path: Option<PathBuf>,
     built_capability: Option<LeanBuiltCapability>,
@@ -98,6 +100,7 @@ impl LeanWorkerCapabilityBuilder {
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
             built_dylib_path: None,
             built_manifest_path: None,
             built_capability: None,
@@ -141,6 +144,7 @@ impl LeanWorkerCapabilityBuilder {
             package: artifact.package,
             lib_name: artifact.module,
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
             built_dylib_path: Some(artifact.dylib_path),
             built_manifest_path: artifact.manifest_path,
             built_capability: Some(spec.clone()),
@@ -192,6 +196,13 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn import_workspace_root(mut self, path: impl Into<PathBuf>) -> Self {
         self.import_workspace_root = Some(normalize_import_workspace_root(path.into()));
+        self
+    }
+
+    /// Select the full-session import profile used for worker host sessions.
+    #[must_use]
+    pub fn import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
+        self.import_profile = profile;
         self
     }
 
@@ -350,6 +361,7 @@ impl LeanWorkerCapabilityBuilder {
             self.lib_name.clone(),
             self.imports.clone(),
         )
+        .with_import_profile(self.import_profile)
         .with_import_workspace_root(self.effective_import_workspace_root())
         .restart_policy_class(restart_policy_class);
         if let Some(check) = &self.metadata_check {
@@ -471,7 +483,8 @@ impl LeanWorkerCapabilityBuilder {
             self.lib_name.clone(),
             manifest_path,
             self.imports.clone(),
-        );
+        )
+        .with_import_profile(self.import_profile);
 
         let validated_metadata = {
             let mut session = worker.open_session(&session_config, None, None)?;
@@ -513,6 +526,7 @@ impl LeanWorkerCapabilityBuilder {
 pub struct LeanWorkerHostHandleBuilder {
     project_root: PathBuf,
     imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
@@ -590,6 +604,7 @@ impl LeanWorkerHostHandleBuilder {
         Self {
             project_root: project_root.into(),
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
@@ -604,6 +619,13 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn worker_executable(mut self, path: impl Into<PathBuf>) -> Self {
         self.worker_child = Some(LeanWorkerChild::path(path));
+        self
+    }
+
+    /// Select the full-session import profile used for opened host sessions.
+    #[must_use]
+    pub fn import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
+        self.import_profile = profile;
         self
     }
 
@@ -723,7 +745,8 @@ impl LeanWorkerHostHandleBuilder {
             self.module_cache_limits,
             self.max_frame_bytes,
         )?;
-        let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports);
+        let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports)
+            .with_import_profile(self.import_profile);
         {
             let _session = worker.open_session(&session_config, None, None)?;
         }
@@ -1827,6 +1850,7 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
 mod tests {
     use super::{LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
     use crate::supervisor::LeanWorkerConfig;
+    use lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile;
     use std::path::PathBuf;
 
     fn workspace_root() -> PathBuf {
@@ -1882,6 +1906,16 @@ mod tests {
             capability_builder().session_key(),
             capability_builder()
                 .import_workspace_root(workspace_root())
+                .session_key(),
+        );
+    }
+
+    #[test]
+    fn import_profile_participates_in_session_key() {
+        assert_ne!(
+            capability_builder().session_key(),
+            capability_builder()
+                .import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat)
                 .session_key(),
         );
     }

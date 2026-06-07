@@ -12,6 +12,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use lean_rs_worker_protocol::types::{LeanWorkerImportStats, LeanWorkerSessionImportProfile};
+
 use crate::capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressSink,
@@ -47,6 +49,7 @@ pub struct LeanWorkerSessionKey {
     package: String,
     lib_name: String,
     imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
     metadata_expectation: Option<LeanWorkerMetadataExpectationKey>,
     toolchain_fingerprint: lean_toolchain::ToolchainFingerprint,
     restart_policy_class: LeanWorkerRestartPolicyClass,
@@ -72,6 +75,7 @@ impl LeanWorkerSessionKey {
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
             metadata_expectation: None,
             toolchain_fingerprint: lean_toolchain::ToolchainFingerprint::current(),
             restart_policy_class: LeanWorkerRestartPolicyClass::Default,
@@ -80,6 +84,11 @@ impl LeanWorkerSessionKey {
 
     pub(crate) fn with_import_workspace_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.import_workspace_root = normalize_import_workspace_root(root.into());
+        self
+    }
+
+    pub(crate) fn with_import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
+        self.import_profile = profile;
         self
     }
 
@@ -138,6 +147,12 @@ impl LeanWorkerSessionKey {
     #[must_use]
     pub fn imports(&self) -> &[String] {
         &self.imports
+    }
+
+    /// Return the import profile required by this session key.
+    #[must_use]
+    pub fn import_profile(&self) -> LeanWorkerSessionImportProfile {
+        self.import_profile
     }
 
     /// Return the build-baked Lean toolchain fingerprint used by this key.
@@ -281,6 +296,7 @@ pub struct LeanWorkerPoolSnapshot {
     pub queue_timeouts: u64,
     pub memory_budget_rejections: u64,
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    pub last_import_stats: Option<LeanWorkerImportStats>,
     pub stream_requests: u64,
     pub stream_successes: u64,
     pub stream_failures: u64,
@@ -433,6 +449,10 @@ fn snapshot_from_entries(
         queue_timeouts,
         memory_budget_rejections,
         last_restart_reason: entries.iter().rev().find_map(|entry| entry.last_restart_reason.clone()),
+        last_import_stats: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_import_stats),
         stream_requests: entries
             .iter()
             .map(|entry| entry.capability.stats().stream_requests)

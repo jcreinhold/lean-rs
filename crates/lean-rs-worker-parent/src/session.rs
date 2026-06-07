@@ -27,7 +27,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
     LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
-    LeanWorkerProofAttemptResult, LeanWorkerRendered,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerSessionImportProfile,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -38,6 +38,7 @@ pub struct LeanWorkerSessionConfig {
     project_root: PathBuf,
     mode: LeanWorkerSessionMode,
     imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,6 +67,7 @@ impl LeanWorkerSessionConfig {
                 manifest_path: None,
             },
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
         }
     }
 
@@ -86,6 +88,7 @@ impl LeanWorkerSessionConfig {
                 manifest_path: Some(manifest_path.into()),
             },
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
         }
     }
 
@@ -96,7 +99,15 @@ impl LeanWorkerSessionConfig {
             project_root: project_root.into(),
             mode: LeanWorkerSessionMode::ShimsOnly,
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
         }
+    }
+
+    /// Select the full-session import profile for this worker session.
+    #[must_use]
+    pub fn with_import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
+        self.import_profile = profile;
+        self
     }
 
     pub(crate) fn project_root_string(&self) -> String {
@@ -111,11 +122,21 @@ impl LeanWorkerSessionConfig {
         &self.imports
     }
 
-    pub(crate) fn with_imports(&self, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    /// Return the full-session import profile used when opening this config.
+    #[must_use]
+    pub fn import_profile(&self) -> LeanWorkerSessionImportProfile {
+        self.import_profile
+    }
+
+    /// Return a copy of this config with a different import list, preserving
+    /// the loading mode and import profile.
+    #[must_use]
+    pub fn with_imports(&self, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             project_root: self.project_root.clone(),
             mode: self.mode.clone(),
             imports: imports.into_iter().map(Into::into).collect(),
+            import_profile: self.import_profile,
         }
     }
 }

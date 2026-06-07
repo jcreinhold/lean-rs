@@ -27,14 +27,15 @@ use crate::types::{
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
-    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
+    LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerSessionImportProfile,
 };
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 10;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -135,6 +136,7 @@ pub enum Request {
         project_root: String,
         mode: HostSessionMode,
         imports: Vec<String>,
+        import_profile: LeanWorkerSessionImportProfile,
     },
     Elaborate {
         source: String,
@@ -262,7 +264,9 @@ pub enum Response {
     U64 {
         value: u64,
     },
-    HostSessionOpened,
+    HostSessionOpened {
+        import_stats: LeanWorkerImportStats,
+    },
     Elaboration {
         outcome: LeanWorkerElabResult,
     },

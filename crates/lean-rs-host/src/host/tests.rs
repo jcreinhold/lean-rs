@@ -23,8 +23,9 @@ use crate::host::meta::{
     infer_type, is_def_eq, pp_expr, whnf,
 };
 use crate::{
-    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken,
-    LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSeverity,
+    DeclarationInspectionRequest, DeclarationInspectionResult, EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
+    LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost,
+    LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -386,6 +387,126 @@ fn session_declaration_type_round_trips_as_expr() {
     // that accepts LeanExpr would prove structural soundness. Here we
     // just confirm the handle exists and drops without panic.
     drop(type_handle);
+}
+
+#[test]
+fn session_import_profiles_pass_full_host_gates() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector, ProofStateResult,
+    };
+
+    const IMPORTS: &[&str] = &["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"];
+    const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+
+    for profile in [
+        LeanSessionImportProfile::ExportedPublic,
+        LeanSessionImportProfile::Server,
+    ] {
+        let err = match caps.session_with_profile(IMPORTS, profile, None, None) {
+            Ok(_) => panic!("{} should report the non-module fixture blocker", profile.label()),
+            Err(err) => err,
+        };
+        let message = format!("{err:?}");
+        assert!(
+            message.contains("cannot import non-`module`"),
+            "{} must report the Lean module-system blocker, got {message}",
+            profile.label(),
+        );
+    }
+
+    for profile in [
+        LeanSessionImportProfile::Private,
+        LeanSessionImportProfile::FullPrivateCompat,
+    ] {
+        let mut session = caps
+            .session_with_profile(IMPORTS, profile, None, None)
+            .unwrap_or_else(|err| panic!("{} session imports cleanly: {err:?}", profile.label()));
+        let stats = session.import_stats().clone();
+        assert_eq!(stats.import_all, profile.import_all(), "{} importAll", profile.label());
+        assert_eq!(
+            stats.import_level,
+            profile.import_level().as_str(),
+            "{} import level",
+            profile.label()
+        );
+        assert!(stats.load_exts, "{} loadExts", profile.label());
+
+        drop(
+            session
+                .query_declaration(DECL, None)
+                .unwrap_or_else(|err| panic!("{} declaration lookup succeeds: {err:?}", profile.label())),
+        );
+
+        let range = session
+            .declaration_source_range(DECL, None)
+            .unwrap_or_else(|err| panic!("{} source range query succeeds: {err:?}", profile.label()))
+            .unwrap_or_else(|| panic!("{} source range exists for {DECL}", profile.label()));
+        assert!(
+            range.end_line >= range.start_line,
+            "{} source range is ordered",
+            profile.label()
+        );
+
+        match session
+            .inspect_declaration(&DeclarationInspectionRequest::new(DECL), None)
+            .unwrap_or_else(|err| panic!("{} inspection succeeds: {err:?}", profile.label()))
+        {
+            DeclarationInspectionResult::Found { declaration } => {
+                let statement = declaration
+                    .statement
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{} inspection includes a statement", profile.label()));
+                assert!(
+                    !statement.value.is_empty(),
+                    "{} pretty statement is non-empty",
+                    profile.label()
+                );
+            }
+            other => panic!("{} expected found inspection, got {other:?}", profile.label()),
+        }
+
+        let elaborated = session
+            .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new(), None)
+            .unwrap_or_else(|err| panic!("{} elaboration dispatch succeeds: {err:?}", profile.label()));
+        assert!(
+            elaborated.is_ok(),
+            "{} elaboration succeeds: {elaborated:?}",
+            profile.label()
+        );
+
+        let outcome = session
+            .process_module_query_batch(
+                "theorem t (h : True) : True := by\n  exact h\n",
+                &[ModuleQuerySelector::ProofState {
+                    id: "state".to_owned(),
+                    line: 2,
+                    column: 4,
+                }],
+                &ModuleQueryOutputBudgets::default(),
+                &LeanElabOptions::new(),
+                None,
+            )
+            .unwrap_or_else(|err| panic!("{} proof-state dispatch succeeds: {err:?}", profile.label()));
+        let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+            panic!("{} expected proof-state Ok outcome, got {outcome:?}", profile.label());
+        };
+        let Some(ModuleQueryBatchItem::Ok { result, .. }) = result.items.first() else {
+            panic!("{} expected first proof-state item to be Ok", profile.label());
+        };
+        let ModuleQueryBatchResult::ProofState(ProofStateResult::State(info)) = result.as_ref() else {
+            panic!("{} expected proof-state result, got {result:?}", profile.label());
+        };
+        assert!(
+            info.locals.iter().any(|local| local.name == "h"),
+            "{} proof-state locals include h",
+            profile.label()
+        );
+    }
 }
 
 #[test]

@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolicy};
+use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig};
 
 const DEFAULT_IMPORTS: u64 = 8;
 const DEFAULT_MAX_IMPORTS: u64 = 2;
@@ -47,12 +47,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("max_imports_per_child={max_imports}");
     println!("max_rss_kib={max_rss_kib}");
 
+    let session_config =
+        LeanWorkerSessionConfig::new(&fixture, "lean_rs_fixture", "LeanRsFixture", ["LeanRsFixture.Handles"]);
     for iteration in 1..=imports {
-        let value = worker.call_fixture_mul(&fixture, iteration, 2)?;
+        let session = worker.open_session(&session_config, None, None)?;
+        drop(session);
         let rss = worker.rss_kib();
         let stats = worker.stats();
         println!(
-            "iteration={iteration} value={value} requests={} imports={} restarts={} exits={} rss_kib={} last_reason={:?}",
+            "iteration={iteration} requests={} imports={} restarts={} exits={} rss_kib={} last_reason={:?}",
             stats.requests,
             stats.imports,
             stats.restarts,
@@ -63,6 +66,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
             stats.last_restart_reason
         );
+        if let Some(import_stats) = stats.last_import_stats.as_ref() {
+            report_import_stats("worker_cycling_session_open", iteration, import_stats);
+        }
     }
 
     let stats = worker.stats();
@@ -106,4 +112,21 @@ fn fixture_root() -> PathBuf {
         || PathBuf::from("fixtures/lean"),
         |workspace| workspace.join("fixtures").join("lean"),
     )
+}
+
+fn report_import_stats(label: &str, iteration: u64, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {
+    println!(
+        "import_stats={label} iteration={iteration} profile_mode=worker-session direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
+        stats.direct_import_names.join(","),
+        stats.effective_module_count,
+        stats.compacted_region_count,
+        stats.memory_mapped_region_count,
+        stats.imported_bytes,
+        stats.imported_constant_count,
+        stats.extension_count,
+        stats.total_imported_extension_entries,
+        stats.import_level,
+        stats.import_all,
+        stats.load_exts,
+    );
 }

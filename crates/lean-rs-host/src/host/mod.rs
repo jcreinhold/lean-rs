@@ -85,7 +85,10 @@ pub use self::process::{
     ProofPositionSummary,
 };
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
-pub use self::session::{LeanDeclarationFilter, LeanSession, LeanSourceRange, SessionStats};
+pub use self::session::{
+    LeanDeclarationFilter, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
+    LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
+};
 
 #[cfg(test)]
 mod tests;

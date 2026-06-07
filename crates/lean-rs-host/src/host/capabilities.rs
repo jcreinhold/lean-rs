@@ -12,7 +12,7 @@
 //!   stays in the lower-level `lean-rs` crate.
 //! - The **shim dylib** is `liblean__rs__host__shims_LeanRsHostShims.dylib`,
 //!   built from the `lean-rs-host` crate's bundled shim sources. It contains
-//!   the 28 mandatory + 9 optional `lean_rs_host_*` `@[export]` symbols that
+//!   the manifest-declared mandatory and optional `lean_rs_host_*` `@[export]` symbols that
 //!   every typed `LeanSession` method dispatches through. Lake does *not*
 //!   transitively bundle the shim's `@[export]` symbols into the user's dylib
 //!   because `LeanLib.sharedFacet` emits a per-package shared library, not a
@@ -41,7 +41,7 @@ use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanLibrary};
 use crate::host::cancellation::LeanCancellationToken;
 use crate::host::host::LeanHost;
 use crate::host::progress::LeanProgressSink;
-use crate::host::session::LeanSession;
+use crate::host::session::{LeanImportProfileMode, LeanImportProfilerOptions, LeanSession, LeanSessionImportProfile};
 use crate::host::shim_bindings::host_shim_export_signatures;
 
 /// Loaded generic interop, host shim, and optional user dylibs with a checked
@@ -143,6 +143,35 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<LeanSession<'lean, 'c>> {
         LeanSession::import(self, imports, cancellation, progress)
+    }
+
+    /// Import using an explicit full-session import profile.
+    ///
+    /// Use this when a caller intentionally needs a broader import shape than
+    /// the default private profile. No profile falls back silently to
+    /// another one: import and service failures are reported for the requested
+    /// profile.
+    pub fn session_with_profile<'c>(
+        &'c self,
+        imports: &[&str],
+        profile: LeanSessionImportProfile,
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<LeanSession<'lean, 'c>> {
+        LeanSession::import_with_profile(self, imports, profile, cancellation, progress)
+    }
+
+    /// Import using one of the closed diagnostic import modes.
+    ///
+    /// This exists for profiling import breadth only. Normal host sessions use
+    /// [`Self::session`], whose default is [`LeanSessionImportProfile::Private`].
+    pub fn profiling_session<'c>(
+        &'c self,
+        imports: &[&str],
+        mode: LeanImportProfileMode,
+        profiler_options: &LeanImportProfilerOptions,
+    ) -> LeanResult<LeanSession<'lean, 'c>> {
+        LeanSession::import_profiled(self, imports, mode, profiler_options)
     }
 
     /// The capability's parent host (for runtime + project access by

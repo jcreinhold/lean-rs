@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports twenty-nine **mandatory** `@[export]` symbols and may export ten
+//! exports thirty-one **mandatory** `@[export]` symbols and may export ten
 //! **optional** symbols (checked when session bindings are constructed)—
 //! five bounded `MetaM` services plus declaration inspection, module-query
 //! entry points, and cache control:
@@ -20,6 +20,9 @@
 //! | ------------------------------------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 //! | `lean_rs_host_session_import`                          | yes        | `String -> Array String -> IO Environment`                                                                                                                           |
 //! | `lean_rs_host_session_import_progress`                 | yes        | `Array String -> Array String -> USize -> USize -> IO (Except UInt8 Environment)`                                                                                    |
+//! | `lean_rs_host_session_import_profile`                  | yes        | `Array String -> Array String -> Bool -> UInt8 -> Bool -> Bool -> Bool -> String -> IO Environment`                                                                 |
+//! | `lean_rs_host_session_import_profile_progress`         | yes        | `Array String -> Array String -> Bool -> UInt8 -> USize -> USize -> IO (Except UInt8 Environment)`                                                                  |
+//! | `lean_rs_host_env_import_stats`                        | yes        | `Environment -> String -> Bool -> IO ImportStats`                                                                                                                   |
 //! | `lean_rs_host_name_from_string`                        | yes        | `String -> Name`                                                                                                                                                     |
 //! | `lean_rs_host_name_to_string`                          | yes        | `Name -> String`                                                                                                                                                     |
 //! | `lean_rs_host_env_query_declaration`                   | yes        | `Environment -> Name -> IO (Option Declaration)`                                                                                                                     |
@@ -107,8 +110,8 @@
 //! the same session.
 //!
 //! The Rust side passes the `.olean` search path (resolved by
-//! [`crate::host::lake::LakeProject`]) as the first argument to
-//! `lean_rs_host_session_import`; the Lean shim only has to call
+//! [`crate::host::lake::LakeProject`]) as the first argument to the
+//! profile-aware import shim; the Lean shim only has to call
 //! `Lean.initSearchPath` and `Lean.importModules` on it. Path-layout
 //! knowledge stays in Rust.
 //!
@@ -149,7 +152,7 @@ use crate::host::process::{
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
 use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
 use lean_rs::Obj;
-use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
+use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 #[cfg(doc)]
 use lean_rs::error::HostStage;
@@ -185,6 +188,213 @@ pub struct SessionStats {
     /// Cumulative nanoseconds spent inside the dispatch `.call(...)`
     /// across every recorded FFI call.
     pub elapsed_ns: u64,
+}
+
+/// Lean-native attribution for the imported environment behind a session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanImportStats {
+    pub direct_import_names: Vec<String>,
+    pub effective_module_count: u64,
+    pub compacted_region_count: u64,
+    pub memory_mapped_region_count: u64,
+    pub imported_bytes: u64,
+    pub imported_constant_count: u64,
+    pub extension_count: u64,
+    pub total_imported_extension_entries: u64,
+    pub import_level: String,
+    pub import_all: bool,
+    pub load_exts: bool,
+}
+
+impl<'lean> TryFromLean<'lean> for LeanImportStats {
+    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+        let (
+            effective_module_count,
+            compacted_region_count,
+            memory_mapped_region_count,
+            imported_bytes,
+            imported_constant_count,
+            extension_count,
+            total_imported_extension_entries,
+            import_all,
+            load_exts,
+        ) = {
+            let ctor = view(&obj).ctor_shape(0, 2, "ImportStats")?;
+            (
+                ctor.uint64(0, "ImportStats.effectiveModuleCount")?,
+                ctor.uint64(8, "ImportStats.compactedRegionCount")?,
+                ctor.uint64(16, "ImportStats.memoryMappedRegionCount")?,
+                ctor.uint64(24, "ImportStats.importedBytes")?,
+                ctor.uint64(32, "ImportStats.importedConstantCount")?,
+                ctor.uint64(40, "ImportStats.extensionCount")?,
+                ctor.uint64(48, "ImportStats.totalImportedExtensionEntries")?,
+                ctor.bool(56, "ImportStats.importAll")?,
+                ctor.bool(57, "ImportStats.loadExts")?,
+            )
+        };
+        let [direct_import_names, import_level] = take_ctor_objects::<2>(obj, 0, "ImportStats")?;
+        Ok(Self {
+            direct_import_names: Vec::<String>::try_from_lean(direct_import_names)?,
+            effective_module_count,
+            compacted_region_count,
+            memory_mapped_region_count,
+            imported_bytes,
+            imported_constant_count,
+            extension_count,
+            total_imported_extension_entries,
+            import_level: String::try_from_lean(import_level)?,
+            import_all,
+            load_exts,
+        })
+    }
+}
+
+/// Closed import levels used by diagnostic profiling imports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LeanImportLevel {
+    Exported,
+    Server,
+    Private,
+}
+
+impl LeanImportLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exported => "exported",
+            Self::Server => "server",
+            Self::Private => "private",
+        }
+    }
+
+    const fn code(self) -> u8 {
+        match self {
+            Self::Exported => 0,
+            Self::Server => 1,
+            Self::Private => 2,
+        }
+    }
+}
+
+/// Closed import profiles for full host sessions.
+///
+/// Profiles intentionally expose names tied to host semantics rather than raw
+/// Lean import knobs. All full-session profiles keep `loadExts := true`; the
+/// no-extension variant remains a profiling-only diagnostic path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LeanSessionImportProfile {
+    /// Public exported declarations only. This is the default pre-1.0
+    /// operability profile.
+    ExportedPublic,
+    /// Server-level import data without `import all`.
+    Server,
+    /// Private-level import data without `import all`.
+    Private,
+    /// Legacy compatibility import shape: `import all`, private level,
+    /// extensions loaded.
+    FullPrivateCompat,
+}
+
+impl Default for LeanSessionImportProfile {
+    fn default() -> Self {
+        Self::Private
+    }
+}
+
+impl LeanSessionImportProfile {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExportedPublic => "exported-public",
+            Self::Server => "server",
+            Self::Private => "private",
+            Self::FullPrivateCompat => "full-private-compat",
+        }
+    }
+
+    pub const fn import_all(self) -> bool {
+        matches!(self, Self::FullPrivateCompat)
+    }
+
+    pub const fn import_level(self) -> LeanImportLevel {
+        match self {
+            Self::ExportedPublic => LeanImportLevel::Exported,
+            Self::Server => LeanImportLevel::Server,
+            Self::Private | Self::FullPrivateCompat => LeanImportLevel::Private,
+        }
+    }
+
+    pub const fn load_exts(self) -> bool {
+        true
+    }
+}
+
+/// Closed import-mode matrix for profiling diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LeanImportProfileMode {
+    FullSession(LeanSessionImportProfile),
+    ExportedNoExts,
+}
+
+impl LeanImportProfileMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FullSession(profile) => profile.label(),
+            Self::ExportedNoExts => "exported-no-exts",
+        }
+    }
+
+    pub const fn import_all(self) -> bool {
+        match self {
+            Self::FullSession(profile) => profile.import_all(),
+            Self::ExportedNoExts => false,
+        }
+    }
+
+    pub const fn import_level(self) -> LeanImportLevel {
+        match self {
+            Self::FullSession(profile) => profile.import_level(),
+            Self::ExportedNoExts => LeanImportLevel::Exported,
+        }
+    }
+
+    pub const fn load_exts(self) -> bool {
+        match self {
+            Self::FullSession(profile) => profile.load_exts(),
+            Self::ExportedNoExts => false,
+        }
+    }
+}
+
+/// Lean profiler toggles scoped to diagnostic profiling imports.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanImportProfilerOptions {
+    pub profiler: bool,
+    pub trace_profiler: bool,
+    pub trace_profiler_output: Option<String>,
+}
+
+impl LeanImportProfilerOptions {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn profiler(mut self, enabled: bool) -> Self {
+        self.profiler = enabled;
+        self
+    }
+
+    #[must_use]
+    pub fn trace_profiler(mut self, enabled: bool) -> Self {
+        self.trace_profiler = enabled;
+        self
+    }
+
+    #[must_use]
+    pub fn trace_profiler_output(mut self, path: impl Into<String>) -> Self {
+        self.trace_profiler_output = Some(path.into());
+        self
+    }
 }
 
 // -- Public source-range / filter types ---------------------------------
@@ -308,6 +518,7 @@ pub struct LeanSession<'lean, 'c> {
     /// the environment directly; every query routes through a Lean
     /// capability export.
     environment: Obj<'lean>,
+    import_stats: LeanImportStats,
     /// Per-session dispatch metrics. `Cell` because every query method
     /// takes `&mut self` but the bulk path can also be invoked through a
     /// shared reference (e.g. inside a fold helper)—keeping the
@@ -321,27 +532,7 @@ pub struct LeanSession<'lean, 'c> {
 static SESSION_IMPORT_LOCK: Mutex<()> = Mutex::new(());
 
 impl<'lean, 'c> LeanSession<'lean, 'c> {
-    /// Import the named modules into a fresh Lean environment and wrap
-    /// it as a session.
-    ///
-    /// The Lean-side `lean_rs_host_session_import` receives the Lake
-    /// project root (so it can `Lean.initSearchPath` the `.olean`
-    /// directory) and the module-name list, and returns the resulting
-    /// environment. Failures surface as
-    /// [`lean_rs::LeanError::LeanException`] with the message Lean produced.
-    pub(crate) fn import(
-        capabilities: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
-        cancellation: Option<&LeanCancellationToken>,
-        progress: Option<&dyn LeanProgressSink>,
-    ) -> LeanResult<Self> {
-        let _span = tracing::info_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.import",
-            imports_len = imports.len(),
-        )
-        .entered();
-        check_cancellation(cancellation)?;
+    fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> LeanResult<Vec<String>> {
         let project = capabilities.host().project();
         let mut search_paths: Vec<String> = project
             .olean_search_paths()
@@ -358,6 +549,48 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 .to_string_lossy()
                 .into_owned(),
         );
+        Ok(search_paths)
+    }
+
+    /// Import the named modules into a fresh Lean environment and wrap
+    /// it as a session.
+    ///
+    /// The Lean-side `lean_rs_host_session_import` receives the Lake
+    /// project root (so it can `Lean.initSearchPath` the `.olean`
+    /// directory) and the module-name list, and returns the resulting
+    /// environment. Failures surface as
+    /// [`lean_rs::LeanError::LeanException`] with the message Lean produced.
+    pub(crate) fn import(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        imports: &[&str],
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<Self> {
+        Self::import_with_profile(
+            capabilities,
+            imports,
+            LeanSessionImportProfile::default(),
+            cancellation,
+            progress,
+        )
+    }
+
+    pub(crate) fn import_with_profile(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        imports: &[&str],
+        profile: LeanSessionImportProfile,
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<Self> {
+        let _span = tracing::info_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.import",
+            profile = profile.label(),
+            imports_len = imports.len(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let search_paths = Self::import_search_paths(capabilities)?;
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
         // Lean 4.30 strictly enforces `enableInitializersExecution` before
         // `importModules (loadExts := true)`. The flag is process-global,
@@ -377,17 +610,89 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let environment = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
             let (handle, trampoline) = bridge.abi_parts();
-            let raw = shims
-                .session_import_progress
-                .call(search_paths, imports_owned, handle, trampoline)?;
+            let raw = if profile == LeanSessionImportProfile::default() {
+                shims
+                    .session_import_progress
+                    .call(search_paths, imports_owned, handle, trampoline)?
+            } else {
+                shims.session_import_profile_progress.call(
+                    search_paths,
+                    imports_owned,
+                    profile.import_all(),
+                    profile.import_level().code(),
+                    handle,
+                    trampoline,
+                )?
+            };
             bridge.decode(raw)?
-        } else {
+        } else if profile == LeanSessionImportProfile::default() {
             shims.session_import.call(search_paths, imports_owned)?
+        } else {
+            shims.session_import_profile.call(
+                search_paths,
+                imports_owned,
+                profile.import_all(),
+                profile.import_level().code(),
+                profile.load_exts(),
+                false,
+                false,
+                String::new(),
+            )?
         };
+        let import_stats = shims.env_import_stats.call(
+            environment.clone(),
+            profile.import_level().as_str().to_owned(),
+            profile.load_exts(),
+        )?;
         Ok(Self {
             capabilities,
             shims,
             environment,
+            import_stats,
+            stats: Cell::new(SessionStats::default()),
+        })
+    }
+
+    pub(crate) fn import_profiled(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        imports: &[&str],
+        mode: LeanImportProfileMode,
+        profiler_options: &LeanImportProfilerOptions,
+    ) -> LeanResult<Self> {
+        let _span = tracing::info_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.import_profiled",
+            mode = mode.label(),
+            imports_len = imports.len(),
+        )
+        .entered();
+        let search_paths = Self::import_search_paths(capabilities)?;
+        let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
+        let _import_guard = SESSION_IMPORT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let shims = HostShimBindings::resolve(capabilities.shim_capability())
+            .map_err(|err| binding_error_to_lean_error(&err))?;
+        let environment = shims.session_import_profile.call(
+            search_paths,
+            imports_owned,
+            mode.import_all(),
+            mode.import_level().code(),
+            mode.load_exts(),
+            profiler_options.profiler,
+            profiler_options.trace_profiler,
+            profiler_options.trace_profiler_output.clone().unwrap_or_default(),
+        )?;
+        let import_stats = shims.env_import_stats.call(
+            environment.clone(),
+            mode.import_level().as_str().to_owned(),
+            mode.load_exts(),
+        )?;
+        Ok(Self {
+            capabilities,
+            shims,
+            environment,
+            import_stats,
             stats: Cell::new(SessionStats::default()),
         })
     }
@@ -406,10 +711,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ) -> LeanResult<Self> {
         let shims = HostShimBindings::resolve(capabilities.shim_capability())
             .map_err(|err| binding_error_to_lean_error(&err))?;
+        let import_stats = shims.env_import_stats.call(
+            environment.clone(),
+            LeanSessionImportProfile::default().import_level().as_str().to_owned(),
+            LeanSessionImportProfile::default().load_exts(),
+        )?;
         Ok(Self {
             capabilities,
             shims,
             environment,
+            import_stats,
             stats: Cell::new(SessionStats::default()),
         })
     }
@@ -434,6 +745,12 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     #[must_use]
     pub fn stats(&self) -> SessionStats {
         self.stats.get()
+    }
+
+    /// Lean-native attribution for this session's imported environment.
+    #[must_use]
+    pub fn import_stats(&self) -> &LeanImportStats {
+        &self.import_stats
     }
 
     /// Internal helper: record one FFI call and add `batch` per-item

@@ -18,11 +18,11 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationFacts,
     LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
     LeanWorkerDeclarationVerificationStatus, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
-    LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
-    LeanWorkerProofAttemptResult, LeanWorkerRendered,
+    LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
 };
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
@@ -341,6 +341,8 @@ pub struct LeanWorkerStats {
     pub last_rss_kib: Option<u64>,
     /// Most recent restart reason, if any.
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    /// Lean-native import attribution for the most recent opened host session, if any.
+    pub last_import_stats: Option<LeanWorkerImportStats>,
     /// Streaming requests that entered a worker child.
     pub stream_requests: u64,
     /// Streaming requests that reached terminal success.
@@ -1151,10 +1153,14 @@ impl LeanWorker {
             project_root: config.project_root_string(),
             mode,
             imports: config.imports().to_vec(),
+            import_profile: config.import_profile(),
         })?;
         self.record_request(true);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
-            Response::HostSessionOpened => Ok(()),
+            Response::HostSessionOpened { import_stats } => {
+                self.stats.last_import_stats = Some(import_stats);
+                Ok(())
+            }
             other => Err(unexpected_response(OPERATION, &other)),
         }
     }

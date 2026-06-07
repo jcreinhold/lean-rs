@@ -11,8 +11,8 @@ use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
     LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerConfig,
     LeanWorkerDeclarationFilter, LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerJsonCommand, LeanWorkerPool,
-    LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig, LeanWorkerSessionImportProfile,
+    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use lean_rs_worker_protocol::worker_exports::fixture_mul_signature;
 use lean_toolchain::CargoLeanCapability;
@@ -955,6 +955,53 @@ fn no_manifest_worker_session_rejects_worker_command_as_checked_binding() {
         }
         other => panic!("expected checked binding worker error, got {other:?}"),
     }
+}
+
+#[test]
+fn capability_builder_session_import_profile_reaches_child_import() {
+    let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary())).expect("worker starts");
+    let default_config = LeanWorkerSessionConfig::new(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["LeanRsInteropConsumer.Callback"],
+    );
+    let compat_config = default_config
+        .clone()
+        .with_import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat);
+    assert_eq!(
+        compat_config
+            .with_imports(["LeanRsInteropConsumer.Callback"])
+            .import_profile(),
+        LeanWorkerSessionImportProfile::FullPrivateCompat,
+        "with_imports must preserve the selected import profile",
+    );
+
+    {
+        let _session = worker
+            .open_session(&default_config, None, None)
+            .expect("default private worker session opens");
+    }
+    let default_stats = worker
+        .stats()
+        .last_import_stats
+        .expect("default session reports import stats");
+    assert_eq!(default_stats.import_level, "private");
+    assert!(!default_stats.import_all);
+    assert!(default_stats.load_exts);
+
+    {
+        let _session = worker
+            .open_session(&compat_config, None, None)
+            .expect("explicit full-private compatibility worker session opens");
+    }
+    let compat_stats = worker
+        .stats()
+        .last_import_stats
+        .expect("compat session reports import stats");
+    assert_eq!(compat_stats.import_level, "private");
+    assert!(compat_stats.import_all);
+    assert!(compat_stats.load_exts);
 }
 
 #[test]

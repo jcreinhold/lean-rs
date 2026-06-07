@@ -1,0 +1,30 @@
+[package]
+authors.workspace = true
+description = "Opt-in profiling and baseline reporting for lean-rs memory and CPU workloads."
+edition.workspace = true
+license.workspace = true
+name = "lean-rs-profiling"
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+lean-toolchain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "collect_baseline_quick"
+path = "src/bin/collect_baseline_quick.rs"
+
+[[bin]]
+name = "collect_baseline_full"
+path = "src/bin/collect_baseline_full.rs"
+
+[[bin]]
+name = "generate_report"
+path = "src/bin/generate_report.rs"
+
+[lints]
+workspace = true

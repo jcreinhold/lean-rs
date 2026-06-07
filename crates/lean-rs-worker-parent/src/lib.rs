@@ -72,6 +72,6 @@ pub use lean_rs_worker_protocol::types::{
     LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate,
     LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary,
     LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered,
-    LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSorryPolicy, LeanWorkerSourceRange,
-    LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSessionImportProfile, LeanWorkerSorryPolicy,
+    LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };

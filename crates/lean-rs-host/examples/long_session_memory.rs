@@ -18,14 +18,17 @@ use std::process::{Command, ExitCode};
 use std::thread;
 use std::time::Duration;
 
-use lean_rs::{LeanDiagnosticCode, LeanResult, LeanRuntime};
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, PoolStats, SessionPool, SessionPoolMemoryPolicy};
+use lean_rs::{LeanDiagnosticCode, LeanError, LeanResult, LeanRuntime};
+use lean_rs_host::{
+    LeanCapabilities, LeanElabOptions, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
+    LeanSessionImportProfile, PoolStats, SessionPool, SessionPoolMemoryPolicy,
+};
 use lean_toolchain::LEAN_VERSION;
 
 const DEFAULT_IMPORTS: usize = 4;
 const DEFAULT_BULK: usize = 64;
 const DEFAULT_ELAB: usize = 64;
-const DEFAULT_POOL_CAPACITY: usize = 4;
+const DEFAULT_POOL_CAPACITY: usize = 1;
 const DEFAULT_CHECKPOINT_EVERY: usize = 1;
 const STEADY_STATE_PAUSE_MS: u64 = 2_000;
 
@@ -53,12 +56,22 @@ const ELAB_TERMS: [&str; 4] = ["(1 + 1 : Nat)", "(Nat.succ 0 : Nat)", "1 +", "(1
 
 #[derive(Debug)]
 struct Config {
+    mode: Mode,
     imports: usize,
     bulk: usize,
     elab: usize,
     pool_capacity: usize,
     checkpoint_every: usize,
     max_rss_kib: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    FreshImport,
+    PooledReuse,
+    SteadyState,
+    ImportMatrix,
+    All,
 }
 
 fn main() -> ExitCode {
@@ -68,6 +81,7 @@ fn main() -> ExitCode {
     println!("pid={}", std::process::id());
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("lean_version={LEAN_VERSION}");
+    println!("mode={}", config.mode.as_str());
     println!("imports_n={}", config.imports);
     println!("bulk_m={}", config.bulk);
     println!("elab_k={}", config.elab);
@@ -79,6 +93,19 @@ fn main() -> ExitCode {
             .max_rss_kib
             .map_or_else(|| "none".to_owned(), |value| value.to_string())
     );
+
+    if config.mode == Mode::All {
+        return match run_all_children() {
+            Ok(()) => {
+                println!("status=ok");
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     match run(&config) {
         Ok(()) => {
@@ -116,50 +143,24 @@ fn run(config: &Config) -> LeanResult<()> {
     let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
     snapshot("after_host_capabilities");
 
-    let fresh_stats = run_fresh_import_drop_loop(runtime, &caps, config)?;
-    report_pool_stats("fresh_import_drop", fresh_stats);
-    snapshot("after_fresh_import_drop");
-
-    {
-        let pooled_stats = run_bounded_pool_loop(runtime, &caps, config)?;
-        report_pool_stats("bounded_pool", pooled_stats);
-        snapshot("after_bounded_pool");
-
-        let pool = SessionPool::with_capacity(runtime, config.pool_capacity);
-        let mut session = pool.acquire(&caps, &MIXED_IMPORTS, None, None)?;
-
-        for iteration in 1..=config.bulk {
-            let decls = session.query_declarations_bulk(&BULK_NAMES, None, None)?;
-            assert_eq!(decls.len(), BULK_NAMES.len());
-            drop(decls);
-            maybe_checkpoint("bulk_introspection", iteration, config.checkpoint_every);
+    match config.mode {
+        Mode::FreshImport => {
+            let fresh_stats = run_fresh_import_drop_loop(runtime, &caps, config)?;
+            report_pool_stats("fresh_import_drop", fresh_stats);
+            snapshot("after_fresh_import_drop");
         }
-        println!("bulk_calls={}", config.bulk);
-        snapshot("after_bulk_introspection");
-
-        let opts = LeanElabOptions::new();
-        let mut ok = 0usize;
-        let mut err = 0usize;
-        for (iteration, term) in (1..=config.elab).zip(ELAB_TERMS.iter().cycle()) {
-            match session.elaborate(term, None, &opts, None)? {
-                Ok(expr) => {
-                    ok = ok.saturating_add(1);
-                    drop(expr);
-                }
-                Err(failure) => {
-                    err = err.saturating_add(1);
-                    drop(failure);
-                }
-            }
-            maybe_checkpoint("elaboration", iteration, config.checkpoint_every);
+        Mode::PooledReuse => {
+            let pooled_stats = run_bounded_pool_loop(runtime, &caps, config)?;
+            report_pool_stats("bounded_pool", pooled_stats);
+            snapshot("after_bounded_pool");
         }
-        println!("elab_calls={}", config.elab);
-        println!("elab_ok={ok}");
-        println!("elab_err={err}");
-        snapshot("after_elaboration");
-
-        drop(session);
-        report_pool_stats("mixed_pool_before_drop", pool.stats());
+        Mode::SteadyState => {
+            run_steady_state_loop(runtime, &caps, config)?;
+        }
+        Mode::ImportMatrix => {
+            run_import_matrix(runtime, &caps, config)?;
+        }
+        Mode::All => {}
     }
 
     snapshot("after_drop_sessions_pools");
@@ -171,6 +172,7 @@ fn run(config: &Config) -> LeanResult<()> {
 impl Config {
     fn from_env() -> Self {
         Self {
+            mode: Mode::from_env(),
             imports: env_usize("LEAN_RS_LONG_SESSION_IMPORTS", DEFAULT_IMPORTS),
             bulk: env_usize("LEAN_RS_LONG_SESSION_BULK", DEFAULT_BULK),
             elab: env_usize("LEAN_RS_LONG_SESSION_ELAB", DEFAULT_ELAB),
@@ -179,6 +181,56 @@ impl Config {
             max_rss_kib: env_u64_optional("LEAN_RS_LONG_SESSION_MAX_RSS_KIB"),
         }
     }
+}
+
+impl Mode {
+    fn from_env() -> Self {
+        std::env::var("LEAN_RS_LONG_SESSION_MODE")
+            .ok()
+            .and_then(|raw| Self::parse(raw.trim()))
+            .unwrap_or(Self::All)
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "fresh-import" => Some(Self::FreshImport),
+            "pooled-reuse" => Some(Self::PooledReuse),
+            "steady-state" => Some(Self::SteadyState),
+            "import-matrix" => Some(Self::ImportMatrix),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::FreshImport => "fresh-import",
+            Self::PooledReuse => "pooled-reuse",
+            Self::SteadyState => "steady-state",
+            Self::ImportMatrix => "import-matrix",
+            Self::All => "all",
+        }
+    }
+}
+
+fn run_all_children() -> Result<(), Box<dyn std::error::Error>> {
+    let exe = std::env::current_exe()?;
+    for mode in [
+        Mode::FreshImport,
+        Mode::PooledReuse,
+        Mode::SteadyState,
+        Mode::ImportMatrix,
+    ] {
+        println!("child_mode_begin={}", mode.as_str());
+        let status = Command::new(&exe)
+            .env("LEAN_RS_LONG_SESSION_MODE", mode.as_str())
+            .status()?;
+        println!("child_mode_end={} success={}", mode.as_str(), status.success());
+        if !status.success() {
+            return Err(format!("long_session_memory child mode {} failed", mode.as_str()).into());
+        }
+    }
+    Ok(())
 }
 
 fn env_usize(name: &str, default: usize) -> usize {
@@ -203,6 +255,12 @@ fn run_fresh_import_drop_loop(
     let pool = SessionPool::with_memory_policy(runtime, 0, memory_policy(config));
     for iteration in 1..=config.imports {
         let session = pool.acquire(caps, &IMPORTS, None, None)?;
+        report_import_stats(
+            "fresh_import_drop",
+            iteration,
+            LeanSessionImportProfile::default().label(),
+            session.import_stats(),
+        );
         drop(session);
         maybe_checkpoint("fresh_import_drop", iteration, config.checkpoint_every);
     }
@@ -217,8 +275,15 @@ fn run_bounded_pool_loop(
     let pool = SessionPool::with_memory_policy(runtime, config.pool_capacity, memory_policy(config));
     if config.pool_capacity > 0 {
         let mut warm = Vec::with_capacity(config.pool_capacity);
-        for _ in 0..config.pool_capacity {
-            warm.push(pool.acquire(caps, &IMPORTS, None, None)?);
+        for iteration in 1..=config.pool_capacity {
+            let session = pool.acquire(caps, &IMPORTS, None, None)?;
+            report_import_stats(
+                "bounded_pool_warm",
+                iteration,
+                LeanSessionImportProfile::default().label(),
+                session.import_stats(),
+            );
+            warm.push(session);
         }
         drop(warm);
     }
@@ -233,6 +298,96 @@ fn run_bounded_pool_loop(
     Ok(pool.stats())
 }
 
+fn run_steady_state_loop(
+    runtime: &'static LeanRuntime,
+    caps: &LeanCapabilities<'static, '_>,
+    config: &Config,
+) -> LeanResult<()> {
+    let pool = SessionPool::with_memory_policy(
+        runtime,
+        config.pool_capacity,
+        memory_policy(config).max_fresh_imports(1),
+    );
+    let mut session = pool.acquire(caps, &MIXED_IMPORTS, None, None)?;
+    report_import_stats(
+        "steady_state_warm",
+        1,
+        LeanSessionImportProfile::default().label(),
+        session.import_stats(),
+    );
+
+    for iteration in 1..=config.bulk {
+        let decls = session.query_declarations_bulk(&BULK_NAMES, None, None)?;
+        assert_eq!(decls.len(), BULK_NAMES.len());
+        drop(decls);
+        maybe_checkpoint("bulk_introspection", iteration, config.checkpoint_every);
+    }
+    println!("bulk_calls={}", config.bulk);
+    snapshot("after_bulk_introspection");
+
+    let opts = LeanElabOptions::new();
+    let mut ok = 0usize;
+    let mut err = 0usize;
+    for (iteration, term) in (1..=config.elab).zip(ELAB_TERMS.iter().cycle()) {
+        match session.elaborate(term, None, &opts, None)? {
+            Ok(expr) => {
+                ok = ok.saturating_add(1);
+                drop(expr);
+            }
+            Err(failure) => {
+                err = err.saturating_add(1);
+                drop(failure);
+            }
+        }
+        maybe_checkpoint("elaboration", iteration, config.checkpoint_every);
+    }
+    println!("elab_calls={}", config.elab);
+    println!("elab_ok={ok}");
+    println!("elab_err={err}");
+    snapshot("after_elaboration");
+
+    drop(session);
+    report_pool_stats("mixed_pool_before_drop", pool.stats());
+    Ok(())
+}
+
+fn run_import_matrix(
+    _runtime: &'static LeanRuntime,
+    caps: &LeanCapabilities<'static, '_>,
+    config: &Config,
+) -> LeanResult<()> {
+    for mode in [
+        LeanImportProfileMode::FullSession(LeanSessionImportProfile::ExportedPublic),
+        LeanImportProfileMode::FullSession(LeanSessionImportProfile::Server),
+        LeanImportProfileMode::FullSession(LeanSessionImportProfile::Private),
+        LeanImportProfileMode::FullSession(LeanSessionImportProfile::FullPrivateCompat),
+        LeanImportProfileMode::ExportedNoExts,
+    ] {
+        for iteration in 1..=config.imports {
+            enforce_matrix_rss_cap(config)?;
+            let profiler_options = import_profiler_options(mode, iteration);
+            match caps.profiling_session(&IMPORTS, mode, &profiler_options) {
+                Ok(mut session) => {
+                    report_import_stats("import_matrix", iteration, mode.label(), session.import_stats());
+                    if !mode.load_exts() {
+                        report_no_ext_capability_gap(mode, &mut session);
+                    }
+                    drop(session);
+                }
+                Err(err) => {
+                    report_import_profile_gap(mode, iteration, &err);
+                }
+            }
+            maybe_checkpoint(
+                &format!("import_matrix_{}", mode.label().replace('-', "_")),
+                iteration,
+                config.checkpoint_every,
+            );
+        }
+    }
+    Ok(())
+}
+
 fn memory_policy(config: &Config) -> SessionPoolMemoryPolicy {
     let fresh_imports = config.imports.max(config.pool_capacity) as u64;
     let mut policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(fresh_imports);
@@ -240,6 +395,78 @@ fn memory_policy(config: &Config) -> SessionPoolMemoryPolicy {
         policy = policy.max_rss_kib(limit);
     }
     policy
+}
+
+fn enforce_matrix_rss_cap(config: &Config) -> LeanResult<()> {
+    let Some(limit) = config.max_rss_kib else {
+        return Ok(());
+    };
+    match rss_kib() {
+        Ok(current) if current >= limit => Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+            "import matrix refused fresh import: current RSS {current} KiB reached max_rss_kib={limit}"
+        ))),
+        Ok(_) => Ok(()),
+        Err(err) => Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+            "import matrix refused fresh import: RSS sample unavailable while max_rss_kib={limit}: {err}"
+        ))),
+    }
+}
+
+fn import_profiler_options(mode: LeanImportProfileMode, iteration: usize) -> LeanImportProfilerOptions {
+    let mut options = LeanImportProfilerOptions::new()
+        .profiler(env_bool("LEAN_RS_IMPORT_PROFILE_PROFILER"))
+        .trace_profiler(env_bool("LEAN_RS_IMPORT_PROFILE_TRACE_PROFILER"));
+    if let Ok(dir) = std::env::var("LEAN_RS_IMPORT_PROFILE_TRACE_PROFILER_OUTPUT_DIR") {
+        let path = PathBuf::from(dir).join(format!("{}-{iteration}.json", mode.label()));
+        options = options.trace_profiler_output(path.to_string_lossy().into_owned());
+    } else if let Ok(path) = std::env::var("LEAN_RS_IMPORT_PROFILE_TRACE_PROFILER_OUTPUT") {
+        options = options.trace_profiler_output(path);
+    }
+    options
+}
+
+fn env_bool(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+fn report_import_profile_gap(mode: LeanImportProfileMode, iteration: usize, err: &LeanError) {
+    let message = format!("{err:?}").replace(char::is_whitespace, "_");
+    println!(
+        "import_profile_gap=import_matrix iteration={iteration} profile_mode={} import_all={} import_level={} load_exts={} error={message}",
+        mode.label(),
+        mode.import_all(),
+        mode.import_level().as_str(),
+        mode.load_exts(),
+    );
+}
+
+fn report_no_ext_capability_gap(mode: LeanImportProfileMode, session: &mut lean_rs_host::LeanSession<'_, '_>) {
+    let opts = LeanElabOptions::new();
+    match session.elaborate(ELAB_TERMS[0], None, &opts, None) {
+        Ok(Ok(expr)) => {
+            drop(expr);
+            println!(
+                "import_mode_capability mode={} service=elaborate status=ok",
+                mode.label()
+            );
+        }
+        Ok(Err(failure)) => {
+            drop(failure);
+            println!(
+                "import_mode_capability_gap mode={} service=elaborate status=diagnostic_failure",
+                mode.label()
+            );
+        }
+        Err(err) => {
+            println!(
+                "import_mode_capability_gap mode={} service=elaborate status=host_error code={}",
+                mode.label(),
+                err.code()
+            );
+        }
+    }
 }
 
 fn fixture_lake_root() -> PathBuf {
@@ -281,5 +508,22 @@ fn report_pool_stats(label: &str, stats: PoolStats) {
         stats.released_dropped,
         stats.drains,
         stats.drained
+    );
+}
+
+fn report_import_stats(label: &str, iteration: usize, profile_mode: &str, stats: &LeanImportStats) {
+    println!(
+        "import_stats={label} iteration={iteration} profile_mode={profile_mode} direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
+        stats.direct_import_names.join(","),
+        stats.effective_module_count,
+        stats.compacted_region_count,
+        stats.memory_mapped_region_count,
+        stats.imported_bytes,
+        stats.imported_constant_count,
+        stats.extension_count,
+        stats.total_imported_extension_entries,
+        stats.import_level,
+        stats.import_all,
+        stats.load_exts,
     );
 }

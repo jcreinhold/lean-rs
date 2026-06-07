@@ -20,7 +20,7 @@
 use std::path::PathBuf;
 
 use lean_rs::LeanRuntime;
-use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession, SessionPool};
+use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession, LeanSessionImportProfile, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -69,6 +69,62 @@ fn session_create_drop_loop_small() {
         let session = session_over_handles(&caps);
         drop(session);
     }
+}
+
+#[test]
+fn session_leak_loop_import_stats_reports_fixture_shape() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let session = session_over_handles(&caps);
+    let stats = session.import_stats();
+
+    assert!(
+        stats
+            .direct_import_names
+            .iter()
+            .any(|name| name == "LeanRsFixture.Handles"),
+        "direct imports should include the requested fixture module: {:?}",
+        stats.direct_import_names
+    );
+    assert!(
+        stats.effective_module_count > 0,
+        "effective module count must be positive"
+    );
+    assert!(
+        stats.compacted_region_count > 0,
+        "compacted region count must be positive"
+    );
+    assert!(stats.imported_bytes > 0, "imported bytes must be positive");
+    assert!(
+        stats.imported_constant_count > 0,
+        "imported constant count must be positive"
+    );
+    assert_eq!(stats.import_level, "private");
+    assert!(!stats.import_all);
+    assert!(stats.load_exts);
+}
+
+#[test]
+fn session_leak_loop_import_stats_reports_explicit_full_private_compat() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let session = caps
+        .session_with_profile(
+            &["LeanRsFixture.Handles"],
+            LeanSessionImportProfile::FullPrivateCompat,
+            None,
+            None,
+        )
+        .expect("compat session imports cleanly");
+    let stats = session.import_stats();
+
+    assert_eq!(stats.import_level, "private");
+    assert!(stats.import_all);
+    assert!(stats.load_exts);
 }
 
 /// Long-form session lifecycle loop. Off by default; run via

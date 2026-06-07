@@ -25,6 +25,53 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Lean-native attribution for the imported environment behind a worker session.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerImportStats {
+    pub direct_import_names: Vec<String>,
+    pub effective_module_count: u64,
+    pub compacted_region_count: u64,
+    pub memory_mapped_region_count: u64,
+    pub imported_bytes: u64,
+    pub imported_constant_count: u64,
+    pub extension_count: u64,
+    pub total_imported_extension_entries: u64,
+    pub import_level: String,
+    pub import_all: bool,
+    pub load_exts: bool,
+}
+
+/// Closed full-session import profiles understood by worker children.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum LeanWorkerSessionImportProfile {
+    /// Public exported declarations only.
+    ExportedPublic,
+    /// Server-level import data without `import all`.
+    Server,
+    /// Private-level import data without `import all`. This is the default
+    /// profile because current non-`module` fixture imports cannot be imported
+    /// at exported/server level.
+    #[default]
+    Private,
+    /// Legacy compatibility import shape.
+    FullPrivateCompat,
+}
+
+impl LeanWorkerSessionImportProfile {
+    /// Stable diagnostic label used in reports and logs.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExportedPublic => "exported-public",
+            Self::Server => "server",
+            Self::Private => "private",
+            Self::FullPrivateCompat => "full-private-compat",
+        }
+    }
+}
+
 /// Bounded elaboration options for worker-session requests.
 ///
 /// Mirrors the stable knobs from `lean_rs_host::LeanElabOptions` without

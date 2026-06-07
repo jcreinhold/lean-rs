@@ -30,6 +30,8 @@ Thumbs.db
 *.profdata
 flamegraph.svg
 perf.data*
+profiling_results/
+__pycache__/
 
 # cargo-fuzz artifacts (per-run, regenerated; not source of truth)
 crates/*/fuzz/corpus/

@@ -22,7 +22,7 @@ use crate::host::process::{
     ModuleQueryBatchOutcome, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
     ModuleSnapshotCacheClearResult, ProofAttemptOutcome, ProofAttemptRequest,
 };
-use crate::host::session::{LeanDeclarationFilter, LeanSourceRange};
+use crate::host::session::{LeanDeclarationFilter, LeanImportStats, LeanSourceRange};
 
 macro_rules! host_shim_exports {
     ($m:ident) => {
@@ -31,6 +31,12 @@ macro_rules! host_shim_exports {
                 => [(Vec<String>, Vec<String>)] => [LeanIo<Obj<'lean>>];
             mandatory session_import_progress => "lean_rs_host_session_import_progress"
                 => [(Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
+            mandatory session_import_profile => "lean_rs_host_session_import_profile"
+                => [(Vec<String>, Vec<String>, bool, u8, bool, bool, bool, String)] => [LeanIo<Obj<'lean>>];
+            mandatory session_import_profile_progress => "lean_rs_host_session_import_profile_progress"
+                => [(Vec<String>, Vec<String>, bool, u8, usize, usize)] => [LeanIo<Obj<'lean>>];
+            mandatory env_import_stats => "lean_rs_host_env_import_stats"
+                => [(Obj<'lean>, String, bool)] => [LeanIo<LeanImportStats>];
             mandatory name_from_string => "lean_rs_host_name_from_string"
                 => [(Obj<'lean>,)] => [LeanName<'lean>];
             mandatory name_to_string => "lean_rs_host_name_to_string"

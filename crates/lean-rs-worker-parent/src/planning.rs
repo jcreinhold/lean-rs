@@ -13,7 +13,7 @@ use lean_toolchain::{
 };
 use serde_json::Value;
 
-use lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata;
+use lean_rs_worker_protocol::types::{LeanWorkerCapabilityMetadata, LeanWorkerSessionImportProfile};
 
 use crate::capability::LeanWorkerCapabilityBuilder;
 use crate::pool::{LeanWorkerRestartPolicyClass, LeanWorkerSessionKey};
@@ -27,6 +27,7 @@ pub struct LeanWorkerImportPlanConfig {
     lib_name: String,
     source_roots: Option<Vec<String>>,
     base_imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
     metadata_expectation: Option<LeanWorkerPlanMetadataExpectation>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
 }
@@ -41,6 +42,7 @@ impl LeanWorkerImportPlanConfig {
             lib_name: lib_name.into(),
             source_roots: None,
             base_imports: Vec::new(),
+            import_profile: LeanWorkerSessionImportProfile::default(),
             metadata_expectation: None,
             restart_policy: None,
         }
@@ -57,6 +59,13 @@ impl LeanWorkerImportPlanConfig {
     #[must_use]
     pub fn base_imports(mut self, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.base_imports = imports.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Select the full-session import profile used by planned worker batches.
+    #[must_use]
+    pub fn import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
+        self.import_profile = profile;
         self
     }
 
@@ -148,6 +157,7 @@ pub struct LeanWorkerPlannedBatch {
     pub lib_name: String,
     pub source_root: String,
     pub imports: Vec<String>,
+    pub import_profile: LeanWorkerSessionImportProfile,
     pub modules: Vec<LeanWorkerModuleWork>,
     pub fingerprint: LeanWorkerBatchFingerprint,
     metadata_expectation: Option<LeanWorkerPlanMetadataExpectation>,
@@ -166,7 +176,8 @@ impl LeanWorkerPlannedBatch {
             self.package.clone(),
             self.lib_name.clone(),
             self.imports.clone(),
-        );
+        )
+        .import_profile(self.import_profile);
         if let Some(policy) = &self.restart_policy {
             builder = builder.restart_policy(policy.clone());
         }
@@ -308,6 +319,7 @@ impl LeanWorkerImportPlanner {
                 lib_name: self.config.lib_name.clone(),
                 source_root: module.source_root.clone(),
                 imports: module.imports.clone(),
+                import_profile: self.config.import_profile,
                 restart_policy_class: restart_policy_class(self.config.restart_policy.as_ref()),
             };
             groups.entry(key).or_default().push(module);
@@ -322,6 +334,7 @@ impl LeanWorkerImportPlanner {
                 key.lib_name.clone(),
                 key.imports.clone(),
             )
+            .with_import_profile(key.import_profile)
             .restart_policy_class(key.restart_policy_class);
             if let Some(expectation) = &self.config.metadata_expectation {
                 session_key = session_key.metadata_expectation(
@@ -338,6 +351,7 @@ impl LeanWorkerImportPlanner {
                 lib_name: key.lib_name,
                 source_root: key.source_root,
                 imports: key.imports,
+                import_profile: key.import_profile,
                 modules,
                 fingerprint: LeanWorkerBatchFingerprint {
                     toolchain: source_set.toolchain.clone(),
@@ -359,6 +373,7 @@ struct BatchGroupKey {
     lib_name: String,
     source_root: String,
     imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
     restart_policy_class: LeanWorkerRestartPolicyClass,
 }
 
@@ -377,12 +392,13 @@ fn batch_key_string(key: &BatchGroupKey, modules: &[LeanWorkerModuleWork]) -> St
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "project={};package={};lib={};source_root={};imports={};policy={:?};modules={module_list}",
+        "project={};package={};lib={};source_root={};imports={};profile={};policy={:?};modules={module_list}",
         key.project_root.display(),
         key.package,
         key.lib_name,
         key.source_root,
         key.imports.join(","),
+        key.import_profile.label(),
         key.restart_policy_class,
     )
 }

@@ -169,6 +169,70 @@ inductive DeclarationInspectionResult where
   | unsupported
   deriving Inhabited
 
+structure ImportStats where
+  directImportNames : Array String
+  effectiveModuleCount : UInt64
+  compactedRegionCount : UInt64
+  memoryMappedRegionCount : UInt64
+  importedBytes : UInt64
+  importedConstantCount : UInt64
+  extensionCount : UInt64
+  totalImportedExtensionEntries : UInt64
+  importLevel : String
+  importAll : Bool
+  loadExts : Bool
+  deriving Inhabited
+
+private def u64 (n : Nat) : UInt64 :=
+  UInt64.ofNat n
+
+private def importLevelFromCode? : UInt8 → Option OLeanLevel
+  | 0 => some .exported
+  | 1 => some .server
+  | 2 => some .private
+  | _ => none
+
+private def mkImportOptions (profiler traceProfiler : Bool) (traceProfilerOutput : String) : Options :=
+  let opts := Options.empty
+  let opts := opts.setBool `profiler profiler
+  let opts := opts.setBool `trace.profiler traceProfiler
+  if traceProfilerOutput.isEmpty then
+    opts
+  else
+    opts.set `trace.profiler.output traceProfilerOutput
+
+private def runSessionImport (searchPaths : Array String) (importNames : Array String)
+    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
+  let sysroot ← Lean.findSysroot
+  Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
+  let imports := importNames.map fun n => { module := n.toName, importAll := importAll : Import }
+  unsafe Lean.enableInitializersExecution
+  Lean.importModules imports opts 0 (loadExts := loadExts) (level := level)
+
+@[export lean_rs_host_env_import_stats]
+def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats := do
+  let mut extensionNames : Array Name := #[]
+  let mut extensionEntries : Nat := 0
+  for data in env.header.moduleData do
+    for (name, entries) in data.entries do
+      extensionEntries := extensionEntries + entries.size
+      unless extensionNames.contains name do
+        extensionNames := extensionNames.push name
+  pure {
+    directImportNames := env.header.imports.map (·.module.toString)
+    effectiveModuleCount := u64 env.header.modules.size
+    compactedRegionCount := u64 env.header.regions.size
+    memoryMappedRegionCount := u64 (env.header.regions.filter (·.isMemoryMapped) |>.size)
+    importedBytes := env.header.regions.foldl (init := 0) fun acc region =>
+      acc + UInt64.ofNat region.size.toNat
+    importedConstantCount := u64 <| env.constants.fold (init := 0) fun acc _ _ => acc + 1
+    extensionCount := u64 extensionNames.size
+    totalImportedExtensionEntries := u64 extensionEntries
+    importLevel
+    importAll := env.header.imports.all (·.importAll)
+    loadExts
+  }
+
 /-- Initialise the Lean search path and import the named modules into a
     fresh environment. The Rust caller passes the resolved
     `.lake/build/lib/lean` search-path entries (one per Lake package
@@ -178,9 +242,6 @@ inductive DeclarationInspectionResult where
     the Lake layout; it just unions whatever entries Rust provides. -/
 @[export lean_rs_host_session_import]
 def sessionImport (searchPaths : Array String) (importNames : Array String) : IO Environment := do
-  let sysroot ← Lean.findSysroot
-  Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
-  let imports := importNames.map fun n => { module := n.toName, importAll := true : Import }
   -- `loadExts := true` activates scoped environment extensions on
   -- import — including the parser extension. Without it, the
   -- imported environment has only the bootstrap-level builtin
@@ -196,8 +257,28 @@ def sessionImport (searchPaths : Array String) (importNames : Array String) : IO
   -- `importModules` throws `IO.userError`. The flag is idempotent and
   -- present on every toolchain in the supported window (4.26+), so we
   -- call it unconditionally rather than version-branching.
-  unsafe Lean.enableInitializersExecution
-  Lean.importModules imports Lean.Options.empty 0 (loadExts := true)
+  runSessionImport searchPaths importNames false true .private Options.empty
+
+@[export lean_rs_host_session_import_profile]
+def sessionImportProfile (searchPaths : Array String) (importNames : Array String)
+    (importAll : Bool) (levelCode : UInt8) (loadExts profiler traceProfiler : Bool)
+    (traceProfilerOutput : String) : IO Environment := do
+  let some level := importLevelFromCode? levelCode |
+    throw <| IO.userError s!"unsupported Lean import profiling level code: {levelCode}"
+  runSessionImport searchPaths importNames importAll loadExts level <|
+    mkImportOptions profiler traceProfiler traceProfilerOutput
+
+@[export lean_rs_host_session_import_profile_progress]
+def sessionImportProfileProgress (searchPaths : Array String) (importNames : Array String)
+    (importAll : Bool) (levelCode : UInt8) (handle trampoline : USize) : IO (Except UInt8 Environment) := do
+  let some level := importLevelFromCode? levelCode |
+    throw <| IO.userError s!"unsupported Lean import profile level code: {levelCode}"
+  if let some status ← reportProgress? handle trampoline 0 importNames.size then
+    return .error status
+  let env ← runSessionImport searchPaths importNames importAll true level Options.empty
+  if let some status ← reportProgress? handle trampoline importNames.size importNames.size then
+    return .error status
+  return .ok env
 
 @[export lean_rs_host_session_import_progress]
 def sessionImportProgress (searchPaths : Array String) (importNames : Array String)

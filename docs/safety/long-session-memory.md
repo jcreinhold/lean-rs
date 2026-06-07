@@ -79,12 +79,67 @@ The profiling wrappers under `profiling/scripts/` run the bounded variants and c
 
 ```sh
 ./profiling/scripts/profile_memory.sh long-session
+./profiling/scripts/profile_memory.sh long-session-matrix
 ./profiling/scripts/profile_with_samply.sh long-session
 ```
 
 This is not a Criterion bench by design. Criterion answers per-iteration latency questions; this workload answers
 whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. A single
 long-running process with named checkpoints answers that directly.
+
+## Import Attribution
+
+The reproducer now prints Lean-native `import_stats=...` rows next to RSS checkpoints. These rows are structured data
+from the imported `Environment`, not parsed console output from `Environment.displayStats`. They report:
+
+- direct import names from `env.header.imports`;
+- effective module count from `env.header.modules`;
+- compacted and memory-mapped region counts from `env.header.regions`;
+- imported bytes from the compacted regions;
+- imported constant count from `env.constants`;
+- persistent extension name count and total imported extension entries from loaded module data;
+- the import mode: `importAll`, import level, and `loadExts`.
+
+Normal host sessions now default to the `Private` full-session profile: `importAll := false`, import level `.private`,
+and `loadExts := true`. This is a pre-1.0 behavior correction for unacceptable memory growth, not a
+compatibility-preservation exercise. `ExportedPublic` and `Server` are narrower on paper, but current fixture imports
+are non-`module` files and Lean rejects exported/server-level imports of them with
+`cannot import non-\`module\` ... from \`module\``. The old behavior remains available only as the explicit
+`FullPrivateCompat` profile: `importAll := true`, import level `.private`, and `loadExts := true`.
+
+The import-mode matrix compares the same fixture imports across:
+
+| Matrix mode | `importAll` | Import level | `loadExts` |
+| --- | --- | --- | --- |
+| `exported-public` | `false` | `.exported` | `true` |
+| `server` | `false` | `.server` | `true` |
+| `private` | `false` | `.private` | `true` |
+| `full-private-compat` | `true` | `.private` | `true` |
+| `exported-no-exts` | `false` | `.exported` | `false` |
+
+The focused profile gates pass for declaration lookup, declaration source ranges, pretty declaration inspection,
+elaboration, proof-state/module-query batches, and capability-backed worker session opening under `private`. Profiling
+reports should compare `private` against `full-private-compat` under an explicit RSS cap before claiming local RSS
+improvements.
+
+Local capped matrix run on 2026-06-07, macOS aarch64, Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_IMPORTS=1`,
+`LEAN_RS_LONG_SESSION_MAX_RSS_KIB=4194304`:
+
+| Profile | Result | Checkpoint RSS KiB | `importAll` | Level | `loadExts` | Modules | Regions | mmap | Bytes | Constants | Exts | Entries |
+| --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `exported-public` | blocked: non-`module` fixture import | 234848 | `false` | `.exported` | `true` | - | - | - | - | - | - | - |
+| `server` | blocked: non-`module` fixture import | 1825920 | `false` | `.server` | `true` | - | - | - | - | - | - | - |
+| `private` | passed | 3809744 | `false` | `.private` | `true` | 2259 | 9033 | 1017 | 1955323616 | 203924 | 119 | 1732192 |
+| `full-private-compat` | passed, then RSS guard refused the next import | 5781488 | `true` | `.private` | `true` | 2259 | 9033 | 0 | 1955323616 | 203924 | 119 | 1732192 |
+
+`loadExts := true` remains required for full host-service semantics. It also means
+`Environment.freeRegions` is not a safe reclamation tool after import: persistent extension data may still reference
+objects in those compacted regions. This baseline records the environment shape that caused a RSS checkpoint; it does
+not reclaim regions.
+
+Baseline JSON and Markdown reports under `profiling_results/` preserve the raw KiB checkpoints and render the Lean
+Import Stats tables side by side. Treat those KiB values as local measurements only; do not compare absolute RSS across
+machines or operating systems.
 
 ## Measured Shape
 
