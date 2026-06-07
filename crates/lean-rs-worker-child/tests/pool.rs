@@ -124,6 +124,7 @@ fn compatible_session_key_reuses_one_worker() {
     }
 
     assert_eq!(pool.snapshot().workers, 1);
+    let imports_after_first_lease = pool.snapshot().imports;
 
     {
         let mut lease = pool.acquire_lease(builder()).expect("pool reuses compatible lease");
@@ -134,6 +135,11 @@ fn compatible_session_key_reuses_one_worker() {
     }
 
     assert_eq!(pool.snapshot().workers, 1);
+    assert_eq!(
+        pool.snapshot().imports,
+        imports_after_first_lease,
+        "warm same-workspace lease should reuse the already-open child session"
+    );
 }
 
 #[test]
@@ -159,6 +165,28 @@ fn distinct_session_key_respects_fixed_pool_limit() {
     let err = pool
         .acquire_lease(different_imports)
         .expect_err("fixed-size pool should reject a second distinct key");
+    match err {
+        LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
+        other => panic!("expected pool exhaustion, got {other:?}"),
+    }
+}
+
+#[test]
+fn import_workspace_root_partitions_pool_session_keys() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let response = lease
+            .run_json_command(&json_command(), &request("pool-import-root"), None, None)
+            .expect("typed command succeeds");
+        assert!(response.accepted);
+    }
+
+    let different_import_root = builder().import_workspace_root(workspace_root());
+    let err = pool
+        .acquire_lease(different_import_root)
+        .expect_err("fixed-size pool should reject a second import workspace root");
     match err {
         LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
         other => panic!("expected pool exhaustion, got {other:?}"),

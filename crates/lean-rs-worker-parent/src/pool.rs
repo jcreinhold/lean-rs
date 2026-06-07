@@ -15,7 +15,8 @@ use serde_json::Value;
 use crate::capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
 use crate::session::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressSink,
-    LeanWorkerRuntimeMetadata, LeanWorkerStreamingCommand, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerStreamingCommand, LeanWorkerTypedDataSink,
+    LeanWorkerTypedStreamSummary,
 };
 use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStatus};
 
@@ -34,12 +35,15 @@ pub enum LeanWorkerRestartPolicyClass {
 /// Worker reuse key for a capability-backed session.
 ///
 /// A session key answers only one pool question: can an already-open child
-/// session safely host compatible work? It is not a downstream cache key, and
-/// it does not encode row schemas, cache validity, ranking, reporting, or
-/// source provenance.
+/// session safely host compatible work? The key includes both the capability
+/// project root and the import workspace root because one open session has one
+/// fixed Lean search path. It is not a downstream cache key, and it does not
+/// encode row schemas, cache validity, ranking, reporting, or source
+/// provenance.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerSessionKey {
     project_root: PathBuf,
+    import_workspace_root: PathBuf,
     package: String,
     lib_name: String,
     imports: Vec<String>,
@@ -50,6 +54,10 @@ pub struct LeanWorkerSessionKey {
 
 impl LeanWorkerSessionKey {
     /// Create a session key from the caller-visible capability requirements.
+    ///
+    /// `project_root` is the capability project root. The import workspace
+    /// root defaults to the same value; capability builders with a distinct
+    /// target workspace override it internally.
     #[must_use]
     pub fn new(
         project_root: impl Into<PathBuf>,
@@ -57,8 +65,10 @@ impl LeanWorkerSessionKey {
         lib_name: impl Into<String>,
         imports: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
+        let project_root = project_root.into();
         Self {
-            project_root: project_root.into(),
+            import_workspace_root: normalize_import_workspace_root(project_root.clone()),
+            project_root,
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
@@ -66,6 +76,11 @@ impl LeanWorkerSessionKey {
             toolchain_fingerprint: lean_toolchain::ToolchainFingerprint::current(),
             restart_policy_class: LeanWorkerRestartPolicyClass::Default,
         }
+    }
+
+    pub(crate) fn with_import_workspace_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.import_workspace_root = normalize_import_workspace_root(root.into());
+        self
     }
 
     /// Add the metadata expectation used to decide safe session reuse.
@@ -95,10 +110,16 @@ impl LeanWorkerSessionKey {
         self
     }
 
-    /// Return the Lake project root for this session key.
+    /// Return the capability Lake project root for this session key.
     #[must_use]
     pub fn project_root(&self) -> &std::path::Path {
         &self.project_root
+    }
+
+    /// Return the target Lake workspace root whose dependency closure the session imports against.
+    #[must_use]
+    pub fn import_workspace_root(&self) -> &std::path::Path {
+        &self.import_workspace_root
     }
 
     /// Return the Lake package name for this session key.
@@ -698,20 +719,9 @@ impl LeanWorkerSessionLease<'_> {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        self.ensure_valid()?;
-        self.enforce_policy_before_request()?;
-        let request_timeout = self.request_timeout_override;
-        let result = self
-            .entry
-            .capability
-            .open_session(cancellation, progress)
-            .and_then(|mut session| {
-                if let Some(timeout) = request_timeout {
-                    session.set_request_timeout(timeout);
-                }
-                session.run_json_command(command, request, cancellation, progress)
-            });
-        self.map_lifecycle_result(result)
+        self.run_with_current_session(cancellation, progress, |session| {
+            session.run_json_command(command, request, cancellation, progress)
+        })
     }
 
     /// Run a typed downstream streaming command through this lease.
@@ -735,19 +745,40 @@ impl LeanWorkerSessionLease<'_> {
         Row: DeserializeOwned,
         Summary: DeserializeOwned,
     {
+        self.run_with_current_session(cancellation, progress, |session| {
+            session.run_streaming_command(command, request, rows, diagnostics, cancellation, progress)
+        })
+    }
+
+    fn run_with_current_session<T>(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        mut command: impl FnMut(&mut LeanWorkerSession<'_>) -> Result<T, LeanWorkerError>,
+    ) -> Result<T, LeanWorkerError> {
         self.ensure_valid()?;
         self.enforce_policy_before_request()?;
         let request_timeout = self.request_timeout_override;
-        let result = self
-            .entry
-            .capability
-            .open_session(cancellation, progress)
-            .and_then(|mut session| {
-                if let Some(timeout) = request_timeout {
-                    session.set_request_timeout(timeout);
-                }
-                session.run_streaming_command(command, request, rows, diagnostics, cancellation, progress)
-            });
+        let result = {
+            let mut session = self.entry.capability.attach_open_session();
+            if let Some(timeout) = request_timeout {
+                session.set_request_timeout(timeout);
+            }
+            command(&mut session)
+        };
+        let result = match result {
+            Err(err) if worker_session_missing(&err) => self
+                .entry
+                .capability
+                .open_session(cancellation, progress)
+                .and_then(|mut session| {
+                    if let Some(timeout) = request_timeout {
+                        session.set_request_timeout(timeout);
+                    }
+                    command(&mut session)
+                }),
+            other => other,
+        };
         self.map_lifecycle_result(result)
     }
 
@@ -830,4 +861,12 @@ fn invalidation_reason(err: &LeanWorkerError) -> String {
     } else {
         "worker lifecycle transition".to_owned()
     }
+}
+
+fn worker_session_missing(err: &LeanWorkerError) -> bool {
+    matches!(err, LeanWorkerError::Worker { code, .. } if code == "lean_rs.worker.session_missing")
+}
+
+fn normalize_import_workspace_root(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
 }

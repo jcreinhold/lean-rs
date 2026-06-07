@@ -58,6 +58,7 @@ const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
 #[derive(Clone, Debug)]
 pub struct LeanWorkerCapabilityBuilder {
     project_root: PathBuf,
+    import_workspace_root: Option<PathBuf>,
     package: String,
     lib_name: String,
     imports: Vec<String>,
@@ -76,11 +77,14 @@ pub struct LeanWorkerCapabilityBuilder {
 }
 
 impl LeanWorkerCapabilityBuilder {
-    /// Create a builder for a Lake project and capability library.
+    /// Create a builder for a capability Lake project and library.
     ///
-    /// `project_root` is the directory containing `lakefile.lean`. `package`
-    /// is the Lake package name used by `lean-rs-host`, and `lib_name` is the
-    /// Lake `lean_lib` target to build and load.
+    /// `project_root` is the capability project's directory containing
+    /// `lakefile.lean`; it owns the dylib and manifest this builder builds or
+    /// loads. `package` is the Lake package name used by `lean-rs-host`, and
+    /// `lib_name` is the Lake `lean_lib` target to build and load. Session
+    /// imports default to this same project unless
+    /// [`Self::import_workspace_root`] sets a separate target workspace.
     #[must_use]
     pub fn new(
         project_root: impl Into<PathBuf>,
@@ -90,6 +94,7 @@ impl LeanWorkerCapabilityBuilder {
     ) -> Self {
         Self {
             project_root: project_root.into(),
+            import_workspace_root: None,
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
@@ -112,9 +117,10 @@ impl LeanWorkerCapabilityBuilder {
     ///
     /// Manifest-backed descriptors are the canonical packaged-app path. The
     /// builder reads package, module, and primary dylib facts from the
-    /// manifest, then infers the Lake project root from the standard
-    /// `.lake/build/lib/<dylib>` layout so the worker child can initialize
-    /// Lean's import search path. Direct dylib descriptors remain supported as
+    /// manifest, then infers the capability Lake project root from the
+    /// standard `.lake/build/lib/<dylib>` layout. Session imports default to
+    /// that inferred project unless [`Self::import_workspace_root`] sets a
+    /// separate target workspace. Direct dylib descriptors remain supported as
     /// a compatibility path when callers also provide package and module names.
     ///
     /// # Errors
@@ -131,6 +137,7 @@ impl LeanWorkerCapabilityBuilder {
         let project_root = infer_lake_project_root_from_dylib(&artifact.dylib_path)?;
         Ok(Self {
             project_root,
+            import_workspace_root: None,
             package: artifact.package,
             lib_name: artifact.module,
             imports: imports.into_iter().map(Into::into).collect(),
@@ -163,6 +170,28 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn worker_child(mut self, child: LeanWorkerChild) -> Self {
         self.worker_child = Some(child);
+        self
+    }
+
+    /// Use a separate target Lake workspace root for session imports.
+    ///
+    /// The capability dylib and manifest still come from this builder's
+    /// capability project. This root is the single target workspace whose own
+    /// `.lake/build/lib/lean` entry and `lake-manifest.json` dependency closure
+    /// the worker session imports against. It is not merged with the
+    /// capability project's search path.
+    ///
+    /// Tools whose capability project and audited workspace are distinct must
+    /// set this explicitly. Otherwise the session imports against the
+    /// capability project, preserving the legacy single-project behavior.
+    ///
+    /// Capability exports that import modules must rely on the host-installed
+    /// search path. They must not call `Lean.initSearchPath` or rebuild the
+    /// search path from `LEAN_PATH`, because doing so resets Lean's search path
+    /// and discards this target workspace root.
+    #[must_use]
+    pub fn import_workspace_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.import_workspace_root = Some(normalize_import_workspace_root(path.into()));
         self
     }
 
@@ -321,11 +350,18 @@ impl LeanWorkerCapabilityBuilder {
             self.lib_name.clone(),
             self.imports.clone(),
         )
+        .with_import_workspace_root(self.effective_import_workspace_root())
         .restart_policy_class(restart_policy_class);
         if let Some(check) = &self.metadata_check {
             key = key.metadata_expectation(check.export.clone(), check.request.clone(), check.expected.clone());
         }
         key
+    }
+
+    fn effective_import_workspace_root(&self) -> PathBuf {
+        self.import_workspace_root
+            .clone()
+            .unwrap_or_else(|| normalize_import_workspace_root(self.project_root.clone()))
     }
 
     pub(crate) fn pool_request_timeout(&self) -> Duration {
@@ -399,6 +435,7 @@ impl LeanWorkerCapabilityBuilder {
     }
 
     fn open_unchecked(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
+        let import_workspace_root = self.effective_import_workspace_root();
         let (dylib_path, manifest_path) = match (self.built_dylib_path, self.built_manifest_path) {
             (Some(dylib_path), Some(manifest_path)) => (dylib_path, manifest_path),
             (_, None) => {
@@ -429,7 +466,7 @@ impl LeanWorkerCapabilityBuilder {
         )?;
 
         let session_config = LeanWorkerSessionConfig::manifest_backed(
-            self.project_root.clone(),
+            import_workspace_root,
             self.package.clone(),
             self.lib_name.clone(),
             manifest_path,
@@ -872,6 +909,10 @@ impl LeanWorkerCapability {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerSession<'_>, LeanWorkerError> {
         self.worker.open_session(&self.session_config, cancellation, progress)
+    }
+
+    pub(crate) fn attach_open_session(&mut self) -> LeanWorkerSession<'_> {
+        self.worker.attach_open_session()
     }
 
     /// Open a worker session with a caller-supplied import set, overriding the imports
@@ -1732,6 +1773,10 @@ fn infer_lake_project_root_from_dylib(dylib_path: &Path) -> Result<PathBuf, Lean
     }
 }
 
+fn normalize_import_workspace_root(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
+
 fn try_build_workspace_worker_child(executable_name: &str, tried: &mut Vec<PathBuf>) -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest_dir.parent()?.parent()?;
@@ -1780,9 +1825,66 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
+    use super::{LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
     use crate::supervisor::LeanWorkerConfig;
     use std::path::PathBuf;
+
+    fn workspace_root() -> PathBuf {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/<name> lives two directories below the workspace root")
+            .to_path_buf()
+    }
+
+    fn interop_root() -> PathBuf {
+        workspace_root().join("fixtures").join("interop-shims")
+    }
+
+    fn capability_builder() -> LeanWorkerCapabilityBuilder {
+        LeanWorkerCapabilityBuilder::new(
+            interop_root(),
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            ["LeanRsInteropConsumer.Callback"],
+        )
+    }
+
+    #[test]
+    fn import_workspace_root_unset_matches_capability_project_root() {
+        let key = capability_builder().session_key();
+        assert_eq!(key.project_root(), interop_root().as_path());
+        assert_eq!(key.import_workspace_root(), interop_root().as_path());
+    }
+
+    #[test]
+    fn explicit_import_workspace_root_matching_capability_root_preserves_key() {
+        assert_eq!(
+            capability_builder().session_key(),
+            capability_builder().import_workspace_root(interop_root()).session_key()
+        );
+    }
+
+    #[test]
+    fn import_workspace_root_is_canonicalized_for_session_reuse() {
+        assert_eq!(
+            capability_builder().import_workspace_root(interop_root()).session_key(),
+            capability_builder()
+                .import_workspace_root(interop_root().join("."))
+                .session_key(),
+        );
+    }
+
+    #[test]
+    fn import_workspace_root_participates_in_session_key() {
+        assert_ne!(
+            capability_builder().session_key(),
+            capability_builder()
+                .import_workspace_root(workspace_root())
+                .session_key(),
+        );
+    }
 
     #[test]
     fn for_toolchain_carries_sysroot_through_resolve() {

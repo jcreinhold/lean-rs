@@ -110,6 +110,21 @@ still names the Lake project root, package, target, and imports; those are capab
 The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile paths, and the workspace development
 build. Low-level `LeanWorker` remains available for tests, custom supervision, and focused lifecycle examples.
 
+### Import Workspace Root
+
+The builder separates the capability project from the target workspace. The capability project owns the dylib and
+manifest. The import workspace root is the single Lake project whose own `.lake/build/lib/lean` entry and
+`lake-manifest.json` dependency closure define the session import search path. The worker crates do not merge the
+capability project's dependency closure into that path.
+
+The default import workspace root is the capability project, which preserves legacy single-project consumers. Tools that
+load a capability from one project and audit or serve modules from another project must call
+`LeanWorkerCapabilityBuilder::import_workspace_root(...)` explicitly for each target workspace.
+
+Lean capability exports that import modules must rely on the host-installed search path. They must not call
+`Lean.initSearchPath` or reconstruct the search path from `LEAN_PATH`; doing so resets Lean's search path and silently
+discards the selected import workspace root.
+
 Use downstream crates for domain schemas. A `lean-dup` integration maps its own request and row types onto the generic
 worker capability layer; it does not require the worker crates to know what a declaration row, feature row, index
 update, or probe result means.

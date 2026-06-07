@@ -9,6 +9,29 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### `lean-rs-worker-parent`: capability sessions can import an external Lake workspace
+
+`LeanWorkerCapabilityBuilder::import_workspace_root(...)` lets a manifest-backed worker capability load its dylib from
+the capability project while opening the host session against a separate audited Lake workspace. The import root is one
+Lake project and its manifest-declared dependency closure; it is not merged with the capability project's search path,
+so capability dependencies cannot shadow the audited workspace's dependencies. The unset path keeps the previous
+behavior (`project_root` is also the import root). Consumers whose capability project and target workspace differ must
+set this override explicitly.
+
+Capability exports that import modules must rely on the host-installed search path. They must not call
+`Lean.initSearchPath` or reconstruct the search path from `LEAN_PATH`, because that would reset Lean's search path and
+discard the selected import workspace root.
+
+The worker-pool session key now includes the canonical effective import workspace root, so repeated audits of the same
+workspace reuse the warm child session while different audited workspaces do not alias. The integration fixture records
+the external-root workload, platform, module counts, cold first-lease cost, warm second-lease cost, worker count, warm
+lease count, and import counter; warm same-workspace commands attach to the already-open child session instead of
+reopening imports. This is parent-side only: `OpenHostSession.project_root` already existed on the wire, so
+`lean-rs-worker-protocol`, `lean-rs-worker-child`, `lean-rs-host`, the Lean shims, and `PROTOCOL_VERSION` are unchanged.
+The pool intentionally keeps one worker entry per compatible capability/import-workspace session for now; reusing one
+loaded capability child across many target workspaces is deferred until a named workload measures dylib reload or worker
+churn as the bottleneck.
+
 ## [0.1.20]
 
 ### Pristine-entry proof position (`ProofPositionSelector::Entry`)

@@ -456,6 +456,13 @@ impl LeanWorker {
             open: true,
         })
     }
+
+    pub(crate) fn attach_open_session(&mut self) -> LeanWorkerSession<'_> {
+        LeanWorkerSession {
+            worker: self,
+            open: true,
+        }
+    }
 }
 
 impl LeanWorkerSession<'_> {

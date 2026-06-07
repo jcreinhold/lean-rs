@@ -3,14 +3,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lean_rs::LeanBuiltCapability;
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerBootstrapDiagnosticCode, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityFact,
     LeanWorkerCapabilityMetadata, LeanWorkerChild, LeanWorkerCommandMetadata, LeanWorkerConfig,
-    LeanWorkerDeclarationFilter, LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerJsonCommand,
-    LeanWorkerRestartPolicy, LeanWorkerSessionConfig,
+    LeanWorkerDeclarationFilter, LeanWorkerError, LeanWorkerHostHandleBuilder, LeanWorkerJsonCommand, LeanWorkerPool,
+    LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig, LeanWorkerStreamingCommand,
+    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use lean_rs_worker_protocol::worker_exports::fixture_mul_signature;
 use lean_toolchain::CargoLeanCapability;
@@ -242,6 +244,47 @@ fn write_transitive_dependency_fixture(project: &TempLakeProject) {
     project.lake_build_ok("Consumer");
 }
 
+fn write_external_import_workspace_fixture(project: &TempLakeProject) {
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage audited_workspace\nlean_lib B\n",
+    );
+    project.write("B.lean", "import B.Mod\n");
+    project.write("B/Mod.lean", "def B.Mod.externalValue : Nat := 7\n");
+    project.lake_build_ok("B.Mod");
+}
+
+fn external_import_builder() -> LeanWorkerCapabilityBuilder {
+    LeanWorkerCapabilityBuilder::new(
+        interop_root(),
+        "lean_rs_interop_consumer",
+        "LeanRsInteropConsumer",
+        ["B.Mod"],
+    )
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
+    .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
+    .worker_executable(worker_binary())
+}
+
+#[derive(Default)]
+struct CountingJsonRows {
+    rows: Mutex<u64>,
+}
+
+impl CountingJsonRows {
+    fn count(&self) -> u64 {
+        *self.rows.lock().expect("row count lock is not poisoned")
+    }
+}
+
+impl LeanWorkerTypedDataSink<serde_json::Value> for CountingJsonRows {
+    fn report(&self, _row: LeanWorkerTypedDataRow<serde_json::Value>) {
+        let mut rows = self.rows.lock().expect("row count lock is not poisoned");
+        *rows = rows.saturating_add(1);
+    }
+}
+
 #[test]
 fn built_capability_builder_infers_lake_root_from_dylib_path() {
     let dylib = interop_root()
@@ -403,6 +446,199 @@ fn shims_only_host_handle_imports_transitive_lake_package_oleans() {
             );
         }
         Err(other) => panic!("expected LeanException worker error for missing import, got {other:?}"),
+    }
+}
+
+#[test]
+fn manifest_capability_import_workspace_root_imports_external_workspace_only() {
+    let project = TempLakeProject::new("capability-external-import-root");
+    write_external_import_workspace_fixture(&project);
+
+    let mut capability = external_import_builder()
+        .import_workspace_root(project.path())
+        .open()
+        .expect("capability imports the external workspace module");
+    let mut session = capability
+        .open_session(None, None)
+        .expect("external workspace session opens");
+    let declarations = session
+        .list_declarations_strings(&LeanWorkerDeclarationFilter::default(), None, None)
+        .expect("standard declaration service sees external workspace");
+    assert!(
+        declarations.iter().any(|name| name == "B.Mod.externalValue"),
+        "external import root should expose B.Mod declarations"
+    );
+
+    match external_import_builder().open() {
+        Ok(_) => panic!("B.Mod unexpectedly imported from the capability project root"),
+        Err(LeanWorkerError::Worker { code, message }) => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+            assert!(
+                message.contains("unknown module prefix 'B'"),
+                "missing external module prefix should be named in the import error: {message}"
+            );
+        }
+        Err(other) => panic!("expected Lean import failure without import root override, got {other:?}"),
+    }
+
+    match capability.open_session_with_imports(["LeanRsInteropConsumer.Callback"], None, None) {
+        Ok(_) => panic!("capability project module leaked into the external import root"),
+        Err(LeanWorkerError::Worker { code, message }) => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+            assert!(
+                message.contains("unknown module prefix 'LeanRsInteropConsumer'"),
+                "leak-check import error should name the capability module prefix: {message}"
+            );
+        }
+        Err(other) => panic!("expected Lean import failure for capability-project module, got {other:?}"),
+    }
+}
+
+#[test]
+fn pooled_manifest_capability_reuses_external_import_workspace_session() {
+    let project = TempLakeProject::new("capability-external-import-root-pool");
+    write_external_import_workspace_fixture(&project);
+    let command = LeanWorkerStreamingCommand::<serde_json::Value, serde_json::Value, serde_json::Value>::new(
+        "lean_rs_interop_consumer_worker_shape_index",
+    );
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+
+    let cold_started = Instant::now();
+    {
+        let mut lease = pool
+            .acquire_lease(external_import_builder().import_workspace_root(project.path()))
+            .expect("pool opens external import-root lease");
+        let cold_elapsed = cold_started.elapsed();
+        let imports_after_open = lease.snapshot().imports;
+        let sink = CountingJsonRows::default();
+        let summary = lease
+            .run_streaming_command(
+                &command,
+                &json!({"source": "external-root-cold"}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect("streaming command runs through pooled external-root lease");
+        assert_eq!(summary.total_rows, sink.count());
+        assert_eq!(
+            lease.snapshot().imports,
+            imports_after_open,
+            "streaming command should attach to the already-open pool session"
+        );
+        println!(
+            "workload=external_import_root_pooled_capability platform={}/{} capability_imports=1 audited_modules=1 cold_first_lease_ms={} workers={} imports_after_cold={}",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            cold_elapsed.as_millis(),
+            lease.snapshot().workers,
+            lease.snapshot().imports,
+        );
+    }
+
+    let imports_after_cold = pool.snapshot().imports;
+    let warm_started = Instant::now();
+    {
+        let mut lease = pool
+            .acquire_lease(external_import_builder().import_workspace_root(project.path().join(".")))
+            .expect("pool reuses canonical-equivalent external import-root lease");
+        let warm_elapsed = warm_started.elapsed();
+        let sink = CountingJsonRows::default();
+        let summary = lease
+            .run_streaming_command(
+                &command,
+                &json!({"source": "external-root-warm"}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect("streaming command runs through warm external-root lease");
+        assert_eq!(summary.total_rows, sink.count());
+        assert_eq!(
+            lease.snapshot().imports,
+            imports_after_cold,
+            "warm same-workspace lease should not reopen the imported session"
+        );
+        println!(
+            "workload=external_import_root_pooled_capability warm_second_lease_ms={} workers={} imports_after_warm={}",
+            warm_elapsed.as_millis(),
+            lease.snapshot().workers,
+            lease.snapshot().imports,
+        );
+    }
+
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.workers, 1);
+    assert_eq!(snapshot.warm_leases, 1);
+    assert_eq!(snapshot.imports, imports_after_cold);
+    println!(
+        "workload=external_import_root_pooled_capability final_workers={} final_warm_leases={} final_imports={}",
+        snapshot.workers, snapshot.warm_leases, snapshot.imports,
+    );
+}
+
+#[test]
+fn external_import_workspace_root_preserves_timeout_and_fatal_errors() {
+    let project = TempLakeProject::new("capability-external-import-root-failures");
+    write_external_import_workspace_fixture(&project);
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+
+    {
+        let mut lease = pool
+            .acquire_lease(external_import_builder().import_workspace_root(project.path()))
+            .expect("pool opens external import-root lease");
+        lease
+            .set_request_timeout(Duration::from_millis(50))
+            .expect("request timeout override is accepted");
+        let command = LeanWorkerStreamingCommand::<serde_json::Value, serde_json::Value, serde_json::Value>::new(
+            "lean_rs_interop_consumer_worker_shape_timeout_after_row",
+        );
+        let sink = CountingJsonRows::default();
+        let err = lease
+            .run_streaming_command(
+                &command,
+                &json!({"source": "external-root-timeout"}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect_err("timeout fixture should preserve existing timeout semantics");
+        match err {
+            LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "worker_run_data_stream"),
+            other => panic!("expected timeout error, got {other:?}"),
+        }
+        assert!(!lease.is_valid(), "timeout should invalidate the current lease");
+    }
+
+    {
+        let mut lease = pool
+            .acquire_lease(external_import_builder().import_workspace_root(project.path()))
+            .expect("pool reacquires external import-root lease after timeout");
+        let command = LeanWorkerStreamingCommand::<serde_json::Value, serde_json::Value, serde_json::Value>::new(
+            "lean_rs_interop_consumer_worker_shape_panic_after_row",
+        );
+        let sink = CountingJsonRows::default();
+        let err = lease
+            .run_streaming_command(
+                &command,
+                &json!({"source": "external-root-fatal"}),
+                &sink,
+                None,
+                None,
+                None,
+            )
+            .expect_err("fatal fixture should preserve existing fatal-exit semantics");
+        match err {
+            LeanWorkerError::ChildPanicOrAbort { exit } => assert!(!exit.success),
+            other => panic!("expected fatal child exit, got {other:?}"),
+        }
+        assert!(
+            !lease.is_valid(),
+            "fatal child exit should invalidate the current lease"
+        );
     }
 }
 

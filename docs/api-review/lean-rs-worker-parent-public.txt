@@ -469,6 +469,7 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::check(&self) -> lean_
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::doctor_export(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::expect_metadata(self, impl core::convert::Into<alloc::string::String>, serde_json::value::Value, lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(&lean_toolchain::built_capability::LeanBuiltCapability, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> core::result::Result<Self, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::import_workspace_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::json_command_export(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::max_frame_bytes(self, u32) -> Self
@@ -1043,6 +1044,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerSessionConfig
 pub struct lean_rs_worker_parent::LeanWorkerSessionKey
 impl lean_rs_worker_parent::LeanWorkerSessionKey
+pub fn lean_rs_worker_parent::LeanWorkerSessionKey::import_workspace_root(&self) -> &std::path::Path
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::imports(&self) -> &[alloc::string::String]
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::lib_name(&self) -> &str
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::metadata_expectation(self, impl core::convert::Into<alloc::string::String>, serde_json::value::Value, core::option::Option<lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata>) -> Self

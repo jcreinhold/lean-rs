@@ -84,7 +84,8 @@ child processes.
 
 Pool reuse is keyed by the facts that make a worker session safe and useful to reuse:
 
-- Lake project root;
+- capability Lake project root;
+- import workspace root;
 - capability package and target;
 - import set;
 - capability metadata expectations;
@@ -95,9 +96,19 @@ The key is not a downstream cache key. Downstream crates still decide whether a 
 semantically valid. The pool key only answers a worker question: can this already-open child session run the next
 compatible request without repeating setup or violating policy?
 
+The import workspace root is key material because the current pool model holds one open session per worker entry, and a
+Lean session's search path is fixed when it opens. The implemented design is one worker entry per compatible
+`(capability, import workspace)` pair. That keeps same-workspace audits warm and prevents different workspaces from
+aliasing one session.
+
 The key records capability metadata expectations as opaque generic metadata facts. The worker crates can compare the
 expected and actual metadata envelopes, but it does not interpret downstream command versions or decide cache
 invalidation.
+
+A future pool design could key workers only by capability identity and reopen sessions against different target
+workspaces on the same loaded capability child. That would be a deeper change to the pool invariant and lifecycle model.
+It should be built only if a named `lean-dup` audit-many-workspaces workload measures worker churn or dylib reload as a
+bottleneck; until then, the current keyed-session model is the supported behavior.
 
 ## What The Pool Hides
 
