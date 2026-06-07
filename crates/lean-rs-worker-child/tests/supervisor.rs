@@ -135,6 +135,32 @@ fn max_import_policy_restarts_before_next_import() {
 }
 
 #[test]
+fn memory_bounded_policy_restarts_before_next_import() {
+    ensure_fixture_built();
+    let fixture = fixture_root();
+    let config = worker_config().restart_policy(LeanWorkerRestartPolicy::memory_bounded(1, 1_073_741_824));
+    let mut worker = LeanWorker::spawn(&config).expect("worker starts");
+    worker
+        .load_fixture_capability(&fixture)
+        .expect("first import-like request succeeds");
+    assert_eq!(worker.stats().restarts, 0);
+
+    worker
+        .load_fixture_capability(&fixture)
+        .expect("second import-like request succeeds after memory-bounded restart");
+    let stats = worker.stats();
+    assert_eq!(stats.imports, 2);
+    assert_eq!(stats.restarts, 1);
+    assert_eq!(stats.max_import_restarts, 1);
+    assert_eq!(
+        stats.last_restart_reason,
+        Some(LeanWorkerRestartReason::MaxImports { limit: 1 })
+    );
+    let exit = worker.terminate().expect("worker terminates");
+    assert!(exit.success, "worker should exit cleanly after import policy restart");
+}
+
+#[test]
 fn idle_restart_policy_restarts_before_next_request() {
     let idle_limit = Duration::from_millis(100);
     let config = worker_config().restart_policy(LeanWorkerRestartPolicy::default().idle_restart_after(idle_limit));

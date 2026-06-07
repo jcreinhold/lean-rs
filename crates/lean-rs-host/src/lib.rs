@@ -43,6 +43,6 @@ pub use crate::host::{
     DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, LeanCapabilities,
     LeanDeclarationFilter, LeanHost, LeanSession, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope,
     ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
-    ProofPositionSelector, ProofPositionSummary, SessionPool, SessionStats,
+    ProofPositionSelector, ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolMemoryPolicy, SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

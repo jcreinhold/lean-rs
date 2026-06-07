@@ -304,6 +304,7 @@ fn parse_code_str(raw: &str) -> Option<LeanDiagnosticCode> {
         "lean_rs.elaboration" | "Elaboration" => Some(LeanDiagnosticCode::Elaboration),
         "lean_rs.unsupported" | "Unsupported" => Some(LeanDiagnosticCode::Unsupported),
         "lean_rs.internal" | "Internal" => Some(LeanDiagnosticCode::Internal),
+        "lean_rs.resource_exhausted" | "ResourceExhausted" => Some(LeanDiagnosticCode::ResourceExhausted),
         _ => None,
     }
 }

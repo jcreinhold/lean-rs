@@ -27,14 +27,18 @@ use std::time::{Duration, Instant};
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError,
     LeanWorkerImportPlanConfig, LeanWorkerImportPlanner, LeanWorkerModuleWork, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
-    LeanWorkerTypedDataSink,
+    LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRestartPolicy, LeanWorkerStreamingCommand,
+    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
 use lean_toolchain::{
     LeanModuleDiscoveryOptions, LeanModuleSetFingerprint, ToolchainFingerprint, discover_lake_modules,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 4_194_304;
+const DEFAULT_PER_WORKER_RSS_KIB: u64 = 1_572_864;
+const DEFAULT_MAX_IMPORTS: u64 = 8;
 
 fn main() -> ExitCode {
     match run() {
@@ -196,6 +200,7 @@ fn planned_builders(
                 .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row")
                 .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
                 .worker_executable(worker_binary)
+                .restart_policy(memory_restart_policy())
         })
         .collect())
 }
@@ -207,7 +212,7 @@ fn run_index_workload(
     workload: &Workload,
 ) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
     let started = Instant::now();
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(max_workers).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(max_workers));
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_index",
     );
@@ -268,7 +273,7 @@ fn run_index_workload(
 
 fn run_cancelled_workload(worker_binary: &Path, workload: &Workload) -> Result<bool, Box<dyn std::error::Error>> {
     let started = Instant::now();
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let token = LeanWorkerCancellationToken::new();
     let sink = CancelAfterFirstRow {
         token: &token,
@@ -296,7 +301,7 @@ fn run_cancelled_workload(worker_binary: &Path, workload: &Workload) -> Result<b
 
 fn run_fatal_workload(worker_binary: &Path, workload: &Workload) -> Result<bool, Box<dyn std::error::Error>> {
     let started = Instant::now();
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let sink = CountingRows::default();
     let command = LeanWorkerStreamingCommand::<ScaleRequest, ScaleRow, ScaleSummary>::new(
         "lean_rs_interop_consumer_worker_shape_mathlib_scale_panic_after_row",
@@ -320,7 +325,7 @@ fn run_fatal_workload(worker_binary: &Path, workload: &Workload) -> Result<bool,
 }
 
 fn run_cycle_workload(worker_binary: &Path, workload: &Workload) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let mut lease = pool.acquire_lease(first_builder(worker_binary, workload)?)?;
     lease.cycle()?;
     drop(lease);
@@ -333,7 +338,7 @@ fn run_slow_sink_workload(
 ) -> Result<WorkloadResult, Box<dyn std::error::Error>> {
     let parent_rss_before = current_process_rss_kib();
     let started = Instant::now();
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
     let sink = SlowManyRows::new(Duration::from_millis(2));
     let command = LeanWorkerStreamingCommand::<serde_json::Value, ManyRow, serde_json::Value>::new(
         "lean_rs_interop_consumer_worker_data_stream_many",
@@ -365,6 +370,32 @@ fn run_slow_sink_workload(
     Ok(WorkloadResult {
         rows: summary.total_rows,
     })
+}
+
+fn memory_pool_config(max_workers: usize) -> LeanWorkerPoolConfig {
+    LeanWorkerPoolConfig::new(max_workers)
+        .max_total_child_rss_kib(env_u64(
+            "LEAN_RS_MATHLIB_SCALE_TOTAL_RSS_KIB",
+            DEFAULT_TOTAL_CHILD_RSS_KIB,
+        ))
+        .per_worker_rss_ceiling_kib(env_u64(
+            "LEAN_RS_MATHLIB_SCALE_PER_WORKER_RSS_KIB",
+            DEFAULT_PER_WORKER_RSS_KIB,
+        ))
+}
+
+fn memory_restart_policy() -> LeanWorkerRestartPolicy {
+    LeanWorkerRestartPolicy::memory_bounded(
+        env_u64("LEAN_RS_MATHLIB_SCALE_MAX_IMPORTS", DEFAULT_MAX_IMPORTS),
+        env_u64("LEAN_RS_MATHLIB_SCALE_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
+    )
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
 }
 
 fn first_builder(

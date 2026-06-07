@@ -48,14 +48,19 @@ cd fixtures/lean && lake build && cd -
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-The default workload is RSS-shaped, not latency-shaped:
+The default workload is bounded so it can be run on a developer machine without reproducing the OOM failure mode:
 
-- 192 fresh import/drop acquisitions through `SessionPool::with_capacity(runtime, 0)`.
-- 192 bounded-pool acquisitions through `SessionPool::with_capacity(runtime, 4)`.
-- 512 `query_declarations_bulk` calls over 16 fixture names.
-- 512 elaboration calls, 50/50 success vs. diagnostic-producing terms.
+- 4 fresh import/drop acquisitions through a zero-capacity pool with `max_fresh_imports=4`.
+- 4 bounded-pool acquisitions through a pool with capacity 4 and the same fresh-import budget.
+- 64 `query_declarations_bulk` calls over 16 fixture names.
+- 64 elaboration calls, 50/50 success vs. diagnostic-producing terms.
 - Snapshots before/after runtime init, host/capability load, import loops, bulk introspection, elaboration, drop, and a
   short steady-state pause.
+
+The old crash-shaped workload remains opt-in: raise `LEAN_RS_LONG_SESSION_IMPORTS`, `LEAN_RS_LONG_SESSION_BULK`, and
+`LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Set
+`LEAN_RS_LONG_SESSION_MAX_RSS_KIB` to make the same-process pool refuse the next fresh import before crossing a local
+RSS ceiling.
 
 Environment overrides:
 
@@ -65,8 +70,16 @@ LEAN_RS_LONG_SESSION_BULK=512 \
 LEAN_RS_LONG_SESSION_ELAB=512 \
 LEAN_RS_LONG_SESSION_POOL_CAPACITY=4 \
 LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY=16 \
+LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152 \
 LEAN_RS_NUM_THREADS=1 \
 cargo run --release -p lean-rs-host --example long_session_memory
+```
+
+The profiling wrappers under `profiling/scripts/` run the bounded variants and can be recorded with `samply`:
+
+```sh
+./profiling/scripts/profile_memory.sh long-session
+./profiling/scripts/profile_with_samply.sh long-session
 ```
 
 This is not a Criterion bench by design. Criterion answers per-iteration latency questions; this workload answers
@@ -145,8 +158,9 @@ caches.
 ## Consumer Pattern
 
 Reuse imported environments. Keep a small `SessionPool` keyed by the import set and run introspection, elaboration,
-kernel checks, and `MetaM` calls against pooled sessions. Steady operations against a warm environment do not accumulate
-RSS.
+kernel checks, and `MetaM` calls against pooled sessions. For same-process hosts that may see many distinct import
+sets, configure `SessionPoolMemoryPolicy` so cache-miss imports fail before the process crosses a fresh-import or RSS
+budget. Steady operations against a warm environment do not accumulate RSS.
 
 Avoid repeatedly creating fresh imported environments in one process. If a workload must sweep many distinct import
 sets, put a process boundary around the sweep: restart the worker after a bounded number of fresh imports. Sixty-four

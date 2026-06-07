@@ -25,10 +25,10 @@ cargo test --doc --workspace
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **4** so total
+The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **2** so total
 memory stays bounded across CI runners (~7 GiB on `{ubuntu-latest, macos-latest}`). The workspace's
 [`.cargo/config.toml`](../.cargo/config.toml) sets `LEAN_RS_NUM_THREADS=1` so each Lean process spawns a single worker
-thread; product is at most 4 Lean workers across the full run.
+thread; product is at most 2 Lean workers across the full run.
 
 | Knob                            | Effect                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
@@ -62,6 +62,9 @@ machine or CI runner with limited memory OOMs (observed: macOS `memorystatus` ki
 memory).
 
 `cargo nextest run` runs each test in its own process, so cumulative Lean state resets at every process boundary.
+The same memory fact applies outside tests: long-running applications should use the worker crates with restart/RSS
+policy, or a same-process `SessionPool` with a fresh-import memory policy, when they may open many distinct import
+sets.
 
 ## Why not fix the cumulative growth instead
 

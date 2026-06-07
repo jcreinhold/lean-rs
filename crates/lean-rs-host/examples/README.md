@@ -206,8 +206,13 @@ repeated fresh imports, bounded `SessionPool` reuse, bulk declaration queries, e
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-**Expected output:** stable `key=value` lines including `lean_version`, `lean_resolved_version`, workload parameters,
-`pool_stats=...`, and `checkpoint=<stage> rss_kib=<u64>`.
+**Expected output:** stable `key=value` lines including `lean_version`, workload parameters, `pool_stats=...`, and
+`checkpoint=<stage> rss_kib=<u64>`.
+
+Defaults are bounded. Raise `LEAN_RS_LONG_SESSION_IMPORTS` only after the previous run's peak RSS is acceptable, and set
+`LEAN_RS_LONG_SESSION_MAX_RSS_KIB` to make the example refuse the next fresh import before crossing a local ceiling.
+The same workload is wrapped by `profiling/scripts/profile_memory.sh long-session` and
+`profiling/scripts/profile_with_samply.sh long-session`.
 
 This example is intentionally not a Criterion bench. It answers a retained-memory question over minutes and lifetime
 boundaries; Criterion answers per-iteration latency questions. The measured model and consumer guidance live in

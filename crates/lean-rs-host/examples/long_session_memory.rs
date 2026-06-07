@@ -18,15 +18,15 @@ use std::process::{Command, ExitCode};
 use std::thread;
 use std::time::Duration;
 
-use lean_rs::{LeanResult, LeanRuntime};
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, PoolStats, SessionPool};
+use lean_rs::{LeanDiagnosticCode, LeanResult, LeanRuntime};
+use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, PoolStats, SessionPool, SessionPoolMemoryPolicy};
 use lean_toolchain::LEAN_VERSION;
 
-const DEFAULT_IMPORTS: usize = 192;
-const DEFAULT_BULK: usize = 512;
-const DEFAULT_ELAB: usize = 512;
+const DEFAULT_IMPORTS: usize = 4;
+const DEFAULT_BULK: usize = 64;
+const DEFAULT_ELAB: usize = 64;
 const DEFAULT_POOL_CAPACITY: usize = 4;
-const DEFAULT_CHECKPOINT_EVERY: usize = 64;
+const DEFAULT_CHECKPOINT_EVERY: usize = 1;
 const STEADY_STATE_PAUSE_MS: u64 = 2_000;
 
 const IMPORTS: [&str; 1] = ["LeanRsFixture.Handles"];
@@ -58,6 +58,7 @@ struct Config {
     elab: usize,
     pool_capacity: usize,
     checkpoint_every: usize,
+    max_rss_kib: Option<u64>,
 }
 
 fn main() -> ExitCode {
@@ -72,10 +73,21 @@ fn main() -> ExitCode {
     println!("elab_k={}", config.elab);
     println!("pool_capacity={}", config.pool_capacity);
     println!("checkpoint_every={}", config.checkpoint_every);
+    println!(
+        "max_rss_kib={}",
+        config
+            .max_rss_kib
+            .map_or_else(|| "none".to_owned(), |value| value.to_string())
+    );
 
     match run(&config) {
         Ok(()) => {
             println!("status=ok");
+            ExitCode::SUCCESS
+        }
+        Err(err) if err.code() == LeanDiagnosticCode::ResourceExhausted => {
+            eprintln!("[{}] {err}", err.code());
+            println!("status=resource_exhausted");
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -164,6 +176,7 @@ impl Config {
             elab: env_usize("LEAN_RS_LONG_SESSION_ELAB", DEFAULT_ELAB),
             pool_capacity: env_usize("LEAN_RS_LONG_SESSION_POOL_CAPACITY", DEFAULT_POOL_CAPACITY),
             checkpoint_every: env_usize("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", DEFAULT_CHECKPOINT_EVERY).max(1),
+            max_rss_kib: env_u64_optional("LEAN_RS_LONG_SESSION_MAX_RSS_KIB"),
         }
     }
 }
@@ -175,12 +188,19 @@ fn env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn env_u64_optional(name: &str) -> Option<u64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.max(1))
+}
+
 fn run_fresh_import_drop_loop(
     runtime: &'static LeanRuntime,
     caps: &LeanCapabilities<'static, '_>,
     config: &Config,
 ) -> LeanResult<PoolStats> {
-    let pool = SessionPool::with_capacity(runtime, 0);
+    let pool = SessionPool::with_memory_policy(runtime, 0, memory_policy(config));
     for iteration in 1..=config.imports {
         let session = pool.acquire(caps, &IMPORTS, None, None)?;
         drop(session);
@@ -194,7 +214,7 @@ fn run_bounded_pool_loop(
     caps: &LeanCapabilities<'static, '_>,
     config: &Config,
 ) -> LeanResult<PoolStats> {
-    let pool = SessionPool::with_capacity(runtime, config.pool_capacity);
+    let pool = SessionPool::with_memory_policy(runtime, config.pool_capacity, memory_policy(config));
     if config.pool_capacity > 0 {
         let mut warm = Vec::with_capacity(config.pool_capacity);
         for _ in 0..config.pool_capacity {
@@ -211,6 +231,15 @@ fn run_bounded_pool_loop(
     }
     println!("bounded_pool_len={}", pool.len());
     Ok(pool.stats())
+}
+
+fn memory_policy(config: &Config) -> SessionPoolMemoryPolicy {
+    let fresh_imports = config.imports.max(config.pool_capacity) as u64;
+    let mut policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(fresh_imports);
+    if let Some(limit) = config.max_rss_kib {
+        policy = policy.max_rss_kib(limit);
+    }
+    policy
 }
 
 fn fixture_lake_root() -> PathBuf {

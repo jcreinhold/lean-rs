@@ -18,6 +18,7 @@ use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolic
 
 const DEFAULT_IMPORTS: u64 = 8;
 const DEFAULT_MAX_IMPORTS: u64 = 2;
+const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
 
 fn main() -> ExitCode {
     match run() {
@@ -32,19 +33,19 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let imports = env_u64("LEAN_RS_WORKER_MEMORY_IMPORTS", DEFAULT_IMPORTS);
     let max_imports = env_u64("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", DEFAULT_MAX_IMPORTS);
+    let max_rss_kib = env_u64("LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB", DEFAULT_MAX_RSS_KIB);
     let fixture = fixture_root();
     lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsFixture")?;
 
     let worker_binary = worker_binary()?;
-    let policy = LeanWorkerRestartPolicy::default()
-        .max_imports(max_imports)
-        .max_rss_kib(u64::MAX);
+    let policy = LeanWorkerRestartPolicy::memory_bounded(max_imports, max_rss_kib);
     let mut worker = LeanWorker::spawn(&LeanWorkerConfig::new(worker_binary).restart_policy(policy))?;
 
     println!("workload=worker_memory_cycling");
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("imports={imports}");
     println!("max_imports_per_child={max_imports}");
+    println!("max_rss_kib={max_rss_kib}");
 
     for iteration in 1..=imports {
         let value = worker.call_fixture_mul(&fixture, iteration, 2)?;

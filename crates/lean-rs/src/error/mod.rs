@@ -170,6 +170,11 @@ impl LeanError {
         Self::host(HostStage::Internal, LeanDiagnosticCode::Internal, message)
     }
 
+    /// Build a resource-exhaustion host failure for caller-configured limits.
+    pub(crate) fn resource_exhausted(message: impl Into<String>) -> Self {
+        Self::host(HostStage::Resource, LeanDiagnosticCode::ResourceExhausted, message)
+    }
+
     /// Build a cooperative cancellation report.
     pub(crate) fn cancelled() -> Self {
         Self::Cancelled(LeanCancelled {
@@ -338,6 +343,8 @@ pub enum HostStage {
     Load,
     /// A `pub(crate)` invariant tripped. Indicates a bug in `lean-rs`.
     Internal,
+    /// A caller-configured memory, import, byte, or request budget was exhausted.
+    Resource,
 }
 
 /// Stable, caller-facing classification of a `lean-rs` failure.
@@ -396,6 +403,8 @@ pub enum LeanDiagnosticCode {
     /// A `pub(crate)` invariant tripped, or a callback panicked inside
     /// the safe boundary. Indicates a bug in `lean-rs`.
     Internal,
+    /// A caller-configured resource budget was exhausted before the operation ran.
+    ResourceExhausted,
 }
 
 impl LeanDiagnosticCode {
@@ -417,6 +426,7 @@ impl LeanDiagnosticCode {
             Self::Unsupported => "lean_rs.unsupported",
             Self::Cancelled => "lean_rs.cancelled",
             Self::Internal => "lean_rs.internal",
+            Self::ResourceExhausted => "lean_rs.resource_exhausted",
         }
     }
 
@@ -435,6 +445,7 @@ impl LeanDiagnosticCode {
             Self::Unsupported => "the loaded capability does not expose the requested service",
             Self::Cancelled => "a cooperative cancellation token was observed before dispatch",
             Self::Internal => "a pub(crate) invariant tripped — likely a bug in lean-rs",
+            Self::ResourceExhausted => "a caller-configured resource budget was exhausted before dispatch",
         }
     }
 }
@@ -561,6 +572,12 @@ pub fn host_cancelled() -> LeanError {
 #[doc(hidden)]
 pub fn host_internal(message: impl Into<String>) -> LeanError {
     LeanError::internal(message)
+}
+
+/// Construct a host resource-exhaustion failure. See [`LeanError::resource_exhausted`].
+#[doc(hidden)]
+pub fn host_resource_exhausted(message: impl Into<String>) -> LeanError {
+    LeanError::resource_exhausted(message)
 }
 
 /// Construct a callback-panic host failure. See [`LeanError::callback_panic`].

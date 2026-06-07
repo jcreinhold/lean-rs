@@ -30,6 +30,7 @@ the same failure happens inside the worker crates, the parent observes a typed w
 | `Elaboration` | `lean_rs.elaboration` | Term parsing or elaboration produced diagnostics. Payload is `LeanElabFailure` with typed diagnostics. | Walk `failure.diagnostics()`: each carries a `severity`, bounded `message`, optional `position`, and `file_label`. If `failure.truncated() == true`, raise `LeanElabOptions::diagnostic_byte_limit` and rerun. |
 | `Unsupported` | `lean_rs.unsupported` | The host shim returned `unsupported` for the requested service, or an optional meta-service symbol was absent at load. | Rebuild the bundled host shims and the consumer capability with the same Lean toolchain. The fixture in this repo exercises all four meta services (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`). |
 | `Cancelled` | `lean_rs.cancelled` | A `lean-rs-host` cooperative cancellation token was observed before a host-controlled FFI dispatch. | Treat the operation as aborted and discard partial work. Create a fresh token before retrying. |
+| `ResourceExhausted` | `lean_rs.resource_exhausted` | A caller-configured resource budget was exhausted before the operation ran. | Reuse an existing session, cycle the worker process, reduce result size, or raise the explicit budget after measuring peak RSS. |
 | `Internal` | `lean_rs.internal` | A `pub(crate)` invariant tripped, or a callback panicked inside the safe boundary. | File a bug; include the bounded message and the `as_str()` id. |
 
 The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids are stable across patch
@@ -148,6 +149,7 @@ fn report(err: &LeanError) {
             }
         }
         LeanDiagnosticCode::Cancelled => eprintln!("caller cancelled the operation"),
+        LeanDiagnosticCode::ResourceExhausted => eprintln!("configured resource budget exhausted: {err}"),
         other => eprintln!("unhandled {other}: {err}"),
     }
 }

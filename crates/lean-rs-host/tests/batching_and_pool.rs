@@ -15,7 +15,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lean_rs::{HostStage, LeanDiagnosticCode, LeanError, LeanRuntime};
-use lean_rs_host::{LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool};
+use lean_rs_host::{
+    LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool,
+    SessionPoolMemoryPolicy,
+};
 
 // -- fixture setup -------------------------------------------------------
 
@@ -524,6 +527,88 @@ fn session_pool_zero_capacity_never_reuses() {
     assert_eq!(stats.imports_performed, 2, "capacity 0 degenerates to always-import");
     assert_eq!(stats.released_dropped, 2, "every release drops");
     assert_eq!(pool.len(), 0, "free list never holds anything");
+}
+
+#[test]
+fn session_pool_memory_policy_refuses_cache_miss_after_import_budget() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_memory_policy(runtime, 0, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
+
+    drop(
+        pool.acquire(&caps, &["LeanRsFixture.Handles"], None, None)
+            .expect("first fresh import fits the budget"),
+    );
+    let Err(err) = pool.acquire(&caps, &["LeanRsFixture.Handles"], None, None) else {
+        panic!("second fresh import should be refused before Lean imports again");
+    };
+
+    assert_eq!(err.code(), LeanDiagnosticCode::ResourceExhausted);
+    match err {
+        LeanError::Host(host) => {
+            assert_eq!(host.stage(), HostStage::Resource);
+            assert!(
+                host.message().contains("max_fresh_imports=1"),
+                "message should name the exhausted budget: {}",
+                host.message(),
+            );
+        }
+        LeanError::LeanException(other) => panic!("expected Host resource exhaustion, got LeanException {other:?}"),
+        LeanError::Cancelled(other) => panic!("expected Host resource exhaustion, got Cancelled {other:?}"),
+    }
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.fresh_import_refusals, 1);
+    assert_eq!(stats.acquired, 1, "refused import is not an acquired session");
+}
+
+#[test]
+fn session_pool_memory_policy_allows_reuse_after_import_budget() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("first fresh import warms the pool"),
+    );
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("reuse remains allowed after fresh-import budget is exhausted"),
+    );
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 1);
+    assert_eq!(stats.fresh_import_refusals, 0);
+    assert_eq!(stats.acquired, 2);
+}
+
+#[test]
+fn session_pool_memory_policy_refuses_cache_miss_at_rss_ceiling() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_memory_policy(runtime, 0, SessionPoolMemoryPolicy::disabled().max_rss_kib(1));
+
+    let Err(err) = pool.acquire(&caps, &["LeanRsFixture.Handles"], None, None) else {
+        panic!("RSS ceiling of 1 KiB should refuse before the first import");
+    };
+
+    assert_eq!(err.code(), LeanDiagnosticCode::ResourceExhausted);
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 0);
+    assert_eq!(stats.fresh_import_refusals, 1);
+    assert_eq!(stats.rss_samples, 1);
 }
 
 #[test]

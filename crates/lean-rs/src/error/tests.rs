@@ -42,6 +42,10 @@ fn lean_error_code_projects_from_variant() {
     assert_eq!(LeanError::symbol_lookup("x").code(), LeanDiagnosticCode::SymbolLookup);
     assert_eq!(LeanError::runtime_init("x").code(), LeanDiagnosticCode::RuntimeInit);
     assert_eq!(
+        LeanError::resource_exhausted("x").code(),
+        LeanDiagnosticCode::ResourceExhausted,
+    );
+    assert_eq!(
         LeanError::lean_exception(LeanExceptionKind::UserError, "x").code(),
         LeanDiagnosticCode::LeanException,
     );
@@ -58,6 +62,10 @@ fn diagnostic_code_as_str_is_stable() {
     assert_eq!(LeanDiagnosticCode::Elaboration.as_str(), "lean_rs.elaboration");
     assert_eq!(LeanDiagnosticCode::Unsupported.as_str(), "lean_rs.unsupported");
     assert_eq!(LeanDiagnosticCode::Internal.as_str(), "lean_rs.internal");
+    assert_eq!(
+        LeanDiagnosticCode::ResourceExhausted.as_str(),
+        "lean_rs.resource_exhausted",
+    );
 }
 
 #[test]

@@ -153,6 +153,14 @@ fresh imports, pooled reuse, bulk introspection, and elaboration, printing RSS c
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
+The default workload is intentionally small and memory-bounded. Use the profiling wrappers for repeatable captures:
+
+```sh
+./profiling/scripts/profile_memory.sh long-session
+./profiling/scripts/profile_with_samply.sh long-session
+./profiling/scripts/profile_memory.sh worker-cycling
+```
+
 This is deliberately not a Criterion bench. Criterion answers per-iteration latency questions; this workload answers
 whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. See
 [`docs/safety/long-session-memory.md`](safety/long-session-memory.md) for the measured `LEAN_RESOLVED_VERSION` result

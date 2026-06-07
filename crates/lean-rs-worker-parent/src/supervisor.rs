@@ -204,9 +204,22 @@ pub struct LeanWorkerRestartPolicy {
 
 impl LeanWorkerRestartPolicy {
     /// Disable automatic policy restarts.
+    ///
+    /// Use only for short-lived tests, benchmarks, or hosts that enforce a
+    /// process memory boundary elsewhere. Long-running Lean hosts should use
+    /// [`Self::memory_bounded`] or set `max_imports`/`max_rss_kib`
+    /// explicitly, because fresh imports retain Lean process-global state
+    /// until the child exits.
     #[must_use]
     pub fn disabled() -> Self {
         Self::default()
+    }
+
+    /// Restart before fresh-import-like requests or RSS growth can accumulate
+    /// without bound in one child process.
+    #[must_use]
+    pub fn memory_bounded(max_imports: u64, max_rss_kib: u64) -> Self {
+        Self::default().max_imports(max_imports).max_rss_kib(max_rss_kib)
     }
 
     /// Restart before a request when this many requests have entered the child.

@@ -52,6 +52,9 @@
 
 use core::cell::{Cell, RefCell};
 
+#[cfg(not(target_os = "linux"))]
+use std::process::Command;
+
 use lean_rs::LeanRuntime;
 use lean_rs::Obj;
 use lean_rs::error::LeanResult;
@@ -95,6 +98,100 @@ pub struct PoolStats {
     pub drains: u64,
     /// Number of cached environments dropped by explicit drains.
     pub drained: u64,
+    /// Number of fresh imports refused by [`SessionPoolMemoryPolicy`].
+    pub fresh_import_refusals: u64,
+    /// Number of process RSS samples taken before fresh imports.
+    pub rss_samples: u64,
+    /// Number of process RSS samples that were unavailable.
+    pub rss_samples_unavailable: u64,
+}
+
+/// Policy for refusing fresh imports in a same-process [`SessionPool`].
+///
+/// Reusing an already-imported environment does not grow Lean's process-global
+/// import state. Fresh imports can, so this policy is checked only on cache
+/// miss, immediately before `Lean.importModules` would run.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SessionPoolMemoryPolicy {
+    max_fresh_imports: Option<u64>,
+    max_rss_kib: Option<u64>,
+}
+
+impl SessionPoolMemoryPolicy {
+    /// Disable import/RSS refusals.
+    ///
+    /// This preserves the historical [`SessionPool::with_capacity`] behavior
+    /// and is appropriate only for short-lived processes, tests with tiny
+    /// import counts, or explicit profiling workloads.
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Refuse the next cache-miss import once `limit` fresh imports have
+    /// already run through this pool.
+    #[must_use]
+    pub fn max_fresh_imports(mut self, limit: u64) -> Self {
+        self.max_fresh_imports = Some(limit.max(1));
+        self
+    }
+
+    /// Refuse the next cache-miss import when current process RSS is at or
+    /// above `limit_kib`.
+    #[must_use]
+    pub fn max_rss_kib(mut self, limit_kib: u64) -> Self {
+        self.max_rss_kib = Some(limit_kib.max(1));
+        self
+    }
+
+    /// Return the configured fresh-import limit.
+    #[must_use]
+    pub fn max_fresh_imports_limit(&self) -> Option<u64> {
+        self.max_fresh_imports
+    }
+
+    /// Return the configured process RSS ceiling in KiB.
+    #[must_use]
+    pub fn max_rss_kib_limit(&self) -> Option<u64> {
+        self.max_rss_kib
+    }
+}
+
+/// Configuration for a same-process [`SessionPool`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionPoolConfig {
+    capacity: usize,
+    memory_policy: SessionPoolMemoryPolicy,
+}
+
+impl SessionPoolConfig {
+    /// Create a pool configuration with a fixed free-list capacity.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            memory_policy: SessionPoolMemoryPolicy::disabled(),
+        }
+    }
+
+    /// Set the policy used before cache-miss imports.
+    #[must_use]
+    pub fn memory_policy(mut self, policy: SessionPoolMemoryPolicy) -> Self {
+        self.memory_policy = policy;
+        self
+    }
+
+    /// Return the configured free-list capacity.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Return the configured memory policy.
+    #[must_use]
+    pub fn memory_policy_ref(&self) -> &SessionPoolMemoryPolicy {
+        &self.memory_policy
+    }
 }
 
 // -- ImportsKey: hashable cache key for the imports list -----------------
@@ -156,6 +253,7 @@ impl<'lean> PoolInner<'lean> {
 pub struct SessionPool<'lean> {
     runtime: &'lean LeanRuntime,
     capacity: usize,
+    memory_policy: SessionPoolMemoryPolicy,
     inner: RefCell<PoolInner<'lean>>,
     stats: Cell<PoolStats>,
 }
@@ -176,14 +274,28 @@ impl<'lean> SessionPool<'lean> {
     /// runtime reference.
     #[must_use]
     pub fn with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self {
+        Self::with_config(runtime, SessionPoolConfig::new(capacity))
+    }
+
+    /// Build an empty pool from an explicit configuration.
+    #[must_use]
+    pub fn with_config(runtime: &'lean LeanRuntime, config: SessionPoolConfig) -> Self {
+        let capacity = config.capacity;
         Self {
             runtime,
             capacity,
+            memory_policy: config.memory_policy,
             inner: RefCell::new(PoolInner {
                 free: Vec::with_capacity(capacity),
             }),
             stats: Cell::new(PoolStats::default()),
         }
+    }
+
+    /// Build an empty pool with a fresh-import memory policy.
+    #[must_use]
+    pub fn with_memory_policy(runtime: &'lean LeanRuntime, capacity: usize, policy: SessionPoolMemoryPolicy) -> Self {
+        Self::with_config(runtime, SessionPoolConfig::new(capacity).memory_policy(policy))
     }
 
     /// Acquire a session targeting `imports` under `caps`.
@@ -236,6 +348,7 @@ impl<'lean> SessionPool<'lean> {
                 (LeanSession::from_environment(caps, env)?, true)
             } else {
                 drop(inner);
+                self.enforce_before_fresh_import(imports)?;
                 let session = caps.session(imports, cancellation, progress)?;
                 self.bump_imported();
                 (session, false)
@@ -288,6 +401,12 @@ impl<'lean> SessionPool<'lean> {
         self.capacity
     }
 
+    /// Return the configured memory policy.
+    #[must_use]
+    pub fn memory_policy(&self) -> &SessionPoolMemoryPolicy {
+        &self.memory_policy
+    }
+
     /// Drop every cached environment currently retained by the pool.
     ///
     /// Returns the number of free-list entries removed. Each removed
@@ -335,6 +454,59 @@ impl<'lean> SessionPool<'lean> {
         self.stats.set(s);
     }
 
+    fn bump_fresh_import_refusal(&self) {
+        let mut s = self.stats.get();
+        s.fresh_import_refusals = s.fresh_import_refusals.saturating_add(1);
+        self.stats.set(s);
+    }
+
+    fn bump_rss_sample(&self, unavailable: bool) {
+        let mut s = self.stats.get();
+        s.rss_samples = s.rss_samples.saturating_add(1);
+        if unavailable {
+            s.rss_samples_unavailable = s.rss_samples_unavailable.saturating_add(1);
+        }
+        self.stats.set(s);
+    }
+
+    fn enforce_before_fresh_import(&self, imports: &[&str]) -> LeanResult<()> {
+        let stats = self.stats.get();
+        if let Some(limit) = self.memory_policy.max_fresh_imports
+            && stats.imports_performed >= limit
+        {
+            self.bump_fresh_import_refusal();
+            return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+                "same-process SessionPool refused fresh import #{} for {} import(s): max_fresh_imports={limit}; reuse a pooled environment or cycle the worker process",
+                stats.imports_performed.saturating_add(1),
+                imports.len(),
+            )));
+        }
+
+        if let Some(limit_kib) = self.memory_policy.max_rss_kib {
+            match current_process_rss_kib() {
+                Some(current_kib) if current_kib >= limit_kib => {
+                    self.bump_rss_sample(false);
+                    self.bump_fresh_import_refusal();
+                    return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+                        "same-process SessionPool refused fresh import for {} import(s): current RSS {current_kib} KiB reached max_rss_kib={limit_kib}; cycle the worker process to reset Lean process-global import state",
+                        imports.len(),
+                    )));
+                }
+                Some(_) => self.bump_rss_sample(false),
+                None => {
+                    self.bump_rss_sample(true);
+                    self.bump_fresh_import_refusal();
+                    return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+                        "same-process SessionPool refused fresh import for {} import(s): current RSS sample unavailable while max_rss_kib={limit_kib} is configured",
+                        imports.len(),
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn release(&self, key: ImportsKey, env: Obj<'lean>) {
         let mut inner = self.inner.borrow_mut();
         let mut s = self.stats.get();
@@ -364,10 +536,33 @@ impl core::fmt::Debug for SessionPool<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SessionPool")
             .field("capacity", &self.capacity)
+            .field("memory_policy", &self.memory_policy)
             .field("len", &self.len())
             .field("stats", &self.stats.get())
             .finish()
     }
+}
+
+#[cfg(target_os = "linux")]
+fn current_process_rss_kib() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        let rest = line.strip_prefix("VmRSS:")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_process_rss_kib() -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim().parse::<u64>().ok().filter(|value| *value > 0)
 }
 
 // -- PooledSession -------------------------------------------------------

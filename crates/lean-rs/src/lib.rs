@@ -118,6 +118,7 @@ pub mod __host_internals {
     pub use crate::error::host_cancelled;
     pub use crate::error::host_internal;
     pub use crate::error::host_module_init;
+    pub use crate::error::host_resource_exhausted;
     pub use crate::error::host_unsupported;
 
     /// Build a Lean `String` object without allocating an intermediate Rust

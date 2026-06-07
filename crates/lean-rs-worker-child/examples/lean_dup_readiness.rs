@@ -21,12 +21,16 @@ use std::time::{Duration, Instant};
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerError,
     LeanWorkerImportPlanConfig, LeanWorkerImportPlanner, LeanWorkerJsonCommand, LeanWorkerModuleWork, LeanWorkerPool,
-    LeanWorkerPoolConfig, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerStreamingCommand,
-    LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorkerPoolConfig, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerRestartPolicy,
+    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
 use lean_toolchain::{LeanModuleSetFingerprint, ToolchainFingerprint};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 2_621_440;
+const DEFAULT_PER_WORKER_RSS_KIB: u64 = 1_572_864;
+const DEFAULT_MAX_IMPORTS: u64 = 8;
 
 fn main() -> ExitCode {
     match run() {
@@ -43,7 +47,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsInteropConsumer")?;
     let parent_rss_before = current_process_rss_kib();
     let started = Instant::now();
-    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2).max_total_child_rss_kib(u64::MAX));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(2));
 
     let mut lease = pool.acquire_lease(planned_builder()?)?;
     let version = run_version(&mut lease)?;
@@ -185,7 +189,31 @@ fn planned_builder() -> Result<lean_rs_worker_parent::LeanWorkerCapabilityBuilde
         .streaming_command_export("lean_rs_interop_consumer_worker_shape_probe")
         .streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
         .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
-        .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many"))
+        .streaming_command_export("lean_rs_interop_consumer_worker_data_stream_many")
+        .restart_policy(memory_restart_policy()))
+}
+
+fn memory_pool_config(max_workers: usize) -> LeanWorkerPoolConfig {
+    LeanWorkerPoolConfig::new(max_workers)
+        .max_total_child_rss_kib(env_u64("LEAN_RS_LEAN_DUP_TOTAL_RSS_KIB", DEFAULT_TOTAL_CHILD_RSS_KIB))
+        .per_worker_rss_ceiling_kib(env_u64(
+            "LEAN_RS_LEAN_DUP_PER_WORKER_RSS_KIB",
+            DEFAULT_PER_WORKER_RSS_KIB,
+        ))
+}
+
+fn memory_restart_policy() -> LeanWorkerRestartPolicy {
+    LeanWorkerRestartPolicy::memory_bounded(
+        env_u64("LEAN_RS_LEAN_DUP_MAX_IMPORTS", DEFAULT_MAX_IMPORTS),
+        env_u64("LEAN_RS_LEAN_DUP_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
+    )
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
 }
 
 fn run_version(
