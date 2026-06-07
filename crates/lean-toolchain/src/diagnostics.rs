@@ -48,12 +48,12 @@ pub enum LinkDiagnostics {
         recovery: &'static str,
     },
     /// The active Lean toolchain is outside the supported window
-    /// declared by [`lean_rs_sys::SUPPORTED_TOOLCHAINS`].
+    /// declared by [`lean_rs_abi::SUPPORTED_TOOLCHAINS`].
     UnsupportedToolchain {
         /// `LEAN_VERSION_STRING` of the active toolchain.
         active: String,
         /// Comma-joined `versions` arrays from each
-        /// [`SupportedToolchain`](lean_rs_sys::SupportedToolchain) entry,
+        /// [`SupportedToolchain`](lean_rs_abi::SupportedToolchain) entry,
         /// rendered as `["4.23.0", "4.24.0", "4.24.1"], ["4.25.0", ...], ...`.
         supported_window: String,
     },

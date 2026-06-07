@@ -16,7 +16,7 @@ binaries that host a Lean runtime in the worker child depend on
 ```text
 lean-rs-worker-parent      (this crate; libleanshared-free)
 ├── lean-rs-worker-protocol  (wire types, no Lean link)
-└── lean-toolchain           (manifest validation, capability descriptor; lean-rs-sys metadata-only)
+└── lean-toolchain           (manifest validation, capability descriptor; link-free ABI metadata)
 ```
 
 The child runtime (`lean-rs-worker-child`) is published separately and is the only crate in the stack that links

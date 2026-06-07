@@ -1,7 +1,7 @@
 //! Typed composition of the build-baked Lean toolchain identity.
 //!
 //! Every field is a `&'static str` resolved at build time—by
-//! `lean-rs-sys`'s build script (`LEAN_VERSION`, `LEAN_HEADER_DIGEST`) or by
+//! `lean-rs-abi`'s build script (`LEAN_VERSION`, `LEAN_HEADER_DIGEST`) or by
 //! this crate's `build.rs` (`LAKE_FIXTURE_DIGEST`, `HOST_TRIPLE`). Published
 //! crate builds that do not contain the workspace fixture record a zero
 //! `LAKE_FIXTURE_DIGEST`; the value is a workspace regression key, not a
@@ -24,7 +24,7 @@ pub struct ToolchainFingerprint {
     /// `LEAN_VERSION_STRING` from the active `lean.h`.
     pub lean_version: &'static str,
     /// The version string from the matched
-    /// [`SupportedToolchain`](lean_rs_sys::SupportedToolchain) entry. Equal
+    /// [`SupportedToolchain`](lean_rs_abi::SupportedToolchain) entry. Equal
     /// to [`Self::lean_version`] except when several releases share one
     /// `lean.h` digest, in which case it is the first version listed for
     /// that entry.
@@ -43,16 +43,16 @@ impl ToolchainFingerprint {
     #[must_use]
     pub const fn current() -> Self {
         Self {
-            lean_version: lean_rs_sys::LEAN_VERSION,
-            resolved_version: lean_rs_sys::LEAN_RESOLVED_VERSION,
-            header_sha256: lean_rs_sys::LEAN_HEADER_DIGEST,
+            lean_version: lean_rs_abi::LEAN_VERSION,
+            resolved_version: lean_rs_abi::LEAN_RESOLVED_VERSION,
+            header_sha256: lean_rs_abi::LEAN_HEADER_DIGEST,
             fixture_sha256: LAKE_FIXTURE_DIGEST,
             host_triple: HOST_TRIPLE,
         }
     }
 
     /// Return `true` iff [`Self::lean_version`] is included in the
-    /// [`SUPPORTED_TOOLCHAINS`](lean_rs_sys::SUPPORTED_TOOLCHAINS) window.
+    /// [`SUPPORTED_TOOLCHAINS`](lean_rs_abi::SUPPORTED_TOOLCHAINS) window.
     ///
     /// The build script already filters at compile time, so this method
     /// returns `true` for any binary that compiled successfully. It is
@@ -60,7 +60,7 @@ impl ToolchainFingerprint {
     /// source (e.g. a remote-worker handshake).
     #[must_use]
     pub fn is_supported(&self) -> bool {
-        lean_rs_sys::supported_for(self.lean_version).is_some()
+        lean_rs_abi::supported_for(self.lean_version).is_some()
     }
 }
 

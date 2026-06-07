@@ -21,9 +21,14 @@ version.workspace = true
 # see `build.rs` for the details.
 default = ["dynamic", "mimalloc"]
 dynamic = []
+# Deprecated compatibility marker. Metadata-only consumers should depend on
+# `lean-rs-abi` or `lean-toolchain`; this crate remains the raw FFI/link crate.
 metadata-only = []
 mimalloc = []
 static = []
+
+[dependencies]
+lean-rs-abi = { workspace = true }
 
 [build-dependencies]
 sha2 = { workspace = true }

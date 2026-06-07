@@ -1,12 +1,12 @@
 # lean-rs-sys
 
-Raw FFI bindings for the Lean 4 C ABI. Sits at the bottom of the `lean-rs` workspace; everything above it (the
-[`lean-toolchain`](../lean-toolchain/) build helpers and the [`lean-rs`](../lean-rs/) safe front door) ultimately
-threads through this crate.
+Raw FFI bindings for the Lean 4 C ABI. Sits above [`lean-rs-abi`](../lean-rs-abi/), which owns link-free
+ABI/toolchain metadata, and below the [`lean-rs`](../lean-rs/) safe front door.
 
 Lean's header layout is **not** part of this crate's public semver. The semver promise covers the opaque public types,
-the `pub unsafe fn` surface, and the `SUPPORTED_TOOLCHAINS` table. The `LeanObjectRepr` layout struct is `pub(crate)`
-and may be updated to track Lean version bumps without breaking downstream code that uses the `pub unsafe fn` helpers.
+the `pub unsafe fn` surface, and the supported-window metadata re-exported from `lean-rs-abi`. The `LeanObjectRepr`
+layout struct is `pub(crate)` and may be updated to track Lean version bumps without breaking downstream code that uses
+the `pub unsafe fn` helpers.
 
 **Calling any function in this crate is `unsafe`.** Public types are opaque (`lean_object` is `[u8; 0]` plus phantom
 markers, `!Send + !Sync + !Unpin`); downstream code reaches refcount, tag, and payload state only through
@@ -17,9 +17,9 @@ capability you need.
 ## Supported Lean window
 
 Currently **4.26.0 through 4.31.0-rc1**; the authoritative list lives in
-[`crates/lean-rs-sys/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/src/supported.rs).
+[`crates/lean-rs-abi/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs).
 The build script computes a SHA-256 digest over the discovered `lean.h` and accepts any digest matching an entry in the
-[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/src/supported.rs) table.
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) table.
 Releases that ship a byte-identical `lean.h` share one entry. A miss fails the build with a bounded diagnostic naming
 the discovered digest and the full window.
 
@@ -33,12 +33,11 @@ PR.
 
 ## Build environment
 
-`build.rs` discovers Lean via `lean --print-prefix` (or `LEAN_SYSROOT` when set), emits the appropriate
-`cargo:rustc-link-*` directives, and exposes `LEAN_VERSION`, `LEAN_HEADER_PATH`, and `LEAN_HEADER_DIGEST` as build-time
-environment variables consumed by `consts.rs`. The default features (`dynamic`, `mimalloc`) link against
-`libleanshared`; the `static` feature is available but requires extending the link set beyond what `lean.h` alone
-demands. The `metadata-only` feature is for crates such as `lean-toolchain` that need the supported-window metadata from
-build scripts without linking the build-script binary to `libleanshared`. See `build.rs` for details.
+`build.rs` discovers Lean via `lean --print-prefix` (or `LEAN_SYSROOT` when set), verifies the active header against the
+`lean-rs-abi` supported window, and emits the appropriate `cargo:rustc-link-*` directives. The default features
+(`dynamic`, `mimalloc`) link against `libleanshared`; the `static` feature is available but requires extending the link
+set beyond what `lean.h` alone demands. The `metadata-only` feature remains as a compatibility marker; new metadata-only
+consumers should depend on `lean-rs-abi` or `lean-toolchain` instead of this raw FFI crate.
 
 When `DOCS_RS=1`, the build script emits documentation-only metadata for the latest supported Lean window entry and
 deliberately skips Lean discovery and link directives. docs.rs does not install Lean, so published API docs must not

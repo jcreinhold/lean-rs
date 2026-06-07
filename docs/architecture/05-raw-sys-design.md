@@ -5,8 +5,9 @@ version-compatibility doc references it for the semver story. Revisiting any dec
 build fix.
 
 `lean-rs-sys` is the workspace's raw FFI crate—the curated `extern "C"` view of `lean.h` plus the pure-Rust mirrors of
-`lean.h`'s `static inline` refcount helpers, the symbol allowlist, the header digest, and the link directives. Published
-as the foundation of the `lean-rs-sys → lean-toolchain → lean-rs` layering.
+`lean.h`'s `static inline` refcount helpers and the link directives. Link-free ABI metadata (the symbol allowlist,
+supported-window table, and header digest constants) lives in `lean-rs-abi`. Runtime FFI is published as the foundation
+of the `lean-rs-sys → lean-rs` layering.
 
 This document covers *why*. The *what* lives in the source tree.
 
@@ -116,7 +117,7 @@ surfaces as a panic in both debug and release; that drives the workspace `rust-v
 ### How drift is caught
 
 The build script reads the discovered `lean.h`, computes SHA-256, and looks it up in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs)—the table of
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs)—the table of
 `(versions, header_digest, missing_symbols)` entries that names the v0.1.0 compatibility window. A miss fails the build
 with bounded diagnostics naming the discovered digest and the full window. The mirrors are byte-identical across every
 entry (verified empirically; the table commentary records the layout-stability proof). The mirrors plus the digest check
@@ -129,8 +130,8 @@ split-by-category layout (openssl-sys / pyo3-ffi style) is the right answer at t
 
 ```
 crates/lean-rs-sys/src/
-  lib.rs       crate doc, lint allow, re-exports, REQUIRED_SYMBOLS
-  consts.rs    LEAN_VERSION, header path, header digest, tag constants
+  lib.rs       crate doc, lint allow, compatibility re-exports
+  consts.rs    compatibility re-exports for lean-rs-abi constants
   types.rs     opaque lean_object + ABI typedefs
   refcount.rs  Rust mirrors of lean_inc / lean_dec / friends
   object.rs    ctor / closure alloc, box, unbox, ptr_tag, is_scalar, casts
@@ -163,11 +164,11 @@ The crate root enables `#![allow(non_camel_case_types)]` and `#![allow(non_snake
 ## 6. Why a `REQUIRED_SYMBOLS` allowlist plus a linkage test
 
 The `extern "C"` blocks across `src/*.rs` are the authoritative declarations; `pub const REQUIRED_SYMBOLS: &[&str]`
-enumerates them as data for tooling:
+in `lean-rs-abi` enumerates them as data for tooling:
 
 - `tests/linkage.rs` takes the address of each entry; if any symbol is missing in `libleanshared`, the binary fails to
   link and the test fails.
-- `lean-toolchain`'s `required_symbols()` returns `lean_rs_sys::REQUIRED_SYMBOLS` directly—the allowlist lives once.
+- `lean-toolchain`'s `required_symbols()` returns `lean_rs_abi::REQUIRED_SYMBOLS` directly—the allowlist lives once.
 - Future tooling (version-compatibility checks, documentation, the charter) can iterate the list without parsing source.
 
 Hand-maintaining ~75 entries is acceptable; churn is low. A future `tests/symbols_match.rs` could grep the `extern "C"`
@@ -179,7 +180,7 @@ The script's job is small:
 
 1. Discover Lean (env vars → `lean --print-prefix` → fixture Lake env, in order, with bounded diagnostics on each miss).
 2. Read `<prefix>/include/lean/lean.h` and compute SHA-256.
-3. Look up the digest in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs). On a hit, record the
+3. Look up the digest in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). On a hit, record the
    matched resolved version; on a miss, fail the build with the discovered digest and the supported window.
 4. Emit `cargo:rustc-env=LEAN_{VERSION,RESOLVED_VERSION,HEADER_PATH,HEADER_DIGEST}=…` plus
    `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry.

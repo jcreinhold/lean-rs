@@ -30,6 +30,20 @@ It runs `lake build MyCapability:shared`, resolves Lake's supported dylib naming
 artifact manifest, and returns `BuiltLeanCapability` for build scripts that want to inspect the result. The manifest is
 the canonical runtime handoff for shipped crates; the direct dylib path remains a lower-level compatibility path.
 
+Hosts that pin the Lean toolchain themselves can pass the matching sysroot explicitly:
+
+```rust
+lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+    .package("my_app")
+    .module("MyCapability")
+    .lean_sysroot(consumer_lean_sysroot)
+    .build()?;
+```
+
+The selected sysroot is scoped to this helper call. Link-directive discovery uses that prefix, and the Lake build runs
+`<sysroot>/bin/lake build <target>:shared` with `LEAN_SYSROOT` set only on the child command. The helper does not set
+process-global environment variables or expose a raw `LEAN_PATH` override.
+
 Lower-level helpers remain available for custom build flows:
 
 - `emit_lean_link_directives_checked` emits only Lean link directives and returns typed `LinkDiagnostics` on discovery

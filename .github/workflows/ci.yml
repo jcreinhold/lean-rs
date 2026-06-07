@@ -115,6 +115,12 @@ jobs:
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/interop-shims/lean-toolchain
 
+      - name: Check clean-source Rust packaging before Lake fixture builds
+        run: |
+          rm -rf fixtures/lean/.lake fixtures/interop-shims/.lake
+          cargo check -p lean-toolchain
+          cargo check -p lean-rs-worker-parent
+
       - name: Build Lake packages
         run: |
           (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)

@@ -2,7 +2,7 @@
 //!
 //! Tests deliberately avoid mutating process environment variables: in modern
 //! Rust `std::env::set_var` is `unsafe` and the workspace denies `unsafe`
-//! outside `lean-rs-sys`. Where a probe's behaviour depends on ambient env
+//! outside `lean-rs-abi`. Where a probe's behaviour depends on ambient env
 //! state, the test is gated on the observed state at startup.
 
 #![allow(
@@ -83,7 +83,7 @@ fn invalid_explicit_sysroot_with_all_probes_off_reports_missing_lean() {
 #[test]
 fn path_lookup_succeeds_when_lean_is_on_path() {
     // Gate: a Lean toolchain *must* be reachable through the env, otherwise
-    // there's nothing to assert. `lean-rs-sys`'s build script also relies on
+    // there's nothing to assert. `lean-rs-abi`'s build script also relies on
     // this—running the test suite already requires a working toolchain.
     let opts = DiscoverOptions {
         explicit_sysroot: None,

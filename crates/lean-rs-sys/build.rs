@@ -26,11 +26,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// `src/supported.rs` is `include!`-ed below so the build script can read
-// `SUPPORTED_TOOLCHAINS` without depending on the crate itself. The included
-// file references `crate::REQUIRED_SYMBOLS` only inside `#[cfg(test)]`
-// helpers, so a build-script include works.
-#[path = "src/supported.rs"]
+// `lean-rs-abi/src/supported.rs` is loaded below so the build script can read
+// `SUPPORTED_TOOLCHAINS` without depending on the sys crate itself. The file
+// references `crate::REQUIRED_SYMBOLS` only inside `#[cfg(test)]` helpers, so a
+// build-script include works.
+#[path = "../lean-rs-abi/src/supported.rs"]
 #[allow(dead_code, unreachable_pub)]
 mod supported;
 
@@ -87,7 +87,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-changed={}", header_path.display());
-    println!("cargo:rerun-if-changed=src/supported.rs");
+    println!("cargo:rerun-if-changed=../lean-rs-abi/src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
@@ -111,7 +111,7 @@ fn emit_docs_rs_metadata() {
     println!("cargo:rustc-env=LEAN_HEADER_DIGEST={}", entry.header_digest);
     emit_version_cfgs(resolved_version);
     println!("cargo:rerun-if-env-changed=DOCS_RS");
-    println!("cargo:rerun-if-changed=src/supported.rs");
+    println!("cargo:rerun-if-changed=../lean-rs-abi/src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 

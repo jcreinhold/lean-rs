@@ -578,7 +578,7 @@ fn read_to_string(path: &Path, message: &'static str) -> Result<String, LeanModu
 }
 
 fn supported_window() -> String {
-    lean_rs_sys::SUPPORTED_TOOLCHAINS
+    lean_rs_abi::SUPPORTED_TOOLCHAINS
         .iter()
         .map(|entry| format!("{:?}", entry.versions))
         .collect::<Vec<_>>()

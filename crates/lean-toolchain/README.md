@@ -1,12 +1,12 @@
 # lean-toolchain
 
 Lean 4 toolchain discovery, fingerprinting, link diagnostics, and `build.rs` helpers for the `lean-rs` project. Sits
-above [`lean-rs-sys`](https://docs.rs/lean-rs-sys) (raw FFI + header digest + symbol allowlist) and below
+above [`lean-rs-abi`](https://docs.rs/lean-rs-abi) (link-free ABI/toolchain metadata) and below
 [`lean-rs`](https://docs.rs/lean-rs).
 
 Owns the typed `ToolchainFingerprint`, the Lake fixture digest, layered link diagnostics, and reusable build-script
 helpers downstream embedders can call from their own `build.rs`. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and
-`REQUIRED_SYMBOLS` from `lean-rs-sys` so the allowlist lives in one place.
+`REQUIRED_SYMBOLS` from `lean-rs-abi` so metadata consumers do not depend on the raw FFI/link crate.
 
 It also owns Lake module discovery for higher layers. `discover_lake_modules` resolves a Lake root, discovers `lean_lib`
 source roots, validates module names, enumerates Lean source files deterministically, and returns source-set
@@ -32,6 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
         .package("my_app")
         .module("MyCapability")
+        // Optional: pin the Lean prefix used for link discovery and the Lake child process.
+        // .lean_sysroot(consumer_lean_sysroot)
         .build()?;
     Ok(())
 }
@@ -44,6 +46,10 @@ available as the lower-level escape hatch and also covers Lake targets that depe
 `lean-rs-interop-shims` package. It reports cache hits and misses on stderr, emits only `cargo:` directives on stdout,
 and returns typed `LinkDiagnostics` for missing `lake`, target lookup failures, Lake build failures, and unresolved
 outputs.
+
+Use `.lean_sysroot(...)` when a host must build the capability with the same Lean prefix its worker child will use. The
+helper runs that prefix's `bin/lake` with a child-scoped `LEAN_SYSROOT`; it does not mutate the parent process
+environment.
 
 See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md)

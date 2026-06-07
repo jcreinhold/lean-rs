@@ -77,7 +77,7 @@ pub struct ToolchainInfo {
     pub lib_dir: PathBuf,
     /// Version string parsed at discovery time (from a `lean-toolchain` file,
     /// `version.h`, or `lean --version`). Falls back to `LEAN_VERSION` from
-    /// `lean-rs-sys` when no live source is available.
+    /// `lean-rs-abi` when no live source is available.
     pub version: String,
     /// Build-baked fingerprint (does not vary with discovery results).
     pub fingerprint: ToolchainFingerprint,
@@ -188,7 +188,7 @@ fn build_info(prefix: PathBuf, source: DiscoverySource, opts: &DiscoverOptions) 
         .as_deref()
         .and_then(parse_toolchain_file)
         .or_else(|| parse_version_header(&prefix))
-        .unwrap_or_else(|| lean_rs_sys::LEAN_VERSION.to_string());
+        .unwrap_or_else(|| lean_rs_abi::LEAN_VERSION.to_string());
     ToolchainInfo {
         prefix,
         lean_binary,

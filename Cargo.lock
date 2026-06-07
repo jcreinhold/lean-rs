@@ -351,6 +351,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean-rs-abi"
+version = "0.1.20"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "lean-rs-host"
 version = "0.1.20"
 dependencies = [
@@ -367,6 +374,7 @@ dependencies = [
 name = "lean-rs-sys"
 version = "0.1.20"
 dependencies = [
+ "lean-rs-abi",
  "sha2",
  "trybuild",
 ]
@@ -413,7 +421,7 @@ dependencies = [
 name = "lean-toolchain"
 version = "0.1.20"
 dependencies = [
- "lean-rs-sys",
+ "lean-rs-abi",
  "serde_json",
  "sha2",
  "toml",

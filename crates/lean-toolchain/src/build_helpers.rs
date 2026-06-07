@@ -1,8 +1,8 @@
 //! Reusable build-script helpers for downstream embedders.
 //!
-//! Inside this workspace `lean-rs-sys`'s `build.rs` is the single source of
-//! `cargo:rustc-link-*` directives—`lean-toolchain` does not call into the
-//! helper from its own build script. The helper exists for **downstream
+//! Inside this workspace `lean-rs-sys` owns runtime link directives, while
+//! `lean-rs-abi` owns link-free metadata. `lean-toolchain` does not call into
+//! this helper from its own build script. The helper exists for **downstream
 //! embedders** whose own `build.rs` would otherwise duplicate the link-policy
 //! probe, the directive set, and the runtime rpath logic.
 //!
@@ -27,11 +27,12 @@
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
@@ -45,9 +46,8 @@ use crate::loader::LeanExportSignature;
 pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// Set once after a successful link-directive emission to make repeat calls
-/// (e.g. multiple `build.rs` invocations within one process) cheap and
-/// idempotent.
-static EMITTED: OnceLock<()> = OnceLock::new();
+/// for the same toolchain cheap and idempotent.
+static EMITTED_TOOLCHAIN_PREFIX: OnceLock<PathBuf> = OnceLock::new();
 
 /// Emit Lean link-search, link-lib, and runtime rpath directives plus
 /// matching rerun triggers from a downstream `build.rs`.
@@ -92,21 +92,28 @@ pub fn emit_lean_link_directives() {
 /// found, the discovered prefix is malformed, or the active Lean version is
 /// outside the supported window.
 pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
-    if EMITTED.get().is_some() {
-        return Ok(());
-    }
+    emit_lean_link_directives_checked_with_options(&DiscoverOptions::default()).map(drop)
+}
 
-    match discover_toolchain(&DiscoverOptions::default()) {
-        Ok(info) => {
-            emit_for(&info);
-            let _ = EMITTED.set(());
-            Ok(())
-        }
+fn emit_lean_link_directives_checked_with_options(opts: &DiscoverOptions) -> Result<ToolchainInfo, LinkDiagnostics> {
+    let info = match discover_toolchain(opts) {
+        Ok(info) => info,
         Err(diagnostic) => {
             emit_rerun_triggers(None);
-            Err(diagnostic)
+            return Err(diagnostic);
         }
+    };
+
+    if EMITTED_TOOLCHAIN_PREFIX
+        .get()
+        .is_some_and(|prefix| prefix == &info.prefix)
+    {
+        return Ok(info);
     }
+
+    emit_for(&info);
+    drop(EMITTED_TOOLCHAIN_PREFIX.set(info.prefix.clone()));
+    Ok(info)
 }
 
 /// Build a Lake `lean_lib` shared-library target and return the produced dylib path.
@@ -140,7 +147,13 @@ pub fn emit_lean_link_directives_checked() -> Result<(), LinkDiagnostics> {
 /// source-set traversal failures, cache write failures, or missing built dylibs.
 pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
     let mut runner = RealLakeRunner;
-    build_lake_target_with_runner(project_root, target_name, &mut runner, CargoMetadata::Emit)
+    build_lake_target_with_runner_and_options(
+        project_root,
+        target_name,
+        &mut runner,
+        CargoMetadata::Emit,
+        &LakeBuildOptions::default(),
+    )
 }
 
 /// Build a Lake `lean_lib` shared-library target without emitting Cargo build-script directives.
@@ -155,7 +168,13 @@ pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathB
 /// Returns the same [`LinkDiagnostics`] variants as [`build_lake_target`].
 pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
     let mut runner = RealLakeRunner;
-    build_lake_target_with_runner(project_root, target_name, &mut runner, CargoMetadata::Suppress)
+    build_lake_target_with_runner_and_options(
+        project_root,
+        target_name,
+        &mut runner,
+        CargoMetadata::Suppress,
+        &LakeBuildOptions::default(),
+    )
 }
 
 /// Build-script helper for shipping a Rust crate with bundled Lean code.
@@ -182,6 +201,7 @@ pub struct CargoLeanCapability {
     module: Option<String>,
     env_var: Option<String>,
     manifest_env_var: Option<String>,
+    lean_sysroot: Option<PathBuf>,
     export_signatures: Vec<LeanExportSignature>,
 }
 
@@ -196,6 +216,7 @@ impl CargoLeanCapability {
             module: None,
             env_var: None,
             manifest_env_var: None,
+            lean_sysroot: None,
             export_signatures: Vec::new(),
         }
     }
@@ -241,6 +262,20 @@ impl CargoLeanCapability {
         self
     }
 
+    /// Build and link against a specific Lean sysroot.
+    ///
+    /// `sysroot` is the Lean prefix containing `include/lean/lean.h` and,
+    /// for real Lake builds, `bin/lake`. [`Self::build`] uses this sysroot
+    /// for link-directive discovery. Both [`Self::build`] and
+    /// [`Self::build_quiet`] pass it only to the spawned Lake command as
+    /// `LEAN_SYSROOT` and run `<sysroot>/bin/lake`; they do not mutate the
+    /// parent process environment.
+    #[must_use]
+    pub fn lean_sysroot(mut self, sysroot: impl Into<PathBuf>) -> Self {
+        self.lean_sysroot = Some(sysroot.into());
+        self
+    }
+
     /// Add trusted ABI metadata for one exported Lean symbol.
     ///
     /// The runtime checked-lookup API accepts a Rust call shape only when it
@@ -260,9 +295,7 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lean cannot be discovered, Lake cannot
     /// build the target, or the target output cannot be resolved.
     pub fn build(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        emit_lean_link_directives_checked()?;
-        let dylib_path = build_lake_target(&self.project_root, &self.target_name)?;
-        self.finish(dylib_path, CargoMetadata::Emit)
+        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Emit)
     }
 
     /// Same as [`Self::build`] without printing Cargo directives.
@@ -275,14 +308,49 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lake cannot build the target or the
     /// target output cannot be resolved.
     pub fn build_quiet(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        let dylib_path = build_lake_target_quiet(&self.project_root, &self.target_name)?;
-        self.finish(dylib_path, CargoMetadata::Suppress)
+        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Suppress)
+    }
+
+    fn build_with_runner(
+        self,
+        runner: &mut impl LakeRunner,
+        cargo_metadata: CargoMetadata,
+    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let discover_options = self.discover_options();
+        let selected_toolchain = match cargo_metadata {
+            CargoMetadata::Emit => Some(emit_lean_link_directives_checked_with_options(&discover_options)?),
+            CargoMetadata::Suppress if self.lean_sysroot.is_some() => Some(discover_toolchain(&discover_options)?),
+            CargoMetadata::Suppress => None,
+        };
+        let lake_options = LakeBuildOptions {
+            lean_sysroot: self.lean_sysroot.clone(),
+        };
+        let dylib_path = build_lake_target_with_runner_and_options(
+            &self.project_root,
+            &self.target_name,
+            runner,
+            cargo_metadata,
+            &lake_options,
+        )?;
+        self.finish(dylib_path, cargo_metadata, selected_toolchain.as_ref())
+    }
+
+    fn discover_options(&self) -> DiscoverOptions {
+        let has_explicit_sysroot = self.lean_sysroot.is_some();
+        DiscoverOptions {
+            explicit_sysroot: self.lean_sysroot.clone(),
+            allow_path_lookup: !has_explicit_sysroot,
+            allow_elan: !has_explicit_sysroot,
+            allow_lake_env: !has_explicit_sysroot,
+            toolchain_file: None,
+        }
     }
 
     fn finish(
         self,
         dylib_path: PathBuf,
         cargo_metadata: CargoMetadata,
+        selected_toolchain: Option<&ToolchainInfo>,
     ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
         let project_root =
             fs::canonicalize(&self.project_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
@@ -310,6 +378,7 @@ impl CargoLeanCapability {
             &dylib_path,
             &manifest_env_var,
             &self.export_signatures,
+            selected_toolchain,
         )?;
         cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
         cargo_metadata.println(format_args!(
@@ -432,14 +501,31 @@ fn emit_rerun_triggers(info: Option<&ToolchainInfo>) {
 }
 
 trait LakeRunner {
-    fn build_shared(&mut self, project_root: &Path, target_name: &str) -> Result<LakeRun, std::io::Error>;
+    fn build_shared(
+        &mut self,
+        project_root: &Path,
+        target_name: &str,
+        options: &LakeBuildOptions,
+    ) -> Result<LakeRun, std::io::Error>;
 }
 
 struct RealLakeRunner;
 
 impl LakeRunner for RealLakeRunner {
-    fn build_shared(&mut self, project_root: &Path, target_name: &str) -> Result<LakeRun, std::io::Error> {
-        let output = Command::new("lake")
+    fn build_shared(
+        &mut self,
+        project_root: &Path,
+        target_name: &str,
+        options: &LakeBuildOptions,
+    ) -> Result<LakeRun, std::io::Error> {
+        let mut command = if let Some(sysroot) = options.lean_sysroot.as_deref() {
+            let mut command = Command::new(sysroot.join("bin").join("lake"));
+            command.env("LEAN_SYSROOT", sysroot);
+            command
+        } else {
+            Command::new("lake")
+        };
+        let output = command
             .arg("build")
             .arg(format!("{target_name}:shared"))
             .current_dir(project_root)
@@ -451,6 +537,11 @@ impl LakeRunner for RealLakeRunner {
             stderr: output.stderr,
         })
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct LakeBuildOptions {
+    lean_sysroot: Option<PathBuf>,
 }
 
 struct LakeRun {
@@ -480,11 +571,28 @@ impl CargoMetadata {
     }
 }
 
+#[cfg(test)]
 fn build_lake_target_with_runner(
     project_root: &Path,
     target_name: &str,
     runner: &mut impl LakeRunner,
     cargo_metadata: CargoMetadata,
+) -> Result<PathBuf, LinkDiagnostics> {
+    build_lake_target_with_runner_and_options(
+        project_root,
+        target_name,
+        runner,
+        cargo_metadata,
+        &LakeBuildOptions::default(),
+    )
+}
+
+fn build_lake_target_with_runner_and_options(
+    project_root: &Path,
+    target_name: &str,
+    runner: &mut impl LakeRunner,
+    cargo_metadata: CargoMetadata,
+    options: &LakeBuildOptions,
 ) -> Result<PathBuf, LinkDiagnostics> {
     let project_root = fs::canonicalize(project_root).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root: project_root.to_path_buf(),
@@ -544,7 +652,7 @@ fn build_lake_target_with_runner(
     }
 
     let dylib = resolve_dylib_path(&project_root, &package_name, target_name);
-    let initial_cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set);
+    let initial_cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set, options);
     let cache_path = cache_path(&project_root, target_name);
     if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == initial_cache_key) {
         cargo_metadata.trace(format_args!(
@@ -560,7 +668,7 @@ fn build_lake_target_with_runner(
     ));
 
     let run = runner
-        .build_shared(&project_root, target_name)
+        .build_shared(&project_root, target_name, options)
         .map_err(|err| LinkDiagnostics::LakeUnavailable {
             project_root: project_root.clone(),
             target_name: target_name.to_owned(),
@@ -582,7 +690,13 @@ fn build_lake_target_with_runner(
         ),
         Err(_) => (manifest_digest, package_name),
     };
-    let final_cache_key = cache_key(target_name, &final_package_name, &final_manifest_digest, &source_set);
+    let final_cache_key = cache_key(
+        target_name,
+        &final_package_name,
+        &final_manifest_digest,
+        &source_set,
+        options,
+    );
 
     let dylib = resolve_dylib_path(&project_root, &final_package_name, target_name);
     if !dylib.is_file() {
@@ -840,11 +954,20 @@ fn write_capability_manifest(
     dylib_path: &Path,
     manifest_env_var: &str,
     export_signatures: &[LeanExportSignature],
+    selected_toolchain: Option<&ToolchainInfo>,
 ) -> Result<PathBuf, LinkDiagnostics> {
     let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
     let dependencies = capability_dependencies(project_root, target_name)?;
     let fingerprint = ToolchainFingerprint::current();
     let search_dirs = capability_search_dirs(project_root, dylib_path);
+    let build_toolchain = selected_toolchain.map(|info| {
+        serde_json::json!({
+            "source": format!("{:?}", info.source),
+            "sysroot": info.prefix.display().to_string(),
+            "version": &info.version,
+            "lean_binary": info.lean_binary.as_ref().map(|path| path.display().to_string()),
+        })
+    });
     let manifest = serde_json::json!({
         "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
         "target_name": target_name,
@@ -862,6 +985,7 @@ fn write_capability_manifest(
             "fixture_sha256": &fingerprint.fixture_sha256,
             "host_triple": &fingerprint.host_triple,
         },
+        "build_toolchain": build_toolchain,
         "search_dirs": search_dirs
             .iter()
             .map(|path| path.display().to_string())
@@ -884,15 +1008,48 @@ fn write_capability_manifest(
             reason: format!("could not create manifest directory {} ({err})", parent.display()),
         })?;
     }
-    fs::write(&manifest_path, bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+    write_atomic(&manifest_path, &bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
         project_root: project_root.to_path_buf(),
         target_name: target_name.to_owned(),
         reason: format!(
-            "could not write Lean capability manifest {} ({err})",
+            "could not atomically write Lean capability manifest {} ({err})",
             manifest_path.display()
         ),
     })?;
     Ok(manifest_path)
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("manifest");
+    for attempt in 0..100_u32 {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let tmp_path = parent.join(format!(".{file_name}.{}.{}.{}.tmp", std::process::id(), nanos, attempt));
+        match OpenOptions::new().write(true).create_new(true).open(&tmp_path) {
+            Ok(mut file) => {
+                if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+                    drop(file);
+                    drop(fs::remove_file(&tmp_path));
+                    return Err(err);
+                }
+                drop(file);
+                if let Err(err) = fs::rename(&tmp_path, path) {
+                    drop(fs::remove_file(&tmp_path));
+                    return Err(err);
+                }
+                return Ok(());
+            }
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("could not allocate temporary path for {}", path.display()),
+    ))
 }
 
 fn capability_manifest_path(
@@ -1041,9 +1198,19 @@ fn screaming_snake(input: &str) -> String {
     if out.is_empty() { "CAPABILITY".to_owned() } else { out }
 }
 
-fn cache_key(target_name: &str, package_name: &str, manifest_digest: &str, source_set: &SourceSet) -> String {
+fn cache_key(
+    target_name: &str,
+    package_name: &str,
+    manifest_digest: &str,
+    source_set: &SourceSet,
+    options: &LakeBuildOptions,
+) -> String {
+    let sysroot = options
+        .lean_sysroot
+        .as_deref()
+        .map_or("ambient", |path| path.to_str().unwrap_or("<non-utf8-sysroot>"));
     format!(
-        "target={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\n",
+        "target={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\n",
         source_set.paths.len(),
         source_set.max_mtime_ns
     )
@@ -1093,16 +1260,16 @@ fn emit_lake_trace(args: std::fmt::Arguments<'_>) {
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::{
-        CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, LakeRun, LakeRunner,
-        build_lake_target_with_runner, capability_env_var, capability_manifest_env_var, capability_manifest_name,
-        command_detail,
+        CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, CargoMetadata, LakeBuildOptions, LakeRun, LakeRunner,
+        build_lake_target_with_runner, build_lake_target_with_runner_and_options, capability_env_var,
+        capability_manifest_env_var, capability_manifest_name, command_detail,
     };
     use crate::LinkDiagnostics;
     use crate::{
         LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
         LeanExportSignature,
     };
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
@@ -1110,6 +1277,7 @@ mod tests {
     #[derive(Clone)]
     struct FakeLake {
         calls: Rc<Cell<usize>>,
+        seen_sysroots: Rc<RefCell<Vec<Option<PathBuf>>>>,
         mode: FakeMode,
     }
 
@@ -1125,6 +1293,7 @@ mod tests {
         fn new(mode: FakeMode) -> Self {
             Self {
                 calls: Rc::new(Cell::new(0)),
+                seen_sysroots: Rc::new(RefCell::new(Vec::new())),
                 mode,
             }
         }
@@ -1132,11 +1301,21 @@ mod tests {
         fn calls(&self) -> usize {
             self.calls.get()
         }
+
+        fn seen_sysroots(&self) -> Vec<Option<PathBuf>> {
+            self.seen_sysroots.borrow().clone()
+        }
     }
 
     impl LakeRunner for FakeLake {
-        fn build_shared(&mut self, project_root: &Path, target_name: &str) -> Result<LakeRun, std::io::Error> {
+        fn build_shared(
+            &mut self,
+            project_root: &Path,
+            target_name: &str,
+            options: &LakeBuildOptions,
+        ) -> Result<LakeRun, std::io::Error> {
             self.calls.set(self.calls.get().saturating_add(1));
+            self.seen_sysroots.borrow_mut().push(options.lean_sysroot.clone());
             match self.mode {
                 FakeMode::SuccessModern => {
                     let dylib = project_root
@@ -1223,6 +1402,13 @@ mod tests {
         fs::write(path, contents).expect("write file");
     }
 
+    fn make_fake_sysroot(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("lean-toolchain-sysroot-{}-{name}", std::process::id()));
+        drop(fs::remove_dir_all(&root));
+        write_file(&root.join("include").join("lean").join("lean.h"), "/* fake lean.h */\n");
+        root
+    }
+
     #[test]
     fn cache_hit_skips_lake_invocation() {
         let root = make_project("cache-hit", "MyCapability");
@@ -1234,6 +1420,36 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(runner.calls(), 1, "second call should use cache");
+    }
+
+    #[test]
+    fn explicit_lake_sysroot_is_part_of_runner_options_and_cache_key() {
+        let root = make_project("explicit-sysroot-cache", "MyCapability");
+        let sysroot = PathBuf::from("/configured/lean/sysroot");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        let options = LakeBuildOptions {
+            lean_sysroot: Some(sysroot.clone()),
+        };
+        let first = build_lake_target_with_runner_and_options(
+            &root,
+            "MyCapability",
+            &mut runner,
+            CargoMetadata::Emit,
+            &options,
+        )
+        .expect("first explicit build");
+        let second = build_lake_target_with_runner_and_options(
+            &root,
+            "MyCapability",
+            &mut runner,
+            CargoMetadata::Emit,
+            &options,
+        )
+        .expect("cached explicit build");
+
+        assert_eq!(first, second);
+        assert_eq!(runner.calls(), 1, "second call should use explicit-sysroot cache");
+        assert_eq!(runner.seen_sysroots(), vec![Some(sysroot)]);
     }
 
     #[test]
@@ -1498,5 +1714,64 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("my_capability_u8_identity"),
         );
+    }
+
+    #[test]
+    fn cargo_capability_build_quiet_passes_explicit_sysroot_to_lake() {
+        let root = make_project("cargo-capability-explicit-sysroot", "MyCapability");
+        let sysroot = make_fake_sysroot("cargo-capability");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+
+        let built = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .lean_sysroot(&sysroot)
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("cargo helper build");
+
+        assert_eq!(runner.seen_sysroots(), vec![Some(sysroot.clone())]);
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
+                .expect("manifest is valid JSON");
+        let build_toolchain = manifest
+            .get("build_toolchain")
+            .expect("manifest records selected build toolchain");
+        assert_eq!(
+            build_toolchain.get("source").and_then(serde_json::Value::as_str),
+            Some("ExplicitSysroot")
+        );
+        assert_eq!(
+            build_toolchain.get("sysroot").and_then(serde_json::Value::as_str),
+            Some(sysroot.to_str().expect("test sysroot is UTF-8"))
+        );
+    }
+
+    #[test]
+    fn cargo_capability_explicit_sysroot_does_not_fall_back_to_ambient_discovery() {
+        let root = make_project("cargo-capability-invalid-explicit-sysroot", "MyCapability");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+
+        let err = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .lean_sysroot("/definitely/not/a/lean/sysroot")
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect_err("invalid explicit sysroot must not fall back to ambient probes");
+
+        match err {
+            LinkDiagnostics::MissingLean { tried } => {
+                assert!(
+                    tried.iter().any(|line| line.contains("explicit_sysroot=")),
+                    "diagnostic should name the explicit sysroot probe: {tried:?}",
+                );
+                assert!(
+                    tried.iter().any(|line| line == "PATH lookup disabled"),
+                    "ambient PATH probe should be disabled: {tried:?}",
+                );
+            }
+            other => panic!("expected MissingLean, got {other:?}"),
+        }
+        assert_eq!(runner.calls(), 0, "Lake must not run after invalid explicit sysroot");
     }
 }

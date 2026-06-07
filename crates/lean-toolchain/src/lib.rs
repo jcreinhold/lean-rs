@@ -1,9 +1,7 @@
 //! Lean 4 toolchain discovery, fingerprinting, allowlist re-export, and build-script helpers.
 //!
-//! Sits one layer above the workspace crate [`lean_rs_sys`], which owns the raw `extern "C"`
-//! declarations, the hand-written refcount inline helpers, the signature-checked symbol
-//! allowlist, the header SHA-256 digest, and the link directives. This crate composes on top:
-//! a typed [`ToolchainFingerprint`], the workspace-only Lake [`LAKE_FIXTURE_DIGEST`], a layered
+//! Sits one layer above [`lean_rs_abi`], which owns link-free ABI/toolchain metadata. This crate
+//! composes on top: a typed [`ToolchainFingerprint`], the workspace-only Lake [`LAKE_FIXTURE_DIGEST`], a layered
 //! [`LinkDiagnostics`] error type, and reusable build-script helpers
 //! ([`emit_lean_link_directives_checked`], [`build_lake_target`],
 //! [`build_lake_target_quiet`]) that downstream embedders and higher layers can use to get
@@ -12,14 +10,13 @@
 //! ## Single typed entry point
 //!
 //! [`LEAN_VERSION`], [`LEAN_HEADER_PATH`], and [`LEAN_HEADER_DIGEST`] are re-exported from
-//! [`lean_rs_sys`] so embedders that depend on this crate need only one import for build
+//! [`lean_rs_abi`] so embedders that depend on this crate need only one import for build
 //! metadata. The allowlist comes through [`required_symbols`] (no copy).
 //!
 //! ## Layering
 //!
-//! `lean-rs-sys → lean-toolchain → lean-rs`. Raw `lean_*` symbols never appear in this
-//! crate's public surface—they remain in `lean-rs-sys` and reach the safe layers through
-//! `lean-rs`'s `pub(crate)` modules.
+//! `lean-rs-abi → lean-toolchain` for link-free metadata, and `lean-rs-sys → lean-rs`
+//! for raw runtime FFI. Raw `lean_*` symbols never appear in this crate's public surface.
 
 #![forbid(unsafe_code)]
 
@@ -43,8 +40,8 @@ pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBui
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
 pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};
-pub use lean_rs_sys::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_VERSION};
-pub use lean_rs_sys::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
+pub use lean_rs_abi::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION};
+pub use lean_rs_abi::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
 pub use limits::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,
     LEAN_HEARTBEAT_LIMIT_MAX,
@@ -65,13 +62,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Curated allowlist of `LEAN_EXPORT` symbols the workspace relies on.
 ///
-/// Returns [`lean_rs_sys::REQUIRED_SYMBOLS`] directly—the allowlist lives in
+/// Returns [`lean_rs_abi::REQUIRED_SYMBOLS`] directly—the allowlist lives in
 /// exactly one place. Use this through `lean-toolchain` so consumer crates do
-/// not also need a direct `lean-rs-sys` dependency just to enumerate symbol
+/// not also need a direct raw-FFI dependency just to enumerate symbol
 /// names.
 #[must_use]
 pub fn required_symbols() -> &'static [&'static str] {
-    lean_rs_sys::REQUIRED_SYMBOLS
+    lean_rs_abi::REQUIRED_SYMBOLS
 }
 
 #[cfg(test)]

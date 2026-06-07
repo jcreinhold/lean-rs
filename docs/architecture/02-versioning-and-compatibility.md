@@ -7,7 +7,7 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 ## Supported Lean toolchain window
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
-being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) table. The table
+being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
 is the single source of truth; this document mirrors it for narrative context. As of 2026-05-30:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
@@ -22,7 +22,7 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.31.0-rc1 | `99ef35d69709…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs), which the build script hash-checks against.
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build script hash-checks against.
 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
@@ -58,29 +58,30 @@ convention-agnostic.
 
 ## Raw FFI source
 
-Raw `extern "C"` declarations for the curated subset of `lean.h`, the pure-Rust mirrors of `lean.h`'s `static inline`
-refcount helpers, and the `REQUIRED_SYMBOLS` allowlist live in the published workspace crate `lean-rs-sys`
-(`crates/lean-rs-sys/`). Publication matches every peer `*-sys` crate and gives advanced users a stable raw-FFI escape
-hatch without forking the workspace.
+Raw `extern "C"` declarations for the curated subset of `lean.h` and the pure-Rust mirrors of `lean.h`'s `static inline`
+refcount helpers live in the published workspace crate `lean-rs-sys` (`crates/lean-rs-sys/`). Link-free ABI metadata,
+including the `REQUIRED_SYMBOLS` allowlist and supported-window table, lives in `lean-rs-abi`
+(`crates/lean-rs-abi/`). Publication matches every peer `*-sys` crate and gives advanced users a stable raw-FFI escape
+hatch without forcing metadata-only consumers to link Lean.
 
-There is no external `lean-sys` dependency. The split between `lean-rs-sys` and `lean-toolchain`:
+There is no external `lean-sys` dependency. The split between `lean-rs-abi`, `lean-rs-sys`, and `lean-toolchain`:
 
-- **`lean-rs-sys`** owns what the active Lean header says: extern declarations split by category, the pure-Rust refcount
-  mirrors, the `REQUIRED_SYMBOLS` allowlist, the `SUPPORTED_TOOLCHAINS` window table, `LEAN_VERSION`,
-  `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, `LEAN_HEADER_DIGEST`, and the `cargo:rustc-link-*` /
-  `rerun-if-changed=<lean.h>` directives. Public types are opaque; layout structs are `pub(crate)`. Its `metadata-only`
-  feature is reserved for build-helper crates that need those constants without linking their own build-script binaries
-  to `libleanshared`.
+- **`lean-rs-abi`** owns link-free ABI/toolchain metadata: the `REQUIRED_SYMBOLS` allowlist,
+  `SUPPORTED_TOOLCHAINS` window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, and
+  `LEAN_HEADER_DIGEST`.
+- **`lean-rs-sys`** owns runtime FFI: extern declarations split by category, the pure-Rust refcount mirrors, opaque
+  public types, crate-private layout structs, and the `cargo:rustc-link-*` directives for dynamic/static Lean runtime
+  linking. It re-exports `lean-rs-abi` metadata for compatibility.
 - **`lean-toolchain`** owns everything composed on top: the typed `ToolchainFingerprint` (which exposes
   `is_supported()`), the Lake fixture digest, layered link diagnostics, reusable build-script helpers, and
-  `required_symbols()` returning `lean_rs_sys::REQUIRED_SYMBOLS` so the allowlist lives in one place.
+  `required_symbols()` returning `lean_rs_abi::REQUIRED_SYMBOLS` so the allowlist lives in one place.
 
 See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the rationale behind `lean-rs-sys`.
 
 ## Header digest
 
-`lean-rs-sys`'s build script computes a SHA-256 over the discovered `lean.h` and looks it up in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs). A miss fails the build with a bounded diagnostic
+`lean-rs-abi`'s build script computes a SHA-256 over the discovered `lean.h` and looks it up in
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A miss fails the build with a bounded diagnostic
 naming the discovered digest and the full window; a hit emits `cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so
 per-version divergences can be `#[cfg]`-gated, and bakes the resolved version into `LEAN_RESOLVED_VERSION` for runtime
 inspection.
@@ -130,7 +131,7 @@ The canonical procedure lives in [`docs/bump-toolchain.md`](../bump-toolchain.md
 
 1. `elan toolchain install leanprover/lean4:vX.Y.Z`.
 2. Capture the new `lean.h` SHA-256 (the bump-toolchain doc has a one-liner).
-3. Add a row to [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-sys/src/supported.rs) (or extend an existing
+3. Add a row to [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) (or extend an existing
    header-identical row).
 4. Add the version to the matrix in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
 5. Run `scripts/test-all-toolchains.sh` locally; commit; open PR.

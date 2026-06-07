@@ -1,0 +1,27 @@
+[package]
+authors.workspace = true
+categories = ["api-bindings", "development-tools::build-utils"]
+description = "Link-free Lean 4 ABI and toolchain metadata shared by lean-rs crates."
+documentation = "https://docs.rs/lean-rs-abi"
+edition.workspace = true
+include = ["Cargo.toml", "LICENSE-APACHE", "LICENSE-MIT", "README.md", "build.rs", "src/**/*.rs"]
+keywords = ["abi", "fingerprint", "lean", "lean4", "toolchain"]
+license.workspace = true
+name = "lean-rs-abi"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[build-dependencies]
+sha2 = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []

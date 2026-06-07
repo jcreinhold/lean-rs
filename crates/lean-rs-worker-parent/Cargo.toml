@@ -10,7 +10,6 @@ include = [
   "LICENSE-MIT",
   "README.md",
   "benches/**/*.rs",
-  "build.rs",
   "examples/**/*.rs",
   "src/**/*.rs",
   "tests/**/*.rs",

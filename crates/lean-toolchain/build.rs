@@ -2,26 +2,18 @@
 //!
 //! 1. Walk parents of `$CARGO_MANIFEST_DIR` until `fixtures/lean/lakefile.lean`
 //!    is found; that directory roots the workspace Lake fixture.
-//! 2. In a workspace checkout, compute a SHA-256 over a stable ordered concatenation of the fixture
-//!    Lake manifest plus the compiled `.olean` and shared-library artifacts.
-//!    If any artifact is absent, abort with a `cargo:warning=` line naming
-//!    the path and the recovery command.
-//!    Published crate tarballs do not include the workspace fixture; those builds
-//!    record a zero digest instead.
+//! 2. In a workspace checkout, compute a SHA-256 over a stable ordered
+//!    concatenation of the fixture Lake manifest plus the compiled `.olean`
+//!    and shared-library artifacts, when those artifacts already exist.
+//!    Clean Cargo git checkouts and published crate tarballs may not contain
+//!    `.lake` outputs; those builds record a zero digest instead.
 //! 3. Write `$OUT_DIR/metadata.rs` with `LAKE_FIXTURE_DIGEST` and
 //!    `HOST_TRIPLE` so `fingerprint.rs` can `include!` them.
-//! 4. Emit `cargo:rerun-if-changed=*` for every input the digest depends on
-//!    and `cargo:rerun-if-env-changed=*` for every env var `discover.rs`
-//!    consults at runtime.
+//! 4. Emit `cargo:rerun-if-changed=*` for every input the digest depends on.
 //!
-//! This script does not emit `cargo:rustc-link-search` or
-//! `cargo:rustc-link-lib` directives—`lean-rs-sys` already does that
-//! for the whole dependency graph, and `emit_lean_link_directives()` in
-//! `src/build_helpers.rs` is the helper downstream embedders call from
-//! their own `build.rs`. It does emit a `cargo:rustc-link-arg=-Wl,-rpath,...`
-//! because `link-arg` directives do not propagate from `lean-rs-sys` to
-//! dependents, so each crate that produces a test/bench/example binary
-//! that loads Lean must bake its own rpath.
+//! This script emits no Lean runtime link or rpath directives. Link-free
+//! toolchain metadata comes from `lean-rs-abi`; runtime link directives are
+//! emitted only by crates that actually load Lean.
 
 // Build scripts use `panic!` as the abort mechanism—same pattern as
 // `lean-rs-sys/build.rs`.
@@ -86,13 +78,10 @@ fn main() {
             for (path, label) in &inputs {
                 if !path.is_file() {
                     println!(
-                        "cargo:warning=lean-toolchain: missing fixture artifact {} (run `cd fixtures/lean && lake build`)",
+                        "cargo:warning=lean-toolchain: missing fixture artifact {}; LAKE_FIXTURE_DIGEST is zero",
                         path.display()
                     );
-                    panic!(
-                        "lean-toolchain: missing fixture artifact {} ({label}); run `cd fixtures/lean && lake build`",
-                        path.display()
-                    );
+                    return ("0".repeat(64), Vec::new());
                 }
                 let bytes = fs::read(path)
                     .unwrap_or_else(|err| panic!("lean-toolchain: cannot read {}: {err}", path.display()));
@@ -126,42 +115,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=LEAN_SYSROOT");
-    println!("cargo:rerun-if-env-changed=ELAN_HOME");
-    println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
-
-    // Bake an rpath into this crate's test binaries so they can load
-    // `libleanshared.{dylib,so}` at run-time. `lean-toolchain` itself
-    // does not call into Lean, but it depends on `lean-rs-sys` whose
-    // build script attaches `libleanshared` to the link line; the test
-    // binary therefore needs to be able to resolve the dylib at load
-    // time. `cargo:rustc-link-arg` directives do not propagate from
-    // `lean-rs-sys` to dependents, so each crate that produces an
-    // executable that loads Lean emits the rpath itself.
-    if !docs_rs
-        && matches!(target_os.as_str(), "macos" | "linux")
-        && let Some(prefix) = discover_prefix()
-    {
-        let lib_lean = prefix.join("lib").join("lean");
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_lean.display());
-    }
-}
-
-fn discover_prefix() -> Option<PathBuf> {
-    if let Some(p) = env::var_os("LEAN_SYSROOT") {
-        return Some(PathBuf::from(p));
-    }
-    let output = std::process::Command::new("lean").arg("--print-prefix").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let trimmed = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
-    }
 }
 
 fn find_fixture_dir(start: &Path) -> Option<PathBuf> {
