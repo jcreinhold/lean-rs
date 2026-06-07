@@ -11,7 +11,7 @@
 //! ## Capability contract
 //!
 //! The bundled host shim dylib that [`crate::host::LeanCapabilities`] loads
-//! exports thirty-one **mandatory** `@[export]` symbols and may export ten
+//! exports thirty-two **mandatory** `@[export]` symbols and may export ten
 //! **optional** symbols (checked when session bindings are constructed)—
 //! five bounded `MetaM` services plus declaration inspection, module-query
 //! entry points, and cache control:
@@ -23,6 +23,7 @@
 //! | `lean_rs_host_session_import_profile`                  | yes        | `Array String -> Array String -> Bool -> UInt8 -> Bool -> Bool -> Bool -> String -> IO Environment`                                                                 |
 //! | `lean_rs_host_session_import_profile_progress`         | yes        | `Array String -> Array String -> Bool -> UInt8 -> USize -> USize -> IO (Except UInt8 Environment)`                                                                  |
 //! | `lean_rs_host_env_import_stats`                        | yes        | `Environment -> String -> Bool -> IO ImportStats`                                                                                                                   |
+//! | `lean_rs_host_bracketed_import_query`                  | yes        | `Array String -> Array String -> Array String -> USize -> USize -> IO (Except UInt8 String)`                                                                        |
 //! | `lean_rs_host_name_from_string`                        | yes        | `String -> Name`                                                                                                                                                     |
 //! | `lean_rs_host_name_to_string`                          | yes        | `Name -> String`                                                                                                                                                     |
 //! | `lean_rs_host_env_query_declaration`                   | yes        | `Environment -> Name -> IO (Option Declaration)`                                                                                                                     |
@@ -531,8 +532,15 @@ pub struct LeanSession<'lean, 'c> {
 /// comment at the lock-acquire site for the Lean-4.30 race it closes.
 static SESSION_IMPORT_LOCK: Mutex<()> = Mutex::new(());
 
+pub(crate) fn with_session_import_lock<T>(f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
+    let _import_guard = SESSION_IMPORT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f()
+}
+
 impl<'lean, 'c> LeanSession<'lean, 'c> {
-    fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> LeanResult<Vec<String>> {
+    pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> LeanResult<Vec<String>> {
         let project = capabilities.host().project();
         let mut search_paths: Vec<String> = project
             .olean_search_paths()
@@ -602,54 +610,54 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // accessing the global references" requirement. Sessions operate
         // concurrently on their own `Environment` values once import
         // returns; the lock spans only the FFI call.
-        let _import_guard = SESSION_IMPORT_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let shims = HostShimBindings::resolve(capabilities.shim_capability())
-            .map_err(|err| binding_error_to_lean_error(&err))?;
-        let environment = if let Some(sink) = progress {
-            let bridge = ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let raw = if profile == LeanSessionImportProfile::default() {
-                shims
-                    .session_import_progress
-                    .call(search_paths, imports_owned, handle, trampoline)?
+        with_session_import_lock(|| {
+            let shims = HostShimBindings::resolve(capabilities.shim_capability())
+                .map_err(|err| binding_error_to_lean_error(&err))?;
+            let environment = if let Some(sink) = progress {
+                let bridge =
+                    ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
+                let (handle, trampoline) = bridge.abi_parts();
+                let raw = if profile == LeanSessionImportProfile::default() {
+                    shims
+                        .session_import_progress
+                        .call(search_paths, imports_owned, handle, trampoline)?
+                } else {
+                    shims.session_import_profile_progress.call(
+                        search_paths,
+                        imports_owned,
+                        profile.import_all(),
+                        profile.import_level().code(),
+                        handle,
+                        trampoline,
+                    )?
+                };
+                bridge.decode(raw)?
+            } else if profile == LeanSessionImportProfile::default() {
+                shims.session_import.call(search_paths, imports_owned)?
             } else {
-                shims.session_import_profile_progress.call(
+                shims.session_import_profile.call(
                     search_paths,
                     imports_owned,
                     profile.import_all(),
                     profile.import_level().code(),
-                    handle,
-                    trampoline,
+                    profile.load_exts(),
+                    false,
+                    false,
+                    String::new(),
                 )?
             };
-            bridge.decode(raw)?
-        } else if profile == LeanSessionImportProfile::default() {
-            shims.session_import.call(search_paths, imports_owned)?
-        } else {
-            shims.session_import_profile.call(
-                search_paths,
-                imports_owned,
-                profile.import_all(),
-                profile.import_level().code(),
+            let import_stats = shims.env_import_stats.call(
+                environment.clone(),
+                profile.import_level().as_str().to_owned(),
                 profile.load_exts(),
-                false,
-                false,
-                String::new(),
-            )?
-        };
-        let import_stats = shims.env_import_stats.call(
-            environment.clone(),
-            profile.import_level().as_str().to_owned(),
-            profile.load_exts(),
-        )?;
-        Ok(Self {
-            capabilities,
-            shims,
-            environment,
-            import_stats,
-            stats: Cell::new(SessionStats::default()),
+            )?;
+            Ok(Self {
+                capabilities,
+                shims,
+                environment,
+                import_stats,
+                stats: Cell::new(SessionStats::default()),
+            })
         })
     }
 
@@ -668,32 +676,31 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         .entered();
         let search_paths = Self::import_search_paths(capabilities)?;
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
-        let _import_guard = SESSION_IMPORT_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let shims = HostShimBindings::resolve(capabilities.shim_capability())
-            .map_err(|err| binding_error_to_lean_error(&err))?;
-        let environment = shims.session_import_profile.call(
-            search_paths,
-            imports_owned,
-            mode.import_all(),
-            mode.import_level().code(),
-            mode.load_exts(),
-            profiler_options.profiler,
-            profiler_options.trace_profiler,
-            profiler_options.trace_profiler_output.clone().unwrap_or_default(),
-        )?;
-        let import_stats = shims.env_import_stats.call(
-            environment.clone(),
-            mode.import_level().as_str().to_owned(),
-            mode.load_exts(),
-        )?;
-        Ok(Self {
-            capabilities,
-            shims,
-            environment,
-            import_stats,
-            stats: Cell::new(SessionStats::default()),
+        with_session_import_lock(|| {
+            let shims = HostShimBindings::resolve(capabilities.shim_capability())
+                .map_err(|err| binding_error_to_lean_error(&err))?;
+            let environment = shims.session_import_profile.call(
+                search_paths,
+                imports_owned,
+                mode.import_all(),
+                mode.import_level().code(),
+                mode.load_exts(),
+                profiler_options.profiler,
+                profiler_options.trace_profiler,
+                profiler_options.trace_profiler_output.clone().unwrap_or_default(),
+            )?;
+            let import_stats = shims.env_import_stats.call(
+                environment.clone(),
+                mode.import_level().as_str().to_owned(),
+                mode.load_exts(),
+            )?;
+            Ok(Self {
+                capabilities,
+                shims,
+                environment,
+                import_stats,
+                stats: Cell::new(SessionStats::default()),
+            })
         })
     }
 

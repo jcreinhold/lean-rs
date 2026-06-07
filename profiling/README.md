@@ -42,12 +42,14 @@ cargo run --profile profiling -p lean-rs-profiling --bin generate_report
 - `long-session-pooled`: same-process pooled reuse after one bounded warm import.
 - `long-session-steady`: same-process steady query/elaboration loop after one bounded import.
 - `long-session-matrix`: import-mode matrix for `exported-public`, `server`, `private`, explicit `full-private-compat`, and exported no-extension diagnostics.
+- `long-session-bracketed`: one-shot declaration metadata query under `loadExts := false` with `freeRegions` after the bracket.
 - `worker-cycling`: worker-child restart behavior under a small `max_imports` budget.
 - `pool-memory`: worker-pool admission, per-worker RSS policy, and reuse counters.
 - `mathlib-scale`: optional larger worker-pool workload; set `LEAN_RS_MATHLIB_ROOT` to use a real mathlib checkout.
 
-Long-session and worker session-open workloads print `import_stats=...` rows next to RSS checkpoints. Baseline reports
-parse those rows into Lean Import Stats tables while preserving the raw key-value output.
+Long-session and worker session-open workloads print `import_stats=...` rows next to RSS checkpoints. Bracketed
+lightweight runs print `bracketed_import_stats=... free_regions_ran=true` after the no-extension bracket returns.
+Baseline reports parse those rows into Lean Import Stats tables while preserving the raw key-value output.
 
 Run a bounded memory workload:
 
@@ -56,6 +58,7 @@ Run a bounded memory workload:
 ./profiling/scripts/profile_memory.sh long-session-pooled
 ./profiling/scripts/profile_memory.sh long-session-steady
 ./profiling/scripts/profile_memory.sh long-session-matrix
+./profiling/scripts/profile_memory.sh long-session-bracketed
 ./profiling/scripts/profile_memory.sh worker-cycling
 ./profiling/scripts/profile_memory.sh pool-memory
 ```
@@ -93,3 +96,11 @@ Do not use same-process fresh-import loops as a production soak test. Long-runni
 The import matrix records narrower exported/server attempts, the selected default `private` profile, and explicit
 `full-private-compat`. `Environment.freeRegions` remains unsafe after `loadExts := true`; the matrix records retained
 environment shape and does not reclaim compacted regions.
+
+The bracketed lightweight workload is the exception by construction: it uses `loadExts := false`, returns only
+serialized Rust-owned data, and reports whether `freeRegions` ran before Rust receives the result.
+
+A local capped probe on macOS aarch64 with Lean 4.31.0-rc1, one `LeanRsFixture.Handles` import, reported
+`bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,
+`bracketed_after_free_1=108048 KiB`, `imported_bytes=1955323616`, `compacted_regions=9033`, and
+`free_regions_ran=true`. Treat these as raw local measurements, not portable RSS targets.

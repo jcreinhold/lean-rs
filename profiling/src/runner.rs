@@ -38,6 +38,7 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
     report.workloads.push(run_long_session("pooled-reuse")?);
     report.workloads.push(run_long_session("steady-state")?);
     report.workloads.push(run_long_session("import-matrix")?);
+    report.workloads.push(run_long_session("bracketed-lightweight")?);
     report.workloads.push(run_worker_cycling()?);
     report.workloads.push(run_pool_memory()?);
     report.workloads.push(run_criterion(
@@ -377,7 +378,9 @@ fn parse_key_values(output: &str) -> ParsedOutput {
 }
 
 fn parse_import_stats(pairs: &[(String, String)]) -> Option<ImportStatsSample> {
-    let label = value(pairs, "import_stats")?.to_owned();
+    let label = value(pairs, "import_stats")
+        .or_else(|| value(pairs, "bracketed_import_stats"))?
+        .to_owned();
     Some(ImportStatsSample {
         label,
         iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
@@ -398,6 +401,7 @@ fn parse_import_stats(pairs: &[(String, String)]) -> Option<ImportStatsSample> {
         import_level: value(pairs, "import_level").unwrap_or("unknown").to_owned(),
         import_all: parse_bool(pairs, "import_all")?,
         load_exts: parse_bool(pairs, "load_exts")?,
+        free_regions_ran: value(pairs, "free_regions_ran").and_then(|value| value.parse().ok()),
     })
 }
 
@@ -481,5 +485,19 @@ mod tests {
         assert_eq!(stats.import_level, "exported");
         assert!(!stats.import_all);
         assert!(stats.load_exts);
+        assert_eq!(stats.free_regions_ran, None);
+    }
+
+    #[test]
+    fn parses_bracketed_import_stats_lines() {
+        let parsed = parse_key_values(
+            "bracketed_import_stats=bracketed_lightweight iteration=1 profile_mode=bracketed-private-no-exts direct_imports=LeanRsFixture.Handles effective_modules=9 compacted_regions=10 memory_mapped_regions=0 imported_bytes=8192 imported_constants=12 extension_count=3 total_imported_extension_entries=4 import_level=private import_all=false load_exts=false free_regions_ran=true",
+        );
+        assert_eq!(parsed.import_stats.len(), 1);
+        let stats = &parsed.import_stats[0];
+        assert_eq!(stats.label, "bracketed_lightweight");
+        assert_eq!(stats.profile_mode, "bracketed-private-no-exts");
+        assert!(!stats.load_exts);
+        assert_eq!(stats.free_regions_ran, Some(true));
     }
 }

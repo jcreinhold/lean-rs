@@ -56,6 +56,7 @@ pub mod process;
 
 pub(crate) mod lake;
 
+mod bracketed;
 mod cancellation;
 mod capabilities;
 #[allow(
@@ -67,6 +68,9 @@ mod progress;
 mod session;
 mod shim_bindings;
 
+pub use self::bracketed::{
+    LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult, LeanBracketedRejectedOperation,
+};
 pub use self::cancellation::LeanCancellationToken;
 pub use self::capabilities::LeanCapabilities;
 pub use self::declaration_search::{

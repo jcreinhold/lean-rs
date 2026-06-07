@@ -20,8 +20,9 @@ use std::time::Duration;
 
 use lean_rs::{LeanDiagnosticCode, LeanError, LeanResult, LeanRuntime};
 use lean_rs_host::{
-    LeanCapabilities, LeanElabOptions, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
-    LeanSessionImportProfile, PoolStats, SessionPool, SessionPoolMemoryPolicy,
+    LeanBracketedImportRequest, LeanCapabilities, LeanElabOptions, LeanHost, LeanImportProfileMode,
+    LeanImportProfilerOptions, LeanImportStats, LeanProgressEvent, LeanProgressSink, LeanSessionImportProfile,
+    PoolStats, SessionPool, SessionPoolMemoryPolicy,
 };
 use lean_toolchain::LEAN_VERSION;
 
@@ -53,6 +54,10 @@ const BULK_NAMES: [&str; 16] = [
     "LeanRsFixture.Handles.exprConstNat",
 ];
 const ELAB_TERMS: [&str; 4] = ["(1 + 1 : Nat)", "(Nat.succ 0 : Nat)", "1 +", "(1 + \"hi\" : Nat)"];
+const BRACKETED_DECLS: [&str; 2] = [
+    "LeanRsFixture.Handles.nameAnonymous",
+    "LeanRsFixture.Handles.noSuchDeclaration",
+];
 
 #[derive(Debug)]
 struct Config {
@@ -71,6 +76,7 @@ enum Mode {
     PooledReuse,
     SteadyState,
     ImportMatrix,
+    BracketedLightweight,
     All,
 }
 
@@ -160,6 +166,9 @@ fn run(config: &Config) -> LeanResult<()> {
         Mode::ImportMatrix => {
             run_import_matrix(runtime, &caps, config)?;
         }
+        Mode::BracketedLightweight => {
+            run_bracketed_lightweight(&caps, config)?;
+        }
         Mode::All => {}
     }
 
@@ -197,6 +206,7 @@ impl Mode {
             "pooled-reuse" => Some(Self::PooledReuse),
             "steady-state" => Some(Self::SteadyState),
             "import-matrix" => Some(Self::ImportMatrix),
+            "bracketed-lightweight" => Some(Self::BracketedLightweight),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -208,6 +218,7 @@ impl Mode {
             Self::PooledReuse => "pooled-reuse",
             Self::SteadyState => "steady-state",
             Self::ImportMatrix => "import-matrix",
+            Self::BracketedLightweight => "bracketed-lightweight",
             Self::All => "all",
         }
     }
@@ -220,6 +231,7 @@ fn run_all_children() -> Result<(), Box<dyn std::error::Error>> {
         Mode::PooledReuse,
         Mode::SteadyState,
         Mode::ImportMatrix,
+        Mode::BracketedLightweight,
     ] {
         println!("child_mode_begin={}", mode.as_str());
         let status = Command::new(&exe)
@@ -388,6 +400,42 @@ fn run_import_matrix(
     Ok(())
 }
 
+fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
+    for iteration in 1..=config.imports {
+        enforce_matrix_rss_cap(config)?;
+        snapshot(&format!("bracketed_before_dispatch_{iteration}"));
+        let sink = BracketedCheckpointSink { iteration };
+        let result =
+            caps.bracketed_import_query(&IMPORTS, LeanBracketedImportRequest::new(BRACKETED_DECLS), Some(&sink))?;
+        report_bracketed_import_stats(
+            "bracketed_lightweight",
+            iteration,
+            &result.import_stats,
+            result.free_regions_ran,
+        );
+        snapshot(&format!("bracketed_after_rust_return_{iteration}"));
+        thread::sleep(Duration::from_millis(250));
+        snapshot(&format!("bracketed_after_pause_{iteration}"));
+    }
+    Ok(())
+}
+
+struct BracketedCheckpointSink {
+    iteration: usize,
+}
+
+impl LeanProgressSink for BracketedCheckpointSink {
+    fn report(&self, event: LeanProgressEvent) {
+        let stage = match event.current {
+            1 => "after_lean_import",
+            2 => "after_query_before_free",
+            3 => "after_free",
+            _ => "unknown",
+        };
+        snapshot(&format!("bracketed_{stage}_{}", self.iteration));
+    }
+}
+
 fn memory_policy(config: &Config) -> SessionPoolMemoryPolicy {
     let fresh_imports = config.imports.max(config.pool_capacity) as u64;
     let mut policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(fresh_imports);
@@ -514,6 +562,23 @@ fn report_pool_stats(label: &str, stats: PoolStats) {
 fn report_import_stats(label: &str, iteration: usize, profile_mode: &str, stats: &LeanImportStats) {
     println!(
         "import_stats={label} iteration={iteration} profile_mode={profile_mode} direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
+        stats.direct_import_names.join(","),
+        stats.effective_module_count,
+        stats.compacted_region_count,
+        stats.memory_mapped_region_count,
+        stats.imported_bytes,
+        stats.imported_constant_count,
+        stats.extension_count,
+        stats.total_imported_extension_entries,
+        stats.import_level,
+        stats.import_all,
+        stats.load_exts,
+    );
+}
+
+fn report_bracketed_import_stats(label: &str, iteration: usize, stats: &LeanImportStats, free_regions_ran: bool) {
+    println!(
+        "bracketed_import_stats={label} iteration={iteration} profile_mode=bracketed-private-no-exts direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={} free_regions_ran={free_regions_ran}",
         stats.direct_import_names.join(","),
         stats.effective_module_count,
         stats.compacted_region_count,

@@ -93,6 +93,7 @@ pub struct ImportStatsSample {
     pub import_level: String,
     pub import_all: bool,
     pub load_exts: bool,
+    pub free_regions_ran: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

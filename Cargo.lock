@@ -364,6 +364,7 @@ dependencies = [
  "criterion",
  "lean-rs",
  "lean-toolchain",
+ "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",

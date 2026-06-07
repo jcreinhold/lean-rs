@@ -183,8 +183,35 @@ structure ImportStats where
   loadExts : Bool
   deriving Inhabited
 
+structure BracketedImportRequest where
+  declarationNames : Array String
+  deriving Inhabited
+
+structure BracketedDeclarationInfo where
+  name : String
+  existsDecl : Bool
+  kind : Option String
+  module : Option String
+  rawType : Option String
+  deriving Inhabited
+
+structure BracketedRejectedOperation where
+  operation : String
+  reason : String
+  deriving Inhabited
+
+structure BracketedImportResult where
+  importStats : ImportStats
+  declarations : Array BracketedDeclarationInfo
+  rejectedOperations : Array BracketedRejectedOperation
+  freeRegionsRan : Bool
+  deriving Inhabited
+
 private def u64 (n : Nat) : UInt64 :=
   UInt64.ofNat n
+
+private def ownedString (s : String) : String :=
+  String.ofList s.toList
 
 private def importLevelFromCode? : UInt8 → Option OLeanLevel
   | 0 => some .exported
@@ -201,10 +228,13 @@ private def mkImportOptions (profiler traceProfiler : Bool) (traceProfilerOutput
   else
     opts.set `trace.profiler.output traceProfilerOutput
 
-private def runSessionImport (searchPaths : Array String) (importNames : Array String)
-    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
+private def initHostSearchPath (searchPaths : Array String) : IO Unit := do
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
+
+private def runSessionImport (searchPaths : Array String) (importNames : Array String)
+    (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
+  initHostSearchPath searchPaths
   let imports := importNames.map fun n => { module := n.toName, importAll := importAll : Import }
   unsafe Lean.enableInitializersExecution
   Lean.importModules imports opts 0 (loadExts := loadExts) (level := level)
@@ -219,7 +249,7 @@ def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) 
       unless extensionNames.contains name do
         extensionNames := extensionNames.push name
   pure {
-    directImportNames := env.header.imports.map (·.module.toString)
+    directImportNames := env.header.imports.map fun imp => ownedString imp.module.toString
     effectiveModuleCount := u64 env.header.modules.size
     compactedRegionCount := u64 env.header.regions.size
     memoryMappedRegionCount := u64 (env.header.regions.filter (·.isMemoryMapped) |>.size)
@@ -228,7 +258,7 @@ def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) 
     importedConstantCount := u64 <| env.constants.fold (init := 0) fun acc _ _ => acc + 1
     extensionCount := u64 extensionNames.size
     totalImportedExtensionEntries := u64 extensionEntries
-    importLevel
+    importLevel := ownedString importLevel
     importAll := env.header.imports.all (·.importAll)
     loadExts
   }
@@ -588,6 +618,141 @@ private def declarationKindOf : ConstantInfo → String
   | .inductInfo _ => "inductive"
   | .ctorInfo   _ => "constructor"
   | .recInfo    _ => "recursor"
+
+private def reportBracketProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
+  if handle == 0 || trampoline == 0 then
+    pure none
+  else
+    reportProgress? handle trampoline current total
+
+private def bracketedRejectedOperations : Array BracketedRejectedOperation := #[
+  {
+    operation := "elaboration"
+    reason := "requires parser and environment extensions loaded by full sessions"
+  },
+  {
+    operation := "source-ranges"
+    reason := "requires declaration-range environment extensions and parser-backed metadata"
+  },
+  {
+    operation := "proof-state"
+    reason := "requires parser/elaborator services and loaded environment extensions"
+  },
+  {
+    operation := "pretty-printing"
+    reason := "notation-aware rendering consults loaded pretty-printer and environment extensions"
+  },
+  {
+    operation := "capability-session"
+    reason := "requires a normal LeanSession with loadExts := true for user capability workflows"
+  }
+]
+
+private def bracketedDeclarationInfo (env : Environment) (nameString : String) : IO BracketedDeclarationInfo := do
+  let name := nameString.toName
+  let mut moduleIdx : Nat := 0
+  for data in env.header.moduleData do
+    for info in data.constants do
+      if info.name == name then
+        let moduleName? := env.header.modules[moduleIdx]? |>.map fun module =>
+          ownedString module.module.toString
+        return {
+          name := ownedString nameString
+          existsDecl := true
+          kind := some (ownedString (declarationKindOf info))
+          module := moduleName?
+          rawType := some (ownedString (toString info.type))
+        }
+    moduleIdx := moduleIdx + 1
+  pure {
+    name := ownedString nameString
+    existsDecl := false
+    kind := none
+    module := none
+    rawType := none
+  }
+
+private def bracketedEnvImportStats (env : Environment) : IO ImportStats := do
+  let mut extensionNames : Array Name := #[]
+  let mut extensionEntries : Nat := 0
+  let mut importedConstants : Nat := 0
+  for data in env.header.moduleData do
+    importedConstants := importedConstants + data.constants.size
+    for (name, entries) in data.entries do
+      extensionEntries := extensionEntries + entries.size
+      unless extensionNames.contains name do
+        extensionNames := extensionNames.push name
+  pure {
+    directImportNames := env.header.imports.map fun imp => ownedString imp.module.toString
+    effectiveModuleCount := u64 env.header.modules.size
+    compactedRegionCount := u64 env.header.regions.size
+    memoryMappedRegionCount := u64 (env.header.regions.filter (·.isMemoryMapped) |>.size)
+    importedBytes := env.header.regions.foldl (init := 0) fun acc region =>
+      acc + UInt64.ofNat region.size.toNat
+    importedConstantCount := u64 importedConstants
+    extensionCount := u64 extensionNames.size
+    totalImportedExtensionEntries := u64 extensionEntries
+    importLevel := ownedString "private"
+    importAll := env.header.imports.all (·.importAll)
+    loadExts := false
+  }
+
+private def importStatsJson (stats : ImportStats) : Json :=
+  Json.mkObj [
+    ("direct_import_names", toJson stats.directImportNames),
+    ("effective_module_count", toJson stats.effectiveModuleCount.toNat),
+    ("compacted_region_count", toJson stats.compactedRegionCount.toNat),
+    ("memory_mapped_region_count", toJson stats.memoryMappedRegionCount.toNat),
+    ("imported_bytes", toJson stats.importedBytes.toNat),
+    ("imported_constant_count", toJson stats.importedConstantCount.toNat),
+    ("extension_count", toJson stats.extensionCount.toNat),
+    ("total_imported_extension_entries", toJson stats.totalImportedExtensionEntries.toNat),
+    ("import_level", toJson stats.importLevel),
+    ("import_all", toJson stats.importAll),
+    ("load_exts", toJson stats.loadExts)
+  ]
+
+private def declarationInfoJson (info : BracketedDeclarationInfo) : Json :=
+  Json.mkObj [
+    ("name", toJson info.name),
+    ("exists", toJson info.existsDecl),
+    ("kind", toJson info.kind),
+    ("module", toJson info.module),
+    ("raw_type", toJson info.rawType)
+  ]
+
+private def rejectedOperationJson (operation : BracketedRejectedOperation) : Json :=
+  Json.mkObj [
+    ("operation", toJson operation.operation),
+    ("reason", toJson operation.reason)
+  ]
+
+private def bracketedResultJson (importStats : ImportStats) (declarations : Array BracketedDeclarationInfo) : Json :=
+  Json.mkObj [
+    ("import_stats", importStatsJson importStats),
+    ("declarations", Json.arr (declarations.map declarationInfoJson)),
+    ("rejected_operations", Json.arr (bracketedRejectedOperations.map rejectedOperationJson)),
+    ("free_regions_ran", toJson true)
+  ]
+
+@[export lean_rs_host_bracketed_import_query]
+def bracketedImportQuery (searchPaths : Array String) (importNames : Array String)
+    (declarationNamesArg : Array String) (handle trampoline : USize)
+    : IO (Except UInt8 String) := do
+  initHostSearchPath searchPaths
+  let imports := importNames.map fun n => { module := n.toName, importAll := false : Import }
+  let declarationNames := declarationNamesArg.map ownedString
+  let result : Except UInt8 String ← unsafe Lean.withImportModules imports Options.empty fun env => do
+    if let some status ← reportBracketProgress? handle trampoline 1 3 then
+      return Except.error status
+    let importStats ← bracketedEnvImportStats env
+    let declarations ← declarationNames.mapM (bracketedDeclarationInfo env)
+    if let some status ← reportBracketProgress? handle trampoline 2 3 then
+      return Except.error status
+    return Except.ok <| ownedString <| (bracketedResultJson importStats declarations).compress
+  if let some status ← reportBracketProgress? handle trampoline 3 3 then
+    return Except.error status
+  return result
 
 private partial def forallConclusion : Expr → Expr
   | .forallE _ _ body _ => forallConclusion body

@@ -24,8 +24,9 @@ use crate::host::meta::{
 };
 use crate::{
     DeclarationInspectionRequest, DeclarationInspectionResult, EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
-    LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost,
-    LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
+    LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanBracketedImportRequest, LeanBracketedImportResult, LeanCancellationToken,
+    LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSessionImportProfile,
+    LeanSeverity,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -505,6 +506,99 @@ fn session_import_profiles_pass_full_host_gates() {
             info.locals.iter().any(|local| local.name == "h"),
             "{} proof-state locals include h",
             profile.label()
+        );
+    }
+}
+
+#[test]
+fn bracketed_import_query_returns_serialized_declaration_metadata() {
+    const IMPORTS: &[&str] = &["LeanRsFixture.Handles"];
+    const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
+    const MISSING: &str = "LeanRsFixture.Handles.noSuchDeclaration";
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+
+    let result = caps
+        .bracketed_import_query(IMPORTS, LeanBracketedImportRequest::new([DECL, MISSING]), None)
+        .expect("bracketed import query succeeds");
+
+    assert!(result.free_regions_ran, "bracketed query reports freeRegions ran");
+    assert_eq!(result.import_stats.direct_import_names, IMPORTS);
+    assert_eq!(result.import_stats.import_level, "private");
+    assert!(!result.import_stats.import_all);
+    assert!(!result.import_stats.load_exts);
+    assert!(
+        result.import_stats.imported_bytes > 0,
+        "bracketed import reports imported bytes"
+    );
+    assert!(
+        result.import_stats.compacted_region_count > 0,
+        "bracketed import reports compacted regions"
+    );
+
+    let found = result
+        .declarations
+        .iter()
+        .find(|info| info.name == DECL)
+        .expect("found declaration row");
+    assert!(found.exists);
+    assert_eq!(found.kind.as_deref(), Some("definition"));
+    assert_eq!(found.module.as_deref(), Some("LeanRsFixture.Handles"));
+    assert!(
+        found.raw_type.as_ref().is_some_and(|raw| !raw.is_empty()),
+        "found declaration has raw type text"
+    );
+
+    let missing = result
+        .declarations
+        .iter()
+        .find(|info| info.name == MISSING)
+        .expect("missing declaration row");
+    assert!(!missing.exists);
+    assert_eq!(missing.kind, None);
+    assert_eq!(missing.module, None);
+    assert_eq!(missing.raw_type, None);
+}
+
+#[test]
+fn bracketed_import_query_result_surface_cannot_carry_lean_handles() {
+    fn assert_owned<T: Send + Sync + 'static>() {}
+
+    assert_owned::<LeanBracketedImportRequest>();
+    assert_owned::<LeanBracketedImportResult>();
+}
+
+#[test]
+fn bracketed_import_query_reports_rejected_full_session_operations() {
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let result = caps
+        .bracketed_import_query(
+            &["LeanRsFixture.Handles"],
+            LeanBracketedImportRequest::new(["LeanRsFixture.Handles.nameAnonymous"]),
+            None,
+        )
+        .expect("bracketed import query succeeds");
+
+    for operation in [
+        "elaboration",
+        "source-ranges",
+        "proof-state",
+        "pretty-printing",
+        "capability-session",
+    ] {
+        let rejected = result
+            .rejected_operations
+            .iter()
+            .find(|rejected| rejected.operation == operation)
+            .unwrap_or_else(|| panic!("expected rejection for {operation}"));
+        assert!(
+            rejected.reason.contains("requires") || rejected.reason.contains("loaded"),
+            "{operation} rejection explains the full-session dependency"
         );
     }
 }

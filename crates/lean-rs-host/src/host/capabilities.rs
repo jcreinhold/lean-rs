@@ -38,6 +38,7 @@ use core::fmt;
 use lean_rs::error::LeanResult;
 use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanLibrary};
 
+use crate::host::bracketed::{LeanBracketedImportRequest, LeanBracketedImportResult};
 use crate::host::cancellation::LeanCancellationToken;
 use crate::host::host::LeanHost;
 use crate::host::progress::LeanProgressSink;
@@ -172,6 +173,24 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         profiler_options: &LeanImportProfilerOptions,
     ) -> LeanResult<LeanSession<'lean, 'c>> {
         LeanSession::import_profiled(self, imports, mode, profiler_options)
+    }
+
+    /// Run a one-shot no-extension import query inside Lean's compacted-region
+    /// bracket.
+    ///
+    /// The bracketed path imports with `loadExts := false`, serializes only the
+    /// requested declaration metadata plus import stats, frees the imported
+    /// compacted regions, and returns Rust-owned data. It is deliberately not a
+    /// replacement for [`Self::session`]: parser, elaboration, proof-state,
+    /// pretty-printing, and capability workflows require full sessions with
+    /// loaded extensions.
+    pub fn bracketed_import_query(
+        &self,
+        imports: &[&str],
+        request: LeanBracketedImportRequest,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<LeanBracketedImportResult> {
+        LeanBracketedImportResult::query(self, imports, request, progress)
     }
 
     /// The capability's parent host (for runtime + project access by

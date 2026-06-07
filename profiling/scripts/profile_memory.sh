@@ -69,6 +69,7 @@ long-session-fresh) run_long_session_mode fresh-import ;;
 long-session-pooled) run_long_session_mode pooled-reuse ;;
 long-session-steady) run_long_session_mode steady-state ;;
 long-session-matrix) run_long_session_mode import-matrix ;;
+long-session-bracketed) run_long_session_mode bracketed-lightweight ;;
 worker-cycling) run_worker_cycling ;;
 pool-memory) run_pool_memory ;;
 mathlib-scale) run_mathlib_scale ;;
@@ -77,12 +78,13 @@ all)
 	run_long_session_mode pooled-reuse
 	run_long_session_mode steady-state
 	run_long_session_mode import-matrix
+	run_long_session_mode bracketed-lightweight
 	run_worker_cycling
 	run_pool_memory
 	;;
 *)
 	echo "Unknown target: $TARGET"
-	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, worker-cycling, pool-memory, mathlib-scale, all"
+	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, worker-cycling, pool-memory, mathlib-scale, all"
 	exit 1
 	;;
 esac

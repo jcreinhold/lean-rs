@@ -116,11 +116,11 @@ fn render_markdown(report: &PerformanceReport) -> String {
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "| Label | Iteration | Mode | Imports | importAll | Level | loadExts | Modules | Regions | mmap | Bytes | Constants | Exts | Entries |"
+                "| Label | Iteration | Mode | Imports | importAll | Level | loadExts | freeRegions | Modules | Regions | mmap | Bytes | Constants | Exts | Entries |"
             );
             let _ = writeln!(
                 out,
-                "| --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+                "| --- | ---: | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
             );
             for stats in visible_import_stats(&run.import_stats) {
                 let iteration = stats
@@ -131,9 +131,12 @@ fn render_markdown(report: &PerformanceReport) -> String {
                 } else {
                     stats.direct_imports.join("<br>")
                 };
+                let free_regions = stats
+                    .free_regions_ran
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
                 let _ = writeln!(
                     out,
-                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                     stats.label,
                     iteration,
                     stats.profile_mode,
@@ -141,6 +144,7 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     stats.import_all,
                     stats.import_level,
                     stats.load_exts,
+                    free_regions,
                     stats.effective_modules,
                     stats.compacted_regions,
                     stats.memory_mapped_regions,

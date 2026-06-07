@@ -10,7 +10,7 @@
 //!   value types: [`LeanEvidence`], [`LeanKernelOutcome`],
 //!   [`ProofSummary`], [`LeanElabOptions`], [`LeanElabFailure`], the
 //!   `meta::*` service surface.
-//! - The capability contract: 28 mandatory + 9 optional `lean_rs_host_*`
+//! - The capability contract: 32 mandatory + 10 optional `lean_rs_host_*`
 //!   `@[export]` Lean shims bundled with this crate and loaded alongside the
 //!   consumer capability dylib.
 //!
@@ -40,11 +40,12 @@ pub use crate::host::{
     DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
     DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
     DeclarationSearchTimings, DeclarationVerificationFacts, DeclarationVerificationOutcome,
-    DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, LeanCapabilities,
-    LeanDeclarationFilter, LeanHost, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions,
-    LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, PoolStats, PooledSession,
-    ProofAttemptEnvelope, ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus,
-    ProofCandidate, ProofEditTarget, ProofPositionSelector, ProofPositionSummary, SessionPool, SessionPoolConfig,
-    SessionPoolMemoryPolicy, SessionStats,
+    DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget,
+    LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult,
+    LeanBracketedRejectedOperation, LeanCapabilities, LeanDeclarationFilter, LeanHost, LeanImportLevel,
+    LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats, LeanSession, LeanSessionImportProfile,
+    LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope, ProofAttemptOutcome, ProofAttemptRequest,
+    ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector, ProofPositionSummary,
+    SessionPool, SessionPoolConfig, SessionPoolMemoryPolicy, SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

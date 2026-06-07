@@ -41,12 +41,16 @@ and [`Meta.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShim
 `DeclarationFilter` is a private wire record whose three flags are Nat-backed `0`/`1` values so it uses the same
 object-slot structure ABI as the rest of the host-defined records; Rust callers see ordinary `bool` fields.
 
-### Environment and declaration queries (15)
+### Environment and declaration queries
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |
 | `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation, None)` |
 | `lean_rs_host_session_import_progress` | `(searchPaths : Array String) (importNames : Array String) (handle trampoline : USize) : IO (Except UInt8 Environment)` | `LeanCapabilities::session(imports, cancellation, Some(progress))` |
+| `lean_rs_host_session_import_profile` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (loadExts profiler traceProfiler : Bool) (traceProfilerOutput : String) : IO Environment` | explicit profile and profiling imports |
+| `lean_rs_host_session_import_profile_progress` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (handle trampoline : USize) : IO (Except UInt8 Environment)` | explicit profile imports with progress |
+| `lean_rs_host_env_import_stats` | `(env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats` | `LeanSession::import_stats()` attribution |
+| `lean_rs_host_bracketed_import_query` | `(searchPaths : Array String) (importNames : Array String) (declarationNames : Array String) (handle trampoline : USize) : IO (Except UInt8 String)` | `LeanCapabilities::bracketed_import_query(...)` |
 | `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
 | `lean_rs_host_name_to_string` | `(n : Name) : String` | `name_to_string(name, cancellation)` (and `name_to_string_bulk` / `list_declarations_strings`) |
 | `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |

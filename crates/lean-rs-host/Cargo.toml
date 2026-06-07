@@ -33,6 +33,7 @@ version.workspace = true
 [dependencies]
 lean-rs = { workspace = true }
 lean-toolchain = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 

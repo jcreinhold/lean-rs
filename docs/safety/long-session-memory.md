@@ -137,6 +137,32 @@ Local capped matrix run on 2026-06-07, macOS aarch64, Lean 4.31.0-rc1, `LEAN_RS_
 objects in those compacted regions. This baseline records the environment shape that caused a RSS checkpoint; it does
 not reclaim regions.
 
+## Bracketed Lightweight Queries
+
+`LeanCapabilities::bracketed_import_query` is a separate experimental path for one-shot declaration metadata queries.
+It imports with `importAll := false`, import level `.private`, and `loadExts := false`, serializes declaration
+existence, declaration kind, module ownership, raw type text, and import stats, and then calls
+`Environment.freeRegions` before returning to Rust. The returned values are owned Rust data; no `Environment`, `Expr`,
+`ConstantInfo`, `Name`, extension state, or capability handle escapes the bracket.
+
+This path is deliberately not a `LeanSession` replacement. Elaboration, parser-backed source/range queries,
+proof-state queries, notation-aware pretty-printing, and capability workflows remain full-session operations because
+they require loaded environment extensions. The profiling workload `bracketed-lightweight` prints
+`bracketed_import_stats=... free_regions_ran=true` and RSS checkpoints for:
+
+- before import dispatch;
+- after Lean imports with `loadExts := false`;
+- after the declaration query, before `freeRegions`;
+- after `freeRegions`;
+- after Rust receives the owned result;
+- after a short pause.
+
+Local capped probe on macOS aarch64 with Lean 4.31.0-rc1:
+
+| Workload | Import RSS KiB | Query-before-free RSS KiB | After-free RSS KiB | Imported bytes | Regions | Constants | Ext entries |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `bracketed-lightweight` (`LeanRsFixture.Handles`, one import) | 1,010,720 | 1,032,032 | 108,048 | 1,955,323,616 | 9,033 | 204,109 | 1,732,192 |
+
 Baseline JSON and Markdown reports under `profiling_results/` preserve the raw KiB checkpoints and render the Lean
 Import Stats tables side by side. Treat those KiB values as local measurements only; do not compare absolute RSS across
 machines or operating systems.
