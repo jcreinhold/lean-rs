@@ -424,3 +424,9 @@ replacement timings, plus the restart reason and budget status. The current stat
 old child exits before the replacement starts, so no warm-spare process temporarily doubles child RSS. Background
 replacement or warm spares remain a future opt-in design that must be admitted by the total child RSS budget before
 spawn/import begins.
+
+Prompt 25 adds `batch=...` rows for the warm `process_module_query_batch` proof-agent path. The implementation reuses
+the existing bounded module-query batch API through one checked-out worker-pool lease; it does not add a new Lean shim
+or batch protocol. These rows are evidence about request/session churn on a warm child. They do not imply compacted
+regions were reclaimed, do not hide cold import cost, and do not replace worker cycling for full `loadExts := true`
+sessions.

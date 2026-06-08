@@ -63,6 +63,8 @@ pub struct WorkloadRun {
     pub session_reuse: Vec<SessionReuseSample>,
     #[serde(default)]
     pub replacements: Vec<ReplacementSample>,
+    #[serde(default)]
+    pub batches: Vec<BatchSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -188,6 +190,24 @@ pub struct ReplacementSample {
     pub replacement_reason: Option<String>,
     pub replacement_budget_status: Option<String>,
     pub skipped_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub layer: String,
+    pub workload: String,
+    pub selectors: u64,
+    pub request_delta: u64,
+    pub import_delta: u64,
+    pub elapsed_ms: f64,
+    pub parent_rss_kib: Option<u64>,
+    pub child_rss_kib: Option<u64>,
+    pub result_items: u64,
+    pub item_failures: u64,
+    pub total_truncated: bool,
+    pub worker_frames: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

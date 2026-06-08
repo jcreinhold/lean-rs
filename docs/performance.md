@@ -181,6 +181,10 @@ and RSS before/after admission. Their `session_reuse=...` rows distinguish equiv
 Their `replacement=...` rows break synchronous worker replacement into spawn/handshake, capability-load,
 session-open/import, first-command, warm-command, and total replacement timings. Prewarming is not enabled by default
 or implemented in this baseline; overlap must be admitted by RSS-budget evidence before adding that lifecycle behavior.
+Their `batch=...` rows cover the warm `process_module_query_batch` proof-agent workload through one pool lease. These
+rows report selector counts, request/import deltas, elapsed time, parent/child RSS, bounded item counts, item-level
+failures, truncation, and `worker_frames=unavailable` until protocol frame counters exist. Batching here reduces
+request/session churn on warm sessions; it is not Lean memory reclamation and does not replace worker cycling.
 The repo defaults now use a 1,572,864 KiB local cap and one worker/import job at a time.
 On the 2026-06-08 local rebaseline, full-session worker cycling stayed within the older 2 GiB cap only at
 `max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one child under about 421 MiB. These are local

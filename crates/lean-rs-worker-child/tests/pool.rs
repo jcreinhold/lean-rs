@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
-    LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
+    LeanWorkerElabOptions, LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQuerySelector,
+    LeanWorkerOutputBudgets, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerProofStateResult, LeanWorkerRestartPolicy,
     LeanWorkerRestartReason, LeanWorkerSessionImportProfile, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
     LeanWorkerTypedDataSink,
 };
@@ -112,6 +114,46 @@ fn request(source: &str) -> FixtureRequest {
     }
 }
 
+fn module_query_source() -> &'static str {
+    "theorem poolBatchProbe (h : True) : True := by\n  exact h\n"
+}
+
+fn module_query_selectors() -> Vec<LeanWorkerModuleQuerySelector> {
+    vec![
+        LeanWorkerModuleQuerySelector::Diagnostics {
+            id: "diagnostics".to_owned(),
+        },
+        LeanWorkerModuleQuerySelector::ProofState {
+            id: "state".to_owned(),
+            line: 2,
+            column: 4,
+        },
+    ]
+}
+
+fn assert_batch_has_state(outcome: &LeanWorkerModuleQueryBatchOutcome) {
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(
+        result.items.iter().any(|item| {
+            matches!(
+                item,
+                LeanWorkerModuleQueryBatchItem::Ok { id, result }
+                    if id == "state"
+                        && matches!(
+                            result.as_ref(),
+                            LeanWorkerModuleQueryBatchResult::ProofState(
+                                LeanWorkerProofStateResult::State { .. }
+                            )
+                        )
+            )
+        }),
+        "expected proof-state selector item, got {:?}",
+        result.items,
+    );
+}
+
 #[test]
 fn compatible_session_key_reuses_one_worker() {
     let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(2));
@@ -161,6 +203,129 @@ fn compatible_session_key_reuses_one_worker() {
         pool.snapshot().imports,
         imports_after_first_lease,
         "warm same-workspace lease should reuse the already-open child session"
+    );
+}
+
+#[test]
+fn lease_module_query_batch_reuses_one_warm_session() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let selectors = module_query_selectors();
+    let budgets = LeanWorkerOutputBudgets::default();
+    let options = LeanWorkerElabOptions::new();
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let before = lease.snapshot();
+        let first = lease
+            .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
+            .expect("first warm batch succeeds");
+        let after_first = lease.snapshot();
+        assert_batch_has_state(&first);
+        assert_eq!(
+            after_first.imports, before.imports,
+            "batch command should use the already-open session instead of importing again",
+        );
+        assert_eq!(after_first.requests, before.requests + 1);
+
+        let second = lease
+            .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
+            .expect("second warm batch succeeds");
+        let after_second = lease.snapshot();
+        assert_batch_has_state(&second);
+        assert_eq!(after_second.imports, before.imports);
+        assert_eq!(after_second.requests, before.requests + 2);
+    }
+
+    let cold_open_attempts = pool.snapshot().cold_open_attempts;
+    let imports = pool.snapshot().imports;
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool reuses compatible lease");
+        let outcome = lease
+            .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
+            .expect("reacquired warm batch succeeds");
+        assert_batch_has_state(&outcome);
+    }
+
+    let snapshot = pool.snapshot();
+    assert_eq!(
+        snapshot.cold_open_attempts, cold_open_attempts,
+        "compatible reacquire should not start another cold worker open",
+    );
+    assert_eq!(
+        snapshot.imports, imports,
+        "compatible reacquire should not import again"
+    );
+    assert_eq!(snapshot.key_hits, 1);
+    assert_eq!(snapshot.fresh_cold_opens_avoided, 1);
+}
+
+#[test]
+fn lease_module_query_batch_preserves_item_level_budget_failures() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let selectors = [LeanWorkerModuleQuerySelector::ProofState {
+        id: "state".to_owned(),
+        line: 2,
+        column: 4,
+    }];
+    let budgets = LeanWorkerOutputBudgets {
+        per_field_bytes: 128,
+        total_bytes: 0,
+    };
+    let options = LeanWorkerElabOptions::new();
+
+    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let outcome = lease
+        .process_module_query_batch(module_query_source(), &selectors, &budgets, &options, None, None)
+        .expect("budget exhaustion is a normal batch outcome");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome with budgeted item, got {outcome:?}");
+    };
+    assert!(result.total_truncated);
+    assert!(
+        matches!(
+            result.items.as_slice(),
+            [LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. }] if id == "state"
+        ),
+        "expected per-selector budget failure, got {:?}",
+        result.items,
+    );
+}
+
+#[test]
+fn lease_module_query_batch_pre_cancelled_token_sends_no_request() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let selectors = module_query_selectors();
+    let budgets = LeanWorkerOutputBudgets::default();
+    let options = LeanWorkerElabOptions::new();
+    let token = LeanWorkerCancellationToken::new();
+    token.cancel();
+
+    let mut lease = pool.acquire_lease(builder()).expect("pool opens lease");
+    let before = lease.snapshot();
+    let err = lease
+        .process_module_query_batch(
+            module_query_source(),
+            &selectors,
+            &budgets,
+            &options,
+            Some(&token),
+            None,
+        )
+        .expect_err("pre-cancelled batch should stop before dispatch");
+    match err {
+        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_process_module_query_batch"),
+        other => panic!("expected cancellation, got {other:?}"),
+    }
+    let after = lease.snapshot();
+    assert_eq!(
+        after.requests, before.requests,
+        "cancelled call should not send a worker request"
+    );
+    assert_eq!(
+        after.imports, before.imports,
+        "cancelled call should not reopen or reimport"
     );
 }
 

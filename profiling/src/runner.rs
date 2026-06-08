@@ -8,8 +8,9 @@ use lean_toolchain::LEAN_VERSION;
 
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
-    AdmissionSample, BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport,
-    ProfileArtifact, ReplacementSample, ReportMetadata, RssCheckpoint, SessionReuseSample, TimingSample, WorkloadRun,
+    AdmissionSample, BaselineMode, BatchSample, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue,
+    PerformanceReport, ProfileArtifact, ReplacementSample, ReportMetadata, RssCheckpoint, SessionReuseSample,
+    TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
@@ -352,6 +353,7 @@ fn run_command_path(
         admissions: parsed.admissions,
         session_reuse: parsed.session_reuse,
         replacements: parsed.replacements,
+        batches: parsed.batches,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -379,6 +381,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut admissions = Vec::new();
     let mut session_reuse = Vec::new();
     let mut replacements = Vec::new();
+    let mut batches = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -427,6 +430,9 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_replacement(&line_pairs) {
             replacements.push(sample);
         }
+        if let Some(sample) = parse_batch(&line_pairs) {
+            batches.push(sample);
+        }
     }
 
     if stderr.contains("lazy discriminator import initialization") {
@@ -460,6 +466,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         admissions,
         session_reuse,
         replacements,
+        batches,
         peak_rss_kib,
     }
 }
@@ -602,6 +609,25 @@ fn parse_replacement(pairs: &[(String, String)]) -> Option<ReplacementSample> {
     })
 }
 
+fn parse_batch(pairs: &[(String, String)]) -> Option<BatchSample> {
+    Some(BatchSample {
+        label: value(pairs, "batch")?.to_owned(),
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        layer: value(pairs, "layer").unwrap_or("unknown").to_owned(),
+        workload: value(pairs, "workload").unwrap_or("unknown").to_owned(),
+        selectors: parse_u64(pairs, "selectors")?,
+        request_delta: parse_u64(pairs, "request_delta")?,
+        import_delta: parse_u64(pairs, "import_delta")?,
+        elapsed_ms: value(pairs, "elapsed_ms")?.parse::<f64>().ok()?,
+        parent_rss_kib: parse_u64(pairs, "parent_rss_kib"),
+        child_rss_kib: parse_u64(pairs, "child_rss_kib"),
+        result_items: parse_u64(pairs, "result_items")?,
+        item_failures: parse_u64(pairs, "item_failures")?,
+        total_truncated: parse_bool(pairs, "total_truncated")?,
+        worker_frames: parse_u64(pairs, "worker_frames"),
+    })
+}
+
 fn value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs
         .iter()
@@ -675,6 +701,7 @@ struct ParsedOutput {
     admissions: Vec<AdmissionSample>,
     session_reuse: Vec<SessionReuseSample>,
     replacements: Vec<ReplacementSample>,
+    batches: Vec<BatchSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -820,6 +847,30 @@ mod tests {
             Some("synchronous-no-overlap")
         );
         assert_eq!(sample.skipped_reason, None);
+    }
+
+    #[test]
+    fn parses_batch_lines() {
+        let parsed = parse_key_values(
+            "batch=warm_module_query_batch iteration=2 layer=worker-pool workload=process_module_query_batch selectors=2 request_delta=1 import_delta=0 elapsed_ms=4.250 parent_rss_kib=120000 child_rss_kib=700000 result_items=2 item_failures=0 total_truncated=false worker_frames=unavailable",
+            "",
+        );
+        assert_eq!(parsed.batches.len(), 1);
+        let sample = &parsed.batches[0];
+        assert_eq!(sample.label, "warm_module_query_batch");
+        assert_eq!(sample.iteration, Some(2));
+        assert_eq!(sample.layer, "worker-pool");
+        assert_eq!(sample.workload, "process_module_query_batch");
+        assert_eq!(sample.selectors, 2);
+        assert_eq!(sample.request_delta, 1);
+        assert_eq!(sample.import_delta, 0);
+        assert_eq!(sample.elapsed_ms, 4.25);
+        assert_eq!(sample.parent_rss_kib, Some(120000));
+        assert_eq!(sample.child_rss_kib, Some(700000));
+        assert_eq!(sample.result_items, 2);
+        assert_eq!(sample.item_failures, 0);
+        assert!(!sample.total_truncated);
+        assert_eq!(sample.worker_frames, None);
     }
 
     #[test]

@@ -18,8 +18,9 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 use lean_rs_worker_parent::{
-    LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerRestartPolicy,
+    LeanWorkerCapabilityBuilder, LeanWorkerElabOptions, LeanWorkerError, LeanWorkerJsonCommand,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerOutputBudgets, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +67,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     fixture_import_reuse(&worker_binary, knobs)?;
     mathlib_shaped_fallback(&worker_binary, knobs)?;
     repeated_session_reuse(&worker_binary, knobs)?;
+    warm_module_query_batch(&worker_binary, knobs)?;
     admission_refusal_stress(&worker_binary, knobs)?;
 
     println!(
@@ -145,6 +147,73 @@ fn repeated_session_reuse(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Res
         print_timing("bounded_reuse_no_cycle", iteration, started.elapsed(), &pool);
     }
     print_snapshot("bounded_reuse_no_cycle", &pool);
+    Ok(())
+}
+
+fn warm_module_query_batch(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Result<(), LeanWorkerError> {
+    let mut pool = LeanWorkerPool::new(memory_pool_config(knobs));
+    let source = "theorem warmBatchProbe (h : True) : True := by\n  exact h\n";
+    let selectors = [
+        LeanWorkerModuleQuerySelector::Diagnostics {
+            id: "diagnostics".to_owned(),
+        },
+        LeanWorkerModuleQuerySelector::ProofState {
+            id: "state".to_owned(),
+            line: 2,
+            column: 4,
+        },
+    ];
+    let budgets = LeanWorkerOutputBudgets::default();
+    let options = LeanWorkerElabOptions::new();
+
+    {
+        let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary, knobs))?;
+        for iteration in 1..=3 {
+            let before = lease.snapshot();
+            let parent_rss_before = current_process_rss_kib();
+            let started = Instant::now();
+            let outcome = lease.process_module_query_batch(source, &selectors, &budgets, &options, None, None)?;
+            let elapsed = started.elapsed();
+            let after = lease.snapshot();
+            print_batch(
+                "warm_module_query_batch",
+                iteration,
+                selectors.len(),
+                before.requests,
+                before.imports,
+                parent_rss_before,
+                elapsed,
+                &after,
+                &outcome,
+            );
+        }
+    }
+
+    {
+        let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary, knobs))?;
+        let before = lease.snapshot();
+        let parent_rss_before = current_process_rss_kib();
+        let started = Instant::now();
+        let outcome = lease.process_module_query_batch(source, &selectors, &budgets, &options, None, None)?;
+        let elapsed = started.elapsed();
+        let after = lease.snapshot();
+        print_batch(
+            "warm_module_query_batch_reacquire",
+            4,
+            selectors.len(),
+            before.requests,
+            before.imports,
+            parent_rss_before,
+            elapsed,
+            &after,
+            &outcome,
+        );
+    }
+
+    print_admission("warm_module_query_batch", 4, &pool);
+    print_session_reuse("warm_module_query_batch", 4, &pool);
+    print_replacement("warm_module_query_batch", 4, &pool);
+    print_snapshot("warm_module_query_batch", &pool);
     Ok(())
 }
 
@@ -341,6 +410,47 @@ fn print_replacement(name: &str, iteration: u64, pool: &LeanWorkerPool) {
         timing.map_or("none", |value| value.replacement_budget_status.as_str()),
         snapshot.last_replacement_skipped_reason.as_deref().unwrap_or("none"),
     );
+}
+
+fn print_batch(
+    label: &str,
+    iteration: u64,
+    selector_count: usize,
+    before_requests: u64,
+    before_imports: u64,
+    parent_rss_before: Option<u64>,
+    elapsed: Duration,
+    snapshot: &lean_rs_worker_parent::LeanWorkerPoolSnapshot,
+    outcome: &LeanWorkerModuleQueryBatchOutcome,
+) {
+    let (result_items, item_failures, total_truncated) = batch_result_facts(outcome);
+    println!(
+        "batch={label} iteration={iteration} layer=worker-pool workload=process_module_query_batch selectors={selector_count} request_delta={} import_delta={} elapsed_ms={:.3} parent_rss_kib={} child_rss_kib={} result_items={result_items} item_failures={item_failures} total_truncated={total_truncated} worker_frames=unavailable",
+        snapshot.requests.saturating_sub(before_requests),
+        snapshot.imports.saturating_sub(before_imports),
+        elapsed.as_secs_f64() * 1_000.0,
+        parent_rss_before.map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot
+            .total_child_rss_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+    );
+}
+
+fn batch_result_facts(outcome: &LeanWorkerModuleQueryBatchOutcome) -> (usize, usize, bool) {
+    match outcome {
+        LeanWorkerModuleQueryBatchOutcome::Ok { result, .. }
+        | LeanWorkerModuleQueryBatchOutcome::MissingImports { result, .. } => {
+            let failures = result
+                .items
+                .iter()
+                .filter(|item| !matches!(item, LeanWorkerModuleQueryBatchItem::Ok { .. }))
+                .count();
+            (result.items.len(), failures, result.total_truncated)
+        }
+        LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed { .. }
+        | LeanWorkerModuleQueryBatchOutcome::Unsupported => (0, 1, false),
+        _ => (0, 1, false),
+    }
 }
 
 fn report_import_stats(label: &str, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {

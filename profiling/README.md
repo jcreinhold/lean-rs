@@ -133,6 +133,13 @@ status. Prompt 24 keeps replacement synchronous and records `synchronous-no-over
 prewarming remain deferred until measurements show a latency need and total child RSS budget can admit temporary
 overlap.
 
+Pool workloads print `batch=...` rows for the warm proof-agent module-query batch path. The Markdown report renders
+them under **Warm Batch Workloads** with selector counts, request/import deltas, elapsed time, parent/child RSS, bounded
+item counts, item-level failures, truncation status, and worker frame count when available. Prompt 25 reuses the
+existing `process_module_query_batch` API through one warm pool lease; it reduces request/session churn and does not
+reclaim Lean memory, avoid cold import cost, or replace worker cycling. Worker frame counts currently report
+`unavailable` because the protocol layer does not expose frame counters.
+
 `collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
 run stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate
 whose peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative

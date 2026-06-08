@@ -12,7 +12,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use lean_rs_worker_protocol::types::{LeanWorkerImportStats, LeanWorkerSessionImportProfile};
+use lean_rs_worker_protocol::types::{
+    LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
+};
 
 use crate::capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
 use crate::session::{
@@ -1037,6 +1040,34 @@ impl LeanWorkerSessionLease<'_> {
     {
         self.run_with_current_session(cancellation, progress, |session| {
             session.run_streaming_command(command, request, rows, diagnostics, cancellation, progress)
+        })
+    }
+
+    /// Parse and elaborate a Lean module once, returning bounded selector
+    /// projections through the already-open worker session behind this lease.
+    ///
+    /// This is the warm proof-agent batch path for pool callers. It keeps
+    /// worker identity, session reopening, policy checks, timeout handling,
+    /// and `session_missing` retry inside the lease lifecycle wrapper.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` for invalidated leases, session startup
+    /// failures, cancellation, timeout, child failure, progress panic, or
+    /// protocol failure. Header-parse failures, missing imports, selector
+    /// unavailability, and budget exhaustion surface in the returned
+    /// [`LeanWorkerModuleQueryBatchOutcome`].
+    pub fn process_module_query_batch(
+        &mut self,
+        source: &str,
+        selectors: &[LeanWorkerModuleQuerySelector],
+        budgets: &LeanWorkerOutputBudgets,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerModuleQueryBatchOutcome, LeanWorkerError> {
+        self.run_with_current_session(cancellation, progress, |session| {
+            session.process_module_query_batch(source, selectors, budgets, options, cancellation, progress)
         })
     }
 
