@@ -55,6 +55,8 @@ pub struct WorkloadRun {
     pub checkpoints: Vec<RssCheckpoint>,
     pub import_stats: Vec<ImportStatsSample>,
     pub derived_work: Vec<DerivedWorkSample>,
+    #[serde(default)]
+    pub timings: Vec<TimingSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -114,6 +116,20 @@ pub struct DerivedWorkSample {
     pub parser_elaborator_runs: u64,
     pub module_snapshot_builds: u64,
     pub lazy_discr_tree_import_initialization_observed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimingSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub kind: String,
+    pub elapsed_ms: f64,
+    pub rss_kib: Option<u64>,
+    pub workers: Option<u64>,
+    pub total_child_rss_kib: Option<u64>,
+    pub worker_restarts: Option<u64>,
+    pub max_import_restarts: Option<u64>,
+    pub policy_restarts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

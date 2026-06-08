@@ -9,9 +9,12 @@ use lean_toolchain::LEAN_VERSION;
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
     BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport, ProfileArtifact,
-    ReportMetadata, RssCheckpoint, WorkloadRun,
+    ReportMetadata, RssCheckpoint, TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
+
+const LOCAL_RSS_CAP_KIB: u64 = 2_097_152;
+const WORKER_POLICY_WIDEN_THRESHOLD_KIB: u64 = LOCAL_RSS_CAP_KIB * 70 / 100;
 
 /// Collect a bounded profiling baseline and write JSON/Markdown artifacts.
 ///
@@ -40,7 +43,18 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
     report.workloads.push(run_long_session("import-matrix")?);
     report.workloads.push(run_long_session("bracketed-lightweight")?);
     report.workloads.push(run_long_session("derived-indexes")?);
-    report.workloads.push(run_worker_cycling()?);
+    let worker_single_import = run_worker_cycling(1)?;
+    let run_two_import_candidate = worker_single_import
+        .peak_rss_kib
+        .is_some_and(|peak| peak <= WORKER_POLICY_WIDEN_THRESHOLD_KIB);
+    report.workloads.push(worker_single_import);
+    if run_two_import_candidate {
+        report.workloads.push(run_worker_cycling(2)?);
+    } else {
+        report.notes.push(format!(
+            "Skipped worker-cycling max_imports=2 candidate because max_imports=1 peak RSS exceeded the 70% widening threshold ({WORKER_POLICY_WIDEN_THRESHOLD_KIB} KiB of {LOCAL_RSS_CAP_KIB} KiB).",
+        ));
+    }
     report.workloads.push(run_pool_memory()?);
     report.workloads.push(run_criterion(
         "host-query-declarations-bulk-16",
@@ -167,17 +181,32 @@ fn run_long_session(mode: &str) -> Result<WorkloadRun, Box<dyn Error>> {
     run_binary(&format!("long-session-{mode}"), &binary, &[], env)
 }
 
-fn run_worker_cycling() -> Result<WorkloadRun, Box<dyn Error>> {
+fn run_worker_cycling(max_imports: u64) -> Result<WorkloadRun, Box<dyn Error>> {
     let mut env = default_env();
     env.push(env_pair("LEAN_RS_WORKER_MEMORY_IMPORTS", "6"));
-    env.push(env_pair("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", "2"));
+    env.push(env_pair("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", &max_imports.to_string()));
+    env.push(env_pair(
+        "LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB",
+        &LOCAL_RSS_CAP_KIB.to_string(),
+    ));
     let binary = profiling_example("memory_cycling");
-    run_binary("worker-cycling", &binary, &[], env)
+    run_binary(&format!("worker-cycling-max-imports-{max_imports}"), &binary, &[], env)
 }
 
 fn run_pool_memory() -> Result<WorkloadRun, Box<dyn Error>> {
+    let mut env = default_env();
+    env.push(env_pair("LEAN_RS_POOL_MEMORY_MAX_WORKERS", "1"));
+    env.push(env_pair(
+        "LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB",
+        &LOCAL_RSS_CAP_KIB.to_string(),
+    ));
+    env.push(env_pair(
+        "LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB",
+        &LOCAL_RSS_CAP_KIB.to_string(),
+    ));
+    env.push(env_pair("LEAN_RS_POOL_MEMORY_MAX_IMPORTS", "1"));
     let binary = profiling_example("pool_memory_scheduling");
-    run_binary("pool-memory", &binary, &[], default_env())
+    run_binary("pool-memory", &binary, &[], env)
 }
 
 fn run_criterion(name: &str, args: &[&str]) -> Result<WorkloadRun, Box<dyn Error>> {
@@ -209,7 +238,8 @@ fn record_samply_profiles() -> Result<Vec<ProfileArtifact>, Box<dyn Error>> {
             &profiling_example("memory_cycling"),
             &[
                 env_pair("LEAN_RS_WORKER_MEMORY_IMPORTS", "6"),
-                env_pair("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", "2"),
+                env_pair("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", "1"),
+                env_pair("LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB", "2097152"),
             ],
         )?,
     ])
@@ -315,6 +345,7 @@ fn run_command_path(
         checkpoints: parsed.checkpoints,
         import_stats: parsed.import_stats,
         derived_work: parsed.derived_work,
+        timings: parsed.timings,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -338,6 +369,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut checkpoints = Vec::new();
     let mut import_stats = Vec::new();
     let mut derived_work = Vec::new();
+    let mut timings = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -374,6 +406,9 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_derived_work(&line_pairs) {
             derived_work.push(sample);
         }
+        if let Some(sample) = parse_timing(&line_pairs) {
+            timings.push(sample);
+        }
     }
 
     if stderr.contains("lazy discriminator import initialization") {
@@ -403,6 +438,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         checkpoints,
         import_stats,
         derived_work,
+        timings,
         peak_rss_kib,
     }
 }
@@ -456,6 +492,24 @@ fn parse_derived_work(pairs: &[(String, String)]) -> Option<DerivedWorkSample> {
             pairs,
             "lazy_discr_tree_import_initialization_observed",
         )?,
+    })
+}
+
+fn parse_timing(pairs: &[(String, String)]) -> Option<TimingSample> {
+    let label = value(pairs, "session_open_timing")
+        .or_else(|| value(pairs, "pool_request_timing"))?
+        .to_owned();
+    Some(TimingSample {
+        label,
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        kind: value(pairs, "kind").unwrap_or("unknown").to_owned(),
+        elapsed_ms: value(pairs, "elapsed_ms")?.parse::<f64>().ok()?,
+        rss_kib: parse_u64(pairs, "rss_kib"),
+        workers: parse_u64(pairs, "workers"),
+        total_child_rss_kib: parse_u64(pairs, "total_child_rss_kib"),
+        worker_restarts: parse_u64(pairs, "worker_restarts"),
+        max_import_restarts: parse_u64(pairs, "max_import_restarts"),
+        policy_restarts: parse_u64(pairs, "policy_restarts"),
     })
 }
 
@@ -524,6 +578,7 @@ struct ParsedOutput {
     checkpoints: Vec<RssCheckpoint>,
     import_stats: Vec<ImportStatsSample>,
     derived_work: Vec<DerivedWorkSample>,
+    timings: Vec<TimingSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -581,6 +636,21 @@ mod tests {
         assert_eq!(stats.non_memory_mapped_region_bytes, Some(8192));
         assert!(!stats.load_exts);
         assert_eq!(stats.free_regions_ran, Some(true));
+    }
+
+    #[test]
+    fn parses_worker_timing_lines() {
+        let parsed = parse_key_values(
+            "session_open_timing=worker_cycling iteration=2 kind=warm-same-child elapsed_ms=12.500 max_imports_per_child=2 max_rss_kib=2097152 rss_kib=700000",
+            "",
+        );
+        assert_eq!(parsed.timings.len(), 1);
+        let timing = &parsed.timings[0];
+        assert_eq!(timing.label, "worker_cycling");
+        assert_eq!(timing.iteration, Some(2));
+        assert_eq!(timing.kind, "warm-same-child");
+        assert_eq!(timing.elapsed_ms, 12.5);
+        assert_eq!(timing.rss_kib, Some(700000));
     }
 
     #[test]

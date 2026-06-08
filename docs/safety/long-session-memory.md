@@ -218,6 +218,40 @@ Local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_
 
 ## Measured Shape
 
+Post-reduction rebaseline on 2026-06-08, commit `396bdf3`, macOS aarch64, Lean 4.31.0-rc1, profiling profile,
+`LEAN_RS_NUM_THREADS=1`, and a local `2,097,152` KiB RSS budget:
+
+| Workload | Command/env shape | Status | Peak RSS KiB | Import profile | Imported bytes | Regions | Ext entries |
+| --- | --- | --- | ---: | --- | ---: | ---: | ---: |
+| Fresh same-process imports | `LEAN_RS_LONG_SESSION_MODE=fresh-import`, `LEAN_RS_LONG_SESSION_IMPORTS=4`, `LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152` | `resource_exhausted` after the second import | 2,225,584 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
+| Pooled reuse | `LEAN_RS_LONG_SESSION_MODE=pooled-reuse`, pool capacity 1 | `ok` | 1,192,976 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
+| Steady query/elaboration | `LEAN_RS_LONG_SESSION_MODE=steady-state` | `ok` | 1,198,608 | `private`, `importAll=false`, `loadExts=true` | 1,956,159,664 | 9,037 | 1,733,621 |
+| Bracketed lightweight | `LEAN_RS_LONG_SESSION_MODE=bracketed-lightweight` | `ok`; after-free RSS settled near 122,480 KiB | 1,044,832 | `private`, `importAll=false`, `loadExts=false` | 1,955,323,616 | 9,033 | 1,732,192 |
+| Derived-index probes | `LEAN_RS_LONG_SESSION_MODE=derived-indexes` | `ok` | 1,236,368 | `private`, `importAll=false`, `loadExts=true` | 1,955,250,248 | 9,033 | 1,732,016 |
+| Worker cycling candidate | `LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1`, `LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152` | `ok`, 5 restarts for 6 imports | 1,194,368 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
+| Worker cycling candidate | `LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2`, same RSS cap | `ok`, but over local cap | 3,236,416 | `private`, `importAll=false`, `loadExts=true` | 1,955,323,616 | 9,033 | 1,732,192 |
+| Worker pool fixture | `max_workers=1`, total/per-worker RSS cap 2,097,152 KiB, `max_imports=1` | `ok` | 419,616 | `private`, `importAll=false`, `loadExts=true` | 460,060,392 | 2,638 | 464,688 |
+
+The local worker recommendation from that run is:
+
+```rust
+LeanWorkerRestartPolicy::memory_bounded(1, 2_097_152);
+LeanWorkerPoolConfig::new(1)
+    .per_worker_rss_ceiling_kib(2_097_152)
+    .max_total_child_rss_kib(2_097_152);
+```
+
+The `max_imports=2` candidate was collected because the one-import run stayed below the 70% widening threshold, but it
+then peaked above the 2 GiB budget. For this fixture and machine, one fresh full-session import per child is the
+measured local policy. Larger hosts should scale `max_total_child_rss_kib` with `max_workers *
+per_worker_rss_ceiling_kib`, and should set both values from their own capped baseline rather than copying the raw KiB
+above.
+
+The same-process test command `cargo test -p lean-rs-host session_leak_loop` is not a safe local verification command.
+It can run multiple fresh full-session imports inside one Rust test harness process without a `SessionPoolMemoryPolicy`
+or worker boundary. Use nextest process isolation or an exact single-test filter instead; `-- --test-threads=1` only
+serializes tests inside the same process and does not reset Lean import state.
+
 The numbers below are local snapshots on macOS aarch64 against `lean=4.29.1`. They are not portable: macOS RSS is noisy
 under memory pressure and compression, and absolute KiB values vary between machines. The *shape*—order-of-magnitude
 growth during fresh imports, flat reuse, flat introspection and elaboration, no return to baseline after drop—is the
@@ -317,14 +351,15 @@ The worker memory reproducer is:
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
-LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2 \
+LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
+LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
 cargo run -p lean-rs-worker-child --example memory_cycling
 ```
 
-On a local macOS aarch64 run, the worker cycled after every two import-like fixture requests. Child RSS moved from about
-345 MiB after the first request in each child to about 717 MiB after the second request, then returned to about 345 MiB
-in the replacement child. This supports the operational claim: process cycling bounds retained RSS for this workload;
-in-process drain does not reset it.
+On the 2026-06-08 macOS aarch64 rebaseline, cycling after every fresh full-session import kept each child near
+1,194,368 KiB. Allowing two fresh imports in one child reached 3,236,416 KiB, above the local 2 GiB budget. This
+supports the operational claim: process cycling bounds retained RSS for this workload; in-process drain does not reset
+it.
 
 `LeanWorkerPool` applies the same memory fact at the local orchestration layer. Pool policy can reject new distinct
 workers when known total child RSS reaches a budget, cycle a warm worker when its sampled RSS reaches a per-worker
@@ -334,8 +369,14 @@ The pool memory-scheduling workload is:
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
 cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 ```
 
-Use the pool knobs to avoid multiplying Lean import RSS across many local children. They do not change the underlying
-reset rule: only process exit resets Lean process-global retained memory.
+On the same run, the pool fixture used one worker, peaked at 419,616 KiB child RSS, and held the parent process around
+2,144 KiB to 3,456 KiB. Cold pool requests were roughly 215 ms; warm pool reuse was roughly 5-6 ms. Use the pool
+knobs together to avoid multiplying Lean import RSS across many local children. They do not change the underlying reset
+rule: only process exit resets Lean process-global retained memory.

@@ -3,22 +3,24 @@
 //! Build the child binary first, then run:
 //!
 //! ```sh
-//! cargo build -p lean-rs-worker --bin lean-rs-worker-child
+//! cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 //! LEAN_RS_WORKER_MEMORY_IMPORTS=8 \
-//! LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=2 \
-//! cargo run -p lean-rs-worker --example memory_cycling
+//! LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
+//! LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
+//! cargo run -p lean-rs-worker-child --example memory_cycling
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Instant;
 
 use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolicy, LeanWorkerSessionConfig};
 
 const DEFAULT_IMPORTS: u64 = 8;
 const DEFAULT_MAX_IMPORTS: u64 = 2;
-const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
+const DEFAULT_MAX_RSS_KIB: u64 = 2_097_152;
 
 fn main() -> ExitCode {
     match run() {
@@ -46,14 +48,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("imports={imports}");
     println!("max_imports_per_child={max_imports}");
     println!("max_rss_kib={max_rss_kib}");
+    println!("worker_policy max_imports_per_child={max_imports} max_rss_kib={max_rss_kib}");
 
     let session_config =
         LeanWorkerSessionConfig::new(&fixture, "lean_rs_fixture", "LeanRsFixture", ["LeanRsFixture.Handles"]);
     for iteration in 1..=imports {
+        let before = worker.stats();
+        let started = Instant::now();
         let session = worker.open_session(&session_config, None, None)?;
+        let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
         drop(session);
         let rss = worker.rss_kib();
         let stats = worker.stats();
+        let open_kind = if before.requests == 0 || stats.restarts > before.restarts {
+            "cold"
+        } else {
+            "warm-same-child"
+        };
+        println!(
+            "session_open_timing=worker_cycling iteration={iteration} kind={open_kind} elapsed_ms={elapsed_ms:.3} max_imports_per_child={max_imports} max_rss_kib={max_rss_kib} rss_kib={}",
+            stats
+                .last_rss_kib
+                .or(rss)
+                .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        );
         println!(
             "iteration={iteration} requests={} imports={} restarts={} exits={} rss_kib={} last_reason={:?}",
             stats.requests,

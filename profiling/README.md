@@ -99,6 +99,27 @@ LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152 \
 Do not use same-process fresh-import loops as a production soak test. Long-running hosts should use worker children with
 `LeanWorkerRestartPolicy::memory_bounded` and `LeanWorkerPoolConfig` RSS ceilings.
 
+The worker rebaseline collector records those ceilings explicitly instead of relying on example defaults:
+
+```sh
+LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
+LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
+LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
+./profiling/scripts/profile_memory.sh worker-cycling
+
+LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
+./profiling/scripts/profile_memory.sh pool-memory
+```
+
+`collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
+run stays at or below 70% of the configured 2 GiB budget, and the Markdown report recommends the largest candidate whose
+peak RSS stays within the budget. On the 2026-06-08 macOS aarch64 run at commit `396bdf3`, `max_imports=1` peaked at
+1,194,368 KiB and `max_imports=2` peaked at 3,236,416 KiB, so the local recommendation is
+`LeanWorkerRestartPolicy::memory_bounded(1, 2097152)`.
+
 The import matrix records narrower exported/server attempts, the selected default `private` profile, and explicit
 `full-private-compat`. `Environment.freeRegions` remains unsafe after `loadExts := true`; the matrix records retained
 environment shape and does not reclaim compacted regions.

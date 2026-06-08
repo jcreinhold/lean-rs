@@ -3,15 +3,19 @@
 //! Build the child binary first, then run:
 //!
 //! ```sh
-//! cargo build -p lean-rs-worker --bin lean-rs-worker-child
-//! cargo run -p lean-rs-worker --example pool_memory_scheduling
+//! cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
+//! LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
+//! LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
+//! LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+//! LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
+//! cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 //! ```
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::print_stdout)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lean_rs_worker_parent::{
     LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig,
@@ -19,9 +23,18 @@ use lean_rs_worker_parent::{
 };
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 2_621_440;
-const DEFAULT_PER_WORKER_RSS_KIB: u64 = 1_572_864;
-const DEFAULT_MAX_IMPORTS: u64 = 2;
+const DEFAULT_MAX_WORKERS: usize = 1;
+const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 2_097_152;
+const DEFAULT_PER_WORKER_RSS_KIB: u64 = 2_097_152;
+const DEFAULT_MAX_IMPORTS: u64 = 1;
+
+#[derive(Clone, Copy)]
+struct MemoryPolicyKnobs {
+    max_workers: usize,
+    total_child_rss_kib: u64,
+    per_worker_rss_kib: u64,
+    max_imports: u64,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -37,17 +50,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = interop_root();
     lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsInteropConsumer")?;
     let worker_binary = worker_binary()?;
+    let knobs = MemoryPolicyKnobs::from_env();
 
     println!("workload=worker_pool_memory_scheduling");
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
+    println!(
+        "pool_policy max_workers={} max_total_child_rss_kib={} per_worker_rss_ceiling_kib={} max_imports_per_child={}",
+        knobs.max_workers, knobs.total_child_rss_kib, knobs.per_worker_rss_kib, knobs.max_imports
+    );
     println!(
         "parent_rss_start_kib={}",
         current_process_rss_kib().map_or_else(|| "unavailable".to_owned(), |value| value.to_string())
     );
 
-    fixture_import_reuse(&worker_binary)?;
-    mathlib_shaped_fallback(&worker_binary)?;
-    repeated_session_reuse(&worker_binary)?;
+    fixture_import_reuse(&worker_binary, knobs)?;
+    mathlib_shaped_fallback(&worker_binary, knobs)?;
+    repeated_session_reuse(&worker_binary, knobs)?;
 
     println!(
         "parent_rss_end_kib={}",
@@ -57,10 +75,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn fixture_import_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
-    let mut pool = LeanWorkerPool::new(memory_pool_config(1).idle_cycle_after(Duration::from_mins(10)));
+fn fixture_import_reuse(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Result<(), LeanWorkerError> {
+    let mut pool = LeanWorkerPool::new(memory_pool_config(knobs).idle_cycle_after(Duration::from_mins(10)));
     for iteration in 1..=3 {
-        let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary))?;
+        let started = Instant::now();
+        let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary, knobs))?;
         let response = lease.run_json_command(
             &json_command(),
             &FixtureRequest {
@@ -73,14 +92,17 @@ fn fixture_import_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
             "fixture_import_reuse iteration={iteration} accepted={} kind={}",
             response.accepted, response.kind
         );
+        drop(lease);
+        print_timing("fixture_import_reuse", iteration, started.elapsed(), &pool);
     }
     print_snapshot("fixture_import_reuse", &pool);
     Ok(())
 }
 
-fn mathlib_shaped_fallback(worker_binary: &Path) -> Result<(), LeanWorkerError> {
-    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
-    let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary))?;
+fn mathlib_shaped_fallback(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Result<(), LeanWorkerError> {
+    let mut pool = LeanWorkerPool::new(memory_pool_config(knobs));
+    let started = Instant::now();
+    let mut lease = pool.acquire_lease(memory_bounded_builder(worker_binary, knobs))?;
     let response = lease.run_json_command(
         &json_command(),
         &FixtureRequest {
@@ -94,17 +116,17 @@ fn mathlib_shaped_fallback(worker_binary: &Path) -> Result<(), LeanWorkerError> 
         response.accepted, response.kind
     );
     drop(lease);
+    print_timing("mathlib_shaped_import_set", 1, started.elapsed(), &pool);
     print_snapshot("mathlib_shaped_import_set", &pool);
     Ok(())
 }
 
-fn repeated_session_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
-    let builder = builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::memory_bounded(
-        1,
-        env_u64("LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
-    ));
-    let mut pool = LeanWorkerPool::new(memory_pool_config(1));
+fn repeated_session_reuse(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Result<(), LeanWorkerError> {
+    let builder =
+        builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::memory_bounded(1, knobs.per_worker_rss_kib));
+    let mut pool = LeanWorkerPool::new(memory_pool_config(knobs));
     for iteration in 1..=3 {
+        let started = Instant::now();
         let mut lease = pool.acquire_lease(builder.clone())?;
         let response = lease.run_json_command(
             &json_command(),
@@ -118,28 +140,35 @@ fn repeated_session_reuse(worker_binary: &Path) -> Result<(), LeanWorkerError> {
             "bounded_reuse_no_cycle iteration={iteration} accepted={} kind={}",
             response.accepted, response.kind
         );
+        drop(lease);
+        print_timing("bounded_reuse_no_cycle", iteration, started.elapsed(), &pool);
     }
     print_snapshot("bounded_reuse_no_cycle", &pool);
     Ok(())
 }
 
-fn memory_pool_config(max_workers: usize) -> LeanWorkerPoolConfig {
-    LeanWorkerPoolConfig::new(max_workers)
-        .max_total_child_rss_kib(env_u64(
-            "LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB",
-            DEFAULT_TOTAL_CHILD_RSS_KIB,
-        ))
-        .per_worker_rss_ceiling_kib(env_u64(
-            "LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB",
-            DEFAULT_PER_WORKER_RSS_KIB,
-        ))
+fn memory_pool_config(knobs: MemoryPolicyKnobs) -> LeanWorkerPoolConfig {
+    LeanWorkerPoolConfig::new(knobs.max_workers)
+        .max_total_child_rss_kib(knobs.total_child_rss_kib)
+        .per_worker_rss_ceiling_kib(knobs.per_worker_rss_kib)
 }
 
-fn memory_bounded_builder(worker_binary: &Path) -> LeanWorkerCapabilityBuilder {
+fn memory_bounded_builder(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> LeanWorkerCapabilityBuilder {
     builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::memory_bounded(
-        env_u64("LEAN_RS_POOL_MEMORY_MAX_IMPORTS", DEFAULT_MAX_IMPORTS),
-        env_u64("LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
+        knobs.max_imports,
+        knobs.per_worker_rss_kib,
     ))
+}
+
+impl MemoryPolicyKnobs {
+    fn from_env() -> Self {
+        Self {
+            max_workers: env_usize("LEAN_RS_POOL_MEMORY_MAX_WORKERS", DEFAULT_MAX_WORKERS),
+            total_child_rss_kib: env_u64("LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB", DEFAULT_TOTAL_CHILD_RSS_KIB),
+            per_worker_rss_kib: env_u64("LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB", DEFAULT_PER_WORKER_RSS_KIB),
+            max_imports: env_u64("LEAN_RS_POOL_MEMORY_MAX_IMPORTS", DEFAULT_MAX_IMPORTS),
+        }
+    }
 }
 
 fn env_u64(name: &str, default: u64) -> u64 {
@@ -147,6 +176,29 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(default)
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn print_timing(name: &str, iteration: u64, elapsed: Duration, pool: &LeanWorkerPool) {
+    let snapshot = pool.snapshot();
+    let kind = if iteration == 1 { "cold" } else { "warm-pool" };
+    println!(
+        "pool_request_timing={name} iteration={iteration} kind={kind} elapsed_ms={:.3} workers={} total_child_rss_kib={} worker_restarts={} max_import_restarts={} policy_restarts={}",
+        elapsed.as_secs_f64() * 1_000.0,
+        snapshot.workers,
+        snapshot
+            .total_child_rss_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot.worker_restarts,
+        snapshot.max_import_restarts,
+        snapshot.policy_restarts,
+    );
 }
 
 fn print_snapshot(name: &str, pool: &LeanWorkerPool) {

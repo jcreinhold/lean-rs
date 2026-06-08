@@ -46,14 +46,19 @@ run_worker_cycling() {
 	echo "=== worker-cycling ==="
 	build_worker_examples
 	LEAN_RS_WORKER_MEMORY_IMPORTS="${LEAN_RS_WORKER_MEMORY_IMPORTS:-6}" \
-		LEAN_RS_WORKER_MEMORY_MAX_IMPORTS="${LEAN_RS_WORKER_MEMORY_MAX_IMPORTS:-2}" \
+		LEAN_RS_WORKER_MEMORY_MAX_IMPORTS="${LEAN_RS_WORKER_MEMORY_MAX_IMPORTS:-1}" \
+		LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB="${LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB:-2097152}" \
 		"$REPO_ROOT/target/profiling/examples/memory_cycling"
 }
 
 run_pool_memory() {
 	echo "=== pool-memory ==="
 	build_worker_examples
-	"$REPO_ROOT/target/profiling/examples/pool_memory_scheduling"
+	LEAN_RS_POOL_MEMORY_MAX_WORKERS="${LEAN_RS_POOL_MEMORY_MAX_WORKERS:-1}" \
+		LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB="${LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB:-2097152}" \
+		LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB="${LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB:-2097152}" \
+		LEAN_RS_POOL_MEMORY_MAX_IMPORTS="${LEAN_RS_POOL_MEMORY_MAX_IMPORTS:-1}" \
+		"$REPO_ROOT/target/profiling/examples/pool_memory_scheduling"
 }
 
 run_mathlib_scale() {

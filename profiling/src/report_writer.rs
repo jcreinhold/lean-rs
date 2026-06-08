@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common::results_dir;
-use crate::report_schema::{BaselineMode, PerformanceReport};
+use crate::report_schema::{BaselineMode, KeyValue, PerformanceReport, TimingSample, WorkloadRun};
 
 /// Write JSON and Markdown artifacts for a collected profiling report.
 ///
@@ -55,6 +55,9 @@ fn render_markdown(report: &PerformanceReport) -> String {
     let _ = writeln!(out, "- Lean: {}", report.metadata.lean_version);
     let _ = writeln!(out, "- Tooling: {}", report.metadata.tooling);
     let _ = writeln!(out);
+
+    render_run_configuration(&mut out, report);
+    render_worker_policy_summary(&mut out, report);
 
     let _ = writeln!(out, "## Workloads");
     let _ = writeln!(out);
@@ -205,6 +208,44 @@ fn render_markdown(report: &PerformanceReport) -> String {
         }
     }
 
+    let timing_workloads: Vec<_> = report.workloads.iter().filter(|run| !run.timings.is_empty()).collect();
+    if !timing_workloads.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Worker Timings");
+        for run in timing_workloads {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "### {}", run.name);
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "| Label | Iteration | Kind | Elapsed ms | RSS KiB | Workers | Total child RSS KiB | Restarts | Max-import restarts | Policy restarts |"
+            );
+            let _ = writeln!(
+                out,
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+            );
+            for timing in visible_timings(&run.timings) {
+                let iteration = timing
+                    .iteration
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
+                    timing.label,
+                    iteration,
+                    timing.kind,
+                    timing.elapsed_ms,
+                    format_optional_u64(timing.rss_kib),
+                    format_optional_u64(timing.workers),
+                    format_optional_u64(timing.total_child_rss_kib),
+                    format_optional_u64(timing.worker_restarts),
+                    format_optional_u64(timing.max_import_restarts),
+                    format_optional_u64(timing.policy_restarts)
+                );
+            }
+        }
+    }
+
     if !report.profiles.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "## CPU Profiles");
@@ -230,11 +271,162 @@ fn render_markdown(report: &PerformanceReport) -> String {
     out
 }
 
+fn render_run_configuration(out: &mut String, report: &PerformanceReport) {
+    let _ = writeln!(out, "## Run Configuration");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "Git `{}` on `{}`, platform `{}`, Lean `{}`.",
+        report.metadata.git_commit, report.metadata.git_branch, report.metadata.platform, report.metadata.lean_version
+    );
+    let _ = writeln!(out);
+    let _ = writeln!(out, "| Workload | Command | Environment | Stdout | Stderr |");
+    let _ = writeln!(out, "| --- | --- | --- | --- | --- |");
+    for run in &report.workloads {
+        let _ = writeln!(
+            out,
+            "| {} | `{}` | {} | [{}]({}) | [{}]({}) |",
+            run.name,
+            run.command,
+            format_env(&run.env),
+            file_name(&run.stdout_path),
+            run.stdout_path,
+            file_name(&run.stderr_path),
+            run.stderr_path
+        );
+    }
+    if !report.profiles.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "| Profile Artifact | Path | Status |");
+        let _ = writeln!(out, "| --- | --- | --- |");
+        for profile in &report.profiles {
+            let path = if profile.path.is_empty() {
+                String::from("-")
+            } else {
+                format!("[{}]({})", file_name(&profile.path), profile.path)
+            };
+            let _ = writeln!(out, "| {} | {} | {} |", profile.workload, path, profile.status);
+        }
+    }
+    let _ = writeln!(out);
+}
+
+fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
+    let worker_one = report
+        .workloads
+        .iter()
+        .find(|run| run.name == "worker-cycling-max-imports-1");
+    let Some(worker_one) = worker_one else {
+        return;
+    };
+
+    let worker_two = report
+        .workloads
+        .iter()
+        .find(|run| run.name == "worker-cycling-max-imports-2");
+    let cap_kib = key_value(&worker_one.key_values, "max_rss_kib")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(2_097_152);
+    let widen_threshold = cap_kib * 70 / 100;
+    let recommended_max_imports = if worker_two
+        .and_then(|run| run.peak_rss_kib)
+        .is_some_and(|peak| peak <= cap_kib)
+    {
+        2
+    } else {
+        1
+    };
+    let pool = report.workloads.iter().find(|run| run.name == "pool-memory");
+    let max_workers = pool
+        .and_then(|run| key_value(&run.key_values, "max_workers"))
+        .unwrap_or("1");
+    let per_worker_rss = pool
+        .and_then(|run| key_value(&run.key_values, "per_worker_rss_ceiling_kib"))
+        .unwrap_or_else(|| key_value(&worker_one.key_values, "max_rss_kib").unwrap_or("2097152"));
+    let total_child_rss = pool
+        .and_then(|run| key_value(&run.key_values, "max_total_child_rss_kib"))
+        .unwrap_or(per_worker_rss);
+
+    let _ = writeln!(out, "## Worker Policy Summary");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "Local recommendation under the {} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({}, {})` with `LeanWorkerPoolConfig::new({}).per_worker_rss_ceiling_kib({}).max_total_child_rss_kib({})`.",
+        cap_kib, recommended_max_imports, cap_kib, max_workers, per_worker_rss, total_child_rss
+    );
+    let _ = writeln!(
+        out,
+        "The `max_imports=2` candidate is collected only when the `max_imports=1` run stays at or below the 70% widening threshold ({} KiB).",
+        widen_threshold
+    );
+    if let Some(worker_two) = worker_two
+        && worker_two.peak_rss_kib.is_some_and(|peak| peak > cap_kib)
+    {
+        let _ = writeln!(
+            out,
+            "`max_imports=2` was measured but is not recommended for this local cap because its peak RSS exceeded the budget."
+        );
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "| Candidate | Status | Peak RSS KiB | Cold open ms | Warm open ms | Restarts |"
+    );
+    let _ = writeln!(out, "| --- | --- | ---: | ---: | ---: | ---: |");
+    render_worker_candidate_row(out, worker_one, "max_imports=1");
+    if let Some(worker_two) = worker_two {
+        render_worker_candidate_row(out, worker_two, "max_imports=2");
+    } else {
+        let _ = writeln!(out, "| max_imports=2 | skipped | - | - | - | - |");
+    }
+    let _ = writeln!(out);
+}
+
+fn render_worker_candidate_row(out: &mut String, run: &WorkloadRun, label: &str) {
+    let status = run.status.as_deref().unwrap_or("unknown");
+    let peak = run
+        .peak_rss_kib
+        .map_or_else(|| String::from("-"), |value| value.to_string());
+    let cold = first_timing_ms(&run.timings, "cold");
+    let warm = first_timing_ms(&run.timings, "warm-same-child");
+    let restarts = key_value(&run.key_values, "restarts").unwrap_or("-");
+    let _ = writeln!(
+        out,
+        "| {} | {} | {} | {} | {} | {} |",
+        label, status, peak, cold, warm, restarts
+    );
+}
+
+fn first_timing_ms(timings: &[TimingSample], kind: &str) -> String {
+    timings
+        .iter()
+        .find(|timing| timing.kind == kind)
+        .map_or_else(|| String::from("-"), |timing| format!("{:.3}", timing.elapsed_ms))
+}
+
 fn file_name(path: &str) -> &str {
     Path::new(path)
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or(path)
+}
+
+fn format_env(env: &[crate::report_schema::EnvPair]) -> String {
+    if env.is_empty() {
+        return String::from("-");
+    }
+    env.iter()
+        .map(|pair| format!("`{}={}`", pair.key, pair.value))
+        .collect::<Vec<_>>()
+        .join("<br>")
+}
+
+fn key_value<'a>(values: &'a [KeyValue], key: &str) -> Option<&'a str> {
+    values
+        .iter()
+        .rev()
+        .find(|value| value.key == key)
+        .map(|value| value.value.as_str())
 }
 
 fn visible_checkpoints(
@@ -263,6 +455,17 @@ fn visible_import_stats(
     visible
 }
 
+fn visible_timings(timings: &[crate::report_schema::TimingSample]) -> Vec<&crate::report_schema::TimingSample> {
+    const HEAD: usize = 20;
+    const TAIL: usize = 5;
+    if timings.len() <= HEAD + TAIL {
+        return timings.iter().collect();
+    }
+    let mut visible: Vec<_> = timings.iter().take(HEAD).collect();
+    visible.extend(timings.iter().skip(timings.len().saturating_sub(TAIL)));
+    visible
+}
+
 fn format_optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| String::from("-"), |value| value.to_string())
 }
@@ -287,7 +490,7 @@ fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u6
 #[cfg(test)]
 mod tests {
     use crate::report_schema::{
-        BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, WorkloadRun,
+        BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, TimingSample, WorkloadRun,
     };
 
     use super::render_markdown;
@@ -335,6 +538,7 @@ mod tests {
                     free_regions_ran: None,
                 }],
                 derived_work: Vec::new(),
+                timings: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -348,5 +552,69 @@ mod tests {
         assert!(markdown.contains("non-mmap bytes"));
         assert!(markdown.contains("RSS gap"));
         assert!(markdown.contains("| import | 1 | private | Init | false | private | true | - | 1 | 2 | 1 | 4096 | 1024 | 3072 | 4096 | 3 | 4 | 5 |"));
+    }
+
+    #[test]
+    fn report_renders_worker_policy_summary_and_timings() {
+        let report = PerformanceReport {
+            metadata: ReportMetadata {
+                timestamp_utc: "now".to_owned(),
+                platform: "test-platform".to_owned(),
+                git_commit: "abc".to_owned(),
+                git_branch: "main".to_owned(),
+                lean_version: "test-lean".to_owned(),
+                tooling: "test".to_owned(),
+            },
+            baseline_mode: BaselineMode::Quick,
+            workloads: vec![WorkloadRun {
+                name: "worker-cycling-max-imports-1".to_owned(),
+                command: "worker".to_owned(),
+                env: vec![EnvPair {
+                    key: "LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB".to_owned(),
+                    value: "2097152".to_owned(),
+                }],
+                exit_success: true,
+                exit_code: Some(0),
+                wall_time_ms: 1.0,
+                status: Some("ok".to_owned()),
+                peak_rss_kib: Some(1000),
+                checkpoints: Vec::new(),
+                import_stats: Vec::new(),
+                derived_work: Vec::new(),
+                timings: vec![TimingSample {
+                    label: "worker_cycling".to_owned(),
+                    iteration: Some(1),
+                    kind: "cold".to_owned(),
+                    elapsed_ms: 10.0,
+                    rss_kib: Some(1000),
+                    workers: None,
+                    total_child_rss_kib: None,
+                    worker_restarts: None,
+                    max_import_restarts: None,
+                    policy_restarts: None,
+                }],
+                key_values: vec![
+                    crate::report_schema::KeyValue {
+                        key: "max_rss_kib".to_owned(),
+                        value: "2097152".to_owned(),
+                    },
+                    crate::report_schema::KeyValue {
+                        key: "restarts".to_owned(),
+                        value: "5".to_owned(),
+                    },
+                ],
+                stdout_path: "stdout".to_owned(),
+                stderr_path: "stderr".to_owned(),
+            }],
+            profiles: Vec::new(),
+            notes: Vec::new(),
+        };
+
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("## Run Configuration"));
+        assert!(markdown.contains("## Worker Policy Summary"));
+        assert!(markdown.contains("LeanWorkerRestartPolicy::memory_bounded(1, 2097152)"));
+        assert!(markdown.contains("## Worker Timings"));
+        assert!(markdown.contains("| worker_cycling | 1 | cold | 10.000 | 1000 |"));
     }
 }

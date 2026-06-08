@@ -36,6 +36,18 @@ thread; product is at most 2 Lean workers across the full run.
 | `cargo test -p lean-rs --lib …` | Single-test debug loop. The cumulative-state pathology doesn't fire at one test.      |
 | `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
 
+Do not use broad or file-shaped `cargo test` filters for import-heavy host tests, including:
+
+```sh
+cargo test -p lean-rs-host session_leak_loop
+cargo test -p lean-rs-host --test session_leak_loop
+```
+
+Those commands can execute multiple fresh full-session imports inside one Rust test harness process. The post-reduction
+fixture import still retains about 1.95 GB of compacted `.olean` region data, and the second same-process fresh import
+can move RSS into multi-GiB territory. Use `cargo nextest run -p lean-rs-host --test session_leak_loop` for process
+isolation, or run one exact test name only when you have an explicit local memory budget.
+
 Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
 `LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
 

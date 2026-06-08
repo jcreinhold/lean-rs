@@ -159,7 +159,14 @@ The default workload is intentionally small and memory-bounded. Use the profilin
 ./profiling/scripts/profile_memory.sh long-session
 ./profiling/scripts/profile_with_samply.sh long-session
 ./profiling/scripts/profile_memory.sh long-session-derived
+LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
+LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
 ./profiling/scripts/profile_memory.sh worker-cycling
+LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
+./profiling/scripts/profile_memory.sh pool-memory
 ```
 
 This is deliberately not a Criterion bench. Criterion answers per-iteration latency questions; this workload answers
@@ -168,6 +175,10 @@ whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, a
 and consumer guidance.
 Use `long-session-derived` when the question is whether a query phase initialized source-range, pretty-printer,
 proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import.
+Use the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig`
+guidance. On the 2026-06-08 local rebaseline, full-session worker cycling stayed within the 2 GiB cap only at
+`max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one child under about 421 MiB. These are local
+KiB, not portable limits.
 
 ## Detect a regression
 
