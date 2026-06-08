@@ -13,6 +13,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CRATES = [
+    "lean-rs-abi",
     "lean-rs-sys",
     "lean-toolchain",
     "lean-rs",
@@ -75,6 +76,14 @@ def check_docs_rs_metadata() -> str:
 
 def package_contents(version: str) -> None:
     required = {
+        "lean-rs-abi": [
+            "Cargo.toml",
+            "README.md",
+            "build.rs",
+            "src/lib.rs",
+            "src/consts.rs",
+            "src/supported.rs",
+        ],
         "lean-rs-sys": [
             "Cargo.toml",
             "README.md",

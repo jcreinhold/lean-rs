@@ -7,7 +7,96 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.2.0]
+
+This is a breaking release (pre-1.0, so a minor bump). The worker wire protocol moved from `PROTOCOL_VERSION` 8 to 10,
+several `LeanWorkerError` variants gained fields and boxed an existing one, and `Request::OpenHostSession` /
+`Response::HostSessionOpened` gained fields — a parent and child built from different `0.x` lines will refuse to
+handshake. Rebuild the whole worker stack from one version. The headline theme is bounded, observable imports: every
+host session now reports what it loaded and how much memory that cost, the pool can refuse imports that would breach an
+RSS budget, and resource exhaustion surfaces as structured facts instead of an opaque failure.
+
+### New crate: `lean-rs-abi` (link-free Lean ABI and toolchain metadata)
+
+The link-free Lean 4 ABI constants and toolchain-fingerprint metadata that previously lived in `lean-rs-sys` now live in
+a new published crate, `lean-rs-abi`, which carries no link dependency on `liblean`. `lean-rs-sys` glob-re-exports
+`lean_rs_abi::consts::*` and `lean_rs_abi::supported::*`, so existing paths such as `lean_rs_sys::consts::LEAN_ARRAY`,
+`lean_rs_sys::SUPPORTED_TOOLCHAINS`, and `lean_rs_sys::SupportedToolchain` keep resolving unchanged; the items are simply
+defined one crate deeper. Build tooling that needs the digest window or ABI tags without linking Lean can now depend on
+`lean-rs-abi` directly. (`cargo public-api` cannot enumerate a cross-crate glob, so the `lean-rs-sys` baseline now renders
+these as `pub use …::<<lean_rs_abi::…::*>>` rather than item-by-item; the public surface is unchanged.)
+
+### `lean-rs-host`: session import profiles bound what a session loads
+
+New `LeanSessionImportProfile` (`Private`, `Server`, `ExportedPublic`, `FullPrivateCompat`) and the lower-level
+`LeanImportLevel` / `LeanImportProfileMode` let a caller pick how much of a module's import closure a session pulls in,
+instead of always importing everything. `LeanCapabilities::session_with_profile(...)` and
+`SessionPool::acquire_with_profile(...)` open a session under a chosen profile; the existing `session(...)` /
+`acquire(...)` keep the full-import behavior. On the wire this adds `import_profile` to `Request::OpenHostSession`
+(part of the `PROTOCOL_VERSION` bump). Profiles default to the full-compatibility behavior, so an unset profile imports
+as before.
+
+### `lean-rs-host`: import statistics and compact-region memory attribution
+
+Every opened session now records a `LeanImportStats` (`LeanSession::import_stats()`), reporting effective module count,
+imported byte and constant counts, extension counts, and per-region memory attribution split into memory-mapped,
+non-memory-mapped, and compacted-region bytes/counts. `LeanImportStats::memory_diagnostic()` renders a human-readable
+summary. `LeanCapabilities::profiling_session(...)` plus `LeanImportProfilerOptions` (`profiler`, `trace_profiler`,
+`trace_profiler_output`) opt into Lean's import profiler for a one-off measured open. The stats ride the protocol as
+`import_stats` on `Response::HostSessionOpened` and on the bracketed-import result (below), and are mirrored by
+`lean-rs-worker-protocol`'s `LeanWorkerImportStats`.
+
+### `lean-rs-host`: session-pool memory policy bounds import admission
+
+`SessionPoolMemoryPolicy` lets a pool refuse work that would breach a memory ceiling: `max_rss_kib(...)` caps process
+RSS and `max_fresh_imports(...)` caps how many fresh import-bearing sessions may be admitted, with `disabled()` for the
+previous unbounded behavior. `SessionPoolConfig` (and `SessionPool::with_config` / `with_memory_policy`) thread the
+policy in, and `SessionPool::memory_policy()` reads it back. When the policy refuses admission the caller gets a
+resource-exhausted error (below) rather than an OOM abort.
+
+### Resource exhaustion is now a structured, honest diagnostic
+
+Memory- and admission-pressure failures surface as facts instead of an opaque error. `lean-rs` gains
+`ResourceExhaustedFacts` (cause, current/limit RSS, import counts and limits, whether work entered Lean, last import
+stats), reachable via `HostFailure::resource_exhausted_facts()`, plus a `HostStage::Resource` stage and a
+`LeanDiagnosticCode::ResourceExhausted` code. `lean-rs-worker-protocol` carries the richer `LeanWorkerResourceExhaustedFacts`
+(adding operation, queue-wait and duration timing, worker generation, cold-open and import-like admission counters, and
+restart reason). **Breaking:** several `LeanWorkerError` variants (`Timeout`, `Cancelled`, `RssHardLimitExceeded`,
+`WorkerPoolExhausted`, `WorkerPoolMemoryBudgetExceeded`, `WorkerPoolQueueTimeout`) gained a boxed `resource` field, and
+the existing `last_import_stats` field on the RSS/budget variants is now boxed (`Option<Box<LeanWorkerImportStats>>`);
+read them through the new `LeanWorkerError::resource_exhausted_facts()` accessor.
+
+### `lean-rs-worker-parent`: session-reuse key diagnostics
+
+`LeanWorkerPoolSnapshot` gains counters that make warm-session reuse auditable: `key_hits`, `key_misses`,
+`distinct_keys_seen`, `last_key_miss_reason`, `import_like_requests`, and the cold-open accounting
+(`cold_open_attempts`, `cold_open_admitted`, `cold_open_refusals`, `concurrent_cold_opens_observed`,
+`fresh_cold_opens_avoided`). The host side exposes the same classification as `SessionPoolKeyMissReason`. These make it
+possible to tell whether a workload is fragmenting the session-reuse key and paying for avoidable cold opens.
+
+### `lean-rs-worker-parent`: worker-replacement latency is measured
+
+`LeanWorkerReplacementTiming` plus the `last_replacement_timing`, `last_capability_load_elapsed`,
+`last_first_command_elapsed`, and `last_replacement_skipped_reason` fields on the pool snapshot record how long it takes
+to stand up a replacement child (capability dylib load and first command) so replacement cost shows up in diagnostics
+instead of as unexplained latency.
+
+### Bracketed lightweight import queries and batched warm module queries
+
+The host gains a bracketed import path (`LeanBracketedImportResult`, carrying its own `import_stats`) for lightweight
+module queries that do not need a full session, and the worker exposes
+`LeanWorkerSessionLease::process_module_query_batch(...)` (`LeanWorkerModuleQuerySelector` →
+`LeanWorkerModuleQueryBatchOutcome`) so a warm child can answer a batch of module queries in one round trip instead of
+one command each.
+
+### Derived-work observability (`LeanWorkerDerivedWorkFacts`)
+
+Declaration inspection and proof-search results now attach `LeanWorkerDerivedWorkFacts`, counting the derived work a
+query triggered: parser/elaborator runs, pretty-prints, raw type renderings, docstring lookups, source-range lookups,
+simp-extension lookups, module-snapshot builds, proof-search fact collections, and whether lazy discrimination-tree
+import initialization was observed. Proof-search facts are gated by a new `proof_search` inspection field and report
+`computed` / `unavailable_reason`, so a caller can tell eager from skipped derived work and avoid paying for it
+needlessly.
 
 ### `lean-rs-worker-parent`: capability sessions can import an external Lake workspace
 

@@ -2134,6 +2134,7 @@ pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::cache_appro
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::cache_entry_count: core::option::Option<u64>
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::cache_status: lean_rs_worker_protocol::types::LeanWorkerModuleCacheStatus
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::output_bytes: u64
+pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::resource: core::option::Option<alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>>
 pub lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::timings: lean_rs_worker_protocol::types::LeanWorkerModuleQueryTimings
 impl lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts
 pub fn lean_rs_worker_protocol::types::LeanWorkerModuleQueryCacheFacts::uncached(u64) -> Self
@@ -2493,6 +2494,42 @@ impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerRenderedI
 impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerRenderedInfo
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerRenderedInfo
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerRenderedInfo
+pub struct lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::cause: alloc::string::String
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::cold_open_admitted: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::cold_open_attempts: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::cold_open_refusals: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::current_rss_kib: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::duration_ms: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::import_count: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::import_like_admitted: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::import_like_requests: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::limit_kib: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::operation: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::queue_wait_ms: core::option::Option<u64>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::restart_reason: core::option::Option<alloc::string::String>
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::work_entered_child: bool
+pub lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::worker_generation: core::option::Option<u64>
+impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts) -> bool
+impl core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+pub fn lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::marker::Send for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::marker::Sync for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::marker::Unpin for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::marker::UnsafeUnpin for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts
 pub struct lean_rs_worker_protocol::types::LeanWorkerSourceRange
 pub lean_rs_worker_protocol::types::LeanWorkerSourceRange::end_column: u32
 pub lean_rs_worker_protocol::types::LeanWorkerSourceRange::end_line: u32

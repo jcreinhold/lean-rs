@@ -98,6 +98,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationFlags
 pub struct lean_rs_host::host::declaration_search::DeclarationInspection
 pub lean_rs_host::host::declaration_search::DeclarationInspection::attributes: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::declaration_search::DeclarationInspection::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::host::declaration_search::DeclarationInspection::docstring: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
 pub lean_rs_host::host::declaration_search::DeclarationInspection::flags: lean_rs_host::host::declaration_search::DeclarationFlags
 pub lean_rs_host::host::declaration_search::DeclarationInspection::kind: alloc::string::String
@@ -151,6 +152,7 @@ pub struct lean_rs_host::host::declaration_search::DeclarationInspectionFields
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::attributes: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::docstring: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::flags: bool
+pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::proof_search: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::source: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::statement: bool
 pub lean_rs_host::host::declaration_search::DeclarationInspectionFields::statement_pretty: bool
@@ -205,10 +207,12 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationInspectionRequest
 pub struct lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::class_name: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::computed: bool
 pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::is_class: bool
 pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::is_instance: bool
 pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::is_rw_candidate: bool
 pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::is_simp: bool
+pub lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::unavailable_reason: core::option::Option<alloc::string::String>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub fn lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
@@ -278,6 +282,7 @@ pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::after_requir
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::after_scope_filter: usize
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::broad_pruning: alloc::vec::Vec<lean_rs_host::host::declaration_search::DeclarationSearchPruning>
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::declarations_scanned: usize
+pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::source_lookups: usize
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::timings: lean_rs_host::host::declaration_search::DeclarationSearchTimings
 pub lean_rs_host::host::declaration_search::DeclarationSearchFacts::truncated: bool
@@ -426,6 +431,35 @@ impl core::marker::Unpin for lean_rs_host::host::declaration_search::Declaration
 impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
+pub struct lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::docstring_lookups: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::lazy_discr_tree_import_initialization_observed: bool
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::module_snapshot_builds: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::parser_elaborator_runs: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::pretty_prints: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::proof_search_fact_collections: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::raw_type_renderings: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::simp_extension_lookups: u64
+pub lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::source_range_lookups: u64
+impl core::clone::Clone for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::clone(&self) -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::Eq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::PartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::eq(&self, &lean_rs_host::host::declaration_search::LeanDerivedWorkFacts) -> bool
+impl core::default::Default for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::default() -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::fmt::Debug for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Send for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Sync for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Unpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub mod lean_rs_host::host::elaboration
 pub use lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT
 pub use lean_rs_host::host::elaboration::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX
@@ -725,14 +759,47 @@ pub fn lean_rs_host::host::meta::is_def_eq<'lean>() -> lean_rs_host::meta::LeanM
 pub fn lean_rs_host::host::meta::pp_expr<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, alloc::string::String>
 pub fn lean_rs_host::host::meta::whnf<'lean>() -> lean_rs_host::meta::LeanMetaService<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs::handle::expr::LeanExpr<'lean>>
 pub mod lean_rs_host::host::pool
+pub enum lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub lean_rs_host::host::pool::SessionPoolKeyMissReason::EmptyPool
+pub lean_rs_host::host::pool::SessionPoolKeyMissReason::NoMatchingKey
+pub lean_rs_host::host::pool::SessionPoolKeyMissReason::ReuseDisabled
+impl lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::clone(&self) -> lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::eq(&self, &lean_rs_host::host::pool::SessionPoolKeyMissReason) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub struct lean_rs_host::host::pool::PoolStats
 pub lean_rs_host::host::pool::PoolStats::acquired: u64
+pub lean_rs_host::host::pool::PoolStats::distinct_keys_seen: u64
 pub lean_rs_host::host::pool::PoolStats::drained: u64
 pub lean_rs_host::host::pool::PoolStats::drains: u64
+pub lean_rs_host::host::pool::PoolStats::fresh_import_refusals: u64
+pub lean_rs_host::host::pool::PoolStats::fresh_imports_avoided: u64
 pub lean_rs_host::host::pool::PoolStats::imports_performed: u64
+pub lean_rs_host::host::pool::PoolStats::key_hits: u64
+pub lean_rs_host::host::pool::PoolStats::key_misses: u64
+pub lean_rs_host::host::pool::PoolStats::last_miss_reason: core::option::Option<lean_rs_host::host::pool::SessionPoolKeyMissReason>
+pub lean_rs_host::host::pool::PoolStats::miss_empty_pool: u64
+pub lean_rs_host::host::pool::PoolStats::miss_no_matching_key: u64
+pub lean_rs_host::host::pool::PoolStats::miss_reuse_disabled: u64
 pub lean_rs_host::host::pool::PoolStats::released_dropped: u64
 pub lean_rs_host::host::pool::PoolStats::released_to_pool: u64
 pub lean_rs_host::host::pool::PoolStats::reused: u64
+pub lean_rs_host::host::pool::PoolStats::rss_samples: u64
+pub lean_rs_host::host::pool::PoolStats::rss_samples_unavailable: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats
@@ -771,12 +838,16 @@ impl<'lean, 'p, 'c> !core::panic::unwind_safe::UnwindSafe for lean_rs_host::host
 pub struct lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire_with_profile<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::memory_policy(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_capacity(&'lean lean_rs::runtime::init::LeanRuntime, usize) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_config(&'lean lean_rs::runtime::init::LeanRuntime, lean_rs_host::host::pool::SessionPoolConfig) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_memory_policy(&'lean lean_rs::runtime::init::LeanRuntime, usize, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
 impl core::fmt::Debug for lean_rs_host::host::pool::SessionPool<'_>
 pub fn lean_rs_host::host::pool::SessionPool<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> !core::marker::Freeze for lean_rs_host::host::pool::SessionPool<'lean>
@@ -786,6 +857,51 @@ impl<'lean> core::marker::Unpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
+pub struct lean_rs_host::host::pool::SessionPoolConfig
+impl lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy(self, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy_ref(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolConfig::new(usize) -> Self
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::clone(&self) -> lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::eq(&self, &lean_rs_host::host::pool::SessionPoolConfig) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+pub struct lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::disabled() -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports_limit(&self) -> core::option::Option<u64>
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib_limit(&self) -> core::option::Option<u64>
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::clone(&self) -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::eq(&self, &lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> bool
+impl core::default::Default for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::default() -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub mod lean_rs_host::host::process
 pub enum lean_rs_host::host::process::DeclarationTargetResult
 pub lean_rs_host::host::process::DeclarationTargetResult::Ambiguous(alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>)
@@ -1936,6 +2052,80 @@ impl core::marker::Unpin for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationTarget
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationTarget
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationTarget
+pub enum lean_rs_host::host::LeanImportLevel
+pub lean_rs_host::host::LeanImportLevel::Exported
+pub lean_rs_host::host::LeanImportLevel::Private
+pub lean_rs_host::host::LeanImportLevel::Server
+impl lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanImportLevel::as_str(self) -> &'static str
+impl core::clone::Clone for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::clone(&self) -> lean_rs_host::LeanImportLevel
+impl core::cmp::Eq for lean_rs_host::LeanImportLevel
+impl core::cmp::PartialEq for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::eq(&self, &lean_rs_host::LeanImportLevel) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanImportLevel
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportLevel
+impl core::marker::Freeze for lean_rs_host::LeanImportLevel
+impl core::marker::Send for lean_rs_host::LeanImportLevel
+impl core::marker::Sync for lean_rs_host::LeanImportLevel
+impl core::marker::Unpin for lean_rs_host::LeanImportLevel
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportLevel
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportLevel
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportLevel
+pub enum lean_rs_host::host::LeanImportProfileMode
+pub lean_rs_host::host::LeanImportProfileMode::ExportedNoExts
+pub lean_rs_host::host::LeanImportProfileMode::FullSession(lean_rs_host::LeanSessionImportProfile)
+impl lean_rs_host::LeanImportProfileMode
+pub const fn lean_rs_host::LeanImportProfileMode::import_all(self) -> bool
+pub const fn lean_rs_host::LeanImportProfileMode::import_level(self) -> lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanImportProfileMode::label(self) -> &'static str
+pub const fn lean_rs_host::LeanImportProfileMode::load_exts(self) -> bool
+impl core::clone::Clone for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::clone(&self) -> lean_rs_host::LeanImportProfileMode
+impl core::cmp::Eq for lean_rs_host::LeanImportProfileMode
+impl core::cmp::PartialEq for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::eq(&self, &lean_rs_host::LeanImportProfileMode) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanImportProfileMode
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportProfileMode
+impl core::marker::Freeze for lean_rs_host::LeanImportProfileMode
+impl core::marker::Send for lean_rs_host::LeanImportProfileMode
+impl core::marker::Sync for lean_rs_host::LeanImportProfileMode
+impl core::marker::Unpin for lean_rs_host::LeanImportProfileMode
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportProfileMode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportProfileMode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportProfileMode
+pub enum lean_rs_host::host::LeanSessionImportProfile
+pub lean_rs_host::host::LeanSessionImportProfile::ExportedPublic
+pub lean_rs_host::host::LeanSessionImportProfile::FullPrivateCompat
+pub lean_rs_host::host::LeanSessionImportProfile::Private
+pub lean_rs_host::host::LeanSessionImportProfile::Server
+impl lean_rs_host::LeanSessionImportProfile
+pub const fn lean_rs_host::LeanSessionImportProfile::import_all(self) -> bool
+pub const fn lean_rs_host::LeanSessionImportProfile::import_level(self) -> lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanSessionImportProfile::label(self) -> &'static str
+pub const fn lean_rs_host::LeanSessionImportProfile::load_exts(self) -> bool
+impl core::clone::Clone for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::clone(&self) -> lean_rs_host::LeanSessionImportProfile
+impl core::cmp::Eq for lean_rs_host::LeanSessionImportProfile
+impl core::cmp::PartialEq for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::eq(&self, &lean_rs_host::LeanSessionImportProfile) -> bool
+impl core::default::Default for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::default() -> lean_rs_host::LeanSessionImportProfile
+impl core::fmt::Debug for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanSessionImportProfile
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Freeze for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Send for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Sync for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Unpin for lean_rs_host::LeanSessionImportProfile
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanSessionImportProfile
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanSessionImportProfile
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSessionImportProfile
 pub enum lean_rs_host::host::ProofAttemptOutcome
 pub lean_rs_host::host::ProofAttemptOutcome::HeaderParseFailed
 pub lean_rs_host::host::ProofAttemptOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
@@ -2033,6 +2223,28 @@ impl core::marker::Unpin for lean_rs_host::ProofPositionSelector
 impl core::marker::UnsafeUnpin for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofPositionSelector
+pub enum lean_rs_host::host::SessionPoolKeyMissReason
+pub lean_rs_host::host::SessionPoolKeyMissReason::EmptyPool
+pub lean_rs_host::host::SessionPoolKeyMissReason::NoMatchingKey
+pub lean_rs_host::host::SessionPoolKeyMissReason::ReuseDisabled
+impl lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::clone(&self) -> lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::eq(&self, &lean_rs_host::host::pool::SessionPoolKeyMissReason) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub struct lean_rs_host::host::DeclarationFlags
 pub lean_rs_host::host::DeclarationFlags::is_generated: bool
 pub lean_rs_host::host::DeclarationFlags::is_internal: bool
@@ -2059,6 +2271,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationFlags
 pub struct lean_rs_host::host::DeclarationInspection
 pub lean_rs_host::host::DeclarationInspection::attributes: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::DeclarationInspection::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::host::DeclarationInspection::docstring: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
 pub lean_rs_host::host::DeclarationInspection::flags: lean_rs_host::host::declaration_search::DeclarationFlags
 pub lean_rs_host::host::DeclarationInspection::kind: alloc::string::String
@@ -2112,6 +2325,7 @@ pub struct lean_rs_host::host::DeclarationInspectionFields
 pub lean_rs_host::host::DeclarationInspectionFields::attributes: bool
 pub lean_rs_host::host::DeclarationInspectionFields::docstring: bool
 pub lean_rs_host::host::DeclarationInspectionFields::flags: bool
+pub lean_rs_host::host::DeclarationInspectionFields::proof_search: bool
 pub lean_rs_host::host::DeclarationInspectionFields::source: bool
 pub lean_rs_host::host::DeclarationInspectionFields::statement: bool
 pub lean_rs_host::host::DeclarationInspectionFields::statement_pretty: bool
@@ -2166,10 +2380,12 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationInspectionRequest
 pub struct lean_rs_host::host::DeclarationProofSearchFacts
 pub lean_rs_host::host::DeclarationProofSearchFacts::class_name: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::DeclarationProofSearchFacts::computed: bool
 pub lean_rs_host::host::DeclarationProofSearchFacts::is_class: bool
 pub lean_rs_host::host::DeclarationProofSearchFacts::is_instance: bool
 pub lean_rs_host::host::DeclarationProofSearchFacts::is_rw_candidate: bool
 pub lean_rs_host::host::DeclarationProofSearchFacts::is_simp: bool
+pub lean_rs_host::host::DeclarationProofSearchFacts::unavailable_reason: core::option::Option<alloc::string::String>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub fn lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
@@ -2239,6 +2455,7 @@ pub lean_rs_host::host::DeclarationSearchFacts::after_required_constants_filter:
 pub lean_rs_host::host::DeclarationSearchFacts::after_scope_filter: usize
 pub lean_rs_host::host::DeclarationSearchFacts::broad_pruning: alloc::vec::Vec<lean_rs_host::host::declaration_search::DeclarationSearchPruning>
 pub lean_rs_host::host::DeclarationSearchFacts::declarations_scanned: usize
+pub lean_rs_host::host::DeclarationSearchFacts::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::host::DeclarationSearchFacts::source_lookups: usize
 pub lean_rs_host::host::DeclarationSearchFacts::timings: lean_rs_host::host::declaration_search::DeclarationSearchTimings
 pub lean_rs_host::host::DeclarationSearchFacts::truncated: bool
@@ -2441,6 +2658,101 @@ impl core::marker::Unpin for lean_rs_host::DeclarationVerificationRequest
 impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationRequest
+pub struct lean_rs_host::host::LeanBracketedDeclarationInfo
+pub lean_rs_host::host::LeanBracketedDeclarationInfo::exists: bool
+pub lean_rs_host::host::LeanBracketedDeclarationInfo::kind: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::LeanBracketedDeclarationInfo::module: core::option::Option<alloc::string::String>
+pub lean_rs_host::host::LeanBracketedDeclarationInfo::name: alloc::string::String
+pub lean_rs_host::host::LeanBracketedDeclarationInfo::raw_type: core::option::Option<alloc::string::String>
+impl core::clone::Clone for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::clone(&self) -> lean_rs_host::LeanBracketedDeclarationInfo
+impl core::cmp::Eq for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::eq(&self, &lean_rs_host::LeanBracketedDeclarationInfo) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedDeclarationInfo
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Send for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Sync for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Unpin for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedDeclarationInfo
+pub struct lean_rs_host::host::LeanBracketedImportRequest
+pub lean_rs_host::host::LeanBracketedImportRequest::declaration_names: alloc::vec::Vec<alloc::string::String>
+impl lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::new(impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+impl core::clone::Clone for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::clone(&self) -> lean_rs_host::LeanBracketedImportRequest
+impl core::cmp::Eq for lean_rs_host::LeanBracketedImportRequest
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::eq(&self, &lean_rs_host::LeanBracketedImportRequest) -> bool
+impl core::default::Default for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::default() -> lean_rs_host::LeanBracketedImportRequest
+impl core::fmt::Debug for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedImportRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanBracketedImportRequest
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanBracketedImportRequest
+pub type lean_rs_host::LeanBracketedImportRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl core::marker::Freeze for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Send for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Sync for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Unpin for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedImportRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedImportRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedImportRequest
+pub struct lean_rs_host::host::LeanBracketedImportResult
+pub lean_rs_host::host::LeanBracketedImportResult::declarations: alloc::vec::Vec<lean_rs_host::LeanBracketedDeclarationInfo>
+pub lean_rs_host::host::LeanBracketedImportResult::free_regions_ran: bool
+pub lean_rs_host::host::LeanBracketedImportResult::import_stats: lean_rs_host::LeanImportStats
+pub lean_rs_host::host::LeanBracketedImportResult::rejected_operations: alloc::vec::Vec<lean_rs_host::LeanBracketedRejectedOperation>
+impl core::clone::Clone for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::clone(&self) -> lean_rs_host::LeanBracketedImportResult
+impl core::cmp::Eq for lean_rs_host::LeanBracketedImportResult
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::eq(&self, &lean_rs_host::LeanBracketedImportResult) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedImportResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Send for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Sync for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Unpin for lean_rs_host::LeanBracketedImportResult
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedImportResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedImportResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedImportResult
+pub struct lean_rs_host::host::LeanBracketedRejectedOperation
+pub lean_rs_host::host::LeanBracketedRejectedOperation::operation: alloc::string::String
+pub lean_rs_host::host::LeanBracketedRejectedOperation::reason: alloc::string::String
+impl core::clone::Clone for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::clone(&self) -> lean_rs_host::LeanBracketedRejectedOperation
+impl core::cmp::Eq for lean_rs_host::LeanBracketedRejectedOperation
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::eq(&self, &lean_rs_host::LeanBracketedRejectedOperation) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedRejectedOperation
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Send for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Sync for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Unpin for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedRejectedOperation
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedRejectedOperation
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedRejectedOperation
 pub struct lean_rs_host::host::LeanCancellationToken
 impl lean_rs_host::LeanCancellationToken
 pub fn lean_rs_host::LeanCancellationToken::cancel(&self)
@@ -2461,7 +2773,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &[&str], lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::profiling_session<'c>(&'c self, &[&str], lean_rs_host::LeanImportProfileMode, &lean_rs_host::LeanImportProfilerOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session_with_profile<'c>(&'c self, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 impl core::fmt::Debug for lean_rs_host::LeanCapabilities<'_, '_>
 pub fn lean_rs_host::LeanCapabilities<'_, '_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'h> core::marker::Freeze for lean_rs_host::LeanCapabilities<'lean, 'h>
@@ -2500,6 +2815,35 @@ impl core::marker::Unpin for lean_rs_host::LeanDeclarationFilter
 impl core::marker::UnsafeUnpin for lean_rs_host::LeanDeclarationFilter
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanDeclarationFilter
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanDeclarationFilter
+pub struct lean_rs_host::host::LeanDerivedWorkFacts
+pub lean_rs_host::host::LeanDerivedWorkFacts::docstring_lookups: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::lazy_discr_tree_import_initialization_observed: bool
+pub lean_rs_host::host::LeanDerivedWorkFacts::module_snapshot_builds: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::parser_elaborator_runs: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::pretty_prints: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::proof_search_fact_collections: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::raw_type_renderings: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::simp_extension_lookups: u64
+pub lean_rs_host::host::LeanDerivedWorkFacts::source_range_lookups: u64
+impl core::clone::Clone for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::clone(&self) -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::Eq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::PartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::eq(&self, &lean_rs_host::host::declaration_search::LeanDerivedWorkFacts) -> bool
+impl core::default::Default for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::default() -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::fmt::Debug for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Send for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Sync for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Unpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub struct lean_rs_host::host::LeanHost<'lean>
 impl<'lean> lean_rs_host::LeanHost<'lean>
 pub fn lean_rs_host::LeanHost<'lean>::from_lake_project(&'lean lean_rs::runtime::init::LeanRuntime, impl core::convert::AsRef<std::path::Path>) -> lean_rs::error::LeanResult<Self>
@@ -2514,6 +2858,66 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHost<'lean>
+pub struct lean_rs_host::host::LeanImportProfilerOptions
+pub lean_rs_host::host::LeanImportProfilerOptions::profiler: bool
+pub lean_rs_host::host::LeanImportProfilerOptions::trace_profiler: bool
+pub lean_rs_host::host::LeanImportProfilerOptions::trace_profiler_output: core::option::Option<alloc::string::String>
+impl lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::new() -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::profiler(self, bool) -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::trace_profiler(self, bool) -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::trace_profiler_output(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::clone(&self) -> lean_rs_host::LeanImportProfilerOptions
+impl core::cmp::Eq for lean_rs_host::LeanImportProfilerOptions
+impl core::cmp::PartialEq for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::eq(&self, &lean_rs_host::LeanImportProfilerOptions) -> bool
+impl core::default::Default for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::default() -> lean_rs_host::LeanImportProfilerOptions
+impl core::fmt::Debug for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Freeze for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Send for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Sync for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Unpin for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportProfilerOptions
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportProfilerOptions
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportProfilerOptions
+pub struct lean_rs_host::host::LeanImportStats
+pub lean_rs_host::host::LeanImportStats::compacted_region_bytes: u64
+pub lean_rs_host::host::LeanImportStats::compacted_region_count: u64
+pub lean_rs_host::host::LeanImportStats::direct_import_names: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::LeanImportStats::effective_module_count: u64
+pub lean_rs_host::host::LeanImportStats::extension_count: u64
+pub lean_rs_host::host::LeanImportStats::import_all: bool
+pub lean_rs_host::host::LeanImportStats::import_level: alloc::string::String
+pub lean_rs_host::host::LeanImportStats::imported_bytes: u64
+pub lean_rs_host::host::LeanImportStats::imported_constant_count: u64
+pub lean_rs_host::host::LeanImportStats::load_exts: bool
+pub lean_rs_host::host::LeanImportStats::memory_mapped_region_bytes: u64
+pub lean_rs_host::host::LeanImportStats::memory_mapped_region_count: u64
+pub lean_rs_host::host::LeanImportStats::non_memory_mapped_region_bytes: u64
+pub lean_rs_host::host::LeanImportStats::total_imported_extension_entries: u64
+impl lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::memory_diagnostic(&self) -> alloc::string::String
+impl core::clone::Clone for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::clone(&self) -> lean_rs_host::LeanImportStats
+impl core::cmp::Eq for lean_rs_host::LeanImportStats
+impl core::cmp::PartialEq for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::eq(&self, &lean_rs_host::LeanImportStats) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportStats
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanImportStats
+impl core::marker::Send for lean_rs_host::LeanImportStats
+impl core::marker::Sync for lean_rs_host::LeanImportStats
+impl core::marker::Unpin for lean_rs_host::LeanImportStats
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportStats
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportStats
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportStats
 pub struct lean_rs_host::host::LeanProgressEvent
 pub lean_rs_host::host::LeanProgressEvent::current: u64
 pub lean_rs_host::host::LeanProgressEvent::elapsed: core::time::Duration
@@ -2550,6 +2954,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, &[
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
@@ -2599,12 +3004,23 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanSourceRange
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSourceRange
 pub struct lean_rs_host::host::PoolStats
 pub lean_rs_host::host::PoolStats::acquired: u64
+pub lean_rs_host::host::PoolStats::distinct_keys_seen: u64
 pub lean_rs_host::host::PoolStats::drained: u64
 pub lean_rs_host::host::PoolStats::drains: u64
+pub lean_rs_host::host::PoolStats::fresh_import_refusals: u64
+pub lean_rs_host::host::PoolStats::fresh_imports_avoided: u64
 pub lean_rs_host::host::PoolStats::imports_performed: u64
+pub lean_rs_host::host::PoolStats::key_hits: u64
+pub lean_rs_host::host::PoolStats::key_misses: u64
+pub lean_rs_host::host::PoolStats::last_miss_reason: core::option::Option<lean_rs_host::host::pool::SessionPoolKeyMissReason>
+pub lean_rs_host::host::PoolStats::miss_empty_pool: u64
+pub lean_rs_host::host::PoolStats::miss_no_matching_key: u64
+pub lean_rs_host::host::PoolStats::miss_reuse_disabled: u64
 pub lean_rs_host::host::PoolStats::released_dropped: u64
 pub lean_rs_host::host::PoolStats::released_to_pool: u64
 pub lean_rs_host::host::PoolStats::reused: u64
+pub lean_rs_host::host::PoolStats::rss_samples: u64
+pub lean_rs_host::host::PoolStats::rss_samples_unavailable: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats
@@ -2751,12 +3167,16 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofPositionSummary
 pub struct lean_rs_host::host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire_with_profile<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::memory_policy(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_capacity(&'lean lean_rs::runtime::init::LeanRuntime, usize) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_config(&'lean lean_rs::runtime::init::LeanRuntime, lean_rs_host::host::pool::SessionPoolConfig) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_memory_policy(&'lean lean_rs::runtime::init::LeanRuntime, usize, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
 impl core::fmt::Debug for lean_rs_host::host::pool::SessionPool<'_>
 pub fn lean_rs_host::host::pool::SessionPool<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> !core::marker::Freeze for lean_rs_host::host::pool::SessionPool<'lean>
@@ -2766,6 +3186,51 @@ impl<'lean> core::marker::Unpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
+pub struct lean_rs_host::host::SessionPoolConfig
+impl lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy(self, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy_ref(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolConfig::new(usize) -> Self
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::clone(&self) -> lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::eq(&self, &lean_rs_host::host::pool::SessionPoolConfig) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+pub struct lean_rs_host::host::SessionPoolMemoryPolicy
+impl lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::disabled() -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports_limit(&self) -> core::option::Option<u64>
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib_limit(&self) -> core::option::Option<u64>
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::clone(&self) -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::eq(&self, &lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> bool
+impl core::default::Default for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::default() -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub struct lean_rs_host::host::SessionStats
 pub lean_rs_host::host::SessionStats::batch_items: u64
 pub lean_rs_host::host::SessionStats::elapsed_ns: u64
@@ -3066,6 +3531,52 @@ impl core::marker::Unpin for lean_rs_host::EvidenceStatus
 impl core::marker::UnsafeUnpin for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::EvidenceStatus
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::EvidenceStatus
+pub enum lean_rs_host::LeanImportLevel
+pub lean_rs_host::LeanImportLevel::Exported
+pub lean_rs_host::LeanImportLevel::Private
+pub lean_rs_host::LeanImportLevel::Server
+impl lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanImportLevel::as_str(self) -> &'static str
+impl core::clone::Clone for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::clone(&self) -> lean_rs_host::LeanImportLevel
+impl core::cmp::Eq for lean_rs_host::LeanImportLevel
+impl core::cmp::PartialEq for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::eq(&self, &lean_rs_host::LeanImportLevel) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportLevel
+pub fn lean_rs_host::LeanImportLevel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanImportLevel
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportLevel
+impl core::marker::Freeze for lean_rs_host::LeanImportLevel
+impl core::marker::Send for lean_rs_host::LeanImportLevel
+impl core::marker::Sync for lean_rs_host::LeanImportLevel
+impl core::marker::Unpin for lean_rs_host::LeanImportLevel
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportLevel
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportLevel
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportLevel
+pub enum lean_rs_host::LeanImportProfileMode
+pub lean_rs_host::LeanImportProfileMode::ExportedNoExts
+pub lean_rs_host::LeanImportProfileMode::FullSession(lean_rs_host::LeanSessionImportProfile)
+impl lean_rs_host::LeanImportProfileMode
+pub const fn lean_rs_host::LeanImportProfileMode::import_all(self) -> bool
+pub const fn lean_rs_host::LeanImportProfileMode::import_level(self) -> lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanImportProfileMode::label(self) -> &'static str
+pub const fn lean_rs_host::LeanImportProfileMode::load_exts(self) -> bool
+impl core::clone::Clone for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::clone(&self) -> lean_rs_host::LeanImportProfileMode
+impl core::cmp::Eq for lean_rs_host::LeanImportProfileMode
+impl core::cmp::PartialEq for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::eq(&self, &lean_rs_host::LeanImportProfileMode) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportProfileMode
+pub fn lean_rs_host::LeanImportProfileMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanImportProfileMode
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportProfileMode
+impl core::marker::Freeze for lean_rs_host::LeanImportProfileMode
+impl core::marker::Send for lean_rs_host::LeanImportProfileMode
+impl core::marker::Sync for lean_rs_host::LeanImportProfileMode
+impl core::marker::Unpin for lean_rs_host::LeanImportProfileMode
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportProfileMode
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportProfileMode
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportProfileMode
 pub enum lean_rs_host::LeanKernelOutcome<'lean>
 pub lean_rs_host::LeanKernelOutcome::Checked(lean_rs_host::LeanEvidence<'lean>)
 pub lean_rs_host::LeanKernelOutcome::Rejected(lean_rs_host::LeanElabFailure)
@@ -3084,6 +3595,34 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanKernelOutcome<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanKernelOutcome<'lean>
+pub enum lean_rs_host::LeanSessionImportProfile
+pub lean_rs_host::LeanSessionImportProfile::ExportedPublic
+pub lean_rs_host::LeanSessionImportProfile::FullPrivateCompat
+pub lean_rs_host::LeanSessionImportProfile::Private
+pub lean_rs_host::LeanSessionImportProfile::Server
+impl lean_rs_host::LeanSessionImportProfile
+pub const fn lean_rs_host::LeanSessionImportProfile::import_all(self) -> bool
+pub const fn lean_rs_host::LeanSessionImportProfile::import_level(self) -> lean_rs_host::LeanImportLevel
+pub const fn lean_rs_host::LeanSessionImportProfile::label(self) -> &'static str
+pub const fn lean_rs_host::LeanSessionImportProfile::load_exts(self) -> bool
+impl core::clone::Clone for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::clone(&self) -> lean_rs_host::LeanSessionImportProfile
+impl core::cmp::Eq for lean_rs_host::LeanSessionImportProfile
+impl core::cmp::PartialEq for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::eq(&self, &lean_rs_host::LeanSessionImportProfile) -> bool
+impl core::default::Default for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::default() -> lean_rs_host::LeanSessionImportProfile
+impl core::fmt::Debug for lean_rs_host::LeanSessionImportProfile
+pub fn lean_rs_host::LeanSessionImportProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::LeanSessionImportProfile
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Freeze for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Send for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Sync for lean_rs_host::LeanSessionImportProfile
+impl core::marker::Unpin for lean_rs_host::LeanSessionImportProfile
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanSessionImportProfile
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanSessionImportProfile
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSessionImportProfile
 pub enum lean_rs_host::LeanSeverity
 pub lean_rs_host::LeanSeverity::Error
 pub lean_rs_host::LeanSeverity::Info
@@ -3201,6 +3740,28 @@ impl core::marker::Unpin for lean_rs_host::ProofPositionSelector
 impl core::marker::UnsafeUnpin for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofPositionSelector
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofPositionSelector
+pub enum lean_rs_host::SessionPoolKeyMissReason
+pub lean_rs_host::SessionPoolKeyMissReason::EmptyPool
+pub lean_rs_host::SessionPoolKeyMissReason::NoMatchingKey
+pub lean_rs_host::SessionPoolKeyMissReason::ReuseDisabled
+impl lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::clone(&self) -> lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::eq(&self, &lean_rs_host::host::pool::SessionPoolKeyMissReason) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolKeyMissReason
+pub fn lean_rs_host::host::pool::SessionPoolKeyMissReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub struct lean_rs_host::DeclarationFlags
 pub lean_rs_host::DeclarationFlags::is_generated: bool
 pub lean_rs_host::DeclarationFlags::is_internal: bool
@@ -3227,6 +3788,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationFlags
 pub struct lean_rs_host::DeclarationInspection
 pub lean_rs_host::DeclarationInspection::attributes: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::DeclarationInspection::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::DeclarationInspection::docstring: core::option::Option<lean_rs_host::host::declaration_search::DeclarationRenderedInfo>
 pub lean_rs_host::DeclarationInspection::flags: lean_rs_host::host::declaration_search::DeclarationFlags
 pub lean_rs_host::DeclarationInspection::kind: alloc::string::String
@@ -3280,6 +3842,7 @@ pub struct lean_rs_host::DeclarationInspectionFields
 pub lean_rs_host::DeclarationInspectionFields::attributes: bool
 pub lean_rs_host::DeclarationInspectionFields::docstring: bool
 pub lean_rs_host::DeclarationInspectionFields::flags: bool
+pub lean_rs_host::DeclarationInspectionFields::proof_search: bool
 pub lean_rs_host::DeclarationInspectionFields::source: bool
 pub lean_rs_host::DeclarationInspectionFields::statement: bool
 pub lean_rs_host::DeclarationInspectionFields::statement_pretty: bool
@@ -3334,10 +3897,12 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationInspectionRequest
 pub struct lean_rs_host::DeclarationProofSearchFacts
 pub lean_rs_host::DeclarationProofSearchFacts::class_name: core::option::Option<alloc::string::String>
+pub lean_rs_host::DeclarationProofSearchFacts::computed: bool
 pub lean_rs_host::DeclarationProofSearchFacts::is_class: bool
 pub lean_rs_host::DeclarationProofSearchFacts::is_instance: bool
 pub lean_rs_host::DeclarationProofSearchFacts::is_rw_candidate: bool
 pub lean_rs_host::DeclarationProofSearchFacts::is_simp: bool
+pub lean_rs_host::DeclarationProofSearchFacts::unavailable_reason: core::option::Option<alloc::string::String>
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 pub fn lean_rs_host::host::declaration_search::DeclarationProofSearchFacts::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationProofSearchFacts
@@ -3407,6 +3972,7 @@ pub lean_rs_host::DeclarationSearchFacts::after_required_constants_filter: usize
 pub lean_rs_host::DeclarationSearchFacts::after_scope_filter: usize
 pub lean_rs_host::DeclarationSearchFacts::broad_pruning: alloc::vec::Vec<lean_rs_host::host::declaration_search::DeclarationSearchPruning>
 pub lean_rs_host::DeclarationSearchFacts::declarations_scanned: usize
+pub lean_rs_host::DeclarationSearchFacts::derived_work: lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub lean_rs_host::DeclarationSearchFacts::source_lookups: usize
 pub lean_rs_host::DeclarationSearchFacts::timings: lean_rs_host::host::declaration_search::DeclarationSearchTimings
 pub lean_rs_host::DeclarationSearchFacts::truncated: bool
@@ -3609,6 +4175,101 @@ impl core::marker::Unpin for lean_rs_host::DeclarationVerificationRequest
 impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationRequest
+pub struct lean_rs_host::LeanBracketedDeclarationInfo
+pub lean_rs_host::LeanBracketedDeclarationInfo::exists: bool
+pub lean_rs_host::LeanBracketedDeclarationInfo::kind: core::option::Option<alloc::string::String>
+pub lean_rs_host::LeanBracketedDeclarationInfo::module: core::option::Option<alloc::string::String>
+pub lean_rs_host::LeanBracketedDeclarationInfo::name: alloc::string::String
+pub lean_rs_host::LeanBracketedDeclarationInfo::raw_type: core::option::Option<alloc::string::String>
+impl core::clone::Clone for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::clone(&self) -> lean_rs_host::LeanBracketedDeclarationInfo
+impl core::cmp::Eq for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::eq(&self, &lean_rs_host::LeanBracketedDeclarationInfo) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedDeclarationInfo
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedDeclarationInfo
+pub fn lean_rs_host::LeanBracketedDeclarationInfo::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Send for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Sync for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::Unpin for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedDeclarationInfo
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedDeclarationInfo
+pub struct lean_rs_host::LeanBracketedImportRequest
+pub lean_rs_host::LeanBracketedImportRequest::declaration_names: alloc::vec::Vec<alloc::string::String>
+impl lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::new(impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+impl core::clone::Clone for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::clone(&self) -> lean_rs_host::LeanBracketedImportRequest
+impl core::cmp::Eq for lean_rs_host::LeanBracketedImportRequest
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::eq(&self, &lean_rs_host::LeanBracketedImportRequest) -> bool
+impl core::default::Default for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::default() -> lean_rs_host::LeanBracketedImportRequest
+impl core::fmt::Debug for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedImportRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::LeanBracketedImportRequest
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::LeanBracketedImportRequest
+pub fn lean_rs_host::LeanBracketedImportRequest::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::LeanBracketedImportRequest
+pub type lean_rs_host::LeanBracketedImportRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl core::marker::Freeze for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Send for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Sync for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::Unpin for lean_rs_host::LeanBracketedImportRequest
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedImportRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedImportRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedImportRequest
+pub struct lean_rs_host::LeanBracketedImportResult
+pub lean_rs_host::LeanBracketedImportResult::declarations: alloc::vec::Vec<lean_rs_host::LeanBracketedDeclarationInfo>
+pub lean_rs_host::LeanBracketedImportResult::free_regions_ran: bool
+pub lean_rs_host::LeanBracketedImportResult::import_stats: lean_rs_host::LeanImportStats
+pub lean_rs_host::LeanBracketedImportResult::rejected_operations: alloc::vec::Vec<lean_rs_host::LeanBracketedRejectedOperation>
+impl core::clone::Clone for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::clone(&self) -> lean_rs_host::LeanBracketedImportResult
+impl core::cmp::Eq for lean_rs_host::LeanBracketedImportResult
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::eq(&self, &lean_rs_host::LeanBracketedImportResult) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedImportResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedImportResult
+pub fn lean_rs_host::LeanBracketedImportResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Send for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Sync for lean_rs_host::LeanBracketedImportResult
+impl core::marker::Unpin for lean_rs_host::LeanBracketedImportResult
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedImportResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedImportResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedImportResult
+pub struct lean_rs_host::LeanBracketedRejectedOperation
+pub lean_rs_host::LeanBracketedRejectedOperation::operation: alloc::string::String
+pub lean_rs_host::LeanBracketedRejectedOperation::reason: alloc::string::String
+impl core::clone::Clone for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::clone(&self) -> lean_rs_host::LeanBracketedRejectedOperation
+impl core::cmp::Eq for lean_rs_host::LeanBracketedRejectedOperation
+impl core::cmp::PartialEq for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::eq(&self, &lean_rs_host::LeanBracketedRejectedOperation) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanBracketedRejectedOperation
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanBracketedRejectedOperation
+pub fn lean_rs_host::LeanBracketedRejectedOperation::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Send for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Sync for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::Unpin for lean_rs_host::LeanBracketedRejectedOperation
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanBracketedRejectedOperation
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanBracketedRejectedOperation
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanBracketedRejectedOperation
 pub struct lean_rs_host::LeanCancellationToken
 impl lean_rs_host::LeanCancellationToken
 pub fn lean_rs_host::LeanCancellationToken::cancel(&self)
@@ -3629,7 +4290,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &[&str], lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::profiling_session<'c>(&'c self, &[&str], lean_rs_host::LeanImportProfileMode, &lean_rs_host::LeanImportProfilerOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session_with_profile<'c>(&'c self, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 impl core::fmt::Debug for lean_rs_host::LeanCapabilities<'_, '_>
 pub fn lean_rs_host::LeanCapabilities<'_, '_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean, 'h> core::marker::Freeze for lean_rs_host::LeanCapabilities<'lean, 'h>
@@ -3668,6 +4332,35 @@ impl core::marker::Unpin for lean_rs_host::LeanDeclarationFilter
 impl core::marker::UnsafeUnpin for lean_rs_host::LeanDeclarationFilter
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanDeclarationFilter
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanDeclarationFilter
+pub struct lean_rs_host::LeanDerivedWorkFacts
+pub lean_rs_host::LeanDerivedWorkFacts::docstring_lookups: u64
+pub lean_rs_host::LeanDerivedWorkFacts::lazy_discr_tree_import_initialization_observed: bool
+pub lean_rs_host::LeanDerivedWorkFacts::module_snapshot_builds: u64
+pub lean_rs_host::LeanDerivedWorkFacts::parser_elaborator_runs: u64
+pub lean_rs_host::LeanDerivedWorkFacts::pretty_prints: u64
+pub lean_rs_host::LeanDerivedWorkFacts::proof_search_fact_collections: u64
+pub lean_rs_host::LeanDerivedWorkFacts::raw_type_renderings: u64
+pub lean_rs_host::LeanDerivedWorkFacts::simp_extension_lookups: u64
+pub lean_rs_host::LeanDerivedWorkFacts::source_range_lookups: u64
+impl core::clone::Clone for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::clone(&self) -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::Eq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::cmp::PartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::eq(&self, &lean_rs_host::host::declaration_search::LeanDerivedWorkFacts) -> bool
+impl core::default::Default for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::default() -> lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::fmt::Debug for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+pub fn lean_rs_host::host::declaration_search::LeanDerivedWorkFacts::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Send for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Sync for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::Unpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::LeanDerivedWorkFacts
 pub struct lean_rs_host::LeanDiagnostic
 impl lean_rs_host::LeanDiagnostic
 pub fn lean_rs_host::LeanDiagnostic::file_label(&self) -> &str
@@ -3759,6 +4452,66 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHost<'lean>
+pub struct lean_rs_host::LeanImportProfilerOptions
+pub lean_rs_host::LeanImportProfilerOptions::profiler: bool
+pub lean_rs_host::LeanImportProfilerOptions::trace_profiler: bool
+pub lean_rs_host::LeanImportProfilerOptions::trace_profiler_output: core::option::Option<alloc::string::String>
+impl lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::new() -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::profiler(self, bool) -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::trace_profiler(self, bool) -> Self
+pub fn lean_rs_host::LeanImportProfilerOptions::trace_profiler_output(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::clone(&self) -> lean_rs_host::LeanImportProfilerOptions
+impl core::cmp::Eq for lean_rs_host::LeanImportProfilerOptions
+impl core::cmp::PartialEq for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::eq(&self, &lean_rs_host::LeanImportProfilerOptions) -> bool
+impl core::default::Default for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::default() -> lean_rs_host::LeanImportProfilerOptions
+impl core::fmt::Debug for lean_rs_host::LeanImportProfilerOptions
+pub fn lean_rs_host::LeanImportProfilerOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Freeze for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Send for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Sync for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::Unpin for lean_rs_host::LeanImportProfilerOptions
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportProfilerOptions
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportProfilerOptions
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportProfilerOptions
+pub struct lean_rs_host::LeanImportStats
+pub lean_rs_host::LeanImportStats::compacted_region_bytes: u64
+pub lean_rs_host::LeanImportStats::compacted_region_count: u64
+pub lean_rs_host::LeanImportStats::direct_import_names: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::LeanImportStats::effective_module_count: u64
+pub lean_rs_host::LeanImportStats::extension_count: u64
+pub lean_rs_host::LeanImportStats::import_all: bool
+pub lean_rs_host::LeanImportStats::import_level: alloc::string::String
+pub lean_rs_host::LeanImportStats::imported_bytes: u64
+pub lean_rs_host::LeanImportStats::imported_constant_count: u64
+pub lean_rs_host::LeanImportStats::load_exts: bool
+pub lean_rs_host::LeanImportStats::memory_mapped_region_bytes: u64
+pub lean_rs_host::LeanImportStats::memory_mapped_region_count: u64
+pub lean_rs_host::LeanImportStats::non_memory_mapped_region_bytes: u64
+pub lean_rs_host::LeanImportStats::total_imported_extension_entries: u64
+impl lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::memory_diagnostic(&self) -> alloc::string::String
+impl core::clone::Clone for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::clone(&self) -> lean_rs_host::LeanImportStats
+impl core::cmp::Eq for lean_rs_host::LeanImportStats
+impl core::cmp::PartialEq for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::eq(&self, &lean_rs_host::LeanImportStats) -> bool
+impl core::fmt::Debug for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::LeanImportStats
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::LeanImportStats
+pub fn lean_rs_host::LeanImportStats::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::LeanImportStats
+impl core::marker::Send for lean_rs_host::LeanImportStats
+impl core::marker::Sync for lean_rs_host::LeanImportStats
+impl core::marker::Unpin for lean_rs_host::LeanImportStats
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportStats
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportStats
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportStats
 pub struct lean_rs_host::LeanPosition
 impl lean_rs_host::LeanPosition
 pub fn lean_rs_host::LeanPosition::column(&self) -> u32
@@ -3819,6 +4572,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, &[
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
@@ -3868,12 +4622,23 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanSourceRange
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanSourceRange
 pub struct lean_rs_host::PoolStats
 pub lean_rs_host::PoolStats::acquired: u64
+pub lean_rs_host::PoolStats::distinct_keys_seen: u64
 pub lean_rs_host::PoolStats::drained: u64
 pub lean_rs_host::PoolStats::drains: u64
+pub lean_rs_host::PoolStats::fresh_import_refusals: u64
+pub lean_rs_host::PoolStats::fresh_imports_avoided: u64
 pub lean_rs_host::PoolStats::imports_performed: u64
+pub lean_rs_host::PoolStats::key_hits: u64
+pub lean_rs_host::PoolStats::key_misses: u64
+pub lean_rs_host::PoolStats::last_miss_reason: core::option::Option<lean_rs_host::host::pool::SessionPoolKeyMissReason>
+pub lean_rs_host::PoolStats::miss_empty_pool: u64
+pub lean_rs_host::PoolStats::miss_no_matching_key: u64
+pub lean_rs_host::PoolStats::miss_reuse_disabled: u64
 pub lean_rs_host::PoolStats::released_dropped: u64
 pub lean_rs_host::PoolStats::released_to_pool: u64
 pub lean_rs_host::PoolStats::reused: u64
+pub lean_rs_host::PoolStats::rss_samples: u64
+pub lean_rs_host::PoolStats::rss_samples_unavailable: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats
@@ -4038,12 +4803,16 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofSummary
 pub struct lean_rs_host::SessionPool<'lean>
 impl<'lean> lean_rs_host::host::pool::SessionPool<'lean>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::acquire_with_profile<'p, 'c>(&'p self, &'c lean_rs_host::LeanCapabilities<'lean, 'c>, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::host::pool::PooledSession<'lean, 'p, 'c>>
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::capacity(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::drain(&self) -> usize
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::is_empty(&self) -> bool
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::len(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::memory_policy(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::stats(&self) -> lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_capacity(&'lean lean_rs::runtime::init::LeanRuntime, usize) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_config(&'lean lean_rs::runtime::init::LeanRuntime, lean_rs_host::host::pool::SessionPoolConfig) -> Self
+pub fn lean_rs_host::host::pool::SessionPool<'lean>::with_memory_policy(&'lean lean_rs::runtime::init::LeanRuntime, usize, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
 impl core::fmt::Debug for lean_rs_host::host::pool::SessionPool<'_>
 pub fn lean_rs_host::host::pool::SessionPool<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'lean> !core::marker::Freeze for lean_rs_host::host::pool::SessionPool<'lean>
@@ -4053,6 +4822,51 @@ impl<'lean> core::marker::Unpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> !core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPool<'lean>
+pub struct lean_rs_host::SessionPoolConfig
+impl lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::capacity(&self) -> usize
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy(self, lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolConfig::memory_policy_ref(&self) -> &lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolConfig::new(usize) -> Self
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::clone(&self) -> lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::eq(&self, &lean_rs_host::host::pool::SessionPoolConfig) -> bool
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolConfig
+pub fn lean_rs_host::host::pool::SessionPoolConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolConfig
+pub struct lean_rs_host::SessionPoolMemoryPolicy
+impl lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::disabled() -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_fresh_imports_limit(&self) -> core::option::Option<u64>
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib(self, u64) -> Self
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::max_rss_kib_limit(&self) -> core::option::Option<u64>
+impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::clone(&self) -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::Eq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::cmp::PartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::eq(&self, &lean_rs_host::host::pool::SessionPoolMemoryPolicy) -> bool
+impl core::default::Default for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::default() -> lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::fmt::Debug for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+pub fn lean_rs_host::host::pool::SessionPoolMemoryPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Freeze for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Send for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Sync for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::Unpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::marker::UnsafeUnpin for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::pool::SessionPoolMemoryPolicy
 pub struct lean_rs_host::SessionStats
 pub lean_rs_host::SessionStats::batch_items: u64
 pub lean_rs_host::SessionStats::elapsed_ns: u64

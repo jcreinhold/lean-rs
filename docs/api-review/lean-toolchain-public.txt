@@ -1,6 +1,7 @@
 pub mod lean_toolchain
 pub use lean_toolchain::LEAN_HEADER_DIGEST
 pub use lean_toolchain::LEAN_HEADER_PATH
+pub use lean_toolchain::LEAN_RESOLVED_VERSION
 pub use lean_toolchain::LEAN_VERSION
 pub use lean_toolchain::SUPPORTED_TOOLCHAINS
 pub use lean_toolchain::SupportedToolchain
@@ -393,6 +394,7 @@ pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<
 pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
+pub fn lean_toolchain::CargoLeanCapability::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::module(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>) -> Self

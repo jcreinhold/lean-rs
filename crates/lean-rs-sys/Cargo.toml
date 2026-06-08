@@ -31,6 +31,12 @@ static = []
 lean-rs-abi = { workspace = true }
 
 [build-dependencies]
+# The build script reads `SUPPORTED_TOOLCHAINS` to match the local `lean.h`
+# digest against the supported window. `lean-rs-abi` is link-free, so depending
+# on it here pulls in no Lean runtime; it must be a real build-dependency (not a
+# cross-crate source include) so the published `lean-rs-sys` tarball builds
+# standalone on crates.io / docs.rs.
+lean-rs-abi = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]

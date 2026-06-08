@@ -361,6 +361,7 @@ pub lean_rs::error::HostStage::Conversion
 pub lean_rs::error::HostStage::Internal
 pub lean_rs::error::HostStage::Link
 pub lean_rs::error::HostStage::Load
+pub lean_rs::error::HostStage::Resource
 pub lean_rs::error::HostStage::RuntimeInit
 impl core::clone::Clone for lean_rs::error::HostStage
 pub fn lean_rs::error::HostStage::clone(&self) -> lean_rs::error::HostStage
@@ -386,6 +387,7 @@ pub lean_rs::error::LeanDiagnosticCode::Internal
 pub lean_rs::error::LeanDiagnosticCode::LeanException
 pub lean_rs::error::LeanDiagnosticCode::Linking
 pub lean_rs::error::LeanDiagnosticCode::ModuleInit
+pub lean_rs::error::LeanDiagnosticCode::ResourceExhausted
 pub lean_rs::error::LeanDiagnosticCode::RuntimeInit
 pub lean_rs::error::LeanDiagnosticCode::SymbolLookup
 pub lean_rs::error::LeanDiagnosticCode::Unsupported
@@ -512,6 +514,7 @@ pub struct lean_rs::error::HostFailure
 impl lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
 pub fn lean_rs::error::HostFailure::message(&self) -> &str
+pub fn lean_rs::error::HostFailure::resource_exhausted_facts(&self) -> core::option::Option<&lean_rs::error::ResourceExhaustedFacts>
 pub fn lean_rs::error::HostFailure::stage(&self) -> lean_rs::error::HostStage
 impl core::clone::Clone for lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::clone(&self) -> lean_rs::error::HostFailure
@@ -559,6 +562,30 @@ impl core::marker::Unpin for lean_rs::error::LeanException
 impl core::marker::UnsafeUnpin for lean_rs::error::LeanException
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::LeanException
 impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::LeanException
+pub struct lean_rs::error::ResourceExhaustedFacts
+pub lean_rs::error::ResourceExhaustedFacts::cause: alloc::string::String
+pub lean_rs::error::ResourceExhaustedFacts::current_rss_kib: core::option::Option<u64>
+pub lean_rs::error::ResourceExhaustedFacts::import_count: core::option::Option<u64>
+pub lean_rs::error::ResourceExhaustedFacts::import_limit: core::option::Option<u64>
+pub lean_rs::error::ResourceExhaustedFacts::last_import_stats: core::option::Option<alloc::string::String>
+pub lean_rs::error::ResourceExhaustedFacts::limit_kib: core::option::Option<u64>
+pub lean_rs::error::ResourceExhaustedFacts::requested_imports: core::option::Option<u64>
+pub lean_rs::error::ResourceExhaustedFacts::work_entered_lean: bool
+impl core::clone::Clone for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::clone(&self) -> lean_rs::error::ResourceExhaustedFacts
+impl core::cmp::Eq for lean_rs::error::ResourceExhaustedFacts
+impl core::cmp::PartialEq for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::eq(&self, &lean_rs::error::ResourceExhaustedFacts) -> bool
+impl core::fmt::Debug for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Freeze for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Send for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Sync for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Unpin for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::UnsafeUnpin for lean_rs::error::ResourceExhaustedFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::ResourceExhaustedFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::ResourceExhaustedFacts
 pub const lean_rs::error::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
 pub const lean_rs::error::LEAN_ERROR_MESSAGE_LIMIT: usize
 pub type lean_rs::error::LeanResult<T> = core::result::Result<T, lean_rs::error::LeanError>
@@ -991,6 +1018,7 @@ pub lean_rs::HostStage::Conversion
 pub lean_rs::HostStage::Internal
 pub lean_rs::HostStage::Link
 pub lean_rs::HostStage::Load
+pub lean_rs::HostStage::Resource
 pub lean_rs::HostStage::RuntimeInit
 impl core::clone::Clone for lean_rs::error::HostStage
 pub fn lean_rs::error::HostStage::clone(&self) -> lean_rs::error::HostStage
@@ -1089,6 +1117,7 @@ pub lean_rs::LeanDiagnosticCode::Internal
 pub lean_rs::LeanDiagnosticCode::LeanException
 pub lean_rs::LeanDiagnosticCode::Linking
 pub lean_rs::LeanDiagnosticCode::ModuleInit
+pub lean_rs::LeanDiagnosticCode::ResourceExhausted
 pub lean_rs::LeanDiagnosticCode::RuntimeInit
 pub lean_rs::LeanDiagnosticCode::SymbolLookup
 pub lean_rs::LeanDiagnosticCode::Unsupported
@@ -1215,6 +1244,7 @@ pub struct lean_rs::HostFailure
 impl lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::code(&self) -> lean_rs::error::LeanDiagnosticCode
 pub fn lean_rs::error::HostFailure::message(&self) -> &str
+pub fn lean_rs::error::HostFailure::resource_exhausted_facts(&self) -> core::option::Option<&lean_rs::error::ResourceExhaustedFacts>
 pub fn lean_rs::error::HostFailure::stage(&self) -> lean_rs::error::HostStage
 impl core::clone::Clone for lean_rs::error::HostFailure
 pub fn lean_rs::error::HostFailure::clone(&self) -> lean_rs::error::HostFailure
@@ -1590,6 +1620,30 @@ impl<'lean, 'a> core::marker::Unpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
 impl<'lean, 'a> core::marker::UnsafeUnpin for lean_rs::runtime::obj::ObjRef<'lean, 'a>
 impl<'lean, 'a> core::panic::unwind_safe::RefUnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
 impl<'lean, 'a> core::panic::unwind_safe::UnwindSafe for lean_rs::runtime::obj::ObjRef<'lean, 'a>
+pub struct lean_rs::ResourceExhaustedFacts
+pub lean_rs::ResourceExhaustedFacts::cause: alloc::string::String
+pub lean_rs::ResourceExhaustedFacts::current_rss_kib: core::option::Option<u64>
+pub lean_rs::ResourceExhaustedFacts::import_count: core::option::Option<u64>
+pub lean_rs::ResourceExhaustedFacts::import_limit: core::option::Option<u64>
+pub lean_rs::ResourceExhaustedFacts::last_import_stats: core::option::Option<alloc::string::String>
+pub lean_rs::ResourceExhaustedFacts::limit_kib: core::option::Option<u64>
+pub lean_rs::ResourceExhaustedFacts::requested_imports: core::option::Option<u64>
+pub lean_rs::ResourceExhaustedFacts::work_entered_lean: bool
+impl core::clone::Clone for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::clone(&self) -> lean_rs::error::ResourceExhaustedFacts
+impl core::cmp::Eq for lean_rs::error::ResourceExhaustedFacts
+impl core::cmp::PartialEq for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::eq(&self, &lean_rs::error::ResourceExhaustedFacts) -> bool
+impl core::fmt::Debug for lean_rs::error::ResourceExhaustedFacts
+pub fn lean_rs::error::ResourceExhaustedFacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Freeze for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Send for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Sync for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::Unpin for lean_rs::error::ResourceExhaustedFacts
+impl core::marker::UnsafeUnpin for lean_rs::error::ResourceExhaustedFacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs::error::ResourceExhaustedFacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs::error::ResourceExhaustedFacts
 pub const lean_rs::DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY: usize
 pub const lean_rs::LEAN_ERROR_MESSAGE_LIMIT: usize
 pub const lean_rs::VERSION: &str

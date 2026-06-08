@@ -135,6 +135,7 @@ pub lean_rs_worker_parent::LeanWorkerError::Bootstrap::code: lean_rs_worker_pare
 pub lean_rs_worker_parent::LeanWorkerError::Bootstrap::message: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerError::Cancelled
 pub lean_rs_worker_parent::LeanWorkerError::Cancelled::operation: &'static str
+pub lean_rs_worker_parent::LeanWorkerError::Cancelled::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::CapabilityBuild
 pub lean_rs_worker_parent::LeanWorkerError::CapabilityBuild::diagnostic: lean_toolchain::diagnostics::LinkDiagnostics
 pub lean_rs_worker_parent::LeanWorkerError::CapabilityDoctorMalformed
@@ -166,9 +167,10 @@ pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::restarts: u64
 pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::window: core::time::Duration
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::current_kib: u64
-pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::last_import_stats: core::option::Option<alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerImportStats>>
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::limit_kib: u64
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::operation: &'static str
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::Setup
 pub lean_rs_worker_parent::LeanWorkerError::Setup::message: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerError::Spawn
@@ -184,6 +186,7 @@ pub lean_rs_worker_parent::LeanWorkerError::StreamRowMalformed::message: alloc::
 pub lean_rs_worker_parent::LeanWorkerError::Timeout
 pub lean_rs_worker_parent::LeanWorkerError::Timeout::duration: core::time::Duration
 pub lean_rs_worker_parent::LeanWorkerError::Timeout::operation: &'static str
+pub lean_rs_worker_parent::LeanWorkerError::Timeout::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::TypedCommandRequestEncode
 pub lean_rs_worker_parent::LeanWorkerError::TypedCommandRequestEncode::export: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerError::TypedCommandRequestEncode::message: alloc::string::String
@@ -212,12 +215,17 @@ pub lean_rs_worker_parent::LeanWorkerError::WorkerChildUnresolved
 pub lean_rs_worker_parent::LeanWorkerError::WorkerChildUnresolved::tried: alloc::vec::Vec<std::path::PathBuf>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolExhausted
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolExhausted::max_workers: usize
+pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolExhausted::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::current_kib: u64
-pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
+pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::last_import_stats: core::option::Option<alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerImportStats>>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::limit_kib: u64
+pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolQueueTimeout
+pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolQueueTimeout::resource: alloc::boxed::Box<lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolQueueTimeout::waited: core::time::Duration
+impl lean_rs_worker_parent::LeanWorkerError
+pub fn lean_rs_worker_parent::LeanWorkerError::resource_exhausted_facts(&self) -> core::option::Option<&lean_rs_worker_protocol::types::LeanWorkerResourceExhaustedFacts>
 impl core::error::Error for lean_rs_worker_parent::LeanWorkerError
 pub fn lean_rs_worker_parent::LeanWorkerError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerError
@@ -896,20 +904,47 @@ pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::active_workers: usize
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::backpressure_failures: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::backpressure_waits: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::cancelled_restarts: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::cold_open_admitted: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::cold_open_attempts: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::cold_open_refusals: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::concurrent_cold_opens_observed: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::data_row_payload_bytes: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::data_rows_delivered: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::distinct_keys_seen: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::fresh_cold_opens_avoided: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::idle_restarts: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::import_like_requests: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::imports: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::key_hits: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::key_misses: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_capability_load_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_first_command_elapsed: core::option::Option<core::time::Duration>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_key_miss_reason: core::option::Option<alloc::string::String>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_replacement_skipped_reason: core::option::Option<alloc::string::String>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_replacement_timing: core::option::Option<lean_rs_worker_parent::supervisor::LeanWorkerReplacementTiming>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_session_open_import_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_spawn_handshake_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_warm_command_elapsed: core::option::Option<core::time::Duration>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::max_import_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::max_request_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::max_workers: usize
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::memory_budget_rejections: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::miss_empty_pool: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::miss_no_matching_key: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::policy_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::queue_depth: usize
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::queue_timeouts: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::refusal_reason: core::option::Option<alloc::string::String>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::replacement_attempts: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::replacement_budget_admitted: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::replacement_budget_skipped: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::replacement_failures: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::replacement_successes: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::requests: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::rss_after_open_kib: core::option::Option<u64>
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::rss_before_admission_kib: core::option::Option<u64>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::rss_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::rss_samples_unavailable: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::stream_elapsed: core::time::Duration
@@ -1089,6 +1124,7 @@ pub struct lean_rs_worker_parent::LeanWorkerSessionLease<'pool>
 impl lean_rs_worker_parent::LeanWorkerSessionLease<'_>
 pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::is_valid(&self) -> bool
+pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::process_module_query_batch(&mut self, &str, &[lean_rs_worker_protocol::types::LeanWorkerModuleQuerySelector], &lean_rs_worker_protocol::types::LeanWorkerOutputBudgets, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerModuleQueryBatchOutcome, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::run_json_command<Req, Resp>(&mut self, &lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>, &Req, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<Resp, lean_rs_worker_parent::LeanWorkerError> where Req: serde_core::ser::Serialize, Resp: serde_core::de::DeserializeOwned
 pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::run_streaming_command<Req, Row, Summary>(&mut self, &lean_rs_worker_parent::LeanWorkerStreamingCommand<Req, Row, Summary>, &Req, &dyn lean_rs_worker_parent::LeanWorkerTypedDataSink<Row>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerDiagnosticSink>, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>, lean_rs_worker_parent::LeanWorkerError> where Req: serde_core::ser::Serialize, Row: serde_core::de::DeserializeOwned, Summary: serde_core::de::DeserializeOwned
 pub fn lean_rs_worker_parent::LeanWorkerSessionLease<'_>::runtime_metadata(&self) -> lean_rs_worker_parent::LeanWorkerRuntimeMetadata
@@ -1115,12 +1151,27 @@ pub lean_rs_worker_parent::LeanWorkerStats::data_rows_delivered: u64
 pub lean_rs_worker_parent::LeanWorkerStats::exits: u64
 pub lean_rs_worker_parent::LeanWorkerStats::explicit_cycles: u64
 pub lean_rs_worker_parent::LeanWorkerStats::idle_restarts: u64
+pub lean_rs_worker_parent::LeanWorkerStats::import_like_admission_attempts: u64
+pub lean_rs_worker_parent::LeanWorkerStats::import_like_admitted: u64
 pub lean_rs_worker_parent::LeanWorkerStats::imports: u64
+pub lean_rs_worker_parent::LeanWorkerStats::last_capability_load_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerStats::last_first_command_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerStats::last_import_like_rss_before_admission_kib: core::option::Option<u64>
 pub lean_rs_worker_parent::LeanWorkerStats::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
+pub lean_rs_worker_parent::LeanWorkerStats::last_replacement_skipped_reason: core::option::Option<alloc::string::String>
+pub lean_rs_worker_parent::LeanWorkerStats::last_replacement_timing: core::option::Option<lean_rs_worker_parent::supervisor::LeanWorkerReplacementTiming>
 pub lean_rs_worker_parent::LeanWorkerStats::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
 pub lean_rs_worker_parent::LeanWorkerStats::last_rss_kib: core::option::Option<u64>
+pub lean_rs_worker_parent::LeanWorkerStats::last_session_open_import_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerStats::last_spawn_handshake_elapsed: core::option::Option<core::time::Duration>
+pub lean_rs_worker_parent::LeanWorkerStats::last_warm_command_elapsed: core::option::Option<core::time::Duration>
 pub lean_rs_worker_parent::LeanWorkerStats::max_import_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerStats::max_request_restarts: u64
+pub lean_rs_worker_parent::LeanWorkerStats::replacement_attempts: u64
+pub lean_rs_worker_parent::LeanWorkerStats::replacement_budget_admitted: u64
+pub lean_rs_worker_parent::LeanWorkerStats::replacement_budget_skipped: u64
+pub lean_rs_worker_parent::LeanWorkerStats::replacement_failures: u64
+pub lean_rs_worker_parent::LeanWorkerStats::replacement_successes: u64
 pub lean_rs_worker_parent::LeanWorkerStats::requests: u64
 pub lean_rs_worker_parent::LeanWorkerStats::restarts: u64
 pub lean_rs_worker_parent::LeanWorkerStats::rss_restarts: u64

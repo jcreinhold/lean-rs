@@ -2,8 +2,8 @@
 //!
 //! 1. Discover a Lean 4 toolchain prefix.
 //! 2. Read `<prefix>/include/lean/lean.h`, compute its SHA-256 digest, and
-//!    look up the matching [`SupportedToolchain`](crate::SupportedToolchain)
-//!    entry. The build fails if no entry matches.
+//!    look up the matching `lean_rs_abi::supported::SupportedToolchain` entry.
+//!    The build fails if no entry matches.
 //! 3. Emit `cargo:rustc-env=…` so `src/consts.rs` can `env!("…")` the resolved
 //!    version, header path, and digest, plus the version `cfg` flags
 //!    (`lean_v_X_Y_Z` exact-equality and `lean_at_least_X_Y` lower-bound) so
@@ -26,15 +26,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// `lean-rs-abi/src/supported.rs` is loaded below so the build script can read
-// `SUPPORTED_TOOLCHAINS` without depending on the sys crate itself. The file
-// references `crate::REQUIRED_SYMBOLS` only inside `#[cfg(test)]` helpers, so a
-// build-script include works.
-#[path = "../lean-rs-abi/src/supported.rs"]
-#[allow(dead_code, unreachable_pub)]
-mod supported;
-
-use supported::{SUPPORTED_TOOLCHAINS, SupportedToolchain};
+// `SUPPORTED_TOOLCHAINS` comes from the link-free `lean-rs-abi` build-dependency
+// (see Cargo.toml). Using it as a real dependency—rather than a cross-crate
+// source include—keeps the published `lean-rs-sys` tarball buildable standalone.
+use lean_rs_abi::supported::{SUPPORTED_TOOLCHAINS, SupportedToolchain};
 
 fn main() {
     if env::var_os("CARGO_FEATURE_STATIC").is_some() && env::var_os("CARGO_FEATURE_DYNAMIC").is_some() {
@@ -87,7 +82,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ELAN_HOME");
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-changed={}", header_path.display());
-    println!("cargo:rerun-if-changed=../lean-rs-abi/src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
@@ -111,7 +105,6 @@ fn emit_docs_rs_metadata() {
     println!("cargo:rustc-env=LEAN_HEADER_DIGEST={}", entry.header_digest);
     emit_version_cfgs(resolved_version);
     println!("cargo:rerun-if-env-changed=DOCS_RS");
-    println!("cargo:rerun-if-changed=../lean-rs-abi/src/supported.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
