@@ -260,8 +260,10 @@ above.
 
 The same-process test command `cargo test -p lean-rs-host session_leak_loop` is not a safe local verification command.
 It can run multiple fresh full-session imports inside one Rust test harness process without a `SessionPoolMemoryPolicy`
-or worker boundary. Use nextest process isolation or an exact single-test filter instead; `-- --test-threads=1` only
-serializes tests inside the same process and does not reset Lean import state.
+or worker boundary. Host full-session imports are therefore rejected when started from Cargo's same-process libtest
+harness, before Lean import begins. Use nextest process isolation instead. For an explicitly budgeted one-off debug run,
+set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1`; `-- --test-threads=1` only serializes tests inside the same process and
+does not reset Lean import state.
 
 The numbers below are local snapshots on macOS aarch64 against `lean=4.29.1`. They are not portable: macOS RSS is noisy
 under memory pressure and compression, and absolute KiB values vary between machines. The *shape*—order-of-magnitude

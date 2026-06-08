@@ -45,6 +45,8 @@ use crate::host::progress::LeanProgressSink;
 use crate::host::session::{LeanImportProfileMode, LeanImportProfilerOptions, LeanSession, LeanSessionImportProfile};
 use crate::host::shim_bindings::host_shim_export_signatures;
 
+const HOST_CARGO_TEST_IMPORT_OVERRIDE: &str = "LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS";
+
 /// Loaded generic interop, host shim, and optional user dylibs with a checked
 /// host-shim capability ready for session binding resolution.
 ///
@@ -143,6 +145,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<LeanSession<'lean, 'c>> {
+        reject_same_process_cargo_test_session_import()?;
         LeanSession::import(self, imports, cancellation, progress)
     }
 
@@ -159,6 +162,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<LeanSession<'lean, 'c>> {
+        reject_same_process_cargo_test_session_import()?;
         LeanSession::import_with_profile(self, imports, profile, cancellation, progress)
     }
 
@@ -172,6 +176,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         mode: LeanImportProfileMode,
         profiler_options: &LeanImportProfilerOptions,
     ) -> LeanResult<LeanSession<'lean, 'c>> {
+        reject_same_process_cargo_test_session_import()?;
         LeanSession::import_profiled(self, imports, mode, profiler_options)
     }
 
@@ -211,4 +216,82 @@ fn load_shim_capability<'lean>(host: &LeanHost<'lean>) -> LeanResult<LeanCapabil
         host.runtime(),
         LeanBuiltCapability::manifest_path(built.manifest_path()),
     )
+}
+
+fn reject_same_process_cargo_test_session_import() -> LeanResult<()> {
+    if !same_process_cargo_test_import_guard_active() {
+        return Ok(());
+    }
+
+    Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+        "lean-rs-host full-session imports are disabled under same-process cargo test; \
+         run `cargo nextest run -p lean-rs-host ...` for process-per-test isolation, \
+         or set {HOST_CARGO_TEST_IMPORT_OVERRIDE}=1 for an explicitly budgeted single-test debug run"
+    )))
+}
+
+fn same_process_cargo_test_import_guard_active() -> bool {
+    same_process_cargo_test_import_guard_active_from_facts(
+        std::env::var(HOST_CARGO_TEST_IMPORT_OVERRIDE).ok().as_deref(),
+        std::env::var_os("NEXTEST").is_some() || std::env::var_os("NEXTEST_RUN_ID").is_some(),
+        is_probably_cargo_test_binary(),
+    )
+}
+
+fn same_process_cargo_test_import_guard_active_from_facts(
+    override_value: Option<&str>,
+    nextest_present: bool,
+    is_cargo_test_binary: bool,
+) -> bool {
+    if env_value_truthy(override_value) || nextest_present {
+        return false;
+    }
+    is_cargo_test_binary
+}
+
+fn env_value_truthy(value: Option<&str>) -> bool {
+    value.is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+}
+
+fn is_probably_cargo_test_binary() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(parent) = exe.parent() else {
+        return false;
+    };
+
+    // Cargo/libtest integration and unit test harnesses live under
+    // `target/{profile}/deps`. Normal examples, profiling binaries, and worker
+    // child processes do not.
+    parent
+        .file_name()
+        .is_some_and(|name| name == std::ffi::OsStr::new("deps"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_process_cargo_test_import_guard_active_from_facts;
+
+    #[test]
+    fn cargo_test_import_guard_blocks_same_process_libtest_harnesses() {
+        assert!(same_process_cargo_test_import_guard_active_from_facts(
+            None, false, true,
+        ));
+    }
+
+    #[test]
+    fn cargo_test_import_guard_allows_nextest_override_and_non_test_binaries() {
+        assert!(!same_process_cargo_test_import_guard_active_from_facts(
+            None, true, true,
+        ));
+        assert!(!same_process_cargo_test_import_guard_active_from_facts(
+            Some("1"),
+            false,
+            true,
+        ));
+        assert!(!same_process_cargo_test_import_guard_active_from_facts(
+            None, false, false,
+        ));
+    }
 }

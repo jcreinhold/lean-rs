@@ -9,6 +9,13 @@
 # are also spawning child worker processes.
 jobs = 1
 
+[alias]
+# Cargo does not allow a workspace config to replace the built-in `cargo test`
+# subcommand. Use `cargo xtest` for the full-suite gate so every test runs
+# under nextest's process isolation.
+xtest = ["nextest", "run", "--workspace"]
+xtest-ci = ["nextest", "run", "--workspace", "--profile", "ci"]
+
 [env]
 # Pin the Lean task manager to a single worker thread per process.
 # Combined with the `test-threads = 1` cap in `.config/nextest.toml`

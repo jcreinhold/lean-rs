@@ -14,8 +14,14 @@ cargo install cargo-nextest --locked
 Run:
 
 ```sh
-cargo nextest run --workspace
+cargo xtest
 ```
+
+`cargo xtest` is a workspace alias for `cargo nextest run --workspace`; use
+`cargo xtest-ci` for `cargo nextest run --workspace --profile ci`. Cargo
+configuration cannot replace the built-in `cargo test` subcommand, so the repo
+also rejects full-session host imports when they are started from a same-process
+libtest binary.
 
 Doctests are not picked up by nextest:
 
@@ -25,17 +31,22 @@ cargo test --doc --workspace
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **1**. The
-workspace's [`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
-`LEAN_RS_NUM_THREADS=1`, and a default `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
-defaults make normal `cargo nextest`, focused `cargo test`, worker examples, and profiling examples use the local
-low-memory shape without manual shell exports.
+The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps
+concurrent test processes at **1**. The workspace's
+[`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`,
+`RUST_TEST_THREADS=1`, `LEAN_RS_NUM_THREADS=1`, and a default
+`LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
+defaults make normal `cargo nextest`, worker examples, and profiling examples
+use the local low-memory shape without manual shell exports. Focused
+same-process `cargo test` runs that open full host sessions now fail before
+Lean import unless the developer explicitly opts into that risk.
 
 | Knob                            | Effect                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
 | `NEXTEST_TEST_THREADS=8`        | Use more processes when the machine has memory to spare.                              |
 | `CARGO_BUILD_JOBS=4`            | Use more compile parallelism when the machine has memory to spare.                    |
-| `cargo test -p lean-rs --lib …` | Single-test debug loop. The cumulative-state pathology doesn't fire at one test.      |
+| `cargo test -p lean-rs --lib …` | Single-test debug loop for crates that do not open full host sessions.                |
+| `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1 cargo test -p lean-rs-host …` | Explicitly budgeted one-off host-session debug run. Do not use as a full-suite gate. |
 | `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
 
 Do not use broad or file-shaped `cargo test` filters for import-heavy host tests, including:
@@ -45,10 +56,15 @@ cargo test -p lean-rs-host session_leak_loop
 cargo test -p lean-rs-host --test session_leak_loop
 ```
 
-Those commands can execute multiple fresh full-session imports inside one Rust test harness process. The post-reduction
-fixture import still retains about 1.95 GB of compacted `.olean` region data, and the second same-process fresh import
-can move RSS into multi-GiB territory. Use `cargo nextest run -p lean-rs-host --test session_leak_loop` for process
-isolation, or run one exact test name only when you have an explicit local memory budget.
+Those commands can execute multiple fresh full-session imports inside one Rust
+test harness process. The post-reduction fixture import still retains about
+1.95 GB of compacted `.olean` region data, and the second same-process fresh
+import can move RSS into multi-GiB territory. The host crate now rejects these
+same-process full-session imports with a typed resource-exhausted error before
+Lean import starts. Use
+`cargo nextest run -p lean-rs-host --test session_leak_loop` for process
+isolation, or set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1` only for one exact
+debug test with an explicit local memory budget.
 
 Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
 `LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
@@ -79,6 +95,12 @@ memory).
 The same memory fact applies outside tests: long-running applications should use the worker crates with restart/RSS
 policy, or a same-process `SessionPool` with a fresh-import memory policy, when they may open many distinct import
 sets.
+
+The host-session guard is intentionally narrow: it only blocks
+`LeanCapabilities::session`, `session_with_profile`, and `profiling_session`
+from Cargo/libtest binaries. It does not affect normal `cargo run` profiling
+commands, worker child processes, bracketed no-extension queries, or nextest
+runs.
 
 ## Why not fix the cumulative growth instead
 

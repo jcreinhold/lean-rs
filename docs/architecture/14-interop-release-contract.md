@@ -78,7 +78,7 @@ cargo run -p lean-rs-host --example progress
 cargo run -p lean-rs-worker-child --example worker_capability_runner
 cargo test -p lean-rs --test callback_trampoline -- --nocapture
 cargo test -p lean-rs --test callback_registry -- --nocapture
-cargo test -p lean-rs-host --test progress -- --nocapture
+cargo nextest run -p lean-rs-host --test progress --no-capture
 cargo test -p lean-rs-worker-child --test streaming_runner -- --nocapture
 cargo test -p lean-rs-worker-child --test typed_command -- --nocapture
 cargo bench -p lean-rs-host --bench session -- \
