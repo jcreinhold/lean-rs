@@ -533,6 +533,18 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
         result.import_stats.imported_bytes > 0,
         "bracketed import reports imported bytes"
     );
+    assert_eq!(
+        result.import_stats.imported_bytes, result.import_stats.compacted_region_bytes,
+        "bracketed imported bytes remains the compacted-region byte total"
+    );
+    assert_eq!(
+        result.import_stats.compacted_region_bytes,
+        result
+            .import_stats
+            .memory_mapped_region_bytes
+            .saturating_add(result.import_stats.non_memory_mapped_region_bytes),
+        "bracketed region bytes should split into mmap and non-mmap totals"
+    );
     assert!(
         result.import_stats.compacted_region_count > 0,
         "bracketed import reports compacted regions"

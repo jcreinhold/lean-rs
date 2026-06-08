@@ -116,11 +116,14 @@ fn fixture_root() -> PathBuf {
 
 fn report_import_stats(label: &str, iteration: u64, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {
     println!(
-        "import_stats={label} iteration={iteration} profile_mode=worker-session direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
+        "import_stats={label} iteration={iteration} profile_mode=worker-session direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} compacted_region_bytes={} memory_mapped_region_bytes={} non_memory_mapped_region_bytes={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
         stats.direct_import_names.join(","),
         stats.effective_module_count,
         stats.compacted_region_count,
         stats.memory_mapped_region_count,
+        stats.compacted_region_bytes,
+        stats.memory_mapped_region_bytes,
+        stats.non_memory_mapped_region_bytes,
         stats.imported_bytes,
         stats.imported_constant_count,
         stats.extension_count,

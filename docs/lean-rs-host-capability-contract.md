@@ -56,6 +56,10 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 | `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
 | `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation, None)` |
 | `lean_rs_host_env_query_declarations_bulk_progress` | `(env : Environment) (names : Array Name) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Declaration)))` | `query_declarations_bulk(names, None, Some(progress))` |
+
+`ImportStats.importedBytes` is retained as a compatibility alias for total compacted-region bytes. Newer shims also
+report `compactedRegionBytes`, `memoryMappedRegionBytes`, and `nonMemoryMappedRegionBytes`, all computed from
+`env.header.regions`.
 | `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations(cancellation)` |
 | `lean_rs_host_env_list_declarations_filtered` | `(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` | `list_declarations_filtered(filter, cancellation, None)` |
 | `lean_rs_host_env_list_declarations_filtered_progress` | `(env : Environment) (filter : DeclarationFilter) (handle trampoline : USize) : IO (Except UInt8 (Array Name))` | `list_declarations_filtered(filter, cancellation, Some(progress))` |

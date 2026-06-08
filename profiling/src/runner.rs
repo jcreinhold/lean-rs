@@ -411,6 +411,8 @@ fn parse_import_stats(pairs: &[(String, String)]) -> Option<ImportStatsSample> {
     let label = value(pairs, "import_stats")
         .or_else(|| value(pairs, "bracketed_import_stats"))?
         .to_owned();
+    let imported_bytes = parse_u64(pairs, "imported_bytes")?;
+    let compacted_region_bytes = parse_u64(pairs, "compacted_region_bytes").unwrap_or(imported_bytes);
     Some(ImportStatsSample {
         label,
         iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
@@ -424,7 +426,10 @@ fn parse_import_stats(pairs: &[(String, String)]) -> Option<ImportStatsSample> {
         effective_modules: parse_u64(pairs, "effective_modules")?,
         compacted_regions: parse_u64(pairs, "compacted_regions")?,
         memory_mapped_regions: parse_u64(pairs, "memory_mapped_regions")?,
-        imported_bytes: parse_u64(pairs, "imported_bytes")?,
+        compacted_region_bytes,
+        memory_mapped_region_bytes: parse_u64(pairs, "memory_mapped_region_bytes"),
+        non_memory_mapped_region_bytes: parse_u64(pairs, "non_memory_mapped_region_bytes"),
+        imported_bytes,
         imported_constants: parse_u64(pairs, "imported_constants")?,
         extension_count: parse_u64(pairs, "extension_count")?,
         total_imported_extension_entries: parse_u64(pairs, "total_imported_extension_entries")?,
@@ -491,7 +496,13 @@ fn command_display(program: &Path, args: &[&str]) -> String {
 }
 
 fn default_env() -> Vec<EnvPair> {
-    vec![env_pair("LEAN_RS_NUM_THREADS", "1")]
+    let mut env = vec![env_pair("LEAN_RS_NUM_THREADS", "1")];
+    if let Ok(limit) = std::env::var("LEAN_RS_LEAN_MAX_MEMORY_KIB")
+        && !limit.is_empty()
+    {
+        env.push(env_pair("LEAN_RS_LEAN_MAX_MEMORY_KIB", &limit));
+    }
+    env
 }
 
 fn env_pair(key: &str, value: &str) -> EnvPair {
@@ -523,7 +534,7 @@ mod tests {
     #[test]
     fn parses_import_stats_lines() {
         let parsed = parse_key_values(
-            "import_stats=import_matrix iteration=2 profile_mode=exported-public direct_imports=Init,Lean effective_modules=12 compacted_regions=12 memory_mapped_regions=11 imported_bytes=4096 imported_constants=500 extension_count=3 total_imported_extension_entries=7 import_level=exported import_all=false load_exts=true",
+            "import_stats=import_matrix iteration=2 profile_mode=exported-public direct_imports=Init,Lean effective_modules=12 compacted_regions=12 memory_mapped_regions=11 compacted_region_bytes=4096 memory_mapped_region_bytes=3072 non_memory_mapped_region_bytes=1024 imported_bytes=4096 imported_constants=500 extension_count=3 total_imported_extension_entries=7 import_level=exported import_all=false load_exts=true",
             "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
@@ -533,6 +544,10 @@ mod tests {
         assert_eq!(stats.profile_mode, "exported-public");
         assert_eq!(stats.direct_imports, ["Init", "Lean"]);
         assert_eq!(stats.effective_modules, 12);
+        assert_eq!(stats.compacted_region_bytes, 4096);
+        assert_eq!(stats.memory_mapped_region_bytes, Some(3072));
+        assert_eq!(stats.non_memory_mapped_region_bytes, Some(1024));
+        assert_eq!(stats.imported_bytes, stats.compacted_region_bytes);
         assert_eq!(stats.import_level, "exported");
         assert!(!stats.import_all);
         assert!(stats.load_exts);
@@ -540,15 +555,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_legacy_import_stats_lines_with_imported_bytes_alias() {
+        let parsed = parse_key_values(
+            "import_stats=legacy iteration=1 profile_mode=private direct_imports=Init effective_modules=1 compacted_regions=1 memory_mapped_regions=0 imported_bytes=256 imported_constants=2 extension_count=0 total_imported_extension_entries=0 import_level=private import_all=false load_exts=true",
+            "",
+        );
+        let stats = &parsed.import_stats[0];
+        assert_eq!(stats.compacted_region_bytes, 256);
+        assert_eq!(stats.memory_mapped_region_bytes, None);
+        assert_eq!(stats.non_memory_mapped_region_bytes, None);
+    }
+
+    #[test]
     fn parses_bracketed_import_stats_lines() {
         let parsed = parse_key_values(
-            "bracketed_import_stats=bracketed_lightweight iteration=1 profile_mode=bracketed-private-no-exts direct_imports=LeanRsFixture.Handles effective_modules=9 compacted_regions=10 memory_mapped_regions=0 imported_bytes=8192 imported_constants=12 extension_count=3 total_imported_extension_entries=4 import_level=private import_all=false load_exts=false free_regions_ran=true",
+            "bracketed_import_stats=bracketed_lightweight iteration=1 profile_mode=bracketed-private-no-exts direct_imports=LeanRsFixture.Handles effective_modules=9 compacted_regions=10 memory_mapped_regions=0 compacted_region_bytes=8192 memory_mapped_region_bytes=0 non_memory_mapped_region_bytes=8192 imported_bytes=8192 imported_constants=12 extension_count=3 total_imported_extension_entries=4 import_level=private import_all=false load_exts=false free_regions_ran=true",
             "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
         let stats = &parsed.import_stats[0];
         assert_eq!(stats.label, "bracketed_lightweight");
         assert_eq!(stats.profile_mode, "bracketed-private-no-exts");
+        assert_eq!(stats.compacted_region_bytes, 8192);
+        assert_eq!(stats.memory_mapped_region_bytes, Some(0));
+        assert_eq!(stats.non_memory_mapped_region_bytes, Some(8192));
         assert!(!stats.load_exts);
         assert_eq!(stats.free_regions_ran, Some(true));
     }

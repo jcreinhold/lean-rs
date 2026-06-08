@@ -191,9 +191,14 @@ fn rss_policy_restarts_or_records_unavailable_sample() {
         assert_eq!(stats.restarts, 1);
         assert_eq!(stats.rss_restarts, 1);
         match stats.last_restart_reason {
-            Some(LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib }) => {
+            Some(LeanWorkerRestartReason::RssCeiling {
+                current_kib,
+                limit_kib,
+                last_import_stats,
+            }) => {
                 assert!(current_kib >= limit_kib);
                 assert_eq!(limit_kib, 1);
+                assert!(last_import_stats.is_none());
             }
             other => panic!("expected RSS restart reason, got {other:?}"),
         }

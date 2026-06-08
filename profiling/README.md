@@ -48,10 +48,13 @@ cargo run --profile profiling -p lean-rs-profiling --bin generate_report
 - `pool-memory`: worker-pool admission, per-worker RSS policy, and reuse counters.
 - `mathlib-scale`: optional larger worker-pool workload; set `LEAN_RS_MATHLIB_ROOT` to use a real mathlib checkout.
 
-Long-session and worker session-open workloads print `import_stats=...` rows next to RSS checkpoints. Bracketed
-lightweight runs print `bracketed_import_stats=... free_regions_ran=true` after the no-extension bracket returns.
-Derived-index probes print `query_derived_work=...` rows for query phases. Baseline reports parse those rows into Lean
-Import Stats and Lean Derived Work tables while preserving the raw key-value output.
+Long-session and worker session-open workloads print `import_stats=...` rows next to RSS checkpoints. Those rows include
+total compacted-region bytes, mmap-backed compacted-region bytes, non-mmap compacted-region bytes, and `imported_bytes`
+as the compatibility alias for the total. Bracketed lightweight runs print
+`bracketed_import_stats=... free_regions_ran=true` after the no-extension bracket returns. Derived-index probes print
+`query_derived_work=...` rows for query phases. Baseline reports parse those rows into Lean Import Stats and Lean
+Derived Work tables while preserving the raw key-value output, and show an RSS gap when a workload-level RSS sample is
+available.
 
 Run a bounded memory workload:
 
@@ -108,6 +111,10 @@ regions. It records whether a requested query phase touched derived work such as
 notation-aware pretty printing, proof-search facts, parser/elaborator execution, module snapshot construction, or
 Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree` laziness is derived-index laziness
 over already imported module data; it is not lazy `.olean` loading and it does not make compacted regions unloadable.
+
+`LEAN_RS_LEAN_MAX_MEMORY_KIB` can be set for worker/profiling runs as a Lean runtime fail-fast guardrail. It is not a
+cleanup mechanism and does not replace worker cycling; it only lets Lean's periodic memory checks throw before the OS
+terminates the process.
 
 A local capped probe on macOS aarch64 with Lean 4.31.0-rc1, one `LeanRsFixture.Handles` import, reported
 `bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,

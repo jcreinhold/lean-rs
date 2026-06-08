@@ -37,6 +37,10 @@ fn all_required_symbols_resolve_at_link_time() {
             lean_rs_sys::init::lean_finalize_task_manager as *const (),
             "lean_finalize_task_manager",
         ),
+        (
+            lean_rs_sys::memory::lean_internal_set_max_memory as *const (),
+            "lean_internal_set_max_memory",
+        ),
         // refcount + marking
         (
             lean_rs_sys::refcount::lean_dec_ref_cold as *const (),

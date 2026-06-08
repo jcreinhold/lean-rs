@@ -62,7 +62,7 @@ use lean_rs::error::LeanResult;
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::progress::LeanProgressSink;
-use crate::host::session::LeanSession;
+use crate::host::session::{LeanImportStats, LeanSession};
 
 // -- PoolStats: pool-level reuse metrics ---------------------------------
 
@@ -255,6 +255,7 @@ pub struct SessionPool<'lean> {
     capacity: usize,
     memory_policy: SessionPoolMemoryPolicy,
     inner: RefCell<PoolInner<'lean>>,
+    last_import_stats: RefCell<Option<LeanImportStats>>,
     stats: Cell<PoolStats>,
 }
 
@@ -288,6 +289,7 @@ impl<'lean> SessionPool<'lean> {
             inner: RefCell::new(PoolInner {
                 free: Vec::with_capacity(capacity),
             }),
+            last_import_stats: RefCell::new(None),
             stats: Cell::new(PoolStats::default()),
         }
     }
@@ -350,6 +352,7 @@ impl<'lean> SessionPool<'lean> {
                 drop(inner);
                 self.enforce_before_fresh_import(imports)?;
                 let session = caps.session(imports, cancellation, progress)?;
+                self.remember_import_stats(session.import_stats().clone());
                 self.bump_imported();
                 (session, false)
             }
@@ -469,6 +472,17 @@ impl<'lean> SessionPool<'lean> {
         self.stats.set(s);
     }
 
+    fn remember_import_stats(&self, stats: LeanImportStats) {
+        *self.last_import_stats.borrow_mut() = Some(stats);
+    }
+
+    fn latest_import_stats_diagnostic(&self) -> String {
+        self.last_import_stats.borrow().as_ref().map_or_else(
+            || String::from("last_import_stats=unavailable"),
+            |stats| format!("last_import_stats=available {}", stats.memory_diagnostic()),
+        )
+    }
+
     fn enforce_before_fresh_import(&self, imports: &[&str]) -> LeanResult<()> {
         let stats = self.stats.get();
         if let Some(limit) = self.memory_policy.max_fresh_imports
@@ -476,9 +490,10 @@ impl<'lean> SessionPool<'lean> {
         {
             self.bump_fresh_import_refusal();
             return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
-                "same-process SessionPool refused fresh import #{} for {} import(s): max_fresh_imports={limit}; reuse a pooled environment or cycle the worker process",
+                "same-process SessionPool refused fresh import #{} for {} import(s): max_fresh_imports={limit}; {}; reuse a pooled environment or cycle the worker process",
                 stats.imports_performed.saturating_add(1),
                 imports.len(),
+                self.latest_import_stats_diagnostic(),
             )));
         }
 
@@ -488,8 +503,9 @@ impl<'lean> SessionPool<'lean> {
                     self.bump_rss_sample(false);
                     self.bump_fresh_import_refusal();
                     return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
-                        "same-process SessionPool refused fresh import for {} import(s): current RSS {current_kib} KiB reached max_rss_kib={limit_kib}; cycle the worker process to reset Lean process-global import state",
+                        "same-process SessionPool refused fresh import for {} import(s): current RSS {current_kib} KiB reached max_rss_kib={limit_kib}; {}; cycle the worker process to reset Lean process-global import state",
                         imports.len(),
+                        self.latest_import_stats_diagnostic(),
                     )));
                 }
                 Some(_) => self.bump_rss_sample(false),
@@ -497,8 +513,9 @@ impl<'lean> SessionPool<'lean> {
                     self.bump_rss_sample(true);
                     self.bump_fresh_import_refusal();
                     return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
-                        "same-process SessionPool refused fresh import for {} import(s): current RSS sample unavailable while max_rss_kib={limit_kib} is configured",
+                        "same-process SessionPool refused fresh import for {} import(s): current RSS sample unavailable while max_rss_kib={limit_kib} is configured; {}",
                         imports.len(),
+                        self.latest_import_stats_diagnostic(),
                     )));
                 }
             }

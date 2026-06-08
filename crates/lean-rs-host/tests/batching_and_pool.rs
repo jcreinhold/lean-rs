@@ -555,6 +555,14 @@ fn session_pool_memory_policy_refuses_cache_miss_after_import_budget() {
                 "message should name the exhausted budget: {}",
                 host.message(),
             );
+            assert!(
+                host.message().contains("last_import_stats=available")
+                    && host.message().contains("compacted_region_bytes=")
+                    && host.message().contains("memory_mapped_region_bytes=")
+                    && host.message().contains("non_memory_mapped_region_bytes="),
+                "message should include latest Lean import attribution: {}",
+                host.message(),
+            );
         }
         LeanError::LeanException(other) => panic!("expected Host resource exhaustion, got LeanException {other:?}"),
         LeanError::Cancelled(other) => panic!("expected Host resource exhaustion, got Cancelled {other:?}"),
@@ -605,6 +613,17 @@ fn session_pool_memory_policy_refuses_cache_miss_at_rss_ceiling() {
     };
 
     assert_eq!(err.code(), LeanDiagnosticCode::ResourceExhausted);
+    match err {
+        LeanError::Host(host) => {
+            assert!(
+                host.message().contains("last_import_stats=unavailable"),
+                "first-import RSS refusal should degrade cleanly without prior import stats: {}",
+                host.message(),
+            );
+        }
+        LeanError::LeanException(other) => panic!("expected Host resource exhaustion, got LeanException {other:?}"),
+        LeanError::Cancelled(other) => panic!("expected Host resource exhaustion, got Cancelled {other:?}"),
+    }
     let stats = pool.stats();
     assert_eq!(stats.imports_performed, 0);
     assert_eq!(stats.fresh_import_refusals, 1);

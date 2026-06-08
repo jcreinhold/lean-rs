@@ -120,6 +120,9 @@ fn worker_import_stats(stats: &LeanImportStats) -> LeanWorkerImportStats {
         effective_module_count: stats.effective_module_count,
         compacted_region_count: stats.compacted_region_count,
         memory_mapped_region_count: stats.memory_mapped_region_count,
+        compacted_region_bytes: stats.compacted_region_bytes,
+        memory_mapped_region_bytes: stats.memory_mapped_region_bytes,
+        non_memory_mapped_region_bytes: stats.non_memory_mapped_region_bytes,
         imported_bytes: stats.imported_bytes,
         imported_constant_count: stats.imported_constant_count,
         extension_count: stats.extension_count,
@@ -249,6 +252,7 @@ fn install_immediate_abort_exit() {}
 )]
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = LeanRuntime::init()?;
+    configure_lean_runtime_memory_limit_from_env();
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let writer = ProtocolWriter::new();
@@ -2177,6 +2181,16 @@ fn module_cache_env_u64(name: &str, default: u64) -> u64 {
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
         .unwrap_or(default)
+}
+
+fn configure_lean_runtime_memory_limit_from_env() {
+    let limit_kib = module_cache_env_u64("LEAN_RS_LEAN_MAX_MEMORY_KIB", 0);
+    if limit_kib == 0 {
+        return;
+    }
+    let limit_bytes = limit_kib.saturating_mul(1024);
+    let limit_bytes = usize::try_from(limit_bytes).unwrap_or(usize::MAX);
+    lean_rs::__host_internals::set_runtime_memory_limit_bytes_for_guardrail(limit_bytes);
 }
 
 fn approx_json_bytes<T: serde::Serialize>(value: &T) -> u64 {

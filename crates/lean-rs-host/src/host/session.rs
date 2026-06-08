@@ -198,6 +198,9 @@ pub struct LeanImportStats {
     pub effective_module_count: u64,
     pub compacted_region_count: u64,
     pub memory_mapped_region_count: u64,
+    pub compacted_region_bytes: u64,
+    pub memory_mapped_region_bytes: u64,
+    pub non_memory_mapped_region_bytes: u64,
     pub imported_bytes: u64,
     pub imported_constant_count: u64,
     pub extension_count: u64,
@@ -213,6 +216,9 @@ impl<'lean> TryFromLean<'lean> for LeanImportStats {
             effective_module_count,
             compacted_region_count,
             memory_mapped_region_count,
+            compacted_region_bytes,
+            memory_mapped_region_bytes,
+            non_memory_mapped_region_bytes,
             imported_bytes,
             imported_constant_count,
             extension_count,
@@ -225,12 +231,15 @@ impl<'lean> TryFromLean<'lean> for LeanImportStats {
                 ctor.uint64(0, "ImportStats.effectiveModuleCount")?,
                 ctor.uint64(8, "ImportStats.compactedRegionCount")?,
                 ctor.uint64(16, "ImportStats.memoryMappedRegionCount")?,
-                ctor.uint64(24, "ImportStats.importedBytes")?,
-                ctor.uint64(32, "ImportStats.importedConstantCount")?,
-                ctor.uint64(40, "ImportStats.extensionCount")?,
-                ctor.uint64(48, "ImportStats.totalImportedExtensionEntries")?,
-                ctor.bool(56, "ImportStats.importAll")?,
-                ctor.bool(57, "ImportStats.loadExts")?,
+                ctor.uint64(24, "ImportStats.compactedRegionBytes")?,
+                ctor.uint64(32, "ImportStats.memoryMappedRegionBytes")?,
+                ctor.uint64(40, "ImportStats.nonMemoryMappedRegionBytes")?,
+                ctor.uint64(48, "ImportStats.importedBytes")?,
+                ctor.uint64(56, "ImportStats.importedConstantCount")?,
+                ctor.uint64(64, "ImportStats.extensionCount")?,
+                ctor.uint64(72, "ImportStats.totalImportedExtensionEntries")?,
+                ctor.bool(80, "ImportStats.importAll")?,
+                ctor.bool(81, "ImportStats.loadExts")?,
             )
         };
         let [direct_import_names, import_level] = take_ctor_objects::<2>(obj, 0, "ImportStats")?;
@@ -239,6 +248,9 @@ impl<'lean> TryFromLean<'lean> for LeanImportStats {
             effective_module_count,
             compacted_region_count,
             memory_mapped_region_count,
+            compacted_region_bytes,
+            memory_mapped_region_bytes,
+            non_memory_mapped_region_bytes,
             imported_bytes,
             imported_constant_count,
             extension_count,
@@ -247,6 +259,29 @@ impl<'lean> TryFromLean<'lean> for LeanImportStats {
             import_all,
             load_exts,
         })
+    }
+}
+
+impl LeanImportStats {
+    /// Stable compact attribution fragment for memory guardrail diagnostics.
+    #[must_use]
+    pub fn memory_diagnostic(&self) -> String {
+        format!(
+            "import_profile=level:{} import_all:{} load_exts:{} direct_import_count={} direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} compacted_region_bytes={} memory_mapped_region_bytes={} non_memory_mapped_region_bytes={} imported_constants={} extension_entries={}",
+            self.import_level,
+            self.import_all,
+            self.load_exts,
+            self.direct_import_names.len(),
+            self.direct_import_names.join(","),
+            self.effective_module_count,
+            self.compacted_region_count,
+            self.memory_mapped_region_count,
+            self.compacted_region_bytes,
+            self.memory_mapped_region_bytes,
+            self.non_memory_mapped_region_bytes,
+            self.imported_constant_count,
+            self.total_imported_extension_entries
+        )
     }
 }
 

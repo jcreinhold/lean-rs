@@ -95,10 +95,23 @@ from the imported `Environment`, not parsed console output from `Environment.dis
 - direct import names from `env.header.imports`;
 - effective module count from `env.header.modules`;
 - compacted and memory-mapped region counts from `env.header.regions`;
-- imported bytes from the compacted regions;
+- total compacted-region bytes, mmap-backed compacted-region bytes, and non-mmap compacted-region bytes from
+  `env.header.regions`;
+- imported bytes as a compatibility alias for total compacted-region bytes;
 - imported constant count from `env.constants`;
 - persistent extension name count and total imported extension entries from loaded module data;
 - the import mode: `importAll`, import level, and `loadExts`.
+
+Lean exposes each `CompactedRegion`'s size and whether it was memory-mapped, but it does not expose a stable imported
+module owner for each region. The attribution is therefore aggregate: it can say how much compacted `.olean` data was
+retained and how much of that was mmap-backed versus heap-loaded fallback data, but not which module owns an individual
+region.
+
+Profiling reports also show the gap between Lean-attributed compacted-region bytes and process RSS when RSS is
+available. That gap is not a leak proof or a safety proof. Allocator arenas, initialized environment extensions,
+interned names, task/runtime state, native module globals, Rust heap data, and ordinary Lean heap objects can all live
+outside compacted `.olean` regions. On unsupported or noisy platforms, RSS remains best-effort and should be reported
+as unavailable or approximate.
 
 Normal host sessions now default to the `Private` full-session profile: `importAll := false`, import level `.private`,
 and `loadExts := true`. This is a pre-1.0 behavior correction for unacceptable memory growth, not a
@@ -291,7 +304,15 @@ import count or RSS ceiling.
 
 The worker crates provide that process-cycling policy. Its restart policy can cycle explicitly, before a configured
 request count, before a configured import-like request count, after an idle interval, or when a best-effort child RSS
-sample reaches a ceiling. The worker memory reproducer is:
+sample reaches a ceiling. Memory guardrail errors include the latest Lean import stats when a session has opened in
+that process, so an RSS refusal can be read next to the retained `.olean` region shape that preceded it.
+
+Worker children also accept `LEAN_RS_LEAN_MAX_MEMORY_KIB` as an opt-in Lean runtime memory limit. Lean checks this
+limit periodically and can throw before the OS kills the process. It is not reclamation: it does not free compacted
+regions, extension state, interned names, allocator arenas, or runtime globals, and process cycling remains the reset
+boundary.
+
+The worker memory reproducer is:
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child

@@ -265,12 +265,17 @@ pub enum LeanWorkerRestartReason {
     /// Import-like request count reached the configured limit before the next import.
     MaxImports { limit: u64 },
     /// Child resident set size reached the configured limit.
-    RssCeiling { current_kib: u64, limit_kib: u64 },
+    RssCeiling {
+        current_kib: u64,
+        limit_kib: u64,
+        last_import_stats: Option<LeanWorkerImportStats>,
+    },
     /// Child resident set size crossed the hard in-flight kill limit.
     RssHardLimit {
         operation: &'static str,
         current_kib: u64,
         limit_kib: u64,
+        last_import_stats: Option<LeanWorkerImportStats>,
     },
     /// Worker was idle at least as long as the configured limit.
     Idle { idle_for: Duration, limit: Duration },
@@ -519,6 +524,7 @@ pub enum LeanWorkerError {
         operation: &'static str,
         current_kib: u64,
         limit_kib: u64,
+        last_import_stats: Option<LeanWorkerImportStats>,
     },
     /// A parent-side cancellation token was observed.
     Cancelled { operation: &'static str },
@@ -562,7 +568,11 @@ pub enum LeanWorkerError {
     /// A local worker pool cannot admit another distinct session key.
     WorkerPoolExhausted { max_workers: usize },
     /// A local worker pool cannot admit work without exceeding its RSS budget.
-    WorkerPoolMemoryBudgetExceeded { current_kib: u64, limit_kib: u64 },
+    WorkerPoolMemoryBudgetExceeded {
+        current_kib: u64,
+        limit_kib: u64,
+        last_import_stats: Option<LeanWorkerImportStats>,
+    },
     /// Waiting for local worker-pool admission exceeded the configured limit.
     WorkerPoolQueueTimeout { waited: Duration },
     /// A supervising policy refused to restart the worker again in its current window.
@@ -612,10 +622,12 @@ impl fmt::Display for LeanWorkerError {
                 operation,
                 current_kib,
                 limit_kib,
+                last_import_stats,
             } => {
                 write!(
                     f,
-                    "worker operation {operation} exceeded hard RSS limit; current_kib={current_kib} limit_kib={limit_kib}"
+                    "worker operation {operation} exceeded hard RSS limit; current_kib={current_kib} limit_kib={limit_kib}; {}",
+                    import_stats_diagnostic(last_import_stats.as_ref())
                 )
             }
             Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
@@ -671,10 +683,15 @@ impl fmt::Display for LeanWorkerError {
                     "worker pool cannot admit another session key; max_workers={max_workers}"
                 )
             }
-            Self::WorkerPoolMemoryBudgetExceeded { current_kib, limit_kib } => {
+            Self::WorkerPoolMemoryBudgetExceeded {
+                current_kib,
+                limit_kib,
+                last_import_stats,
+            } => {
                 write!(
                     f,
-                    "worker pool cannot admit work within RSS budget; current_kib={current_kib} limit_kib={limit_kib}"
+                    "worker pool cannot admit work within RSS budget; current_kib={current_kib} limit_kib={limit_kib}; {}",
+                    import_stats_diagnostic(last_import_stats.as_ref())
                 )
             }
             Self::WorkerPoolQueueTimeout { waited } => {
@@ -1889,7 +1906,11 @@ impl LeanWorker {
             match self.child_rss_kib() {
                 Some(current_kib) if current_kib >= limit_kib => {
                     self.stats.last_rss_kib = Some(current_kib);
-                    return self.restart_with_reason(LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib });
+                    return self.restart_with_reason(LeanWorkerRestartReason::RssCeiling {
+                        current_kib,
+                        limit_kib,
+                        last_import_stats: self.stats.last_import_stats.clone(),
+                    });
                 }
                 Some(current_kib) => {
                     self.stats.last_rss_kib = Some(current_kib);
@@ -1956,11 +1977,13 @@ impl LeanWorker {
                     operation,
                     current_kib,
                     limit_kib,
+                    last_import_stats: self.stats.last_import_stats.clone(),
                 })?;
                 Err(LeanWorkerError::RssHardLimitExceeded {
                     operation,
                     current_kib,
                     limit_kib,
+                    last_import_stats: self.stats.last_import_stats.clone(),
                 })
             }
             Some(current_kib) => {
@@ -2438,6 +2461,28 @@ fn write_exit(f: &mut fmt::Formatter<'_>, prefix: &str, exit: &LeanWorkerExit) -
     }
 }
 
+fn import_stats_diagnostic(stats: Option<&LeanWorkerImportStats>) -> String {
+    let Some(stats) = stats else {
+        return String::from("last_import_stats=unavailable");
+    };
+    format!(
+        "last_import_stats=available import_profile=level:{} import_all:{} load_exts:{} direct_import_count={} direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} compacted_region_bytes={} memory_mapped_region_bytes={} non_memory_mapped_region_bytes={} imported_constants={} extension_entries={}",
+        stats.import_level,
+        stats.import_all,
+        stats.load_exts,
+        stats.direct_import_names.len(),
+        stats.direct_import_names.join(","),
+        stats.effective_module_count,
+        stats.compacted_region_count,
+        stats.memory_mapped_region_count,
+        stats.compacted_region_bytes,
+        stats.memory_mapped_region_bytes,
+        stats.non_memory_mapped_region_bytes,
+        stats.imported_constant_count,
+        stats.total_imported_extension_entries
+    )
+}
+
 /// Truncate `text` to at most `max_bytes` bytes for human display, appending
 /// `… (N bytes truncated)` when bytes are dropped.
 ///
@@ -2685,6 +2730,7 @@ mod tests {
             LeanWorkerRestartReason::RssCeiling {
                 current_kib: 2,
                 limit_kib: 1,
+                last_import_stats: None,
             }
             .stable_cause(),
             "rss_ceiling"
@@ -2694,6 +2740,7 @@ mod tests {
                 operation: "test",
                 current_kib: 2,
                 limit_kib: 1,
+                last_import_stats: None,
             }
             .stable_cause(),
             "rss_hard_limit"

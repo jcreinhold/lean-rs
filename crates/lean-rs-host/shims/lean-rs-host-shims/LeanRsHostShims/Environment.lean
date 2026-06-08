@@ -194,6 +194,9 @@ structure ImportStats where
   effectiveModuleCount : UInt64
   compactedRegionCount : UInt64
   memoryMappedRegionCount : UInt64
+  compactedRegionBytes : UInt64
+  memoryMappedRegionBytes : UInt64
+  nonMemoryMappedRegionBytes : UInt64
   importedBytes : UInt64
   importedConstantCount : UInt64
   extensionCount : UInt64
@@ -268,13 +271,22 @@ def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) 
       extensionEntries := extensionEntries + entries.size
       unless extensionNames.contains name do
         extensionNames := extensionNames.push name
+  let compactedRegionBytes := env.header.regions.foldl (init := 0) fun acc region =>
+    acc + UInt64.ofNat region.size.toNat
+  let memoryMappedRegionBytes := env.header.regions.foldl (init := 0) fun acc region =>
+    if region.isMemoryMapped then
+      acc + UInt64.ofNat region.size.toNat
+    else
+      acc
   pure {
     directImportNames := env.header.imports.map fun imp => ownedString imp.module.toString
     effectiveModuleCount := u64 env.header.modules.size
     compactedRegionCount := u64 env.header.regions.size
     memoryMappedRegionCount := u64 (env.header.regions.filter (·.isMemoryMapped) |>.size)
-    importedBytes := env.header.regions.foldl (init := 0) fun acc region =>
-      acc + UInt64.ofNat region.size.toNat
+    compactedRegionBytes
+    memoryMappedRegionBytes
+    nonMemoryMappedRegionBytes := compactedRegionBytes - memoryMappedRegionBytes
+    importedBytes := compactedRegionBytes
     importedConstantCount := u64 <| env.constants.fold (init := 0) fun acc _ _ => acc + 1
     extensionCount := u64 extensionNames.size
     totalImportedExtensionEntries := u64 extensionEntries
@@ -702,13 +714,22 @@ private def bracketedEnvImportStats (env : Environment) : IO ImportStats := do
       extensionEntries := extensionEntries + entries.size
       unless extensionNames.contains name do
         extensionNames := extensionNames.push name
+  let compactedRegionBytes := env.header.regions.foldl (init := 0) fun acc region =>
+    acc + UInt64.ofNat region.size.toNat
+  let memoryMappedRegionBytes := env.header.regions.foldl (init := 0) fun acc region =>
+    if region.isMemoryMapped then
+      acc + UInt64.ofNat region.size.toNat
+    else
+      acc
   pure {
     directImportNames := env.header.imports.map fun imp => ownedString imp.module.toString
     effectiveModuleCount := u64 env.header.modules.size
     compactedRegionCount := u64 env.header.regions.size
     memoryMappedRegionCount := u64 (env.header.regions.filter (·.isMemoryMapped) |>.size)
-    importedBytes := env.header.regions.foldl (init := 0) fun acc region =>
-      acc + UInt64.ofNat region.size.toNat
+    compactedRegionBytes
+    memoryMappedRegionBytes
+    nonMemoryMappedRegionBytes := compactedRegionBytes - memoryMappedRegionBytes
+    importedBytes := compactedRegionBytes
     importedConstantCount := u64 importedConstants
     extensionCount := u64 extensionNames.size
     totalImportedExtensionEntries := u64 extensionEntries
@@ -723,6 +744,9 @@ private def importStatsJson (stats : ImportStats) : Json :=
     ("effective_module_count", toJson stats.effectiveModuleCount.toNat),
     ("compacted_region_count", toJson stats.compactedRegionCount.toNat),
     ("memory_mapped_region_count", toJson stats.memoryMappedRegionCount.toNat),
+    ("compacted_region_bytes", toJson stats.compactedRegionBytes.toNat),
+    ("memory_mapped_region_bytes", toJson stats.memoryMappedRegionBytes.toNat),
+    ("non_memory_mapped_region_bytes", toJson stats.nonMemoryMappedRegionBytes.toNat),
     ("imported_bytes", toJson stats.importedBytes.toNat),
     ("imported_constant_count", toJson stats.importedConstantCount.toNat),
     ("extension_count", toJson stats.extensionCount.toNat),

@@ -87,6 +87,10 @@ pub struct ImportStatsSample {
     pub effective_modules: u64,
     pub compacted_regions: u64,
     pub memory_mapped_regions: u64,
+    #[serde(default)]
+    pub compacted_region_bytes: u64,
+    pub memory_mapped_region_bytes: Option<u64>,
+    pub non_memory_mapped_region_bytes: Option<u64>,
     pub imported_bytes: u64,
     pub imported_constants: u64,
     pub extension_count: u64,

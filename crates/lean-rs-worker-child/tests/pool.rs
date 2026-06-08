@@ -384,9 +384,14 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
     }
 
     let admission = match pool.acquire_lease(distinct_valid_builder()) {
-        Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded { current_kib, limit_kib }) => {
+        Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
+            current_kib,
+            limit_kib,
+            last_import_stats,
+        }) => {
             assert_eq!(limit_kib, 1);
             assert!(current_kib >= limit_kib);
+            assert!(last_import_stats.is_some());
             "budget-exceeded"
         }
         Ok(lease) => {
@@ -439,10 +444,14 @@ fn per_worker_rss_policy_invalidates_old_lease_before_work() {
                 assert!(reason.contains("memory policy"), "unexpected reason: {reason}");
                 let snapshot = lease.snapshot();
                 assert_eq!(snapshot.policy_restarts, 1);
-                assert!(matches!(
-                    snapshot.last_restart_reason,
-                    Some(LeanWorkerRestartReason::RssCeiling { limit_kib: 1, .. })
-                ));
+                match snapshot.last_restart_reason {
+                    Some(LeanWorkerRestartReason::RssCeiling {
+                        limit_kib: 1,
+                        last_import_stats,
+                        ..
+                    }) => assert!(last_import_stats.is_some()),
+                    other => panic!("expected RSS ceiling restart reason with import stats, got {other:?}"),
+                }
             }
             Ok(response) => {
                 assert!(response.accepted);

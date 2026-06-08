@@ -114,6 +114,8 @@ pub unsafe fn lean_rs_sys::io::lean_io_result_get_value(lean_rs_sys::types::b_le
 pub unsafe fn lean_rs_sys::io::lean_io_result_is_error(lean_rs_sys::types::b_lean_obj_arg) -> bool
 pub unsafe fn lean_rs_sys::io::lean_io_result_is_ok(lean_rs_sys::types::b_lean_obj_arg) -> bool
 pub unsafe fn lean_rs_sys::io::lean_io_result_take_value(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
+pub mod lean_rs_sys::memory
+pub unsafe c fn lean_rs_sys::memory::lean_internal_set_max_memory(usize) -> lean_rs_sys::types::lean_obj_res
 pub mod lean_rs_sys::nat_int
 pub const lean_rs_sys::nat_int::LEAN_MAX_SMALL_INT: i64
 pub const lean_rs_sys::nat_int::LEAN_MAX_SMALL_NAT: usize

@@ -116,11 +116,11 @@ fn render_markdown(report: &PerformanceReport) -> String {
             let _ = writeln!(out);
             let _ = writeln!(
                 out,
-                "| Label | Iteration | Mode | Imports | importAll | Level | loadExts | freeRegions | Modules | Regions | mmap | Bytes | Constants | Exts | Entries |"
+                "| Label | Iteration | Mode | Imports | importAll | Level | loadExts | freeRegions | Modules | Regions | mmap | Total bytes | mmap bytes | non-mmap bytes | RSS gap | Constants | Exts | Entries |"
             );
             let _ = writeln!(
                 out,
-                "| --- | ---: | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+                "| --- | ---: | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
             );
             for stats in visible_import_stats(&run.import_stats) {
                 let iteration = stats
@@ -134,9 +134,11 @@ fn render_markdown(report: &PerformanceReport) -> String {
                 let free_regions = stats
                     .free_regions_ran
                     .map_or_else(|| String::from("-"), |value| value.to_string());
+                let compacted_region_bytes = compacted_region_bytes(stats);
+                let rss_gap = import_rss_gap(run.peak_rss_kib, compacted_region_bytes);
                 let _ = writeln!(
                     out,
-                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                     stats.label,
                     iteration,
                     stats.profile_mode,
@@ -148,7 +150,10 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     stats.effective_modules,
                     stats.compacted_regions,
                     stats.memory_mapped_regions,
-                    stats.imported_bytes,
+                    compacted_region_bytes,
+                    format_optional_u64(stats.memory_mapped_region_bytes),
+                    format_optional_u64(stats.non_memory_mapped_region_bytes),
+                    rss_gap,
                     stats.imported_constants,
                     stats.extension_count,
                     stats.total_imported_extension_entries
@@ -256,4 +261,92 @@ fn visible_import_stats(
     let mut visible: Vec<_> = stats.iter().take(HEAD).collect();
     visible.extend(stats.iter().skip(stats.len().saturating_sub(TAIL)));
     visible
+}
+
+fn format_optional_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| String::from("-"), |value| value.to_string())
+}
+
+fn import_rss_gap(peak_rss_kib: Option<u64>, compacted_region_bytes: u64) -> String {
+    let Some(peak_rss_kib) = peak_rss_kib else {
+        return String::from("-");
+    };
+    let peak_rss_bytes = i128::from(peak_rss_kib) * 1024;
+    let gap = peak_rss_bytes - i128::from(compacted_region_bytes);
+    gap.to_string()
+}
+
+fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u64 {
+    if stats.compacted_region_bytes == 0 {
+        stats.imported_bytes
+    } else {
+        stats.compacted_region_bytes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::report_schema::{
+        BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, WorkloadRun,
+    };
+
+    use super::render_markdown;
+
+    #[test]
+    fn import_stats_table_renders_region_byte_split_and_rss_gap() {
+        let report = PerformanceReport {
+            metadata: ReportMetadata {
+                timestamp_utc: "now".to_owned(),
+                platform: "test".to_owned(),
+                git_commit: "abc".to_owned(),
+                git_branch: "main".to_owned(),
+                lean_version: "test".to_owned(),
+                tooling: "test".to_owned(),
+            },
+            baseline_mode: BaselineMode::Quick,
+            workloads: vec![WorkloadRun {
+                name: "long-session-test".to_owned(),
+                command: "cmd".to_owned(),
+                env: Vec::<EnvPair>::new(),
+                exit_success: true,
+                exit_code: Some(0),
+                wall_time_ms: 1.0,
+                status: Some("ok".to_owned()),
+                peak_rss_kib: Some(8),
+                checkpoints: Vec::new(),
+                import_stats: vec![ImportStatsSample {
+                    label: "import".to_owned(),
+                    iteration: Some(1),
+                    profile_mode: "private".to_owned(),
+                    direct_imports: vec!["Init".to_owned()],
+                    effective_modules: 1,
+                    compacted_regions: 2,
+                    memory_mapped_regions: 1,
+                    compacted_region_bytes: 4096,
+                    memory_mapped_region_bytes: Some(1024),
+                    non_memory_mapped_region_bytes: Some(3072),
+                    imported_bytes: 4096,
+                    imported_constants: 3,
+                    extension_count: 4,
+                    total_imported_extension_entries: 5,
+                    import_level: "private".to_owned(),
+                    import_all: false,
+                    load_exts: true,
+                    free_regions_ran: None,
+                }],
+                derived_work: Vec::new(),
+                key_values: Vec::new(),
+                stdout_path: "stdout".to_owned(),
+                stderr_path: "stderr".to_owned(),
+            }],
+            profiles: Vec::new(),
+            notes: Vec::new(),
+        };
+
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("mmap bytes"));
+        assert!(markdown.contains("non-mmap bytes"));
+        assert!(markdown.contains("RSS gap"));
+        assert!(markdown.contains("| import | 1 | private | Init | false | private | true | - | 1 | 2 | 1 | 4096 | 1024 | 3072 | 4096 | 3 | 4 | 5 |"));
+    }
 }

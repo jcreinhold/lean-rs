@@ -8,6 +8,7 @@ pub const REQUIRED_SYMBOLS: &[&str] = &[
     "lean_init_task_manager",
     "lean_init_task_manager_using",
     "lean_finalize_task_manager",
+    "lean_internal_set_max_memory",
     // refcount + marking
     "lean_dec_ref_cold",
     "lean_mark_mt",

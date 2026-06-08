@@ -127,6 +127,15 @@ pub mod __host_internals {
     pub fn string_from_str<'lean>(runtime: &'lean LeanRuntime, value: &str) -> Obj<'lean> {
         crate::abi::string::from_str(runtime, value)
     }
+
+    /// Set Lean's process-global runtime memory limit for an isolated worker
+    /// or profiling process.
+    ///
+    /// This is a guardrail only. It can make Lean throw before the OS kills
+    /// the process, but it does not free retained runtime/import state.
+    pub fn set_runtime_memory_limit_bytes_for_guardrail(limit_bytes: usize) {
+        crate::runtime::memory::set_memory_limit_bytes_for_guardrail(limit_bytes);
+    }
 }
 
 #[cfg(feature = "fuzzing")]

@@ -529,9 +529,16 @@ impl LeanWorkerPool {
             return Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
                 current_kib: rss.total_kib,
                 limit_kib,
+                last_import_stats: self.latest_import_stats(),
             });
         }
         Ok(())
+    }
+
+    fn latest_import_stats(&self) -> Option<LeanWorkerImportStats> {
+        self.entries
+            .iter()
+            .find_map(|entry| entry.capability.stats().last_import_stats)
     }
 
     fn refresh_total_child_rss(&mut self) -> PoolRssTotal {
@@ -606,7 +613,11 @@ impl PoolEntry {
         if let Some(limit_kib) = config.per_worker_rss_ceiling_kib {
             match self.sample_rss() {
                 Some(current_kib) if current_kib >= limit_kib => {
-                    let reason = LeanWorkerRestartReason::RssCeiling { current_kib, limit_kib };
+                    let reason = LeanWorkerRestartReason::RssCeiling {
+                        current_kib,
+                        limit_kib,
+                        last_import_stats: self.capability.stats().last_import_stats,
+                    };
                     self.cycle_for_policy(reason)?;
                     return Ok(Some(format!(
                         "memory policy cycled worker at {current_kib} KiB RSS with limit {limit_kib} KiB"

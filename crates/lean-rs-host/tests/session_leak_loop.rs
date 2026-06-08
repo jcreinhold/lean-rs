@@ -97,6 +97,17 @@ fn session_leak_loop_import_stats_reports_fixture_shape() {
         "compacted region count must be positive"
     );
     assert!(stats.imported_bytes > 0, "imported bytes must be positive");
+    assert_eq!(
+        stats.imported_bytes, stats.compacted_region_bytes,
+        "imported bytes remains a compatibility alias for compacted-region bytes"
+    );
+    assert_eq!(
+        stats.compacted_region_bytes,
+        stats
+            .memory_mapped_region_bytes
+            .saturating_add(stats.non_memory_mapped_region_bytes),
+        "compacted-region bytes should split into mmap and non-mmap totals"
+    );
     assert!(
         stats.imported_constant_count > 0,
         "imported constant count must be positive"

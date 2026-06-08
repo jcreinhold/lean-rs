@@ -33,7 +33,7 @@ releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases â
 `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
 on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The 4.31.0-rc1 row
 was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h` byte-identical in
-the relevant block to 4.30.0; all 87 `REQUIRED_SYMBOLS` resolve); it will be swapped for the 4.31.0 row once that ships.
+the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve); it will be swapped for the 4.31.0 row once that ships.
 
 **Policy.**
 

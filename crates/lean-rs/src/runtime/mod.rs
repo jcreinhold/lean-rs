@@ -18,6 +18,7 @@
 //!   borrowed Lean object handle.
 
 pub(crate) mod init;
+pub(crate) mod memory;
 pub mod obj;
 pub(crate) mod thread;
 

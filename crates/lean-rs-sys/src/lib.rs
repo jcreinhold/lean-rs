@@ -43,6 +43,7 @@ pub mod ctor;
 pub mod external;
 pub mod init;
 pub mod io;
+pub mod memory;
 pub mod nat_int;
 pub mod object;
 pub mod refcount;

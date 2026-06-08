@@ -27,6 +27,7 @@ pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationRequest
 pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationResult
 pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationStatus
 pub use lean_rs_worker_parent::LeanWorkerDeclarationVerificationTarget
+pub use lean_rs_worker_parent::LeanWorkerDerivedWorkFacts
 pub use lean_rs_worker_parent::LeanWorkerDiagnostic
 pub use lean_rs_worker_parent::LeanWorkerDoctorDiagnostic
 pub use lean_rs_worker_parent::LeanWorkerDoctorReport
@@ -71,6 +72,7 @@ pub use lean_rs_worker_parent::LeanWorkerReferencesResult
 pub use lean_rs_worker_parent::LeanWorkerRendered
 pub use lean_rs_worker_parent::LeanWorkerRenderedInfo
 pub use lean_rs_worker_parent::LeanWorkerRendering
+pub use lean_rs_worker_parent::LeanWorkerSessionImportProfile
 pub use lean_rs_worker_parent::LeanWorkerSorryPolicy
 pub use lean_rs_worker_parent::LeanWorkerSourceRange
 pub use lean_rs_worker_parent::LeanWorkerSurroundingDeclarationResult
@@ -164,6 +166,7 @@ pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::restarts: u64
 pub lean_rs_worker_parent::LeanWorkerError::RestartLimitExceeded::window: core::time::Duration
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::limit_kib: u64
 pub lean_rs_worker_parent::LeanWorkerError::RssHardLimitExceeded::operation: &'static str
 pub lean_rs_worker_parent::LeanWorkerError::Setup
@@ -211,6 +214,7 @@ pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolExhausted
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolExhausted::max_workers: usize
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolMemoryBudgetExceeded::limit_kib: u64
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolQueueTimeout
 pub lean_rs_worker_parent::LeanWorkerError::WorkerPoolQueueTimeout::waited: core::time::Duration
@@ -290,9 +294,11 @@ pub lean_rs_worker_parent::LeanWorkerRestartReason::RequestTimeout::duration: co
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RequestTimeout::operation: &'static str
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssCeiling::limit_kib: u64
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::current_kib: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::limit_kib: u64
 pub lean_rs_worker_parent::LeanWorkerRestartReason::RssHardLimit::operation: &'static str
 impl lean_rs_worker_parent::LeanWorkerRestartReason
@@ -469,6 +475,7 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::check(&self) -> lean_
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::doctor_export(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::expect_metadata(self, impl core::convert::Into<alloc::string::String>, serde_json::value::Value, lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(&lean_toolchain::built_capability::LeanBuiltCapability, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> core::result::Result<Self, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::import_workspace_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::json_command_export(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self
@@ -637,6 +644,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerH
 pub struct lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 impl lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::check(&self) -> lean_rs_worker_parent::LeanWorkerBootstrapReport
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::max_frame_bytes(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::module_cache_limits(self, lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> Self
@@ -663,6 +671,7 @@ pub struct lean_rs_worker_parent::LeanWorkerImportPlanConfig
 impl lean_rs_worker_parent::LeanWorkerImportPlanConfig
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::base_imports(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::expect_metadata(self, impl core::convert::Into<alloc::string::String>, serde_json::value::Value, lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerImportPlanConfig::source_roots(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
@@ -812,6 +821,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerPlanMetadataExpectation
 pub struct lean_rs_worker_parent::LeanWorkerPlannedBatch
 pub lean_rs_worker_parent::LeanWorkerPlannedBatch::fingerprint: lean_rs_worker_parent::LeanWorkerBatchFingerprint
+pub lean_rs_worker_parent::LeanWorkerPlannedBatch::import_profile: lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile
 pub lean_rs_worker_parent::LeanWorkerPlannedBatch::imports: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_worker_parent::LeanWorkerPlannedBatch::lib_name: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerPlannedBatch::modules: alloc::vec::Vec<lean_rs_worker_parent::LeanWorkerModuleWork>
@@ -890,6 +900,7 @@ pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::data_row_payload_bytes: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::data_rows_delivered: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::idle_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::imports: u64
+pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::max_import_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerPoolSnapshot::max_request_restarts: u64
@@ -952,6 +963,7 @@ pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::idle_restart_after(self, 
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_imports(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_requests(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_rss_kib(self, u64) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::memory_bounded(u64, u64) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerRestartPolicy
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::clone(&self) -> lean_rs_worker_parent::LeanWorkerRestartPolicy
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerRestartPolicy
@@ -1024,9 +1036,12 @@ impl<'worker> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent:
 impl<'worker> !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerSession<'worker>
 pub struct lean_rs_worker_parent::LeanWorkerSessionConfig
 impl lean_rs_worker_parent::LeanWorkerSessionConfig
+pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::import_profile(&self) -> lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::manifest_backed(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::shims_only(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::with_import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::with_imports(&self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerSessionConfig
 pub fn lean_rs_worker_parent::LeanWorkerSessionConfig::clone(&self) -> lean_rs_worker_parent::LeanWorkerSessionConfig
 impl core::cmp::Eq for lean_rs_worker_parent::LeanWorkerSessionConfig
@@ -1044,6 +1059,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerSessionConfig
 pub struct lean_rs_worker_parent::LeanWorkerSessionKey
 impl lean_rs_worker_parent::LeanWorkerSessionKey
+pub fn lean_rs_worker_parent::LeanWorkerSessionKey::import_profile(&self) -> lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::import_workspace_root(&self) -> &std::path::Path
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::imports(&self) -> &[alloc::string::String]
 pub fn lean_rs_worker_parent::LeanWorkerSessionKey::lib_name(&self) -> &str
@@ -1100,6 +1116,7 @@ pub lean_rs_worker_parent::LeanWorkerStats::exits: u64
 pub lean_rs_worker_parent::LeanWorkerStats::explicit_cycles: u64
 pub lean_rs_worker_parent::LeanWorkerStats::idle_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerStats::imports: u64
+pub lean_rs_worker_parent::LeanWorkerStats::last_import_stats: core::option::Option<lean_rs_worker_protocol::types::LeanWorkerImportStats>
 pub lean_rs_worker_parent::LeanWorkerStats::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
 pub lean_rs_worker_parent::LeanWorkerStats::last_rss_kib: core::option::Option<u64>
 pub lean_rs_worker_parent::LeanWorkerStats::max_import_restarts: u64

@@ -25,7 +25,7 @@ the discovered digest and the full window.
 
 The build script emits `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry's resolved version, so downstream code can
 `#[cfg]`-gate per-version divergences. As of v0.1.0 no divergence requires gating: layout structs are byte-identical and
-all 87 `REQUIRED_SYMBOLS` entries are present across the entire window.
+all 88 `REQUIRED_SYMBOLS` entries are present across the entire window.
 
 Bumping the window is the [bump procedure](https://github.com/jcreinhold/lean-rs/blob/main/docs/bump-toolchain.md): add
 a row to `SUPPORTED_TOOLCHAINS`, add a CI matrix entry, run the local sweep (`scripts/test-all-toolchains.sh`), open a
