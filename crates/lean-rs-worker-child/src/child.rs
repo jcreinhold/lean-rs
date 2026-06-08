@@ -26,9 +26,9 @@ use lean_rs_host::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
     DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchRequest, DeclarationSearchResult,
-    DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanElabFailure,
-    LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
-    LeanSourceRange,
+    DeclarationSearchRow, DeclarationSearchScope, LeanCapabilities, LeanDeclarationFilter, LeanDerivedWorkFacts,
+    LeanElabFailure, LeanElabOptions, LeanHost, LeanImportStats, LeanKernelOutcome, LeanSession,
+    LeanSessionImportProfile, LeanSeverity, LeanSourceRange,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -48,9 +48,9 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType,
     LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
-    LeanWorkerDeclarationVerificationTarget, LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerImportStats, LeanWorkerKernelResult,
-    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
+    LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
+    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerImportStats,
+    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
     LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
@@ -1867,6 +1867,20 @@ fn declaration_search_host(search: &LeanWorkerDeclarationSearch) -> DeclarationS
     }
 }
 
+fn derived_work_facts_wire(facts: LeanDerivedWorkFacts) -> LeanWorkerDerivedWorkFacts {
+    LeanWorkerDerivedWorkFacts {
+        source_range_lookups: facts.source_range_lookups,
+        docstring_lookups: facts.docstring_lookups,
+        raw_type_renderings: facts.raw_type_renderings,
+        pretty_prints: facts.pretty_prints,
+        proof_search_fact_collections: facts.proof_search_fact_collections,
+        simp_extension_lookups: facts.simp_extension_lookups,
+        parser_elaborator_runs: facts.parser_elaborator_runs,
+        module_snapshot_builds: facts.module_snapshot_builds,
+        lazy_discr_tree_import_initialization_observed: facts.lazy_discr_tree_import_initialization_observed,
+    }
+}
+
 fn declaration_inspection_host(request: &LeanWorkerDeclarationInspectionRequest) -> DeclarationInspectionRequest {
     DeclarationInspectionRequest {
         name: request.name.clone(),
@@ -1886,6 +1900,7 @@ fn declaration_inspection_fields_host(fields: LeanWorkerDeclarationInspectionFie
         attributes: fields.attributes,
         flags: fields.flags,
         statement_pretty: matches!(fields.rendering, LeanWorkerRendering::Pretty),
+        proof_search: fields.proof_search,
     }
 }
 
@@ -1969,6 +1984,7 @@ fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) ->
             rank_micros: facts.timings.rank_micros,
             source_micros: facts.timings.source_micros,
         },
+        derived_work: derived_work_facts_wire(facts.derived_work),
     }
 }
 
@@ -1993,6 +2009,7 @@ fn declaration_inspection_wire(declaration: DeclarationInspection) -> LeanWorker
         attributes: declaration.attributes,
         proof_search: declaration_proof_search_facts_wire(declaration.proof_search),
         flags: declaration_flags_wire(declaration.flags),
+        derived_work: derived_work_facts_wire(declaration.derived_work),
         statement_rendering: declaration.statement_pretty.map(|pretty| {
             if pretty {
                 LeanWorkerRendering::Pretty
@@ -2012,6 +2029,8 @@ fn declaration_rendered_info_wire(info: DeclarationRenderedInfo) -> LeanWorkerRe
 
 fn declaration_proof_search_facts_wire(facts: DeclarationProofSearchFacts) -> LeanWorkerDeclarationProofSearchFacts {
     LeanWorkerDeclarationProofSearchFacts {
+        computed: facts.computed,
+        unavailable_reason: facts.unavailable_reason,
         is_simp: facts.is_simp,
         is_rw_candidate: facts.is_rw_candidate,
         is_instance: facts.is_instance,

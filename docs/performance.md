@@ -158,6 +158,7 @@ The default workload is intentionally small and memory-bounded. Use the profilin
 ```sh
 ./profiling/scripts/profile_memory.sh long-session
 ./profiling/scripts/profile_with_samply.sh long-session
+./profiling/scripts/profile_memory.sh long-session-derived
 ./profiling/scripts/profile_memory.sh worker-cycling
 ```
 
@@ -165,6 +166,8 @@ This is deliberately not a Criterion bench. Criterion answers per-iteration late
 whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. See
 [`docs/safety/long-session-memory.md`](safety/long-session-memory.md) for the measured `LEAN_RESOLVED_VERSION` result
 and consumer guidance.
+Use `long-session-derived` when the question is whether a query phase initialized source-range, pretty-printer,
+proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import.
 
 ## Detect a regression
 

@@ -92,6 +92,18 @@ structure DeclarationSearchTimings where
   sourceMicros : Nat
   deriving Inhabited
 
+structure DerivedWorkFacts where
+  sourceRangeLookups : Nat
+  docstringLookups : Nat
+  rawTypeRenderings : Nat
+  prettyPrints : Nat
+  proofSearchFactCollections : Nat
+  simpExtensionLookups : Nat
+  parserElaboratorRuns : Nat
+  moduleSnapshotBuilds : Nat
+  lazyDiscrTreeImportInitializationObserved : Nat
+  deriving Inhabited
+
 structure DeclarationSearchFacts where
   declarationsScanned : Nat
   afterNameFilter : Nat
@@ -103,6 +115,7 @@ structure DeclarationSearchFacts where
   broadPruning : Array DeclarationSearchPruning
   truncated : Nat
   timings : DeclarationSearchTimings
+  derivedWork : DerivedWorkFacts
   deriving Inhabited
 
 structure DeclarationSearchResult where
@@ -121,6 +134,10 @@ structure DeclarationInspectionFields where
       `pp.universes false`), `0` = raw `Expr.toString`. Pretty falls back to raw
       when the pretty-printer cannot render the term. -/
   rendering : Nat
+  /-- Request proof-search-oriented facts such as simp/rw/instance/class.
+      This is deliberately separate from `attributes`: computing these facts
+      can touch persistent extensions and derived search structures. -/
+  proofSearch : Nat
   deriving Inhabited
 
 structure DeclarationInspectionBudgets where
@@ -140,6 +157,8 @@ structure DeclarationRenderedInfo where
   deriving Inhabited
 
 structure DeclarationProofSearchFacts where
+  computed : Nat
+  unavailableReason : Option String
   isSimp : Nat
   isRwCandidate : Nat
   isInstance : Nat
@@ -157,6 +176,7 @@ structure DeclarationInspection where
   attributes : Array String
   proofSearch : DeclarationProofSearchFacts
   flags : DeclarationFlags
+  derivedWork : DerivedWorkFacts
   /-- Rendering that actually produced `statement`: `1` = pretty, `0` = raw,
       `none` when no statement was requested. Lets the caller tell whether the
       pretty path fired or fell back to the raw term. -/
@@ -843,6 +863,31 @@ private def declarationSearchBaseScore (request : DeclarationSearchRequest) (nam
 private def candidateLess (a b : DeclarationSearchCandidate) : Bool :=
   a.score > b.score || (a.score == b.score && a.nameString < b.nameString)
 
+private def natOfBool (value : Bool) : Nat :=
+  if value then 1 else 0
+
+private def noDerivedWork : DerivedWorkFacts := {
+  sourceRangeLookups := 0
+  docstringLookups := 0
+  rawTypeRenderings := 0
+  prettyPrints := 0
+  proofSearchFactCollections := 0
+  simpExtensionLookups := 0
+  parserElaboratorRuns := 0
+  moduleSnapshotBuilds := 0
+  lazyDiscrTreeImportInitializationObserved := 0
+}
+
+private def unavailableProofSearchFacts (reason : String) : DeclarationProofSearchFacts := {
+  computed := 0
+  unavailableReason := some reason
+  isSimp := 0
+  isRwCandidate := 0
+  isInstance := 0
+  isClass := 0
+  className := none
+}
+
 @[export lean_rs_host_env_search_declarations]
 def envSearchDeclarations (env : Environment) (request : DeclarationSearchRequest) (sourceRoots : Array String)
     : IO DeclarationSearchResult := do
@@ -947,15 +992,13 @@ def envSearchDeclarations (env : Environment) (request : DeclarationSearchReques
     broadPruning
     truncated := if truncated then 1 else 0
     timings
+    derivedWork := { noDerivedWork with sourceRangeLookups := sourceLookups }
   }
   pure {
     declarations := rows
     truncated := if truncated then 1 else 0
     facts
   }
-
-private def natOfBool (value : Bool) : Nat :=
-  if value then 1 else 0
 
 private def takeUtf8Bytes (limit : Nat) (text : String) : String × Bool := Id.run do
   if text.utf8ByteSize <= limit then
@@ -1037,6 +1080,8 @@ private def proofSearchFacts (env : Environment) (declName : Name) (type : Expr)
     isInstance := natOfBool (isInstanceDeclaration env declName)
     isClass := natOfBool isClass
     className
+    computed := 1
+    unavailableReason := none
   }
 
 private def reducibilityAttribute? : ConstantInfo → Option String
@@ -1048,7 +1093,13 @@ private def reducibilityAttribute? : ConstantInfo → Option String
   | .opaqueInfo _ => some "opaque"
   | _ => none
 
-private def inspectionAttributes (info : ConstantInfo) (facts : DeclarationProofSearchFacts) : Array String := Id.run do
+private def cheapInspectionAttributes (info : ConstantInfo) : Array String := Id.run do
+  let mut attrs := #[]
+  if let some attr := reducibilityAttribute? info then
+    attrs := attrs.push attr
+  attrs
+
+private def proofSearchAttributes (facts : DeclarationProofSearchFacts) : Array String := Id.run do
   let mut attrs := #[]
   if facts.isSimp != 0 then
     attrs := attrs.push "simp"
@@ -1058,8 +1109,6 @@ private def inspectionAttributes (info : ConstantInfo) (facts : DeclarationProof
     attrs := attrs.push "instance"
   if facts.isClass != 0 then
     attrs := attrs.push "class"
-  if let some attr := reducibilityAttribute? info then
-    attrs := attrs.push attr
   attrs
 
 @[export lean_rs_host_env_inspect_declaration]
@@ -1071,8 +1120,10 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
   let canonicalName := declName.toString
   let kind := declarationKindOf info
   let moduleName := (declarationModule? env declName).map Name.toString
+  let mut derivedWork := noDerivedWork
   let source ←
     if request.fields.source != 0 then
+      derivedWork := { derivedWork with sourceRangeLookups := 1 }
       envDeclarationSourceRange env declName sourceRoots
     else
       pure none
@@ -1081,10 +1132,22 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
     isGenerated := natOfBool (isGeneratedName declName)
     isInternal := natOfBool (isInternalName declName)
   }
-  let facts ← proofSearchFacts env declName info.type
+  let facts ←
+    if request.fields.proofSearch != 0 then
+      derivedWork := { derivedWork with proofSearchFactCollections := 1, simpExtensionLookups := 1 }
+      try
+        proofSearchFacts env declName info.type
+      catch ex =>
+        pure <| unavailableProofSearchFacts (toString ex)
+    else
+      pure <| unavailableProofSearchFacts "proof-search facts were not requested"
   let attributes :=
     if request.fields.attributes != 0 then
-      inspectionAttributes info facts
+      let cheap := cheapInspectionAttributes info
+      if facts.computed != 0 then
+        cheap ++ proofSearchAttributes facts
+      else
+        cheap
     else
       #[]
   let mut spent := 0
@@ -1095,10 +1158,14 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
     -- pretty-printer succeeds; otherwise the raw fully-elaborated term.
     let (text, usedRendering) ←
       if request.fields.rendering != 0 then
+        derivedWork := { derivedWork with prettyPrints := derivedWork.prettyPrints + 1 }
         match ← ppExprBounded env info.type heartbeats with
         | some pretty => pure (pretty, 1)
-        | none => pure (toString info.type, 0)
+        | none =>
+          derivedWork := { derivedWork with rawTypeRenderings := derivedWork.rawTypeRenderings + 1 }
+          pure (toString info.type, 0)
       else
+        derivedWork := { derivedWork with rawTypeRenderings := derivedWork.rawTypeRenderings + 1 }
         pure (toString info.type, 0)
     let (rendered, used) := boundText text request.budgets.perFieldBytes
       (request.budgets.totalBytes - spent)
@@ -1107,6 +1174,7 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
     statementRendering := some usedRendering
   let mut docstring := none
   if request.fields.docstring != 0 then
+    derivedWork := { derivedWork with docstringLookups := 1 }
     match ← findDocString? env declName false with
     | none => pure ()
     | some doc =>
@@ -1124,6 +1192,7 @@ def envInspectDeclaration (env : Environment) (request : DeclarationInspectionRe
     attributes
     proofSearch := facts
     flags := if request.fields.flags != 0 then flags else default
+    derivedWork
     statementRendering
   }
 

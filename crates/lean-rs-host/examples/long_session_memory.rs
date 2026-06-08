@@ -19,10 +19,15 @@ use std::thread;
 use std::time::Duration;
 
 use lean_rs::{LeanDiagnosticCode, LeanError, LeanResult, LeanRuntime};
+use lean_rs_host::host::process::{
+    ModuleQueryOutputBudgets, ModuleQuerySelector, ProofAttemptRequest, ProofCandidate, ProofEditTarget,
+    ProofPositionSelector, SorryPolicy,
+};
 use lean_rs_host::{
-    LeanBracketedImportRequest, LeanCapabilities, LeanElabOptions, LeanHost, LeanImportProfileMode,
-    LeanImportProfilerOptions, LeanImportStats, LeanProgressEvent, LeanProgressSink, LeanSessionImportProfile,
-    PoolStats, SessionPool, SessionPoolMemoryPolicy,
+    DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest,
+    DeclarationVerificationRequest, DeclarationVerificationTarget, LeanBracketedImportRequest, LeanCapabilities,
+    LeanDerivedWorkFacts, LeanElabOptions, LeanHost, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
+    LeanProgressEvent, LeanProgressSink, LeanSessionImportProfile, PoolStats, SessionPool, SessionPoolMemoryPolicy,
 };
 use lean_toolchain::LEAN_VERSION;
 
@@ -77,6 +82,7 @@ enum Mode {
     SteadyState,
     ImportMatrix,
     BracketedLightweight,
+    DerivedIndexes,
     All,
 }
 
@@ -169,6 +175,9 @@ fn run(config: &Config) -> LeanResult<()> {
         Mode::BracketedLightweight => {
             run_bracketed_lightweight(&caps, config)?;
         }
+        Mode::DerivedIndexes => {
+            run_derived_indexes(&caps, config)?;
+        }
         Mode::All => {}
     }
 
@@ -207,6 +216,7 @@ impl Mode {
             "steady-state" => Some(Self::SteadyState),
             "import-matrix" => Some(Self::ImportMatrix),
             "bracketed-lightweight" => Some(Self::BracketedLightweight),
+            "derived-indexes" => Some(Self::DerivedIndexes),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -219,6 +229,7 @@ impl Mode {
             Self::SteadyState => "steady-state",
             Self::ImportMatrix => "import-matrix",
             Self::BracketedLightweight => "bracketed-lightweight",
+            Self::DerivedIndexes => "derived-indexes",
             Self::All => "all",
         }
     }
@@ -232,6 +243,7 @@ fn run_all_children() -> Result<(), Box<dyn std::error::Error>> {
         Mode::SteadyState,
         Mode::ImportMatrix,
         Mode::BracketedLightweight,
+        Mode::DerivedIndexes,
     ] {
         println!("child_mode_begin={}", mode.as_str());
         let status = Command::new(&exe)
@@ -420,6 +432,148 @@ fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Conf
     Ok(())
 }
 
+fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
+    enforce_matrix_rss_cap(config)?;
+    let mut session = caps.session(&["LeanRsFixture.SourceRanges"], None, None)?;
+    report_import_stats(
+        "derived_indexes",
+        1,
+        LeanSessionImportProfile::default().label(),
+        session.import_stats(),
+    );
+
+    let decl = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
+
+    let mut cheap_request = DeclarationInspectionRequest::new(decl);
+    cheap_request.fields = DeclarationInspectionFields {
+        source: true,
+        statement: false,
+        docstring: false,
+        attributes: true,
+        flags: true,
+        statement_pretty: false,
+        proof_search: false,
+    };
+    report_inspection_derived_work("cheap_inspection", &mut session, &cheap_request)?;
+
+    let mut raw_request = cheap_request.clone();
+    raw_request.fields.statement = true;
+    report_inspection_derived_work("raw_statement_inspection", &mut session, &raw_request)?;
+
+    let mut pretty_request = raw_request.clone();
+    pretty_request.fields.statement_pretty = true;
+    report_inspection_derived_work("pretty_statement_inspection", &mut session, &pretty_request)?;
+
+    let mut proof_request = pretty_request.clone();
+    proof_request.fields.proof_search = true;
+    proof_request.fields.docstring = true;
+    report_inspection_derived_work("proof_search_inspection", &mut session, &proof_request)?;
+
+    let mut search = DeclarationSearchRequest::new("documentedSimpTheorem");
+    search.include_source = false;
+    let search_without_source = session.search_declarations(&search, None)?;
+    report_derived_work(
+        "declaration_search_no_source",
+        1,
+        &search_without_source.facts.derived_work,
+    );
+
+    search.include_source = true;
+    let search_with_source = session.search_declarations(&search, None)?;
+    report_derived_work(
+        "declaration_search_with_source",
+        1,
+        &search_with_source.facts.derived_work,
+    );
+
+    let options = LeanElabOptions::new();
+    let source = "theorem derivedProbe (h : True) : True := by\n  exact h\n";
+    let _module_query = session.process_module_query_batch(
+        source,
+        &[ModuleQuerySelector::ProofState {
+            id: "state".to_owned(),
+            line: 2,
+            column: 4,
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &options,
+        None,
+    )?;
+    report_derived_work(
+        "module_query_proof_state",
+        1,
+        &LeanDerivedWorkFacts {
+            parser_elaborator_runs: 1,
+            module_snapshot_builds: 1,
+            ..LeanDerivedWorkFacts::default()
+        },
+    );
+
+    let proof_request = ProofAttemptRequest {
+        source: source.to_owned(),
+        edit: ProofEditTarget::Declaration {
+            name: "derivedProbe".to_owned(),
+            position: ProofPositionSelector::Default,
+        },
+        candidates: vec![ProofCandidate {
+            id: "exact_h".to_owned(),
+            text: "exact h".to_owned(),
+        }],
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let _attempt = session.attempt_proof(&proof_request, &options, None)?;
+    report_derived_work(
+        "proof_attempt",
+        1,
+        &LeanDerivedWorkFacts {
+            parser_elaborator_runs: 1,
+            module_snapshot_builds: 1,
+            ..LeanDerivedWorkFacts::default()
+        },
+    );
+
+    let verification_request = DeclarationVerificationRequest {
+        source: source.to_owned(),
+        target: DeclarationVerificationTarget::Name {
+            name: "derivedProbe".to_owned(),
+        },
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: false,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let _verification = session.verify_declaration(&verification_request, &options, None)?;
+    report_derived_work(
+        "verify_declaration",
+        1,
+        &LeanDerivedWorkFacts {
+            parser_elaborator_runs: 1,
+            module_snapshot_builds: 1,
+            ..LeanDerivedWorkFacts::default()
+        },
+    );
+
+    Ok(())
+}
+
+fn report_inspection_derived_work(
+    label: &str,
+    session: &mut lean_rs_host::LeanSession<'_, '_>,
+    request: &DeclarationInspectionRequest,
+) -> LeanResult<()> {
+    match session.inspect_declaration(request, None)? {
+        DeclarationInspectionResult::Found { declaration } => {
+            report_derived_work(label, 1, &declaration.derived_work);
+        }
+        DeclarationInspectionResult::NotFound { name } => {
+            println!("query_derived_work_gap={label} status=not_found name={name}");
+        }
+        DeclarationInspectionResult::Unsupported => {
+            println!("query_derived_work_gap={label} status=unsupported");
+        }
+    }
+    Ok(())
+}
+
 struct BracketedCheckpointSink {
     iteration: usize,
 }
@@ -590,5 +744,20 @@ fn report_bracketed_import_stats(label: &str, iteration: usize, stats: &LeanImpo
         stats.import_level,
         stats.import_all,
         stats.load_exts,
+    );
+}
+
+fn report_derived_work(label: &str, iteration: usize, facts: &LeanDerivedWorkFacts) {
+    println!(
+        "query_derived_work={label} iteration={iteration} source_range_lookups={} docstring_lookups={} raw_type_renderings={} pretty_prints={} proof_search_fact_collections={} simp_extension_lookups={} parser_elaborator_runs={} module_snapshot_builds={} lazy_discr_tree_import_initialization_observed={}",
+        facts.source_range_lookups,
+        facts.docstring_lookups,
+        facts.raw_type_renderings,
+        facts.pretty_prints,
+        facts.proof_search_fact_collections,
+        facts.simp_extension_lookups,
+        facts.parser_elaborator_runs,
+        facts.module_snapshot_builds,
+        facts.lazy_discr_tree_import_initialization_observed,
     );
 }

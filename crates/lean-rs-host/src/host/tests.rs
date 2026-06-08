@@ -23,10 +23,10 @@ use crate::host::meta::{
     infer_type, is_def_eq, pp_expr, whnf,
 };
 use crate::{
-    DeclarationInspectionRequest, DeclarationInspectionResult, EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT,
-    LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanBracketedImportRequest, LeanBracketedImportResult, LeanCancellationToken,
-    LeanDeclarationFilter, LeanElabOptions, LeanHost, LeanKernelOutcome, LeanSession, LeanSessionImportProfile,
-    LeanSeverity,
+    DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest,
+    EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanBracketedImportRequest,
+    LeanBracketedImportResult, LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost,
+    LeanKernelOutcome, LeanSession, LeanSessionImportProfile, LeanSeverity,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -560,6 +560,114 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
     assert_eq!(missing.kind, None);
     assert_eq!(missing.module, None);
     assert_eq!(missing.raw_type, None);
+}
+
+#[test]
+fn derived_cheap_inspection_skips_proof_search_indexes() {
+    const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("fixture capability loads");
+    let mut session = caps
+        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .expect("fixture session opens");
+
+    let result = session
+        .inspect_declaration(&DeclarationInspectionRequest::new(DECL), None)
+        .expect("inspection succeeds");
+
+    let DeclarationInspectionResult::Found { declaration } = result else {
+        panic!("expected found inspection");
+    };
+    assert!(!declaration.proof_search.computed);
+    assert!(declaration.proof_search.unavailable_reason.is_some());
+    assert_eq!(declaration.derived_work.proof_search_fact_collections, 0);
+    assert_eq!(declaration.derived_work.simp_extension_lookups, 0);
+    assert!(
+        !declaration.attributes.iter().any(|attr| attr == "simp"),
+        "simp is proof-search-derived and must not be reported by default: {:?}",
+        declaration.attributes
+    );
+}
+
+#[test]
+fn derived_proof_search_inspection_reports_explicit_work() {
+    const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("fixture capability loads");
+    let mut session = caps
+        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .expect("fixture session opens");
+    let mut request = DeclarationInspectionRequest::new(DECL);
+    request.fields.proof_search = true;
+
+    let result = session
+        .inspect_declaration(&request, None)
+        .expect("inspection succeeds");
+
+    let DeclarationInspectionResult::Found { declaration } = result else {
+        panic!("expected found inspection");
+    };
+    assert!(declaration.proof_search.computed);
+    assert!(declaration.proof_search.unavailable_reason.is_none());
+    assert!(declaration.proof_search.is_simp);
+    assert!(declaration.proof_search.is_rw_candidate);
+    assert_eq!(declaration.derived_work.proof_search_fact_collections, 1);
+    assert_eq!(declaration.derived_work.simp_extension_lookups, 1);
+    assert!(declaration.attributes.iter().any(|attr| attr == "simp"));
+}
+
+#[test]
+fn derived_statement_rendering_and_search_source_work_are_reported() {
+    const DECL: &str = "LeanRsFixture.SourceRanges.knownTheorem";
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("fixture capability loads");
+    let mut session = caps
+        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .expect("fixture session opens");
+
+    let mut raw_request = DeclarationInspectionRequest::new(DECL);
+    raw_request.fields = DeclarationInspectionFields {
+        source: false,
+        statement: true,
+        docstring: false,
+        attributes: false,
+        flags: false,
+        statement_pretty: false,
+        proof_search: false,
+    };
+    let raw = session
+        .inspect_declaration(&raw_request, None)
+        .expect("raw inspection succeeds");
+    let DeclarationInspectionResult::Found { declaration } = raw else {
+        panic!("expected raw inspection");
+    };
+    assert_eq!(declaration.derived_work.raw_type_renderings, 1);
+    assert_eq!(declaration.derived_work.pretty_prints, 0);
+
+    let mut pretty_request = raw_request.clone();
+    pretty_request.fields.statement_pretty = true;
+    let pretty = session
+        .inspect_declaration(&pretty_request, None)
+        .expect("pretty inspection succeeds");
+    let DeclarationInspectionResult::Found { declaration } = pretty else {
+        panic!("expected pretty inspection");
+    };
+    assert_eq!(declaration.derived_work.pretty_prints, 1);
+
+    let mut search = DeclarationSearchRequest::new("knownTheorem");
+    search.include_source = false;
+    let without_source = session.search_declarations(&search, None).expect("search succeeds");
+    assert_eq!(without_source.facts.derived_work.source_range_lookups, 0);
+
+    search.include_source = true;
+    let with_source = session.search_declarations(&search, None).expect("search succeeds");
+    assert!(with_source.facts.derived_work.source_range_lookups > 0);
 }
 
 #[test]

@@ -157,6 +157,49 @@ fn render_markdown(report: &PerformanceReport) -> String {
         }
     }
 
+    let derived_workloads: Vec<_> = report
+        .workloads
+        .iter()
+        .filter(|run| !run.derived_work.is_empty())
+        .collect();
+    if !derived_workloads.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Lean Derived Work");
+        for run in derived_workloads {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "### {}", run.name);
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "| Label | Iteration | Source Ranges | Docstrings | Raw Types | Pretty Prints | Proof Facts | Simp Ext | Parser/Elab | Snapshots | Lazy Import Init |"
+            );
+            let _ = writeln!(
+                out,
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+            );
+            for sample in &run.derived_work {
+                let iteration = sample
+                    .iteration
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    sample.label,
+                    iteration,
+                    sample.source_range_lookups,
+                    sample.docstring_lookups,
+                    sample.raw_type_renderings,
+                    sample.pretty_prints,
+                    sample.proof_search_fact_collections,
+                    sample.simp_extension_lookups,
+                    sample.parser_elaborator_runs,
+                    sample.module_snapshot_builds,
+                    sample.lazy_discr_tree_import_initialization_observed
+                );
+            }
+        }
+    }
+
     if !report.profiles.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "## CPU Profiles");

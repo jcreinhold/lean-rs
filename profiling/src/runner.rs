@@ -8,8 +8,8 @@ use lean_toolchain::LEAN_VERSION;
 
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
-    BaselineMode, EnvPair, ImportStatsSample, KeyValue, PerformanceReport, ProfileArtifact, ReportMetadata,
-    RssCheckpoint, WorkloadRun,
+    BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport, ProfileArtifact,
+    ReportMetadata, RssCheckpoint, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
@@ -39,6 +39,7 @@ pub fn collect(mode: BaselineMode) -> Result<(PathBuf, PathBuf), Box<dyn Error>>
     report.workloads.push(run_long_session("steady-state")?);
     report.workloads.push(run_long_session("import-matrix")?);
     report.workloads.push(run_long_session("bracketed-lightweight")?);
+    report.workloads.push(run_long_session("derived-indexes")?);
     report.workloads.push(run_worker_cycling()?);
     report.workloads.push(run_pool_memory()?);
     report.workloads.push(run_criterion(
@@ -293,7 +294,8 @@ fn run_command_path(
     let stdout_path = write_raw(name, "stdout", &output.stdout)?;
     let stderr_path = write_raw(name, "stderr", &output.stderr)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed = parse_key_values(&stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let parsed = parse_key_values(&stdout, &stderr);
 
     Ok(WorkloadRun {
         name: name.to_owned(),
@@ -312,6 +314,7 @@ fn run_command_path(
         peak_rss_kib: parsed.peak_rss_kib,
         checkpoints: parsed.checkpoints,
         import_stats: parsed.import_stats,
+        derived_work: parsed.derived_work,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -330,10 +333,11 @@ fn write_raw(name: &str, stream: &str, bytes: &[u8]) -> Result<PathBuf, Box<dyn 
     Ok(path)
 }
 
-fn parse_key_values(output: &str) -> ParsedOutput {
+fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut key_values = Vec::new();
     let mut checkpoints = Vec::new();
     let mut import_stats = Vec::new();
+    let mut derived_work = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -367,12 +371,38 @@ fn parse_key_values(output: &str) -> ParsedOutput {
         if let Some(stats) = parse_import_stats(&line_pairs) {
             import_stats.push(stats);
         }
+        if let Some(sample) = parse_derived_work(&line_pairs) {
+            derived_work.push(sample);
+        }
+    }
+
+    if stderr.contains("lazy discriminator import initialization") {
+        if derived_work.len() == 1 {
+            if let Some(sample) = derived_work.first_mut() {
+                sample.lazy_discr_tree_import_initialization_observed = true;
+            }
+        } else {
+            derived_work.push(DerivedWorkSample {
+                label: "lean_profiler_stderr".to_owned(),
+                iteration: None,
+                source_range_lookups: 0,
+                docstring_lookups: 0,
+                raw_type_renderings: 0,
+                pretty_prints: 0,
+                proof_search_fact_collections: 0,
+                simp_extension_lookups: 0,
+                parser_elaborator_runs: 0,
+                module_snapshot_builds: 0,
+                lazy_discr_tree_import_initialization_observed: true,
+            });
+        }
     }
 
     ParsedOutput {
         key_values,
         checkpoints,
         import_stats,
+        derived_work,
         peak_rss_kib,
     }
 }
@@ -402,6 +432,25 @@ fn parse_import_stats(pairs: &[(String, String)]) -> Option<ImportStatsSample> {
         import_all: parse_bool(pairs, "import_all")?,
         load_exts: parse_bool(pairs, "load_exts")?,
         free_regions_ran: value(pairs, "free_regions_ran").and_then(|value| value.parse().ok()),
+    })
+}
+
+fn parse_derived_work(pairs: &[(String, String)]) -> Option<DerivedWorkSample> {
+    Some(DerivedWorkSample {
+        label: value(pairs, "query_derived_work")?.to_owned(),
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        source_range_lookups: parse_u64(pairs, "source_range_lookups")?,
+        docstring_lookups: parse_u64(pairs, "docstring_lookups")?,
+        raw_type_renderings: parse_u64(pairs, "raw_type_renderings")?,
+        pretty_prints: parse_u64(pairs, "pretty_prints")?,
+        proof_search_fact_collections: parse_u64(pairs, "proof_search_fact_collections")?,
+        simp_extension_lookups: parse_u64(pairs, "simp_extension_lookups")?,
+        parser_elaborator_runs: parse_u64(pairs, "parser_elaborator_runs")?,
+        module_snapshot_builds: parse_u64(pairs, "module_snapshot_builds")?,
+        lazy_discr_tree_import_initialization_observed: parse_bool(
+            pairs,
+            "lazy_discr_tree_import_initialization_observed",
+        )?,
     })
 }
 
@@ -463,6 +512,7 @@ struct ParsedOutput {
     key_values: Vec<KeyValue>,
     checkpoints: Vec<RssCheckpoint>,
     import_stats: Vec<ImportStatsSample>,
+    derived_work: Vec<DerivedWorkSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -474,6 +524,7 @@ mod tests {
     fn parses_import_stats_lines() {
         let parsed = parse_key_values(
             "import_stats=import_matrix iteration=2 profile_mode=exported-public direct_imports=Init,Lean effective_modules=12 compacted_regions=12 memory_mapped_regions=11 imported_bytes=4096 imported_constants=500 extension_count=3 total_imported_extension_entries=7 import_level=exported import_all=false load_exts=true",
+            "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
         let stats = &parsed.import_stats[0];
@@ -492,6 +543,7 @@ mod tests {
     fn parses_bracketed_import_stats_lines() {
         let parsed = parse_key_values(
             "bracketed_import_stats=bracketed_lightweight iteration=1 profile_mode=bracketed-private-no-exts direct_imports=LeanRsFixture.Handles effective_modules=9 compacted_regions=10 memory_mapped_regions=0 imported_bytes=8192 imported_constants=12 extension_count=3 total_imported_extension_entries=4 import_level=private import_all=false load_exts=false free_regions_ran=true",
+            "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
         let stats = &parsed.import_stats[0];
@@ -499,5 +551,30 @@ mod tests {
         assert_eq!(stats.profile_mode, "bracketed-private-no-exts");
         assert!(!stats.load_exts);
         assert_eq!(stats.free_regions_ran, Some(true));
+    }
+
+    #[test]
+    fn parses_derived_work_lines() {
+        let parsed = parse_key_values(
+            "query_derived_work=proof_search_inspection iteration=1 source_range_lookups=1 docstring_lookups=0 raw_type_renderings=0 pretty_prints=1 proof_search_fact_collections=1 simp_extension_lookups=1 parser_elaborator_runs=0 module_snapshot_builds=0 lazy_discr_tree_import_initialization_observed=false",
+            "",
+        );
+        assert_eq!(parsed.derived_work.len(), 1);
+        let sample = &parsed.derived_work[0];
+        assert_eq!(sample.label, "proof_search_inspection");
+        assert_eq!(sample.iteration, Some(1));
+        assert_eq!(sample.pretty_prints, 1);
+        assert_eq!(sample.proof_search_fact_collections, 1);
+        assert!(!sample.lazy_discr_tree_import_initialization_observed);
+    }
+
+    #[test]
+    fn maps_lazy_discr_tree_stderr_span_to_single_derived_phase() {
+        let parsed = parse_key_values(
+            "query_derived_work=lazy_probe iteration=1 source_range_lookups=0 docstring_lookups=0 raw_type_renderings=0 pretty_prints=0 proof_search_fact_collections=0 simp_extension_lookups=0 parser_elaborator_runs=1 module_snapshot_builds=1 lazy_discr_tree_import_initialization_observed=false",
+            "profiler: lazy discriminator import initialization 10ms",
+        );
+        assert_eq!(parsed.derived_work.len(), 1);
+        assert!(parsed.derived_work[0].lazy_discr_tree_import_initialization_observed);
     }
 }

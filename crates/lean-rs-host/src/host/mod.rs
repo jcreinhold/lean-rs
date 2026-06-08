@@ -78,7 +78,7 @@ pub use self::declaration_search::{
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
     DeclarationRenderedInfo, DeclarationSearchBias, DeclarationSearchFacts, DeclarationSearchPruning,
     DeclarationSearchRequest, DeclarationSearchResult, DeclarationSearchRow, DeclarationSearchScope,
-    DeclarationSearchTimings,
+    DeclarationSearchTimings, LeanDerivedWorkFacts,
 };
 pub use self::host::LeanHost;
 pub use self::pool::{PoolStats, PooledSession, SessionPool, SessionPoolConfig, SessionPoolMemoryPolicy};

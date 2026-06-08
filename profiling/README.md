@@ -43,13 +43,15 @@ cargo run --profile profiling -p lean-rs-profiling --bin generate_report
 - `long-session-steady`: same-process steady query/elaboration loop after one bounded import.
 - `long-session-matrix`: import-mode matrix for `exported-public`, `server`, `private`, explicit `full-private-compat`, and exported no-extension diagnostics.
 - `long-session-bracketed`: one-shot declaration metadata query under `loadExts := false` with `freeRegions` after the bracket.
+- `long-session-derived`: full-session query probes that report source-range, pretty-printing, proof-search, parser/elaborator, module-snapshot, and lazy discriminator initialization work.
 - `worker-cycling`: worker-child restart behavior under a small `max_imports` budget.
 - `pool-memory`: worker-pool admission, per-worker RSS policy, and reuse counters.
 - `mathlib-scale`: optional larger worker-pool workload; set `LEAN_RS_MATHLIB_ROOT` to use a real mathlib checkout.
 
 Long-session and worker session-open workloads print `import_stats=...` rows next to RSS checkpoints. Bracketed
 lightweight runs print `bracketed_import_stats=... free_regions_ran=true` after the no-extension bracket returns.
-Baseline reports parse those rows into Lean Import Stats tables while preserving the raw key-value output.
+Derived-index probes print `query_derived_work=...` rows for query phases. Baseline reports parse those rows into Lean
+Import Stats and Lean Derived Work tables while preserving the raw key-value output.
 
 Run a bounded memory workload:
 
@@ -59,6 +61,7 @@ Run a bounded memory workload:
 ./profiling/scripts/profile_memory.sh long-session-steady
 ./profiling/scripts/profile_memory.sh long-session-matrix
 ./profiling/scripts/profile_memory.sh long-session-bracketed
+./profiling/scripts/profile_memory.sh long-session-derived
 ./profiling/scripts/profile_memory.sh worker-cycling
 ./profiling/scripts/profile_memory.sh pool-memory
 ```
@@ -99,6 +102,12 @@ environment shape and does not reclaim compacted regions.
 
 The bracketed lightweight workload is the exception by construction: it uses `loadExts := false`, returns only
 serialized Rust-owned data, and reports whether `freeRegions` ran before Rust receives the result.
+
+The derived-index workload stays on normal full sessions with `loadExts := true`. It does not reclaim compacted
+regions. It records whether a requested query phase touched derived work such as declaration-range lookup,
+notation-aware pretty printing, proof-search facts, parser/elaborator execution, module snapshot construction, or
+Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree` laziness is derived-index laziness
+over already imported module data; it is not lazy `.olean` loading and it does not make compacted regions unloadable.
 
 A local capped probe on macOS aarch64 with Lean 4.31.0-rc1, one `LeanRsFixture.Handles` import, reported
 `bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,

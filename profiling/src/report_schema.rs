@@ -54,6 +54,7 @@ pub struct WorkloadRun {
     pub peak_rss_kib: Option<u64>,
     pub checkpoints: Vec<RssCheckpoint>,
     pub import_stats: Vec<ImportStatsSample>,
+    pub derived_work: Vec<DerivedWorkSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -94,6 +95,21 @@ pub struct ImportStatsSample {
     pub import_all: bool,
     pub load_exts: bool,
     pub free_regions_ran: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DerivedWorkSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub source_range_lookups: u64,
+    pub docstring_lookups: u64,
+    pub raw_type_renderings: u64,
+    pub pretty_prints: u64,
+    pub proof_search_fact_collections: u64,
+    pub simp_extension_lookups: u64,
+    pub parser_elaborator_runs: u64,
+    pub module_snapshot_builds: u64,
+    pub lazy_discr_tree_import_initialization_observed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

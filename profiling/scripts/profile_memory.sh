@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
-	echo "Usage: $0 <long-session|long-session-fresh|long-session-pooled|long-session-steady|long-session-matrix|worker-cycling|pool-memory|mathlib-scale|all>"
+	echo "Usage: $0 <long-session|long-session-fresh|long-session-pooled|long-session-steady|long-session-matrix|long-session-bracketed|long-session-derived|worker-cycling|pool-memory|mathlib-scale|all>"
 	exit 1
 fi
 
@@ -70,6 +70,7 @@ long-session-pooled) run_long_session_mode pooled-reuse ;;
 long-session-steady) run_long_session_mode steady-state ;;
 long-session-matrix) run_long_session_mode import-matrix ;;
 long-session-bracketed) run_long_session_mode bracketed-lightweight ;;
+long-session-derived) run_long_session_mode derived-indexes ;;
 worker-cycling) run_worker_cycling ;;
 pool-memory) run_pool_memory ;;
 mathlib-scale) run_mathlib_scale ;;
@@ -79,12 +80,13 @@ all)
 	run_long_session_mode steady-state
 	run_long_session_mode import-matrix
 	run_long_session_mode bracketed-lightweight
+	run_long_session_mode derived-indexes
 	run_worker_cycling
 	run_pool_memory
 	;;
 *)
 	echo "Unknown target: $TARGET"
-	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, worker-cycling, pool-memory, mathlib-scale, all"
+	echo "Available: long-session, long-session-fresh, long-session-pooled, long-session-steady, long-session-matrix, long-session-bracketed, long-session-derived, worker-cycling, pool-memory, mathlib-scale, all"
 	exit 1
 	;;
 esac

@@ -100,6 +100,19 @@ pub struct DeclarationSearchTimings {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanDerivedWorkFacts {
+    pub source_range_lookups: u64,
+    pub docstring_lookups: u64,
+    pub raw_type_renderings: u64,
+    pub pretty_prints: u64,
+    pub proof_search_fact_collections: u64,
+    pub simp_extension_lookups: u64,
+    pub parser_elaborator_runs: u64,
+    pub module_snapshot_builds: u64,
+    pub lazy_discr_tree_import_initialization_observed: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DeclarationSearchFacts {
     pub declarations_scanned: usize,
     pub after_name_filter: usize,
@@ -111,6 +124,7 @@ pub struct DeclarationSearchFacts {
     pub broad_pruning: Vec<DeclarationSearchPruning>,
     pub truncated: bool,
     pub timings: DeclarationSearchTimings,
+    pub derived_work: LeanDerivedWorkFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,6 +149,10 @@ pub struct DeclarationInspectionFields {
     /// falling back to the raw term if the pretty-printer cannot render it;
     /// the fully-elaborated raw form when `false`.
     pub statement_pretty: bool,
+    /// Include proof-search-oriented facts such as simp/rw/instance/class.
+    /// Defaults off because these facts may touch persistent extensions and
+    /// lazy derived search indexes.
+    pub proof_search: bool,
 }
 
 impl Default for DeclarationInspectionFields {
@@ -146,6 +164,7 @@ impl Default for DeclarationInspectionFields {
             attributes: true,
             flags: true,
             statement_pretty: true,
+            proof_search: false,
         }
     }
 }
@@ -195,6 +214,8 @@ pub struct DeclarationRenderedInfo {
     reason = "proof-search booleans are independent inspection facts, not control-flow state"
 )]
 pub struct DeclarationProofSearchFacts {
+    pub computed: bool,
+    pub unavailable_reason: Option<String>,
     pub is_simp: bool,
     pub is_rw_candidate: bool,
     pub is_instance: bool,
@@ -213,6 +234,7 @@ pub struct DeclarationInspection {
     pub attributes: Vec<String>,
     pub proof_search: DeclarationProofSearchFacts,
     pub flags: DeclarationFlags,
+    pub derived_work: LeanDerivedWorkFacts,
     /// Rendering that produced `statement`: `Some(true)` = pretty, `Some(false)`
     /// = raw, `None` when no statement was requested.
     pub statement_pretty: Option<bool>,
@@ -298,6 +320,7 @@ impl<'lean> IntoLean<'lean> for DeclarationInspectionFields {
                 nat_from_bool(runtime, self.attributes),
                 nat_from_bool(runtime, self.flags),
                 nat_from_bool(runtime, self.statement_pretty),
+                nat_from_bool(runtime, self.proof_search),
             ],
         )
     }
@@ -446,6 +469,35 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchTimings {
     }
 }
 
+impl<'lean> TryFromLean<'lean> for LeanDerivedWorkFacts {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [
+            source_range_lookups,
+            docstring_lookups,
+            raw_type_renderings,
+            pretty_prints,
+            proof_search_fact_collections,
+            simp_extension_lookups,
+            parser_elaborator_runs,
+            module_snapshot_builds,
+            lazy_discr_tree_import_initialization_observed,
+        ] = take_ctor_objects::<9>(obj, 0, "DerivedWorkFacts")?;
+        Ok(Self {
+            source_range_lookups: nat::try_to_u64(source_range_lookups)?,
+            docstring_lookups: nat::try_to_u64(docstring_lookups)?,
+            raw_type_renderings: nat::try_to_u64(raw_type_renderings)?,
+            pretty_prints: nat::try_to_u64(pretty_prints)?,
+            proof_search_fact_collections: nat::try_to_u64(proof_search_fact_collections)?,
+            simp_extension_lookups: nat::try_to_u64(simp_extension_lookups)?,
+            parser_elaborator_runs: nat::try_to_u64(parser_elaborator_runs)?,
+            module_snapshot_builds: nat::try_to_u64(module_snapshot_builds)?,
+            lazy_discr_tree_import_initialization_observed: bool_from_nat(
+                lazy_discr_tree_import_initialization_observed,
+            )?,
+        })
+    }
+}
+
 impl<'lean> TryFromLean<'lean> for DeclarationSearchFacts {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         let [
@@ -459,7 +511,8 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchFacts {
             broad_pruning,
             truncated,
             timings,
-        ] = take_ctor_objects::<10>(obj, 0, "DeclarationSearchFacts")?;
+            derived_work,
+        ] = take_ctor_objects::<11>(obj, 0, "DeclarationSearchFacts")?;
         Ok(Self {
             declarations_scanned: nat::try_to_usize(declarations_scanned)?,
             after_name_filter: nat::try_to_usize(after_name_filter)?,
@@ -471,6 +524,7 @@ impl<'lean> TryFromLean<'lean> for DeclarationSearchFacts {
             broad_pruning: Vec::<DeclarationSearchPruning>::try_from_lean(broad_pruning)?,
             truncated: bool_from_nat(truncated)?,
             timings: DeclarationSearchTimings::try_from_lean(timings)?,
+            derived_work: LeanDerivedWorkFacts::try_from_lean(derived_work)?,
         })
     }
 }
@@ -498,9 +552,18 @@ impl<'lean> TryFromLean<'lean> for DeclarationRenderedInfo {
 
 impl<'lean> TryFromLean<'lean> for DeclarationProofSearchFacts {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
-        let [is_simp, is_rw_candidate, is_instance, is_class, class_name] =
-            take_ctor_objects::<5>(obj, 0, "DeclarationProofSearchFacts")?;
+        let [
+            computed,
+            unavailable_reason,
+            is_simp,
+            is_rw_candidate,
+            is_instance,
+            is_class,
+            class_name,
+        ] = take_ctor_objects::<7>(obj, 0, "DeclarationProofSearchFacts")?;
         Ok(Self {
+            computed: bool_from_nat(computed)?,
+            unavailable_reason: Option::<String>::try_from_lean(unavailable_reason)?,
             is_simp: bool_from_nat(is_simp)?,
             is_rw_candidate: bool_from_nat(is_rw_candidate)?,
             is_instance: bool_from_nat(is_instance)?,
@@ -522,8 +585,9 @@ impl<'lean> TryFromLean<'lean> for DeclarationInspection {
             attributes,
             proof_search,
             flags,
+            derived_work,
             statement_rendering,
-        ] = take_ctor_objects::<10>(obj, 0, "DeclarationInspection")?;
+        ] = take_ctor_objects::<11>(obj, 0, "DeclarationInspection")?;
         // `statementRendering : Option Nat` (1 = pretty, 0 = raw) → Option<bool>.
         let statement_pretty = match view(&statement_rendering).sum_tag()? {
             0 => None,
@@ -547,6 +611,7 @@ impl<'lean> TryFromLean<'lean> for DeclarationInspection {
             attributes: Vec::<String>::try_from_lean(attributes)?,
             proof_search: DeclarationProofSearchFacts::try_from_lean(proof_search)?,
             flags: DeclarationFlags::try_from_lean(flags)?,
+            derived_work: LeanDerivedWorkFacts::try_from_lean(derived_work)?,
             statement_pretty,
         })
     }

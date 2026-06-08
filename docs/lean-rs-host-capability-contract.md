@@ -83,7 +83,13 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 | `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
 | `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
 
-## Optional contract (9 symbols)
+Declaration inspection carries two attribution subrecords in its result: `proofSearch`, which reports whether
+proof-search facts were computed, and `derivedWork`, which reports source-range, docstring, raw rendering,
+pretty-printing, proof-search, parser/elaborator, module-snapshot, and lazy discriminator derived work. The inspection
+request's `fields.proofSearch` flag defaults off on the Rust side; `attributes` alone must not force proof-search
+facts.
+
+## Optional contract (10 symbols)
 
 If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call
 site degrades gracefully—`LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services, and
@@ -96,6 +102,7 @@ module-query methods return their `Unsupported` outcome for bounded module proje
 | `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
 | `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
 | `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
+| `lean_rs_host_env_inspect_declaration` | `(env) (request : DeclarationInspectionRequest) (sourceRoots : Array String) (heartbeats : UInt64) : IO DeclarationInspectionResult` | `inspect_declaration(request, cancellation)` |
 | `lean_rs_host_process_module_query` | `(env) (src : String) (query : ModuleQuery) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryOutcome` | `process_module_query(source, query, options, cancellation)` |
 | `lean_rs_host_process_module_query_batch` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryBatchOutcome` | `process_module_query_batch(source, selectors, budgets, options, cancellation)` |
 | `lean_rs_host_process_module_query_batch_cached` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) (policy : String) : IO ModuleQueryBatchCachedOutcome` | `process_module_query_batch_cached(source, selectors, budgets, options, policy, cancellation)` |
@@ -108,8 +115,8 @@ policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can
   initialize the module and interpret symbol names consistently.
-- Same 28 mandatory `@[export]` symbol names with manifest-compatible signatures.
-- The 9 optional symbols are truly optional; omitting any collapses the corresponding session method to its
+- Same 32 mandatory `@[export]` symbol names with manifest-compatible signatures.
+- The 10 optional symbols are truly optional; omitting any collapses the corresponding session method to its
   `Unsupported` arm (`run_meta` for the five meta services, module-query methods for bounded module projections, or
   cache-clear reporting unsupported).
 

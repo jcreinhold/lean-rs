@@ -949,6 +949,7 @@ mod tests {
                         rank_micros: 50,
                         source_micros: 0,
                     },
+                    derived_work: Default::default(),
                 },
             },
         });
@@ -970,6 +971,7 @@ mod tests {
                     attributes: true,
                     flags: true,
                     rendering: LeanWorkerRendering::Pretty,
+                    proof_search: true,
                 },
                 budgets: LeanWorkerOutputBudgets {
                     per_field_bytes: 128,
@@ -1005,6 +1007,8 @@ mod tests {
                     }),
                     attributes: vec!["simp".to_owned(), "rw".to_owned()],
                     proof_search: LeanWorkerDeclarationProofSearchFacts {
+                        computed: true,
+                        unavailable_reason: None,
                         is_simp: true,
                         is_rw_candidate: true,
                         is_instance: false,
@@ -1012,6 +1016,7 @@ mod tests {
                         class_name: None,
                     },
                     flags: LeanWorkerDeclarationFlags::default(),
+                    derived_work: Default::default(),
                     statement_rendering: Some(LeanWorkerRendering::Pretty),
                 }),
             },
@@ -1401,5 +1406,6 @@ mod tests {
         let fields: LeanWorkerDeclarationInspectionFields =
             serde_json::from_value(json).expect("fields without rendering deserialize");
         assert_eq!(fields.rendering, LeanWorkerRendering::Pretty);
+        assert!(!fields.proof_search);
     }
 }

@@ -504,6 +504,8 @@ fn inspect_declaration_returns_known_theorem() {
     assert_eq!(declaration.name, "LeanRsFixture.SourceRanges.knownTheorem");
     assert_eq!(declaration.kind, "theorem");
     assert!(declaration.source.is_some());
+    assert!(!declaration.proof_search.computed);
+    assert!(declaration.proof_search.unavailable_reason.is_some());
     let statement = declaration.statement.expect("default inspection renders statement");
     assert_eq!(statement.value, "True");
     assert!(!statement.truncated);
@@ -564,7 +566,7 @@ fn inspect_declaration_returns_not_found_for_unknown_name() {
 }
 
 #[test]
-fn inspect_declaration_bounds_docstring_and_reports_attributes() {
+fn inspect_declaration_bounds_docstring_and_skips_proof_search_by_default() {
     ensure_fixture_built();
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     let mut session = worker
@@ -586,16 +588,52 @@ fn inspect_declaration_bounds_docstring_and_reports_attributes() {
     let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
         panic!("documented theorem should be found, got {result:?}");
     };
+    assert!(!declaration.proof_search.computed);
+    assert!(declaration.proof_search.unavailable_reason.is_some());
+    assert!(!declaration.attributes.iter().any(|attr| attr == "simp"));
+    assert_eq!(declaration.derived_work.proof_search_fact_collections, 0);
+    let docstring = declaration.docstring.expect("docstring should be present");
+    assert!(docstring.truncated);
+    assert!(docstring.value.len() <= 24);
+}
+
+#[test]
+fn inspect_declaration_reports_proof_search_when_requested() {
+    ensure_fixture_built();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&handles_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationInspectionRequest {
+        name: "LeanRsFixture.SourceRanges.documentedSimpTheorem".to_owned(),
+        fields: LeanWorkerDeclarationInspectionFields {
+            proof_search: true,
+            ..LeanWorkerDeclarationInspectionFields::default()
+        },
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 24,
+            total_bytes: 96,
+        },
+    };
+
+    let result = session
+        .inspect_declaration(&request, None, None)
+        .expect("worker inspect_declaration dispatch succeeds");
+
+    let LeanWorkerDeclarationInspectionResult::Found { declaration } = result else {
+        panic!("documented theorem should be found, got {result:?}");
+    };
+    assert!(declaration.proof_search.computed);
+    assert!(declaration.proof_search.unavailable_reason.is_none());
     assert!(
         declaration.attributes.iter().any(|attr| attr == "simp"),
-        "simp attribute should be reported: {:?}",
+        "simp attribute should be reported when proof_search is requested: {:?}",
         declaration.attributes
     );
     assert!(declaration.proof_search.is_simp);
     assert!(declaration.proof_search.is_rw_candidate);
-    let docstring = declaration.docstring.expect("docstring should be present");
-    assert!(docstring.truncated);
-    assert!(docstring.value.len() <= 24);
+    assert_eq!(declaration.derived_work.proof_search_fact_collections, 1);
+    assert_eq!(declaration.derived_work.simp_extension_lookups, 1);
 }
 
 #[test]

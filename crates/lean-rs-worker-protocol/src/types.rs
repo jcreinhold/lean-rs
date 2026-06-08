@@ -420,6 +420,20 @@ pub struct LeanWorkerDeclarationSearchTimings {
     pub source_micros: u64,
 }
 
+/// Observable derived work performed by one host query.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDerivedWorkFacts {
+    pub source_range_lookups: u64,
+    pub docstring_lookups: u64,
+    pub raw_type_renderings: u64,
+    pub pretty_prints: u64,
+    pub proof_search_fact_collections: u64,
+    pub simp_extension_lookups: u64,
+    pub parser_elaborator_runs: u64,
+    pub module_snapshot_builds: u64,
+    pub lazy_discr_tree_import_initialization_observed: bool,
+}
+
 /// Fanout and timing facts for a bounded declaration search.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerDeclarationSearchFacts {
@@ -433,6 +447,8 @@ pub struct LeanWorkerDeclarationSearchFacts {
     pub broad_pruning: Vec<LeanWorkerDeclarationSearchPruning>,
     pub truncated: bool,
     pub timings: LeanWorkerDeclarationSearchTimings,
+    #[serde(default)]
+    pub derived_work: LeanWorkerDerivedWorkFacts,
 }
 
 /// Result of a bounded declaration search.
@@ -473,6 +489,11 @@ pub struct LeanWorkerDeclarationInspectionFields {
     /// cannot render the term. Request `Raw` for the fully-elaborated form.
     #[serde(default = "rendering_pretty")]
     pub rendering: LeanWorkerRendering,
+    /// Include proof-search-oriented facts such as simp/rw/instance/class.
+    /// Defaults off because these facts may initialize expensive persistent
+    /// extension or derived-index state.
+    #[serde(default)]
+    pub proof_search: bool,
 }
 
 fn rendering_pretty() -> LeanWorkerRendering {
@@ -488,6 +509,7 @@ impl Default for LeanWorkerDeclarationInspectionFields {
             attributes: true,
             flags: true,
             rendering: LeanWorkerRendering::Pretty,
+            proof_search: false,
         }
     }
 }
@@ -519,6 +541,8 @@ impl LeanWorkerDeclarationInspectionRequest {
     reason = "proof-search booleans are independent wire facts, not control-flow state"
 )]
 pub struct LeanWorkerDeclarationProofSearchFacts {
+    pub computed: bool,
+    pub unavailable_reason: Option<String>,
     pub is_simp: bool,
     pub is_rw_candidate: bool,
     pub is_instance: bool,
@@ -538,6 +562,8 @@ pub struct LeanWorkerDeclarationInspection {
     pub attributes: Vec<String>,
     pub proof_search: LeanWorkerDeclarationProofSearchFacts,
     pub flags: LeanWorkerDeclarationFlags,
+    #[serde(default)]
+    pub derived_work: LeanWorkerDerivedWorkFacts,
     /// Rendering that actually produced `statement`: `Some(Pretty)` or
     /// `Some(Raw)`, or `None` when no statement was requested. Lets the caller
     /// tell whether the pretty path fired or fell back to the raw term.

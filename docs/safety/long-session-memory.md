@@ -167,6 +167,42 @@ Baseline JSON and Markdown reports under `profiling_results/` preserve the raw K
 Import Stats tables side by side. Treat those KiB values as local measurements only; do not compare absolute RSS across
 machines or operating systems.
 
+## Derived Index Attribution
+
+Full sessions still import with `loadExts := true`, so they cannot use `Environment.freeRegions`. Prompt 19 narrows a
+different cost: work derived from the already imported environment after a caller asks a query. The profiling workload
+`derived-indexes` prints `query_derived_work=...` rows for query phases such as cheap declaration inspection, raw and
+pretty statement rendering, opt-in proof-search facts, declaration search with and without source ranges, module
+proof-state queries, proof attempts, and declaration verification.
+
+Default declaration inspection no longer computes proof-search facts. A caller must explicitly request them with the
+inspection request's `proof_search` field. When the field is off, the returned proof-search facts say they were not
+computed instead of reporting complete false data. This prevents metadata-only callers from touching simp/proof-search
+extension state by accident. Cheap attributes such as reducibility remain available through the normal `attributes`
+field; proof-search-derived attributes such as `simp`, `rw`, `instance`, and `class` are reported only when
+`proof_search` is requested.
+
+The derived-work rows distinguish source-range extension lookups, docstring lookups, raw type rendering,
+notation-aware pretty printing, proof-search fact collection, simp-extension lookup, parser/elaborator execution,
+module snapshot construction, and Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree`
+laziness is derived-index laziness over imported module data. It is not lazy `.olean` loading, does not reduce
+`env.header.regions`, and does not make compacted regions safe to free after `loadExts := true`.
+
+Local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_MODE=derived-indexes`,
+`LEAN_RS_LONG_SESSION_IMPORTS=1`, and `LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152`:
+
+| Phase | Source ranges | Docstrings | Raw types | Pretty prints | Proof facts | Simp ext | Parser/elab | Snapshots | Lazy discr import init |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `cheap_inspection` | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | `false` |
+| `raw_statement_inspection` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | `false` |
+| `pretty_statement_inspection` | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | `false` |
+| `proof_search_inspection` | 1 | 1 | 0 | 1 | 1 | 1 | 0 | 0 | `false` |
+| `declaration_search_no_source` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | `false` |
+| `declaration_search_with_source` | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | `false` |
+| `module_query_proof_state` | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | `false` |
+| `proof_attempt` | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | `false` |
+| `verify_declaration` | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | `false` |
+
 ## Measured Shape
 
 The numbers below are local snapshots on macOS aarch64 against `lean=4.29.1`. They are not portable: macOS RSS is noisy
