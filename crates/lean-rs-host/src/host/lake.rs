@@ -287,8 +287,16 @@ mod tests {
             fs::write(self.root.join("lake-manifest.json"), contents).expect("write manifest");
         }
 
+        fn canonical_root(&self) -> PathBuf {
+            fs::canonicalize(&self.root).expect("canonicalize temp Lake root")
+        }
+
         fn own_olean_path(&self) -> PathBuf {
-            self.root.join(".lake").join("build").join("lib").join("lean")
+            self.canonical_root()
+                .join(".lake")
+                .join("build")
+                .join("lib")
+                .join("lean")
         }
     }
 
@@ -334,7 +342,7 @@ mod tests {
             vec![
                 project.own_olean_path(),
                 project
-                    .root
+                    .canonical_root()
                     .join("custom-packages")
                     .join("doc-gen4")
                     .join(".lake")
@@ -342,7 +350,7 @@ mod tests {
                     .join("lib")
                     .join("lean"),
                 project
-                    .root
+                    .canonical_root()
                     .join("../dep")
                     .join(".lake")
                     .join("build")

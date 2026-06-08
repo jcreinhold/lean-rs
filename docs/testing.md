@@ -29,6 +29,17 @@ Doctests are not picked up by nextest:
 cargo test --doc --workspace
 ```
 
+For a local Prompt-28-style smoke check that avoids same-process import-heavy
+targets, use:
+
+```sh
+cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci
+cargo test -p lean-rs-profiling parses_import_stats_lines
+cargo check --profile profiling -p lean-rs-host --example long_session_memory
+cargo check --profile profiling -p lean-rs-worker-child --bin lean-rs-worker-child --example memory_cycling --example pool_memory_scheduling
+cargo check --profile profiling -p lean-rs-profiling --bins
+```
+
 ## Tuning
 
 The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps
@@ -47,6 +58,7 @@ Lean import unless the developer explicitly opts into that risk.
 | `CARGO_BUILD_JOBS=4`            | Use more compile parallelism when the machine has memory to spare.                    |
 | `cargo test -p lean-rs --lib …` | Single-test debug loop for crates that do not open full host sessions.                |
 | `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1 cargo test -p lean-rs-host …` | Explicitly budgeted one-off host-session debug run. Do not use as a full-suite gate. |
+| `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1 cargo nextest run -p lean-rs-host --test session_leak_loop --include-ignored` | Run ignored leak-loop diagnostics intentionally. Tune `LEAN_RS_LEAK_LOOP_ITERS` first. |
 | `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
 
 Do not use broad or file-shaped `cargo test` filters for import-heavy host tests, including:
@@ -66,8 +78,29 @@ Lean import starts. Use
 isolation, or set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1` only for one exact
 debug test with an explicit local memory budget.
 
+Ignored import-heavy diagnostics add a second opt-in:
+`LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1`. This prevents accidental
+`--include-ignored` runs from executing long fresh-import loops in one test
+process. The ignored loops remain available for sanitizer or explicitly
+budgeted diagnostics; routine coverage comes from nextest-isolated small tests
+and worker/pool checks.
+
 Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
 `LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
+
+## Import-heavy test inventory
+
+Use this inventory when adding or selecting tests:
+
+| Test surface | Category | Safe routine runner | Notes |
+| --- | --- | --- | --- |
+| `lean-rs`, `lean-toolchain`, `lean-rs-worker-protocol` unit tests | cheap/unit | `cargo test -p <crate>` or nextest | No full host-session imports. |
+| `lean-rs-host` unit tests that do not call `LeanCapabilities::session` | cheap/unit | nextest or focused `cargo test` | Same-process host import guard does not affect these. |
+| `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | single fresh import or bounded pool reuse | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
+| `session_create_drop_loop_long`, `pool_acquire_release_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Intended for sanitizer/explicit diagnostics, not routine local smoke tests. |
+| `crates/lean-rs-host/tests/batching_and_pool.rs` | many host-session service tests | `cargo nextest run -p lean-rs-host --test batching_and_pool --profile ci` | Do not run the whole integration binary through plain `cargo test`; use nextest isolation. |
+| `long_session_memory` example and profiling collectors | profiling-only | `cargo check` locally; run with explicit `LEAN_RS_LONG_SESSION_MAX_RSS_KIB` when measuring | Runtime profiling must be capped and opt-in. |
+| Worker child/parent pool and capability tests | worker process boundary | `cargo test -p lean-rs-worker-child pool`, `cargo test -p lean-rs-worker-child capability_builder`, or nextest | Fresh imports happen in worker children or isolated test processes. |
 
 ## Per-process Lean threads
 

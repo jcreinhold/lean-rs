@@ -53,6 +53,20 @@ fn iters(default: usize) -> usize {
         .unwrap_or(default)
 }
 
+fn env_value_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+}
+
+fn import_heavy_diagnostics_enabled() -> bool {
+    if env_value_truthy("LEAN_RS_RUN_IMPORT_HEAVY_TESTS") {
+        return true;
+    }
+    eprintln!("skipping import-heavy diagnostic loop; set LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1 to run it");
+    false
+}
+
 #[test]
 fn session_create_drop_loop_small() {
     // Eight session lifecycles is enough to exercise the import +
@@ -144,6 +158,10 @@ fn session_leak_loop_import_stats_reports_explicit_full_private_compat() {
 #[test]
 #[ignore = "long-running leak surface; run under sanitizer CI"]
 fn session_create_drop_loop_long() {
+    if !import_heavy_diagnostics_enabled() {
+        return;
+    }
+
     let host = fixture_host();
     let caps = host
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
@@ -203,6 +221,10 @@ fn pool_acquire_release_loop_small() {
 #[test]
 #[ignore = "long-running pool leak surface; run under sanitizer CI"]
 fn pool_acquire_release_loop_long() {
+    if !import_heavy_diagnostics_enabled() {
+        return;
+    }
+
     let host = fixture_host();
     let caps = host
         .load_capabilities("lean_rs_fixture", "LeanRsFixture")
