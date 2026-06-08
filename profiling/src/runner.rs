@@ -8,12 +8,12 @@ use lean_toolchain::LEAN_VERSION;
 
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
-    BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport, ProfileArtifact,
-    ReportMetadata, RssCheckpoint, TimingSample, WorkloadRun,
+    AdmissionSample, BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport,
+    ProfileArtifact, ReportMetadata, RssCheckpoint, TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
-const LOCAL_RSS_CAP_KIB: u64 = 2_097_152;
+const LOCAL_RSS_CAP_KIB: u64 = 1_572_864;
 const WORKER_POLICY_WIDEN_THRESHOLD_KIB: u64 = LOCAL_RSS_CAP_KIB * 70 / 100;
 
 /// Collect a bounded profiling baseline and write JSON/Markdown artifacts.
@@ -171,12 +171,15 @@ fn build_profiling_binaries() -> Result<(), Box<dyn Error>> {
 fn run_long_session(mode: &str) -> Result<WorkloadRun, Box<dyn Error>> {
     let mut env = default_env();
     env.push(env_pair("LEAN_RS_LONG_SESSION_MODE", mode));
-    env.push(env_pair("LEAN_RS_LONG_SESSION_IMPORTS", "4"));
+    env.push(env_pair("LEAN_RS_LONG_SESSION_IMPORTS", "1"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_BULK", "64"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_ELAB", "64"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_POOL_CAPACITY", "1"));
     env.push(env_pair("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", "1"));
-    env.push(env_pair("LEAN_RS_LONG_SESSION_MAX_RSS_KIB", "2097152"));
+    env.push(env_pair(
+        "LEAN_RS_LONG_SESSION_MAX_RSS_KIB",
+        &LOCAL_RSS_CAP_KIB.to_string(),
+    ));
     let binary = profiling_example("long_session_memory");
     run_binary(&format!("long-session-{mode}"), &binary, &[], env)
 }
@@ -228,9 +231,9 @@ fn record_samply_profiles() -> Result<Vec<ProfileArtifact>, Box<dyn Error>> {
             &profiling_example("long_session_memory"),
             &[
                 env_pair("LEAN_RS_LONG_SESSION_MODE", "fresh-import"),
-                env_pair("LEAN_RS_LONG_SESSION_IMPORTS", "4"),
+                env_pair("LEAN_RS_LONG_SESSION_IMPORTS", "1"),
                 env_pair("LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY", "1"),
-                env_pair("LEAN_RS_LONG_SESSION_MAX_RSS_KIB", "2097152"),
+                env_pair("LEAN_RS_LONG_SESSION_MAX_RSS_KIB", &LOCAL_RSS_CAP_KIB.to_string()),
             ],
         )?,
         record_samply(
@@ -239,7 +242,7 @@ fn record_samply_profiles() -> Result<Vec<ProfileArtifact>, Box<dyn Error>> {
             &[
                 env_pair("LEAN_RS_WORKER_MEMORY_IMPORTS", "6"),
                 env_pair("LEAN_RS_WORKER_MEMORY_MAX_IMPORTS", "1"),
-                env_pair("LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB", "2097152"),
+                env_pair("LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB", &LOCAL_RSS_CAP_KIB.to_string()),
             ],
         )?,
     ])
@@ -346,6 +349,7 @@ fn run_command_path(
         import_stats: parsed.import_stats,
         derived_work: parsed.derived_work,
         timings: parsed.timings,
+        admissions: parsed.admissions,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -370,6 +374,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut import_stats = Vec::new();
     let mut derived_work = Vec::new();
     let mut timings = Vec::new();
+    let mut admissions = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -409,6 +414,9 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_timing(&line_pairs) {
             timings.push(sample);
         }
+        if let Some(sample) = parse_admission(&line_pairs) {
+            admissions.push(sample);
+        }
     }
 
     if stderr.contains("lazy discriminator import initialization") {
@@ -439,6 +447,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         import_stats,
         derived_work,
         timings,
+        admissions,
         peak_rss_kib,
     }
 }
@@ -513,6 +522,26 @@ fn parse_timing(pairs: &[(String, String)]) -> Option<TimingSample> {
     })
 }
 
+fn parse_admission(pairs: &[(String, String)]) -> Option<AdmissionSample> {
+    let label = value(pairs, "admission")?.to_owned();
+    let refusal_reason =
+        value(pairs, "refusal_reason").and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
+    Some(AdmissionSample {
+        label,
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        kind: value(pairs, "kind").unwrap_or("unknown").to_owned(),
+        cold_open_attempts: parse_u64(pairs, "cold_open_attempts")?,
+        cold_open_admitted: parse_u64(pairs, "cold_open_admitted")?,
+        cold_open_refusals: parse_u64(pairs, "cold_open_refusals")?,
+        import_like_requests: parse_u64(pairs, "import_like_requests")?,
+        import_like_admitted: parse_u64(pairs, "import_like_admitted"),
+        concurrent_cold_opens_observed: parse_u64(pairs, "concurrent_cold_opens_observed")?,
+        rss_before_admission_kib: parse_u64(pairs, "rss_before_admission_kib"),
+        rss_after_open_kib: parse_u64(pairs, "rss_after_open_kib"),
+        refusal_reason,
+    })
+}
+
 fn value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs
         .iter()
@@ -579,6 +608,7 @@ struct ParsedOutput {
     import_stats: Vec<ImportStatsSample>,
     derived_work: Vec<DerivedWorkSample>,
     timings: Vec<TimingSample>,
+    admissions: Vec<AdmissionSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -641,7 +671,7 @@ mod tests {
     #[test]
     fn parses_worker_timing_lines() {
         let parsed = parse_key_values(
-            "session_open_timing=worker_cycling iteration=2 kind=warm-same-child elapsed_ms=12.500 max_imports_per_child=2 max_rss_kib=2097152 rss_kib=700000",
+            "session_open_timing=worker_cycling iteration=2 kind=warm-same-child elapsed_ms=12.500 max_imports_per_child=2 max_rss_kib=1572864 rss_kib=700000",
             "",
         );
         assert_eq!(parsed.timings.len(), 1);
@@ -651,6 +681,28 @@ mod tests {
         assert_eq!(timing.kind, "warm-same-child");
         assert_eq!(timing.elapsed_ms, 12.5);
         assert_eq!(timing.rss_kib, Some(700000));
+    }
+
+    #[test]
+    fn parses_admission_lines() {
+        let parsed = parse_key_values(
+            "admission=worker_session_open iteration=2 kind=cold cold_open_attempts=1 cold_open_admitted=1 cold_open_refusals=0 import_like_requests=1 import_like_admitted=1 concurrent_cold_opens_observed=0 rss_before_admission_kib=100 rss_after_open_kib=700000 refusal_reason=none",
+            "",
+        );
+        assert_eq!(parsed.admissions.len(), 1);
+        let admission = &parsed.admissions[0];
+        assert_eq!(admission.label, "worker_session_open");
+        assert_eq!(admission.iteration, Some(2));
+        assert_eq!(admission.kind, "cold");
+        assert_eq!(admission.cold_open_attempts, 1);
+        assert_eq!(admission.cold_open_admitted, 1);
+        assert_eq!(admission.cold_open_refusals, 0);
+        assert_eq!(admission.import_like_requests, 1);
+        assert_eq!(admission.import_like_admitted, Some(1));
+        assert_eq!(admission.concurrent_cold_opens_observed, 0);
+        assert_eq!(admission.rss_before_admission_kib, Some(100));
+        assert_eq!(admission.rss_after_open_kib, Some(700000));
+        assert_eq!(admission.refusal_reason, None);
     }
 
     #[test]

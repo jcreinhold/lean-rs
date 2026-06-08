@@ -68,7 +68,7 @@ fn build_template() {
     static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
         let output = Command::new(cargo())
-            .args(["build", "--jobs", "2", "--manifest-path"])
+            .args(["build", "--jobs", "1", "--manifest-path"])
             .arg(template_manifest())
             .args(["--bins", "--examples"])
             .output()

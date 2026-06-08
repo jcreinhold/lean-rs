@@ -124,6 +124,8 @@ fn max_import_policy_restarts_before_next_import() {
         .expect("second import-like request succeeds after policy restart");
     let stats = worker.stats();
     assert_eq!(stats.imports, 2);
+    assert_eq!(stats.import_like_admission_attempts, 2);
+    assert_eq!(stats.import_like_admitted, 2);
     assert_eq!(stats.restarts, 1);
     assert_eq!(stats.max_import_restarts, 1);
     assert_eq!(
@@ -150,6 +152,8 @@ fn memory_bounded_policy_restarts_before_next_import() {
         .expect("second import-like request succeeds after memory-bounded restart");
     let stats = worker.stats();
     assert_eq!(stats.imports, 2);
+    assert_eq!(stats.import_like_admission_attempts, 2);
+    assert_eq!(stats.import_like_admitted, 2);
     assert_eq!(stats.restarts, 1);
     assert_eq!(stats.max_import_restarts, 1);
     assert_eq!(

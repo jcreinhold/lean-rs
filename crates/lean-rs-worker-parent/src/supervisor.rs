@@ -322,6 +322,12 @@ pub struct LeanWorkerStats {
     pub requests: u64,
     /// Import-like requests that entered a worker child.
     pub imports: u64,
+    /// Import-like requests that reached the supervisor admission gate.
+    pub import_like_admission_attempts: u64,
+    /// Import-like requests admitted past parent-side restart/RSS policy.
+    pub import_like_admitted: u64,
+    /// Last sampled child RSS before an import-like request was admitted, when available.
+    pub last_import_like_rss_before_admission_kib: Option<u64>,
     /// Child exits observed by the supervisor, including policy cycles.
     pub exits: u64,
     /// Policy or explicit restarts performed by the supervisor.
@@ -1888,29 +1894,43 @@ impl LeanWorker {
 
     fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
         self.ensure_running()?;
+        if import_like {
+            self.stats.import_like_admission_attempts = self.stats.import_like_admission_attempts.saturating_add(1);
+            self.stats.last_import_like_rss_before_admission_kib = self.child_rss_kib();
+        }
 
         if let Some(limit) = self.config.restart_policy.max_requests
             && self.requests_since_restart >= limit
         {
-            return self.restart_with_reason(LeanWorkerRestartReason::MaxRequests { limit });
+            self.restart_with_reason(LeanWorkerRestartReason::MaxRequests { limit })?;
+            if import_like {
+                self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
+            }
+            return Ok(());
         }
 
         if import_like
             && let Some(limit) = self.config.restart_policy.max_imports
             && self.imports_since_restart >= limit
         {
-            return self.restart_with_reason(LeanWorkerRestartReason::MaxImports { limit });
+            self.restart_with_reason(LeanWorkerRestartReason::MaxImports { limit })?;
+            self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
+            return Ok(());
         }
 
         if let Some(limit_kib) = self.config.restart_policy.max_rss_kib {
             match self.child_rss_kib() {
                 Some(current_kib) if current_kib >= limit_kib => {
                     self.stats.last_rss_kib = Some(current_kib);
-                    return self.restart_with_reason(LeanWorkerRestartReason::RssCeiling {
+                    self.restart_with_reason(LeanWorkerRestartReason::RssCeiling {
                         current_kib,
                         limit_kib,
                         last_import_stats: self.stats.last_import_stats.clone(),
-                    });
+                    })?;
+                    if import_like {
+                        self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
+                    }
+                    return Ok(());
                 }
                 Some(current_kib) => {
                     self.stats.last_rss_kib = Some(current_kib);
@@ -1924,10 +1944,17 @@ impl LeanWorker {
         if let Some(limit) = self.config.restart_policy.idle_restart_after {
             let idle_for = self.last_activity.elapsed();
             if idle_for >= limit {
-                return self.restart_with_reason(LeanWorkerRestartReason::Idle { idle_for, limit });
+                self.restart_with_reason(LeanWorkerRestartReason::Idle { idle_for, limit })?;
+                if import_like {
+                    self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
+                }
+                return Ok(());
             }
         }
 
+        if import_like {
+            self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
+        }
         Ok(())
     }
 

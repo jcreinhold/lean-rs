@@ -57,6 +57,8 @@ pub struct WorkloadRun {
     pub derived_work: Vec<DerivedWorkSample>,
     #[serde(default)]
     pub timings: Vec<TimingSample>,
+    #[serde(default)]
+    pub admissions: Vec<AdmissionSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -130,6 +132,22 @@ pub struct TimingSample {
     pub worker_restarts: Option<u64>,
     pub max_import_restarts: Option<u64>,
     pub policy_restarts: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdmissionSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub kind: String,
+    pub cold_open_attempts: u64,
+    pub cold_open_admitted: u64,
+    pub cold_open_refusals: u64,
+    pub import_like_requests: u64,
+    pub import_like_admitted: Option<u64>,
+    pub concurrent_cold_opens_observed: u64,
+    pub rss_before_admission_kib: Option<u64>,
+    pub rss_after_open_kib: Option<u64>,
+    pub refusal_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

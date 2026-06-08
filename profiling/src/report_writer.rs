@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common::results_dir;
-use crate::report_schema::{BaselineMode, KeyValue, PerformanceReport, TimingSample, WorkloadRun};
+use crate::report_schema::{AdmissionSample, BaselineMode, KeyValue, PerformanceReport, TimingSample, WorkloadRun};
 
 /// Write JSON and Markdown artifacts for a collected profiling report.
 ///
@@ -246,6 +246,50 @@ fn render_markdown(report: &PerformanceReport) -> String {
         }
     }
 
+    let admission_workloads: Vec<_> = report
+        .workloads
+        .iter()
+        .filter(|run| !run.admissions.is_empty())
+        .collect();
+    if !admission_workloads.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Import Admission");
+        for run in admission_workloads {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "### {}", run.name);
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "| Label | Iteration | Kind | Cold attempts | Cold admitted | Cold refusals | Import-like requests | Import-like admitted | Concurrent cold opens | RSS before KiB | RSS after KiB | Refusal |"
+            );
+            let _ = writeln!(
+                out,
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+            );
+            for admission in visible_admissions(&run.admissions) {
+                let iteration = admission
+                    .iteration
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    admission.label,
+                    iteration,
+                    admission.kind,
+                    admission.cold_open_attempts,
+                    admission.cold_open_admitted,
+                    admission.cold_open_refusals,
+                    admission.import_like_requests,
+                    format_optional_u64(admission.import_like_admitted),
+                    admission.concurrent_cold_opens_observed,
+                    format_optional_u64(admission.rss_before_admission_kib),
+                    format_optional_u64(admission.rss_after_open_kib),
+                    admission.refusal_reason.as_deref().unwrap_or("-")
+                );
+            }
+        }
+    }
+
     if !report.profiles.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "## CPU Profiles");
@@ -326,7 +370,7 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
         .find(|run| run.name == "worker-cycling-max-imports-2");
     let cap_kib = key_value(&worker_one.key_values, "max_rss_kib")
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(2_097_152);
+        .unwrap_or(1_572_864);
     let widen_threshold = cap_kib * 70 / 100;
     let recommended_max_imports = if worker_two
         .and_then(|run| run.peak_rss_kib)
@@ -342,7 +386,7 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
         .unwrap_or("1");
     let per_worker_rss = pool
         .and_then(|run| key_value(&run.key_values, "per_worker_rss_ceiling_kib"))
-        .unwrap_or_else(|| key_value(&worker_one.key_values, "max_rss_kib").unwrap_or("2097152"));
+        .unwrap_or_else(|| key_value(&worker_one.key_values, "max_rss_kib").unwrap_or("1572864"));
     let total_child_rss = pool
         .and_then(|run| key_value(&run.key_values, "max_total_child_rss_kib"))
         .unwrap_or(per_worker_rss);
@@ -466,6 +510,17 @@ fn visible_timings(timings: &[crate::report_schema::TimingSample]) -> Vec<&crate
     visible
 }
 
+fn visible_admissions(admissions: &[AdmissionSample]) -> Vec<&AdmissionSample> {
+    const HEAD: usize = 20;
+    const TAIL: usize = 5;
+    if admissions.len() <= HEAD + TAIL {
+        return admissions.iter().collect();
+    }
+    let mut visible: Vec<_> = admissions.iter().take(HEAD).collect();
+    visible.extend(admissions.iter().skip(admissions.len().saturating_sub(TAIL)));
+    visible
+}
+
 fn format_optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| String::from("-"), |value| value.to_string())
 }
@@ -490,7 +545,8 @@ fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u6
 #[cfg(test)]
 mod tests {
     use crate::report_schema::{
-        BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, TimingSample, WorkloadRun,
+        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, TimingSample,
+        WorkloadRun,
     };
 
     use super::render_markdown;
@@ -539,6 +595,7 @@ mod tests {
                 }],
                 derived_work: Vec::new(),
                 timings: Vec::new(),
+                admissions: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -571,7 +628,7 @@ mod tests {
                 command: "worker".to_owned(),
                 env: vec![EnvPair {
                     key: "LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB".to_owned(),
-                    value: "2097152".to_owned(),
+                    value: "1572864".to_owned(),
                 }],
                 exit_success: true,
                 exit_code: Some(0),
@@ -593,10 +650,24 @@ mod tests {
                     max_import_restarts: None,
                     policy_restarts: None,
                 }],
+                admissions: vec![AdmissionSample {
+                    label: "worker_session_open".to_owned(),
+                    iteration: Some(1),
+                    kind: "cold".to_owned(),
+                    cold_open_attempts: 1,
+                    cold_open_admitted: 1,
+                    cold_open_refusals: 0,
+                    import_like_requests: 1,
+                    import_like_admitted: Some(1),
+                    concurrent_cold_opens_observed: 0,
+                    rss_before_admission_kib: Some(100),
+                    rss_after_open_kib: Some(1000),
+                    refusal_reason: None,
+                }],
                 key_values: vec![
                     crate::report_schema::KeyValue {
                         key: "max_rss_kib".to_owned(),
-                        value: "2097152".to_owned(),
+                        value: "1572864".to_owned(),
                     },
                     crate::report_schema::KeyValue {
                         key: "restarts".to_owned(),
@@ -613,8 +684,10 @@ mod tests {
         let markdown = render_markdown(&report);
         assert!(markdown.contains("## Run Configuration"));
         assert!(markdown.contains("## Worker Policy Summary"));
-        assert!(markdown.contains("LeanWorkerRestartPolicy::memory_bounded(1, 2097152)"));
+        assert!(markdown.contains("LeanWorkerRestartPolicy::memory_bounded(1, 1572864)"));
         assert!(markdown.contains("## Worker Timings"));
         assert!(markdown.contains("| worker_cycling | 1 | cold | 10.000 | 1000 |"));
+        assert!(markdown.contains("## Import Admission"));
+        assert!(markdown.contains("| worker_session_open | 1 | cold | 1 | 1 | 0 | 1 | 1 | 0 | 100 | 1000 | - |"));
     }
 }

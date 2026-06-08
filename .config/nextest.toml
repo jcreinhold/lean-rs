@@ -4,8 +4,7 @@
 # imports `LeanRsFixture.Handles` (which transitively imports the full
 # Lean compiler environment) commits several hundred MB of resident
 # memory. Process parallelism is capped against memory, not CPU count,
-# so the suite stays well under typical CI runner RAM (~7 GiB on
-# `ubuntu-latest` / `macos-latest`).
+# so the suite stays under developer-machine memory budgets.
 #
 # See `docs/testing.md` for the full rationale and for the local
 # developer workflow.
@@ -18,16 +17,15 @@
 #   2. The `lean-rs-worker-child` integration tests in
 #      `capability_builder` and `loader_regressions` shell out to
 #      `cargo build` on the `shipped-lean-crate` template. Each of
-#      those `cargo build` invocations is itself capped at `--jobs 2`,
+#      those `cargo build` invocations is itself capped at `--jobs 1`,
 #      but the *outer* concurrency multiplies that swarm: with N test
-#      threads you can see up to `N × 2` rustc workers compiling
+#      threads you can see up to `N × 1` rustc workers compiling
 #      Lean-linked code in addition to the Lean compiler driven by the
 #      template's `build.rs`.
-# Net: keep this conservative. 2 × ~1 GiB per process + 2 × 2 rustc
-# workers when a template build is active is the worst case and fits
-# inside an 8–16 GiB working set. Override locally with
+# Net: keep this conservative. One test process, one Lean worker, and one
+# rustc/link job is the default local-safe shape. Override locally with
 # `NEXTEST_TEST_THREADS=N cargo nextest run ...`.
-test-threads = 2
+test-threads = 1
 
 # We want full visibility into all failures in a single run rather than
 # stopping at the first.
@@ -38,7 +36,7 @@ fail-fast = false
 # without progress (~4 minutes).
 slow-timeout = { period = "60s", terminate-after = 4 }
 
-# Env vars (LEAN_RS_NUM_THREADS=1, RUST_LOG=warn) are set in
+# Env vars (Lean/thread/memory guardrails and RUST_LOG=warn) are set in
 # `.cargo/config.toml` under `[env]` so they apply uniformly to every
 # cargo invocation (cargo test, cargo nextest, cargo run --example).
 # nextest's own env-var keys differ between versions; the cargo

@@ -125,6 +125,7 @@ fn compatible_session_key_reuses_one_worker() {
 
     assert_eq!(pool.snapshot().workers, 1);
     let imports_after_first_lease = pool.snapshot().imports;
+    let cold_attempts_after_first_lease = pool.snapshot().cold_open_attempts;
 
     {
         let mut lease = pool.acquire_lease(builder()).expect("pool reuses compatible lease");
@@ -135,6 +136,14 @@ fn compatible_session_key_reuses_one_worker() {
     }
 
     assert_eq!(pool.snapshot().workers, 1);
+    assert_eq!(
+        pool.snapshot().cold_open_attempts,
+        cold_attempts_after_first_lease,
+        "warm compatible lease must not start another cold worker open",
+    );
+    assert_eq!(pool.snapshot().cold_open_admitted, 1);
+    assert_eq!(pool.snapshot().cold_open_refusals, 0);
+    assert_eq!(pool.snapshot().concurrent_cold_opens_observed, 0);
     assert_eq!(
         pool.snapshot().imports,
         imports_after_first_lease,
@@ -169,6 +178,12 @@ fn distinct_session_key_respects_fixed_pool_limit() {
         LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
         other => panic!("expected pool exhaustion, got {other:?}"),
     }
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.cold_open_attempts, 2);
+    assert_eq!(snapshot.cold_open_admitted, 1);
+    assert_eq!(snapshot.cold_open_refusals, 1);
+    assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
+    assert_eq!(snapshot.concurrent_cold_opens_observed, 0);
 }
 
 #[test]
@@ -403,6 +418,8 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
     let snapshot = pool.snapshot();
     if admission == "budget-exceeded" {
         assert_eq!(snapshot.memory_budget_rejections, 1);
+        assert_eq!(snapshot.cold_open_refusals, 1);
+        assert_eq!(snapshot.refusal_reason.as_deref(), Some("rss_budget"));
     } else {
         assert!(
             snapshot.rss_samples_unavailable > 0,
@@ -431,6 +448,8 @@ fn queue_wait_timeout_is_typed_when_pool_is_full() {
         other => panic!("expected queue timeout, got {other:?}"),
     }
     assert_eq!(pool.snapshot().queue_timeouts, 1);
+    assert_eq!(pool.snapshot().cold_open_refusals, 1);
+    assert_eq!(pool.snapshot().refusal_reason.as_deref(), Some("queue_timeout"));
 }
 
 #[test]

@@ -295,6 +295,14 @@ pub struct LeanWorkerPoolSnapshot {
     pub policy_restarts: u64,
     pub queue_timeouts: u64,
     pub memory_budget_rejections: u64,
+    pub cold_open_attempts: u64,
+    pub cold_open_admitted: u64,
+    pub cold_open_refusals: u64,
+    pub import_like_requests: u64,
+    pub concurrent_cold_opens_observed: u64,
+    pub rss_before_admission_kib: Option<u64>,
+    pub rss_after_open_kib: Option<u64>,
+    pub refusal_reason: Option<String>,
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
     pub last_import_stats: Option<LeanWorkerImportStats>,
     pub stream_requests: u64,
@@ -314,6 +322,14 @@ pub struct LeanWorkerPool {
     entries: Vec<PoolEntry>,
     queue_timeouts: u64,
     memory_budget_rejections: u64,
+    cold_open_attempts: u64,
+    cold_open_admitted: u64,
+    cold_open_refusals: u64,
+    cold_opens_in_progress: u64,
+    concurrent_cold_opens_observed: u64,
+    rss_before_admission_kib: Option<u64>,
+    rss_after_open_kib: Option<u64>,
+    refusal_reason: Option<String>,
 }
 
 impl LeanWorkerPool {
@@ -325,6 +341,14 @@ impl LeanWorkerPool {
             entries: Vec::new(),
             queue_timeouts: 0,
             memory_budget_rejections: 0,
+            cold_open_attempts: 0,
+            cold_open_admitted: 0,
+            cold_open_refusals: 0,
+            cold_opens_in_progress: 0,
+            concurrent_cold_opens_observed: 0,
+            rss_before_admission_kib: None,
+            rss_after_open_kib: None,
+            refusal_reason: None,
         }
     }
 
@@ -361,12 +385,23 @@ impl LeanWorkerPool {
             });
         }
 
+        self.record_cold_open_attempt();
+        let rss_before_admission = self.refresh_total_child_rss();
+        self.rss_before_admission_kib = rss_before_admission.available_total();
         if self.entries.len() >= self.config.max_workers {
             return self.pool_full_error();
         }
-        self.ensure_spawn_within_total_rss_budget()?;
+        self.ensure_spawn_within_total_rss_budget(rss_before_admission)?;
 
-        let capability = builder.clone().open()?;
+        self.record_cold_open_admitted();
+        let capability = match builder.clone().open() {
+            Ok(capability) => capability,
+            Err(err) => {
+                self.cold_opens_in_progress = self.cold_opens_in_progress.saturating_sub(1);
+                return Err(err);
+            }
+        };
+        self.cold_opens_in_progress = self.cold_opens_in_progress.saturating_sub(1);
         let base_request_timeout = builder.pool_request_timeout();
         self.entries.push(PoolEntry {
             key,
@@ -380,10 +415,18 @@ impl LeanWorkerPool {
             policy_restarts: 0,
             active_leases: 0,
         });
-        let entry = self.entries.last_mut().ok_or_else(|| LeanWorkerError::Protocol {
+        let index = self
+            .entries
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| LeanWorkerError::Protocol {
+                message: "worker pool failed to retain newly opened entry".to_owned(),
+            })?;
+        let _ = self.entries[index].sample_rss();
+        self.rss_after_open_kib = total_known_child_rss_kib(&self.entries);
+        let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool failed to retain newly opened entry".to_owned(),
         })?;
-        let _ = entry.sample_rss();
         entry.active_leases = entry.active_leases.saturating_add(1);
         Ok(LeanWorkerSessionLease {
             entry,
@@ -402,11 +445,18 @@ impl LeanWorkerPool {
             &self.entries,
             self.queue_timeouts,
             self.memory_budget_rejections,
+            self.cold_open_attempts,
+            self.cold_open_admitted,
+            self.cold_open_refusals,
+            self.concurrent_cold_opens_observed,
+            self.rss_before_admission_kib,
+            self.rss_after_open_kib,
+            self.refusal_reason.clone(),
         )
     }
 
     fn snapshot_from_lease_config(config: &LeanWorkerPoolConfig, entry: &PoolEntry) -> LeanWorkerPoolSnapshot {
-        snapshot_from_entries(config, std::slice::from_ref(entry), 0, 0)
+        snapshot_from_entries(config, std::slice::from_ref(entry), 0, 0, 0, 0, 0, 0, None, None, None)
     }
 }
 
@@ -415,6 +465,13 @@ fn snapshot_from_entries(
     entries: &[PoolEntry],
     queue_timeouts: u64,
     memory_budget_rejections: u64,
+    cold_open_attempts: u64,
+    cold_open_admitted: u64,
+    cold_open_refusals: u64,
+    concurrent_cold_opens_observed: u64,
+    rss_before_admission_kib: Option<u64>,
+    rss_after_open_kib: Option<u64>,
+    refusal_reason: Option<String>,
 ) -> LeanWorkerPoolSnapshot {
     LeanWorkerPoolSnapshot {
         max_workers: config.max_workers,
@@ -448,6 +505,17 @@ fn snapshot_from_entries(
         policy_restarts: entries.iter().map(|entry| entry.policy_restarts).sum(),
         queue_timeouts,
         memory_budget_rejections,
+        cold_open_attempts,
+        cold_open_admitted,
+        cold_open_refusals,
+        import_like_requests: entries
+            .iter()
+            .map(|entry| entry.capability.stats().import_like_admission_attempts)
+            .sum(),
+        concurrent_cold_opens_observed,
+        rss_before_admission_kib,
+        rss_after_open_kib,
+        refusal_reason,
         last_restart_reason: entries.iter().rev().find_map(|entry| entry.last_restart_reason.clone()),
         last_import_stats: entries
             .iter()
@@ -516,16 +584,16 @@ impl LeanWorkerPool {
         entry.enforce_policy(&self.config).map(|_| ())
     }
 
-    fn ensure_spawn_within_total_rss_budget(&mut self) -> Result<(), LeanWorkerError> {
+    fn ensure_spawn_within_total_rss_budget(&mut self, rss: PoolRssTotal) -> Result<(), LeanWorkerError> {
         let Some(limit_kib) = self.config.max_total_child_rss_kib else {
             return Ok(());
         };
-        let rss = self.refresh_total_child_rss();
         if rss.unavailable > 0 {
             return Ok(());
         }
         if rss.total_kib >= limit_kib {
             self.memory_budget_rejections = self.memory_budget_rejections.saturating_add(1);
+            self.record_cold_open_refusal("rss_budget");
             return Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
                 current_kib: rss.total_kib,
                 limit_kib,
@@ -533,6 +601,24 @@ impl LeanWorkerPool {
             });
         }
         Ok(())
+    }
+
+    fn record_cold_open_attempt(&mut self) {
+        self.cold_open_attempts = self.cold_open_attempts.saturating_add(1);
+        self.refusal_reason = None;
+        if self.cold_opens_in_progress > 0 {
+            self.concurrent_cold_opens_observed = self.concurrent_cold_opens_observed.saturating_add(1);
+        }
+    }
+
+    fn record_cold_open_admitted(&mut self) {
+        self.cold_open_admitted = self.cold_open_admitted.saturating_add(1);
+        self.cold_opens_in_progress = self.cold_opens_in_progress.saturating_add(1);
+    }
+
+    fn record_cold_open_refusal(&mut self, reason: impl Into<String>) {
+        self.cold_open_refusals = self.cold_open_refusals.saturating_add(1);
+        self.refusal_reason = Some(reason.into());
     }
 
     fn latest_import_stats(&self) -> Option<LeanWorkerImportStats> {
@@ -559,6 +645,7 @@ impl LeanWorkerPool {
 
     fn pool_full_error<T>(&mut self) -> Result<T, LeanWorkerError> {
         if self.config.queue_wait_timeout.is_zero() {
+            self.record_cold_open_refusal("max_workers");
             return Err(LeanWorkerError::WorkerPoolExhausted {
                 max_workers: self.config.max_workers,
             });
@@ -569,6 +656,7 @@ impl LeanWorkerPool {
             thread::sleep(remaining.min(Duration::from_millis(10)));
         }
         self.queue_timeouts = self.queue_timeouts.saturating_add(1);
+        self.record_cold_open_refusal("queue_timeout");
         Err(LeanWorkerError::WorkerPoolQueueTimeout {
             waited: self.config.queue_wait_timeout,
         })
@@ -655,6 +743,16 @@ impl PoolEntry {
 struct PoolRssTotal {
     total_kib: u64,
     unavailable: u64,
+}
+
+impl PoolRssTotal {
+    fn available_total(self) -> Option<u64> {
+        if self.unavailable == 0 {
+            Some(self.total_kib)
+        } else {
+            None
+        }
+    }
 }
 
 /// Borrowed lease for running typed commands on a compatible worker session.

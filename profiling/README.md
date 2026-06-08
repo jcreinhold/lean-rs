@@ -92,7 +92,7 @@ Defaults are deliberately small. Increase them only when the previous run's peak
 ```sh
 LEAN_RS_LONG_SESSION_IMPORTS=8 \
 LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY=1 \
-LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152 \
+LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 ./profiling/scripts/profile_memory.sh long-session-fresh
 ```
 
@@ -104,21 +104,26 @@ The worker rebaseline collector records those ceilings explicitly instead of rel
 ```sh
 LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
 LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
+LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
 ./profiling/scripts/profile_memory.sh worker-cycling
 
 LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
 LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
 ./profiling/scripts/profile_memory.sh pool-memory
 ```
 
+Worker and pool workloads also print `admission=...` rows. The Markdown report renders them under **Import Admission**
+with cold-open attempts, admitted opens, typed refusals, import-like requests, observed concurrent cold opens, and RSS
+before/after admission. A nonzero refusal count is expected in the pool stress row when the configured worker/RSS budget
+rejects a distinct cold session before another import starts.
+
 `collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
-run stays at or below 70% of the configured 2 GiB budget, and the Markdown report recommends the largest candidate whose
-peak RSS stays within the budget. On the 2026-06-08 macOS aarch64 run at commit `396bdf3`, `max_imports=1` peaked at
-1,194,368 KiB and `max_imports=2` peaked at 3,236,416 KiB, so the local recommendation is
-`LeanWorkerRestartPolicy::memory_bounded(1, 2097152)`.
+run stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate
+whose peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative
+and normally skips the two-import candidate on local machines. Historical 2026-06-08 data at a 2 GiB cap showed
+`max_imports=1` peaking at 1,194,368 KiB and `max_imports=2` peaking at 3,236,416 KiB.
 
 The import matrix records narrower exported/server attempts, the selected default `private` profile, and explicit
 `full-private-compat`. `Environment.freeRegions` remains unsafe after `loadExts := true`; the matrix records retained

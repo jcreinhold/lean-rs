@@ -25,14 +25,16 @@ cargo test --doc --workspace
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **2** so total
-memory stays bounded across CI runners (~7 GiB on `{ubuntu-latest, macos-latest}`). The workspace's
-[`.cargo/config.toml`](../.cargo/config.toml) sets `LEAN_RS_NUM_THREADS=1` so each Lean process spawns a single worker
-thread; product is at most 2 Lean workers across the full run.
+The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **1**. The
+workspace's [`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
+`LEAN_RS_NUM_THREADS=1`, and a default `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
+defaults make normal `cargo nextest`, focused `cargo test`, worker examples, and profiling examples use the local
+low-memory shape without manual shell exports.
 
 | Knob                            | Effect                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
 | `NEXTEST_TEST_THREADS=8`        | Use more processes when the machine has memory to spare.                              |
+| `CARGO_BUILD_JOBS=4`            | Use more compile parallelism when the machine has memory to spare.                    |
 | `cargo test -p lean-rs --lib …` | Single-test debug loop. The cumulative-state pathology doesn't fire at one test.      |
 | `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
 

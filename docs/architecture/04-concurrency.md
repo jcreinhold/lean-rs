@@ -83,8 +83,8 @@ values fall back to Lean's default with a `tracing::warn!` against the `lean_rs`
 
 Set `LEAN_RS_NUM_THREADS` when several Lean-using processes run side by side (CI test matrices, batch workers,
 multi-tenant services) so the sum of their pools does not oversubscribe cores. The workspace ships
-`LEAN_RS_NUM_THREADS = "1"` as a cargo `[env]` default; tests run under `cargo nextest run` with a 2-process cap, for at
-most 2 Lean workers across the suite. See [`docs/testing.md`](../testing.md) for the test-runner side.
+`LEAN_RS_NUM_THREADS = "1"` as a cargo `[env]` default; tests run under `cargo nextest run` with a 1-process cap, for at
+most 1 Lean worker across the suite. See [`docs/testing.md`](../testing.md) for the test-runner side.
 
 The crate does not currently expose a programmatic `with_workers(n)` constructor; the env var is the single supported
 override. Adding a programmatic API later is a strict refinement.

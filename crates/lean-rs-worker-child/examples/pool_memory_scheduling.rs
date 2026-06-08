@@ -5,8 +5,8 @@
 //! ```sh
 //! cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 //! LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-//! LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
-//! LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+//! LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
+//! LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
 //! LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
 //! cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 //! ```
@@ -24,8 +24,8 @@ use lean_rs_worker_parent::{
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_MAX_WORKERS: usize = 1;
-const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 2_097_152;
-const DEFAULT_PER_WORKER_RSS_KIB: u64 = 2_097_152;
+const DEFAULT_TOTAL_CHILD_RSS_KIB: u64 = 1_572_864;
+const DEFAULT_PER_WORKER_RSS_KIB: u64 = 1_572_864;
 const DEFAULT_MAX_IMPORTS: u64 = 1;
 
 #[derive(Clone, Copy)]
@@ -66,6 +66,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     fixture_import_reuse(&worker_binary, knobs)?;
     mathlib_shaped_fallback(&worker_binary, knobs)?;
     repeated_session_reuse(&worker_binary, knobs)?;
+    admission_refusal_stress(&worker_binary, knobs)?;
 
     println!(
         "parent_rss_end_kib={}",
@@ -147,6 +148,48 @@ fn repeated_session_reuse(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Res
     Ok(())
 }
 
+fn admission_refusal_stress(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> Result<(), LeanWorkerError> {
+    let mut pool = LeanWorkerPool::new(memory_pool_config(MemoryPolicyKnobs {
+        max_workers: 1,
+        ..knobs
+    }));
+    {
+        let mut lease = pool.acquire_lease(builder(worker_binary))?;
+        let response = lease.run_json_command(
+            &json_command(),
+            &FixtureRequest {
+                source: "admission-refusal-first".to_owned(),
+            },
+            None,
+            None,
+        )?;
+        println!(
+            "admission_refusal_stress first_accepted={} kind={}",
+            response.accepted, response.kind
+        );
+    }
+
+    let distinct = builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::default().max_requests(99));
+    match pool.acquire_lease(distinct) {
+        Err(LeanWorkerError::WorkerPoolExhausted { max_workers }) => {
+            println!("admission_refusal_stress refused=max_workers max_workers={max_workers}");
+        }
+        Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
+            current_kib, limit_kib, ..
+        }) => {
+            println!("admission_refusal_stress refused=rss_budget current_kib={current_kib} limit_kib={limit_kib}");
+        }
+        Err(err) => return Err(err),
+        Ok(lease) => {
+            drop(lease);
+            println!("admission_refusal_stress refused=none");
+        }
+    }
+    print_admission("admission_refusal_stress", 1, &pool);
+    print_snapshot("admission_refusal_stress", &pool);
+    Ok(())
+}
+
 fn memory_pool_config(knobs: MemoryPolicyKnobs) -> LeanWorkerPoolConfig {
     LeanWorkerPoolConfig::new(knobs.max_workers)
         .max_total_child_rss_kib(knobs.total_child_rss_kib)
@@ -199,6 +242,7 @@ fn print_timing(name: &str, iteration: u64, elapsed: Duration, pool: &LeanWorker
         snapshot.max_import_restarts,
         snapshot.policy_restarts,
     );
+    print_admission(name, iteration, pool);
 }
 
 fn print_snapshot(name: &str, pool: &LeanWorkerPool) {
@@ -220,6 +264,26 @@ fn print_snapshot(name: &str, pool: &LeanWorkerPool) {
     if let Some(import_stats) = snapshot.last_import_stats.as_ref() {
         report_import_stats(name, import_stats);
     }
+}
+
+fn print_admission(name: &str, iteration: u64, pool: &LeanWorkerPool) {
+    let snapshot = pool.snapshot();
+    println!(
+        "admission={name} iteration={iteration} kind=pool cold_open_attempts={} cold_open_admitted={} cold_open_refusals={} import_like_requests={} import_like_admitted={} concurrent_cold_opens_observed={} rss_before_admission_kib={} rss_after_open_kib={} refusal_reason={}",
+        snapshot.cold_open_attempts,
+        snapshot.cold_open_admitted,
+        snapshot.cold_open_refusals,
+        snapshot.import_like_requests,
+        snapshot.imports,
+        snapshot.concurrent_cold_opens_observed,
+        snapshot
+            .rss_before_admission_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot
+            .rss_after_open_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        snapshot.refusal_reason.as_deref().unwrap_or("none"),
+    );
 }
 
 fn report_import_stats(label: &str, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {

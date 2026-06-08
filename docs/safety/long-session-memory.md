@@ -70,7 +70,7 @@ LEAN_RS_LONG_SESSION_BULK=512 \
 LEAN_RS_LONG_SESSION_ELAB=512 \
 LEAN_RS_LONG_SESSION_POOL_CAPACITY=4 \
 LEAN_RS_LONG_SESSION_CHECKPOINT_EVERY=16 \
-LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152 \
+LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 LEAN_RS_NUM_THREADS=1 \
 cargo run --release -p lean-rs-host --example long_session_memory
 ```
@@ -201,7 +201,7 @@ module snapshot construction, and Lean's `lazy discriminator import initializati
 laziness is derived-index laziness over imported module data. It is not lazy `.olean` loading, does not reduce
 `env.header.regions`, and does not make compacted regions safe to free after `loadExts := true`.
 
-Local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_MODE=derived-indexes`,
+Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_MODE=derived-indexes`,
 `LEAN_RS_LONG_SESSION_IMPORTS=1`, and `LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152`:
 
 | Phase | Source ranges | Docstrings | Raw types | Pretty prints | Proof facts | Simp ext | Parser/elab | Snapshots | Lazy discr import init |
@@ -219,7 +219,9 @@ Local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_
 ## Measured Shape
 
 Post-reduction rebaseline on 2026-06-08, commit `396bdf3`, macOS aarch64, Lean 4.31.0-rc1, profiling profile,
-`LEAN_RS_NUM_THREADS=1`, and a local `2,097,152` KiB RSS budget:
+`LEAN_RS_NUM_THREADS=1`, and a local `2,097,152` KiB RSS budget. Current repo defaults are stricter:
+`test-threads=1`, `build.jobs=1`, `RUST_TEST_THREADS=1`, `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864`, and profiling RSS caps
+of 1,572,864 KiB.
 
 | Workload | Command/env shape | Status | Peak RSS KiB | Import profile | Imported bytes | Regions | Ext entries |
 | --- | --- | --- | ---: | --- | ---: | ---: | ---: |
@@ -239,6 +241,15 @@ LeanWorkerRestartPolicy::memory_bounded(1, 2_097_152);
 LeanWorkerPoolConfig::new(1)
     .per_worker_rss_ceiling_kib(2_097_152)
     .max_total_child_rss_kib(2_097_152);
+```
+
+The current checked-in local-safe defaults are stricter and require no shell exports:
+
+```rust
+LeanWorkerRestartPolicy::memory_bounded(1, 1_572_864);
+LeanWorkerPoolConfig::new(1)
+    .per_worker_rss_ceiling_kib(1_572_864)
+    .max_total_child_rss_kib(1_572_864);
 ```
 
 The `max_imports=2` candidate was collected because the one-import run stayed below the 70% widening threshold, but it
@@ -352,31 +363,50 @@ The worker memory reproducer is:
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
 LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
+LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
 cargo run -p lean-rs-worker-child --example memory_cycling
 ```
 
-On the 2026-06-08 macOS aarch64 rebaseline, cycling after every fresh full-session import kept each child near
-1,194,368 KiB. Allowing two fresh imports in one child reached 3,236,416 KiB, above the local 2 GiB budget. This
-supports the operational claim: process cycling bounds retained RSS for this workload; in-process drain does not reset
-it.
+On the 2026-06-08 macOS aarch64 rebaseline with a 2 GiB cap, cycling after every fresh full-session import kept each
+child near 1,194,368 KiB. Allowing two fresh imports in one child reached 3,236,416 KiB, above that local budget. The
+current 1,572,864 KiB default keeps the one-import policy but avoids automatically widening to the two-import candidate.
+This supports the operational claim: process cycling bounds retained RSS for this workload; in-process drain does not
+reset it.
 
 `LeanWorkerPool` applies the same memory fact at the local orchestration layer. Pool policy can reject new distinct
 workers when known total child RSS reaches a budget, cycle a warm worker when its sampled RSS reaches a per-worker
 ceiling, cycle idle workers, and bound admission waits for a full pool. RSS sampling remains best effort and
 platform-specific: an unavailable sample is recorded as unavailable, not treated as proof that the pool is under budget.
+
+Cold import admission is intentionally local to the existing Rust boundaries:
+
+| Path | Admission shape |
+| --- | --- |
+| Direct `LeanCapabilities::session` | no pooling; caller owns process budget |
+| Same-process `SessionPool` cache miss | `SessionPoolMemoryPolicy` refuses before `Lean.importModules` |
+| Same-process `SessionPool` cache hit | warm reuse; no fresh import admission |
+| `LeanWorkerCapabilityBuilder::open` | single worker child; `LeanWorkerRestartPolicy` checks import-like session open before it enters the child |
+| Explicit worker `open_session` / `open_session_with_imports` | supervisor records import-like admission and applies restart/RSS policy first |
+| `LeanWorkerPool::acquire_lease` with a new session key | `&mut LeanWorkerPool` serializes one pool; `max_workers` and total child RSS are checked before `builder.open()` |
+| Lease command after `session_missing` | reopens through the same worker supervisor admission path |
+
+There is no global import semaphore and no `max_concurrent_imports` knob in this baseline. One pool cannot internally
+run concurrent cold opens because lease acquisition takes `&mut LeanWorkerPool`; multiple independent pools are a
+caller-level concurrency decision and should be bounded by their own process policy and RSS budget.
 The pool memory-scheduling workload is:
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=2097152 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=2097152 \
+LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
+LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
 LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
 cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 ```
 
 On the same run, the pool fixture used one worker, peaked at 419,616 KiB child RSS, and held the parent process around
-2,144 KiB to 3,456 KiB. Cold pool requests were roughly 215 ms; warm pool reuse was roughly 5-6 ms. Use the pool
-knobs together to avoid multiplying Lean import RSS across many local children. They do not change the underlying reset
-rule: only process exit resets Lean process-global retained memory.
+2,144 KiB to 3,456 KiB. Cold pool requests were roughly 215 ms; warm pool reuse was roughly 5-6 ms. The profiling rows
+named `admission=...` report cold-open attempts, admitted opens, typed refusals, observed concurrent cold opens, import-like
+requests, and RSS before/after admission. Use the pool knobs together to avoid multiplying Lean import RSS across many
+local children. They do not change the underlying reset rule: only process exit resets Lean process-global retained
+memory.

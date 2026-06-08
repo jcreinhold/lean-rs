@@ -69,7 +69,7 @@ fn build_shipped_template() {
     static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
-            .args(["build", "--jobs", "2", "--manifest-path"])
+            .args(["build", "--jobs", "1", "--manifest-path"])
             .arg(shipped_template_manifest())
             .args(["--bins", "--examples"])
             .env("CARGO_TARGET_DIR", shipped_template_target_dir())

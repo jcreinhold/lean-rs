@@ -6,7 +6,7 @@
 //! cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 //! LEAN_RS_WORKER_MEMORY_IMPORTS=8 \
 //! LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-//! LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=2097152 \
+//! LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
 //! cargo run -p lean-rs-worker-child --example memory_cycling
 //! ```
 
@@ -20,7 +20,7 @@ use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerRestartPolic
 
 const DEFAULT_IMPORTS: u64 = 8;
 const DEFAULT_MAX_IMPORTS: u64 = 2;
-const DEFAULT_MAX_RSS_KIB: u64 = 2_097_152;
+const DEFAULT_MAX_RSS_KIB: u64 = 1_572_864;
 
 fn main() -> ExitCode {
     match run() {
@@ -72,6 +72,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .or(rss)
                 .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
         );
+        report_admission(iteration, open_kind, &before, &stats);
         println!(
             "iteration={iteration} requests={} imports={} restarts={} exits={} rss_kib={} last_reason={:?}",
             stats.requests,
@@ -98,6 +99,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("worker_exit_success={}", exit.success);
     println!("status=ok");
     Ok(())
+}
+
+fn report_admission(
+    iteration: u64,
+    kind: &str,
+    before: &lean_rs_worker_parent::LeanWorkerStats,
+    after: &lean_rs_worker_parent::LeanWorkerStats,
+) {
+    let cold_open = u64::from(kind == "cold");
+    let import_like_requests = after
+        .import_like_admission_attempts
+        .saturating_sub(before.import_like_admission_attempts);
+    let import_like_admitted = after.import_like_admitted.saturating_sub(before.import_like_admitted);
+    println!(
+        "admission=worker_session_open iteration={iteration} kind={kind} cold_open_attempts={cold_open} cold_open_admitted={cold_open} cold_open_refusals=0 import_like_requests={import_like_requests} import_like_admitted={import_like_admitted} concurrent_cold_opens_observed=0 rss_before_admission_kib={} rss_after_open_kib={} refusal_reason=none",
+        after
+            .last_import_like_rss_before_admission_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+        after
+            .last_rss_kib
+            .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
+    );
 }
 
 fn env_u64(name: &str, default: u64) -> u64 {
