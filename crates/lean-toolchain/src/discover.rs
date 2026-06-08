@@ -38,10 +38,18 @@ pub enum DiscoverySource {
 ///
 /// `Default` enables every probe; tests and reproducible builds narrow the
 /// set to produce deterministic behaviour.
+// Each `bool` is an independent per-probe toggle, deliberately parallel; a
+// state enum or bitflags would obscure that one-flag-per-probe mapping.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug)]
 pub struct DiscoverOptions {
-    /// Caller-supplied sysroot; bypasses every other probe when set.
+    /// Caller-supplied sysroot, probed first. The ambient probes that follow
+    /// are each gated by their own `allow_*` flag, so a caller that wants an
+    /// explicit sysroot to be the *only* source clears those flags (the build
+    /// helpers do this automatically).
     pub explicit_sysroot: Option<PathBuf>,
+    /// Consult the `LEAN_SYSROOT` environment variable.
+    pub allow_lean_sysroot_env: bool,
     /// Consult `lean --print-prefix` (requires `lean` on `PATH`).
     pub allow_path_lookup: bool,
     /// Consult `$ELAN_HOME` + `elan show active-toolchain`.
@@ -56,6 +64,7 @@ impl Default for DiscoverOptions {
     fn default() -> Self {
         Self {
             explicit_sysroot: None,
+            allow_lean_sysroot_env: true,
             allow_path_lookup: true,
             allow_elan: true,
             allow_lake_env: true,
@@ -107,15 +116,19 @@ pub fn discover_toolchain(opts: &DiscoverOptions) -> Result<ToolchainInfo, LinkD
         tried.push("explicit_sysroot unset".into());
     }
 
-    match env::var_os("LEAN_SYSROOT") {
-        Some(value) => {
-            let path = PathBuf::from(&value);
-            if has_header(&path) {
-                return Ok(build_info(path, DiscoverySource::LeanSysrootEnv, opts));
+    if opts.allow_lean_sysroot_env {
+        match env::var_os("LEAN_SYSROOT") {
+            Some(value) => {
+                let path = PathBuf::from(&value);
+                if has_header(&path) {
+                    return Ok(build_info(path, DiscoverySource::LeanSysrootEnv, opts));
+                }
+                tried.push(format!("LEAN_SYSROOT={} (no include/lean/lean.h)", path.display()));
             }
-            tried.push(format!("LEAN_SYSROOT={} (no include/lean/lean.h)", path.display()));
+            None => tried.push("LEAN_SYSROOT unset".into()),
         }
-        None => tried.push("LEAN_SYSROOT unset".into()),
+    } else {
+        tried.push("LEAN_SYSROOT probe disabled".into());
     }
 
     if opts.allow_elan {

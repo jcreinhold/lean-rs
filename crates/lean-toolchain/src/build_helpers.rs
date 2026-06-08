@@ -339,6 +339,7 @@ impl CargoLeanCapability {
         let has_explicit_sysroot = self.lean_sysroot.is_some();
         DiscoverOptions {
             explicit_sysroot: self.lean_sysroot.clone(),
+            allow_lean_sysroot_env: !has_explicit_sysroot,
             allow_path_lookup: !has_explicit_sysroot,
             allow_elan: !has_explicit_sysroot,
             allow_lake_env: !has_explicit_sysroot,

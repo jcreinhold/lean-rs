@@ -413,6 +413,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::CargoLeanCapabilit
 pub struct lean_toolchain::DiscoverOptions
 pub lean_toolchain::DiscoverOptions::allow_elan: bool
 pub lean_toolchain::DiscoverOptions::allow_lake_env: bool
+pub lean_toolchain::DiscoverOptions::allow_lean_sysroot_env: bool
 pub lean_toolchain::DiscoverOptions::allow_path_lookup: bool
 pub lean_toolchain::DiscoverOptions::explicit_sysroot: core::option::Option<std::path::PathBuf>
 pub lean_toolchain::DiscoverOptions::toolchain_file: core::option::Option<std::path::PathBuf>

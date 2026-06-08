@@ -12,7 +12,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 This is a breaking release (pre-1.0, so a minor bump). The worker wire protocol moved from `PROTOCOL_VERSION` 8 to 10,
 several `LeanWorkerError` variants gained fields and boxed an existing one, and `Request::OpenHostSession` /
 `Response::HostSessionOpened` gained fields — a parent and child built from different `0.x` lines will refuse to
-handshake. Rebuild the whole worker stack from one version. The headline theme is bounded, observable imports: every
+handshake. Rebuild the whole worker stack from one version. `lean-toolchain`'s `DiscoverOptions` also gains a field
+(`allow_lean_sysroot_env`, see below). The headline theme is bounded, observable imports: every
 host session now reports what it loaded and how much memory that cost, the pool can refuse imports that would breach an
 RSS budget, and resource exhaustion surfaces as structured facts instead of an opaque failure.
 
@@ -25,6 +26,16 @@ a new published crate, `lean-rs-abi`, which carries no link dependency on `lible
 defined one crate deeper. Build tooling that needs the digest window or ABI tags without linking Lean can now depend on
 `lean-rs-abi` directly. (`cargo public-api` cannot enumerate a cross-crate glob, so the `lean-rs-sys` baseline now renders
 these as `pub use …::<<lean_rs_abi::…::*>>` rather than item-by-item; the public surface is unchanged.)
+
+### `lean-toolchain`: an explicit sysroot no longer leaks ambient `LEAN_SYSROOT`
+
+`DiscoverOptions` gains an `allow_lean_sysroot_env` flag, completing the per-probe gating set. Previously the
+`LEAN_SYSROOT` environment probe ran unconditionally, so passing an explicit (or deliberately invalid) sysroot still
+fell back to an ambient `LEAN_SYSROOT` — contradicting `explicit_sysroot`'s documented "probed first, ambient disabled"
+contract. The build helpers now clear this flag whenever an explicit sysroot is set, so an explicit sysroot is the only
+source. `Default` leaves it enabled, preserving the previous discovery order for callers that do not narrow the probe
+set. This is the field that surfaced as a CI-only failure (CI exports `LEAN_SYSROOT`); local runs without it were
+unaffected.
 
 ### `lean-rs-host`: session import profiles bound what a session loads
 

@@ -34,6 +34,7 @@ fn explicit_sysroot_wins_over_every_other_probe() {
     let prefix = baked_prefix();
     let info = discover_toolchain(&DiscoverOptions {
         explicit_sysroot: Some(prefix.clone()),
+        allow_lean_sysroot_env: false,
         allow_path_lookup: false,
         allow_elan: false,
         allow_lake_env: false,
@@ -50,15 +51,12 @@ fn explicit_sysroot_wins_over_every_other_probe() {
 
 #[test]
 fn invalid_explicit_sysroot_with_all_probes_off_reports_missing_lean() {
-    // Only meaningful when LEAN_SYSROOT is not set in the ambient env: that
-    // probe runs unconditionally per the documented precedence.
-    if env::var_os("LEAN_SYSROOT").is_some() {
-        eprintln!("skipping: LEAN_SYSROOT is set in the test environment");
-        return;
-    }
-
+    // With every ambient probe—including the `LEAN_SYSROOT` env probe—disabled,
+    // a bogus explicit sysroot must fail deterministically regardless of the
+    // ambient environment (CI sets `LEAN_SYSROOT`).
     let err = discover_toolchain(&DiscoverOptions {
         explicit_sysroot: Some(PathBuf::from("/definitely/does/not/exist/lean-prefix")),
+        allow_lean_sysroot_env: false,
         allow_path_lookup: false,
         allow_elan: false,
         allow_lake_env: false,
@@ -87,6 +85,7 @@ fn path_lookup_succeeds_when_lean_is_on_path() {
     // this—running the test suite already requires a working toolchain.
     let opts = DiscoverOptions {
         explicit_sysroot: None,
+        allow_lean_sysroot_env: true,
         allow_path_lookup: true,
         allow_elan: false,
         allow_lake_env: false,
@@ -147,6 +146,7 @@ fn toolchain_file_overrides_version_string() {
 
     let info = discover_toolchain(&DiscoverOptions {
         explicit_sysroot: Some(baked_prefix()),
+        allow_lean_sysroot_env: false,
         allow_path_lookup: false,
         allow_elan: false,
         allow_lake_env: false,
