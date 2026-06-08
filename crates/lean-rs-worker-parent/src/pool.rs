@@ -46,6 +46,7 @@ pub enum LeanWorkerRestartPolicyClass {
 pub struct LeanWorkerSessionKey {
     project_root: PathBuf,
     import_workspace_root: PathBuf,
+    built_manifest_path: Option<PathBuf>,
     package: String,
     lib_name: String,
     imports: Vec<String>,
@@ -68,10 +69,11 @@ impl LeanWorkerSessionKey {
         lib_name: impl Into<String>,
         imports: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        let project_root = project_root.into();
+        let project_root = normalize_import_workspace_root(project_root.into());
         Self {
             import_workspace_root: normalize_import_workspace_root(project_root.clone()),
             project_root,
+            built_manifest_path: None,
             package: package.into(),
             lib_name: lib_name.into(),
             imports: imports.into_iter().map(Into::into).collect(),
@@ -84,6 +86,11 @@ impl LeanWorkerSessionKey {
 
     pub(crate) fn with_import_workspace_root(mut self, root: impl Into<PathBuf>) -> Self {
         self.import_workspace_root = normalize_import_workspace_root(root.into());
+        self
+    }
+
+    pub(crate) fn with_built_manifest_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.built_manifest_path = Some(normalize_import_workspace_root(path.into()));
         self
     }
 
@@ -298,6 +305,13 @@ pub struct LeanWorkerPoolSnapshot {
     pub cold_open_attempts: u64,
     pub cold_open_admitted: u64,
     pub cold_open_refusals: u64,
+    pub key_hits: u64,
+    pub key_misses: u64,
+    pub distinct_keys_seen: u64,
+    pub fresh_cold_opens_avoided: u64,
+    pub miss_empty_pool: u64,
+    pub miss_no_matching_key: u64,
+    pub last_key_miss_reason: Option<String>,
     pub import_like_requests: u64,
     pub concurrent_cold_opens_observed: u64,
     pub rss_before_admission_kib: Option<u64>,
@@ -325,6 +339,13 @@ pub struct LeanWorkerPool {
     cold_open_attempts: u64,
     cold_open_admitted: u64,
     cold_open_refusals: u64,
+    key_hits: u64,
+    key_misses: u64,
+    seen_keys: Vec<LeanWorkerSessionKey>,
+    fresh_cold_opens_avoided: u64,
+    miss_empty_pool: u64,
+    miss_no_matching_key: u64,
+    last_key_miss_reason: Option<String>,
     cold_opens_in_progress: u64,
     concurrent_cold_opens_observed: u64,
     rss_before_admission_kib: Option<u64>,
@@ -344,6 +365,13 @@ impl LeanWorkerPool {
             cold_open_attempts: 0,
             cold_open_admitted: 0,
             cold_open_refusals: 0,
+            key_hits: 0,
+            key_misses: 0,
+            seen_keys: Vec::new(),
+            fresh_cold_opens_avoided: 0,
+            miss_empty_pool: 0,
+            miss_no_matching_key: 0,
+            last_key_miss_reason: None,
             cold_opens_in_progress: 0,
             concurrent_cold_opens_observed: 0,
             rss_before_admission_kib: None,
@@ -369,7 +397,9 @@ impl LeanWorkerPool {
         builder: LeanWorkerCapabilityBuilder,
     ) -> Result<LeanWorkerSessionLease<'_>, LeanWorkerError> {
         let key = builder.session_key();
+        self.remember_seen_key(&key);
         if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
+            self.record_key_hit();
             self.ensure_entry_running(index)?;
             self.enforce_entry_policy_before_assignment(index)?;
             let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
@@ -385,6 +415,12 @@ impl LeanWorkerPool {
             });
         }
 
+        let miss_reason = if self.entries.is_empty() {
+            "empty_pool"
+        } else {
+            "no_matching_key"
+        };
+        self.record_key_miss(miss_reason);
         self.record_cold_open_attempt();
         let rss_before_admission = self.refresh_total_child_rss();
         self.rss_before_admission_kib = rss_before_admission.available_total();
@@ -448,6 +484,13 @@ impl LeanWorkerPool {
             self.cold_open_attempts,
             self.cold_open_admitted,
             self.cold_open_refusals,
+            self.key_hits,
+            self.key_misses,
+            u64::try_from(self.seen_keys.len()).unwrap_or(u64::MAX),
+            self.fresh_cold_opens_avoided,
+            self.miss_empty_pool,
+            self.miss_no_matching_key,
+            self.last_key_miss_reason.clone(),
             self.concurrent_cold_opens_observed,
             self.rss_before_admission_kib,
             self.rss_after_open_kib,
@@ -456,7 +499,26 @@ impl LeanWorkerPool {
     }
 
     fn snapshot_from_lease_config(config: &LeanWorkerPoolConfig, entry: &PoolEntry) -> LeanWorkerPoolSnapshot {
-        snapshot_from_entries(config, std::slice::from_ref(entry), 0, 0, 0, 0, 0, 0, None, None, None)
+        snapshot_from_entries(
+            config,
+            std::slice::from_ref(entry),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            None,
+            None,
+            None,
+        )
     }
 }
 
@@ -468,6 +530,13 @@ fn snapshot_from_entries(
     cold_open_attempts: u64,
     cold_open_admitted: u64,
     cold_open_refusals: u64,
+    key_hits: u64,
+    key_misses: u64,
+    distinct_keys_seen: u64,
+    fresh_cold_opens_avoided: u64,
+    miss_empty_pool: u64,
+    miss_no_matching_key: u64,
+    last_key_miss_reason: Option<String>,
     concurrent_cold_opens_observed: u64,
     rss_before_admission_kib: Option<u64>,
     rss_after_open_kib: Option<u64>,
@@ -508,6 +577,13 @@ fn snapshot_from_entries(
         cold_open_attempts,
         cold_open_admitted,
         cold_open_refusals,
+        key_hits,
+        key_misses,
+        distinct_keys_seen,
+        fresh_cold_opens_avoided,
+        miss_empty_pool,
+        miss_no_matching_key,
+        last_key_miss_reason,
         import_like_requests: entries
             .iter()
             .map(|entry| entry.capability.stats().import_like_admission_attempts)
@@ -619,6 +695,28 @@ impl LeanWorkerPool {
     fn record_cold_open_refusal(&mut self, reason: impl Into<String>) {
         self.cold_open_refusals = self.cold_open_refusals.saturating_add(1);
         self.refusal_reason = Some(reason.into());
+    }
+
+    fn remember_seen_key(&mut self, key: &LeanWorkerSessionKey) {
+        if self.seen_keys.iter().all(|seen| seen != key) {
+            self.seen_keys.push(key.clone());
+        }
+    }
+
+    fn record_key_hit(&mut self) {
+        self.key_hits = self.key_hits.saturating_add(1);
+        self.fresh_cold_opens_avoided = self.fresh_cold_opens_avoided.saturating_add(1);
+        self.last_key_miss_reason = None;
+    }
+
+    fn record_key_miss(&mut self, reason: &'static str) {
+        self.key_misses = self.key_misses.saturating_add(1);
+        match reason {
+            "empty_pool" => self.miss_empty_pool = self.miss_empty_pool.saturating_add(1),
+            "no_matching_key" => self.miss_no_matching_key = self.miss_no_matching_key.saturating_add(1),
+            _ => {}
+        }
+        self.last_key_miss_reason = Some(reason.to_owned());
     }
 
     fn latest_import_stats(&self) -> Option<LeanWorkerImportStats> {

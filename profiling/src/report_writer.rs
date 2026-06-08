@@ -4,7 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common::results_dir;
-use crate::report_schema::{AdmissionSample, BaselineMode, KeyValue, PerformanceReport, TimingSample, WorkloadRun};
+use crate::report_schema::{
+    AdmissionSample, BaselineMode, KeyValue, PerformanceReport, SessionReuseSample, TimingSample, WorkloadRun,
+};
 
 /// Write JSON and Markdown artifacts for a collected profiling report.
 ///
@@ -290,6 +292,49 @@ fn render_markdown(report: &PerformanceReport) -> String {
         }
     }
 
+    let reuse_workloads: Vec<_> = report
+        .workloads
+        .iter()
+        .filter(|run| !run.session_reuse.is_empty())
+        .collect();
+    if !reuse_workloads.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Session Reuse Keys");
+        for run in reuse_workloads {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "### {}", run.name);
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "| Label | Iteration | Layer | Key hits | Key misses | Distinct keys | Fresh imports avoided | Empty misses | Reuse-disabled misses | No-match misses | Last miss |"
+            );
+            let _ = writeln!(
+                out,
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+            );
+            for sample in visible_session_reuse(&run.session_reuse) {
+                let iteration = sample
+                    .iteration
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    sample.label,
+                    iteration,
+                    sample.layer,
+                    sample.key_hits,
+                    sample.key_misses,
+                    sample.distinct_keys_seen,
+                    sample.fresh_imports_avoided,
+                    sample.miss_empty_pool,
+                    sample.miss_reuse_disabled,
+                    sample.miss_no_matching_key,
+                    sample.last_miss_reason.as_deref().unwrap_or("-")
+                );
+            }
+        }
+    }
+
     if !report.profiles.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "## CPU Profiles");
@@ -521,6 +566,17 @@ fn visible_admissions(admissions: &[AdmissionSample]) -> Vec<&AdmissionSample> {
     visible
 }
 
+fn visible_session_reuse(samples: &[SessionReuseSample]) -> Vec<&SessionReuseSample> {
+    const HEAD: usize = 20;
+    const TAIL: usize = 5;
+    if samples.len() <= HEAD + TAIL {
+        return samples.iter().collect();
+    }
+    let mut visible: Vec<_> = samples.iter().take(HEAD).collect();
+    visible.extend(samples.iter().skip(samples.len().saturating_sub(TAIL)));
+    visible
+}
+
 fn format_optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| String::from("-"), |value| value.to_string())
 }
@@ -545,8 +601,8 @@ fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u6
 #[cfg(test)]
 mod tests {
     use crate::report_schema::{
-        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata, TimingSample,
-        WorkloadRun,
+        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata,
+        SessionReuseSample, TimingSample, WorkloadRun,
     };
 
     use super::render_markdown;
@@ -596,6 +652,7 @@ mod tests {
                 derived_work: Vec::new(),
                 timings: Vec::new(),
                 admissions: Vec::new(),
+                session_reuse: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -664,6 +721,7 @@ mod tests {
                     rss_after_open_kib: Some(1000),
                     refusal_reason: None,
                 }],
+                session_reuse: Vec::new(),
                 key_values: vec![
                     crate::report_schema::KeyValue {
                         key: "max_rss_kib".to_owned(),
@@ -689,5 +747,58 @@ mod tests {
         assert!(markdown.contains("| worker_cycling | 1 | cold | 10.000 | 1000 |"));
         assert!(markdown.contains("## Import Admission"));
         assert!(markdown.contains("| worker_session_open | 1 | cold | 1 | 1 | 0 | 1 | 1 | 0 | 100 | 1000 | - |"));
+    }
+
+    #[test]
+    fn report_renders_session_reuse_table() {
+        let report = PerformanceReport {
+            metadata: ReportMetadata {
+                timestamp_utc: "now".to_owned(),
+                platform: "test".to_owned(),
+                git_commit: "abc".to_owned(),
+                git_branch: "main".to_owned(),
+                lean_version: "test".to_owned(),
+                tooling: "test".to_owned(),
+            },
+            baseline_mode: BaselineMode::Quick,
+            workloads: vec![WorkloadRun {
+                name: "pool-memory".to_owned(),
+                command: "cmd".to_owned(),
+                env: Vec::<EnvPair>::new(),
+                exit_success: true,
+                exit_code: Some(0),
+                wall_time_ms: 1.0,
+                status: Some("ok".to_owned()),
+                peak_rss_kib: None,
+                checkpoints: Vec::new(),
+                import_stats: Vec::new(),
+                derived_work: Vec::new(),
+                timings: Vec::new(),
+                admissions: Vec::new(),
+                session_reuse: vec![SessionReuseSample {
+                    label: "bounded_reuse_no_cycle".to_owned(),
+                    iteration: Some(2),
+                    layer: "worker-pool".to_owned(),
+                    key_hits: 1,
+                    key_misses: 1,
+                    distinct_keys_seen: 1,
+                    fresh_imports_avoided: 1,
+                    miss_empty_pool: 1,
+                    miss_reuse_disabled: 0,
+                    miss_no_matching_key: 0,
+                    last_miss_reason: None,
+                }],
+                key_values: Vec::new(),
+                stdout_path: "stdout".to_owned(),
+                stderr_path: "stderr".to_owned(),
+            }],
+            profiles: Vec::new(),
+            notes: Vec::new(),
+        };
+
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("## Session Reuse Keys"));
+        assert!(markdown.contains("Fresh imports avoided"));
+        assert!(markdown.contains("| bounded_reuse_no_cycle | 2 | worker-pool | 1 | 1 | 1 | 1 | 1 | 0 | 0 | - |"));
     }
 }

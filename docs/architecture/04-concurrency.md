@@ -98,9 +98,10 @@ an internal implementation detail of capabilities that need them.
 
 ## `SessionPool` under concurrency
 
-`SessionPool<'lean>` is a per-thread free-list for `LeanSession` instances bucketed by their imports key. Interior
-mutability is `RefCell<PoolInner<'lean>>` + `Cell<PoolStats>`; combined with the inherited `!Send + !Sync` of
-`LeanRuntime`, the pool is firmly single-threaded.
+`SessionPool<'lean>` is a per-thread free-list for `LeanSession` instances bucketed by a session-safety key:
+canonical Lake project root, ordered imports, and import profile. Import order is preserved because
+`Lean.importModules` is order-sensitive. Interior mutability is `RefCell<PoolInner<'lean>>` + `Cell<PoolStats>`;
+combined with the inherited `!Send + !Sync` of `LeanRuntime`, the pool is firmly single-threaded.
 
 Intended deployment: one pool per worker, all anchored to the shared `&'static LeanRuntime` returned by
 `LeanRuntime::init`. Workers acquire and release independently; the pool itself never crosses a thread boundary.

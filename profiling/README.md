@@ -119,6 +119,13 @@ with cold-open attempts, admitted opens, typed refusals, import-like requests, o
 before/after admission. A nonzero refusal count is expected in the pool stress row when the configured worker/RSS budget
 rejects a distinct cold session before another import starts.
 
+Pool workloads print `session_reuse=...` rows. The Markdown report renders them under **Session Reuse Keys** with key
+hits, key misses, distinct keys, fresh imports avoided, and miss reasons. These rows are separate from admission rows:
+reuse rows explain whether an equivalent request used a warm session, while admission rows explain whether cold work was
+allowed. Session keys preserve Lean import order and include only session-safety facts such as canonical roots, import
+profile, metadata expectation, toolchain identity, and manifest identity where applicable; they are not downstream result
+cache keys.
+
 `collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
 run stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate
 whose peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative

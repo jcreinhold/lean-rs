@@ -81,7 +81,9 @@ pub use self::declaration_search::{
     DeclarationSearchTimings, LeanDerivedWorkFacts,
 };
 pub use self::host::LeanHost;
-pub use self::pool::{PoolStats, PooledSession, SessionPool, SessionPoolConfig, SessionPoolMemoryPolicy};
+pub use self::pool::{
+    PoolStats, PooledSession, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason, SessionPoolMemoryPolicy,
+};
 pub use self::process::{
     DeclarationVerificationFacts, DeclarationVerificationOutcome, DeclarationVerificationRequest,
     DeclarationVerificationStatus, DeclarationVerificationTarget, ProofAttemptEnvelope, ProofAttemptOutcome,

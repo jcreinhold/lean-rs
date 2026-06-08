@@ -46,6 +46,7 @@ pub use crate::host::{
     LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats, LeanSession,
     LeanSessionImportProfile, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope, ProofAttemptOutcome,
     ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
-    ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolMemoryPolicy, SessionStats,
+    ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason, SessionPoolMemoryPolicy,
+    SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

@@ -52,6 +52,7 @@
 
 use core::cell::{Cell, RefCell};
 
+use std::path::PathBuf;
 #[cfg(not(target_os = "linux"))]
 use std::process::Command;
 
@@ -62,7 +63,7 @@ use lean_rs::error::LeanResult;
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::progress::LeanProgressSink;
-use crate::host::session::{LeanImportStats, LeanSession};
+use crate::host::session::{LeanImportStats, LeanSession, LeanSessionImportProfile};
 
 // -- PoolStats: pool-level reuse metrics ---------------------------------
 
@@ -104,6 +105,40 @@ pub struct PoolStats {
     pub rss_samples: u64,
     /// Number of process RSS samples that were unavailable.
     pub rss_samples_unavailable: u64,
+    /// Number of acquire calls that matched a reusable session key.
+    pub key_hits: u64,
+    /// Number of acquire calls that could not reuse a session key.
+    pub key_misses: u64,
+    /// Number of distinct session keys observed by this pool.
+    pub distinct_keys_seen: u64,
+    /// Number of fresh imports avoided by key hits.
+    pub fresh_imports_avoided: u64,
+    /// Key misses because the pool had no reusable entry.
+    pub miss_empty_pool: u64,
+    /// Key misses because the pool has zero reuse capacity.
+    pub miss_reuse_disabled: u64,
+    /// Key misses because cached entries existed but none matched the requested key.
+    pub miss_no_matching_key: u64,
+    /// Most recent key-miss reason.
+    pub last_miss_reason: Option<SessionPoolKeyMissReason>,
+}
+
+/// Why a same-process pool acquire could not reuse a warm session key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionPoolKeyMissReason {
+    EmptyPool,
+    ReuseDisabled,
+    NoMatchingKey,
+}
+
+impl SessionPoolKeyMissReason {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::EmptyPool => "empty_pool",
+            Self::ReuseDisabled => "reuse_disabled",
+            Self::NoMatchingKey => "no_matching_key",
+        }
+    }
 }
 
 /// Policy for refusing fresh imports in a same-process [`SessionPool`].
@@ -194,28 +229,42 @@ impl SessionPoolConfig {
     }
 }
 
-// -- ImportsKey: hashable cache key for the imports list -----------------
+// -- SessionPoolKey: cache key for imported environments -----------------
 
-/// Free-list key: the ordered imports list a pooled environment was
+/// Free-list key: the imported-environment identity a pooled session was
 /// imported with.
 ///
 /// Order matters because `Lean.importModules` is order-sensitive—a
 /// later import can shadow an earlier one. Equality is structural and
-/// canonical (the same `&[&str]` always produces the same key).
+/// canonical (the same capability root, profile, and `&[&str]` always
+/// produces the same key).
 #[derive(Clone, Eq, PartialEq)]
-struct ImportsKey(Vec<String>);
+struct SessionPoolKey {
+    project_root: PathBuf,
+    imports: Vec<String>,
+    import_profile: LeanSessionImportProfile,
+}
 
-impl ImportsKey {
-    fn from_slice(imports: &[&str]) -> Self {
-        Self(imports.iter().map(|&s| s.to_owned()).collect())
+impl SessionPoolKey {
+    fn from_capabilities(
+        caps: &LeanCapabilities<'_, '_>,
+        imports: &[&str],
+        import_profile: LeanSessionImportProfile,
+    ) -> Self {
+        Self {
+            project_root: caps.host().project().root().to_path_buf(),
+            imports: imports.iter().map(|&s| s.to_owned()).collect(),
+            import_profile,
+        }
     }
 }
 
 // -- PooledEntry: one slot on the free list ------------------------------
 
 struct PooledEntry<'lean> {
-    imports_key: ImportsKey,
+    key: SessionPoolKey,
     environment: Obj<'lean>,
+    import_stats: LeanImportStats,
 }
 
 // -- PoolInner: RefCell-protected free list ------------------------------
@@ -228,13 +277,14 @@ struct PoolInner<'lean> {
     /// amortising imports across O(10s) of sessions, not for managing
     /// thousands.
     free: Vec<PooledEntry<'lean>>,
+    seen_keys: Vec<SessionPoolKey>,
 }
 
 impl<'lean> PoolInner<'lean> {
-    /// Pop the most recently released entry whose imports key matches.
-    fn take_matching(&mut self, key: &ImportsKey) -> Option<Obj<'lean>> {
-        let idx = self.free.iter().rposition(|entry| &entry.imports_key == key)?;
-        Some(self.free.remove(idx).environment)
+    /// Pop the most recently released entry whose session key matches.
+    fn take_matching(&mut self, key: &SessionPoolKey) -> Option<PooledEntry<'lean>> {
+        let idx = self.free.iter().rposition(|entry| &entry.key == key)?;
+        Some(self.free.remove(idx))
     }
 }
 
@@ -244,9 +294,10 @@ impl<'lean> PoolInner<'lean> {
 ///
 /// Built with [`Self::with_capacity`]; environments enter the pool
 /// through [`PooledSession::drop`] (returning a previously-acquired
-/// session). Pool entries are capability-agnostic: a single pool may be
-/// shared across multiple [`LeanCapabilities`] values, as long as they
-/// share the same runtime.
+/// session). Pool entries are keyed by canonical Lake project root,
+/// ordered imports, and import profile. A single pool may be shared
+/// across multiple [`LeanCapabilities`] values with the same runtime;
+/// roots and profiles still partition the reusable environments.
 ///
 /// Neither [`Send`] nor [`Sync`] (inherited from the contained
 /// `Obj<'lean>` values).
@@ -288,6 +339,7 @@ impl<'lean> SessionPool<'lean> {
             memory_policy: config.memory_policy,
             inner: RefCell::new(PoolInner {
                 free: Vec::with_capacity(capacity),
+                seen_keys: Vec::new(),
             }),
             last_import_stats: RefCell::new(None),
             stats: Cell::new(PoolStats::default()),
@@ -303,12 +355,12 @@ impl<'lean> SessionPool<'lean> {
     /// Acquire a session targeting `imports` under `caps`.
     ///
     /// If a pooled environment was previously released with the same
-    /// `imports` list (order-sensitive), it is rewrapped under the
-    /// supplied capability borrow and returned—no `Lean.importModules`
-    /// runs. Otherwise the pool calls
-    /// [`LeanCapabilities::session`] internally to perform a fresh
-    /// import. Either way, the resulting [`PooledSession`] returns the
-    /// underlying environment to the pool on `Drop`.
+    /// canonical project root, default import profile, and ordered
+    /// `imports` list, it is rewrapped under the supplied capability
+    /// borrow and returned—no `Lean.importModules` runs. Otherwise the
+    /// pool calls [`LeanCapabilities::session`] internally to perform a
+    /// fresh import. Either way, the resulting [`PooledSession`] returns
+    /// the underlying environment to the pool on `Drop`.
     ///
     /// `caps` must come from the same [`LeanRuntime`] the pool was
     /// constructed with; this is structurally enforced by the shared
@@ -330,9 +382,36 @@ impl<'lean> SessionPool<'lean> {
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
+        self.acquire_with_profile(
+            caps,
+            imports,
+            LeanSessionImportProfile::default(),
+            cancellation,
+            progress,
+        )
+    }
+
+    /// Acquire a session targeting `imports` with an explicit import profile.
+    ///
+    /// This is the profile-aware variant of [`Self::acquire`]. Profiles are
+    /// part of the session-safety key; a legacy compatibility import never
+    /// aliases a lighter default-profile environment.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::acquire`].
+    pub fn acquire_with_profile<'p, 'c>(
+        &'p self,
+        caps: &'c LeanCapabilities<'lean, 'c>,
+        imports: &[&str],
+        import_profile: LeanSessionImportProfile,
+        cancellation: Option<&LeanCancellationToken>,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
         let _span = tracing::debug_span!(
             target: "lean_rs",
             "lean_rs.host.pool.acquire",
+            profile = import_profile.label(),
             imports_len = imports.len(),
             imports_first = imports.first().copied().unwrap_or("<empty>"),
         )
@@ -342,16 +421,22 @@ impl<'lean> SessionPool<'lean> {
             core::ptr::eq(self.runtime, caps.host().runtime()),
             "pool runtime and capability runtime must agree; the shared 'lean parameter normally enforces this",
         );
-        let key = ImportsKey::from_slice(imports);
+        let key = SessionPoolKey::from_capabilities(caps, imports, import_profile);
+        self.remember_seen_key(&key);
         let (session, hit) = {
             let mut inner = self.inner.borrow_mut();
-            if let Some(env) = inner.take_matching(&key) {
+            if let Some(entry) = inner.take_matching(&key) {
                 self.bump_reused();
-                (LeanSession::from_environment(caps, env)?, true)
+                (
+                    LeanSession::from_environment_with_import_stats(caps, entry.environment, entry.import_stats)?,
+                    true,
+                )
             } else {
+                let reason = self.miss_reason(&inner);
                 drop(inner);
+                self.bump_key_miss(reason);
                 self.enforce_before_fresh_import(imports)?;
-                let session = caps.session(imports, cancellation, progress)?;
+                let session = caps.session_with_profile(imports, import_profile, cancellation, progress)?;
                 self.remember_import_stats(session.import_stats().clone());
                 self.bump_imported();
                 (session, false)
@@ -360,7 +445,7 @@ impl<'lean> SessionPool<'lean> {
         tracing::debug!(target: "lean_rs", hit = hit, "lean_rs.host.pool.acquire.result");
         Ok(PooledSession {
             pool: self,
-            imports_key: key,
+            key,
             session: Some(session),
         })
     }
@@ -447,6 +532,9 @@ impl<'lean> SessionPool<'lean> {
         let mut s = self.stats.get();
         s.reused = s.reused.saturating_add(1);
         s.acquired = s.acquired.saturating_add(1);
+        s.key_hits = s.key_hits.saturating_add(1);
+        s.fresh_imports_avoided = s.fresh_imports_avoided.saturating_add(1);
+        s.last_miss_reason = None;
         self.stats.set(s);
     }
 
@@ -454,6 +542,44 @@ impl<'lean> SessionPool<'lean> {
         let mut s = self.stats.get();
         s.imports_performed = s.imports_performed.saturating_add(1);
         s.acquired = s.acquired.saturating_add(1);
+        self.stats.set(s);
+    }
+
+    fn remember_seen_key(&self, key: &SessionPoolKey) {
+        let mut inner = self.inner.borrow_mut();
+        if inner.seen_keys.iter().all(|seen| seen != key) {
+            inner.seen_keys.push(key.clone());
+            let mut s = self.stats.get();
+            s.distinct_keys_seen = u64::try_from(inner.seen_keys.len()).unwrap_or(u64::MAX);
+            self.stats.set(s);
+        }
+    }
+
+    fn miss_reason(&self, inner: &PoolInner<'_>) -> SessionPoolKeyMissReason {
+        if self.capacity == 0 {
+            SessionPoolKeyMissReason::ReuseDisabled
+        } else if inner.free.is_empty() {
+            SessionPoolKeyMissReason::EmptyPool
+        } else {
+            SessionPoolKeyMissReason::NoMatchingKey
+        }
+    }
+
+    fn bump_key_miss(&self, reason: SessionPoolKeyMissReason) {
+        let mut s = self.stats.get();
+        s.key_misses = s.key_misses.saturating_add(1);
+        match reason {
+            SessionPoolKeyMissReason::EmptyPool => {
+                s.miss_empty_pool = s.miss_empty_pool.saturating_add(1);
+            }
+            SessionPoolKeyMissReason::ReuseDisabled => {
+                s.miss_reuse_disabled = s.miss_reuse_disabled.saturating_add(1);
+            }
+            SessionPoolKeyMissReason::NoMatchingKey => {
+                s.miss_no_matching_key = s.miss_no_matching_key.saturating_add(1);
+            }
+        }
+        s.last_miss_reason = Some(reason);
         self.stats.set(s);
     }
 
@@ -524,14 +650,15 @@ impl<'lean> SessionPool<'lean> {
         Ok(())
     }
 
-    fn release(&self, key: ImportsKey, env: Obj<'lean>) {
+    fn release(&self, key: SessionPoolKey, env: Obj<'lean>, import_stats: LeanImportStats) {
         let mut inner = self.inner.borrow_mut();
         let mut s = self.stats.get();
         let kept = inner.free.len() < self.capacity;
         if kept {
             inner.free.push(PooledEntry {
-                imports_key: key,
+                key,
                 environment: env,
+                import_stats,
             });
             s.released_to_pool = s.released_to_pool.saturating_add(1);
         } else {
@@ -607,7 +734,7 @@ fn current_process_rss_kib() -> Option<u64> {
 /// the contained [`LeanSession`]).
 pub struct PooledSession<'lean, 'p, 'c> {
     pool: &'p SessionPool<'lean>,
-    imports_key: ImportsKey,
+    key: SessionPoolKey,
     /// `Option` so [`Drop`] can take the session by value without
     /// resorting to `ManuallyDrop`. Always `Some` between
     /// construction and `Drop`.
@@ -651,8 +778,9 @@ impl<'lean, 'c> core::ops::DerefMut for PooledSession<'lean, '_, 'c> {
 impl Drop for PooledSession<'_, '_, '_> {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
+            let import_stats = session.import_stats().clone();
             let env = session.into_environment();
-            self.pool.release(self.imports_key.clone(), env);
+            self.pool.release(self.key.clone(), env, import_stats);
         }
     }
 }

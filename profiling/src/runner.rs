@@ -9,7 +9,7 @@ use lean_toolchain::LEAN_VERSION;
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
     AdmissionSample, BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport,
-    ProfileArtifact, ReportMetadata, RssCheckpoint, TimingSample, WorkloadRun,
+    ProfileArtifact, ReportMetadata, RssCheckpoint, SessionReuseSample, TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
@@ -350,6 +350,7 @@ fn run_command_path(
         derived_work: parsed.derived_work,
         timings: parsed.timings,
         admissions: parsed.admissions,
+        session_reuse: parsed.session_reuse,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -375,6 +376,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut derived_work = Vec::new();
     let mut timings = Vec::new();
     let mut admissions = Vec::new();
+    let mut session_reuse = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -417,6 +419,9 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_admission(&line_pairs) {
             admissions.push(sample);
         }
+        if let Some(sample) = parse_session_reuse(&line_pairs) {
+            session_reuse.push(sample);
+        }
     }
 
     if stderr.contains("lazy discriminator import initialization") {
@@ -448,6 +453,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         derived_work,
         timings,
         admissions,
+        session_reuse,
         peak_rss_kib,
     }
 }
@@ -542,6 +548,25 @@ fn parse_admission(pairs: &[(String, String)]) -> Option<AdmissionSample> {
     })
 }
 
+fn parse_session_reuse(pairs: &[(String, String)]) -> Option<SessionReuseSample> {
+    let label = value(pairs, "session_reuse")?.to_owned();
+    let last_miss_reason =
+        value(pairs, "last_miss_reason").and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
+    Some(SessionReuseSample {
+        label,
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        layer: value(pairs, "layer").unwrap_or("unknown").to_owned(),
+        key_hits: parse_u64(pairs, "key_hits")?,
+        key_misses: parse_u64(pairs, "key_misses")?,
+        distinct_keys_seen: parse_u64(pairs, "distinct_keys_seen")?,
+        fresh_imports_avoided: parse_u64(pairs, "fresh_imports_avoided")?,
+        miss_empty_pool: parse_u64(pairs, "miss_empty_pool")?,
+        miss_reuse_disabled: parse_u64(pairs, "miss_reuse_disabled").unwrap_or(0),
+        miss_no_matching_key: parse_u64(pairs, "miss_no_matching_key")?,
+        last_miss_reason,
+    })
+}
+
 fn value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs
         .iter()
@@ -609,6 +634,7 @@ struct ParsedOutput {
     derived_work: Vec<DerivedWorkSample>,
     timings: Vec<TimingSample>,
     admissions: Vec<AdmissionSample>,
+    session_reuse: Vec<SessionReuseSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -703,6 +729,27 @@ mod tests {
         assert_eq!(admission.rss_before_admission_kib, Some(100));
         assert_eq!(admission.rss_after_open_kib, Some(700000));
         assert_eq!(admission.refusal_reason, None);
+    }
+
+    #[test]
+    fn parses_session_reuse_lines() {
+        let parsed = parse_key_values(
+            "session_reuse=pooled-reuse iteration=2 layer=host key_hits=1 key_misses=1 distinct_keys_seen=1 fresh_imports_avoided=1 miss_empty_pool=1 miss_reuse_disabled=0 miss_no_matching_key=0 last_miss_reason=none",
+            "",
+        );
+        assert_eq!(parsed.session_reuse.len(), 1);
+        let sample = &parsed.session_reuse[0];
+        assert_eq!(sample.label, "pooled-reuse");
+        assert_eq!(sample.iteration, Some(2));
+        assert_eq!(sample.layer, "host");
+        assert_eq!(sample.key_hits, 1);
+        assert_eq!(sample.key_misses, 1);
+        assert_eq!(sample.distinct_keys_seen, 1);
+        assert_eq!(sample.fresh_imports_avoided, 1);
+        assert_eq!(sample.miss_empty_pool, 1);
+        assert_eq!(sample.miss_reuse_disabled, 0);
+        assert_eq!(sample.miss_no_matching_key, 0);
+        assert_eq!(sample.last_miss_reason, None);
     }
 
     #[test]

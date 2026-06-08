@@ -8,7 +8,8 @@ use std::time::Duration;
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
     LeanWorkerError, LeanWorkerJsonCommand, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
-    LeanWorkerRestartReason, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerRestartReason, LeanWorkerSessionImportProfile, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow,
+    LeanWorkerTypedDataSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -143,6 +144,12 @@ fn compatible_session_key_reuses_one_worker() {
     );
     assert_eq!(pool.snapshot().cold_open_admitted, 1);
     assert_eq!(pool.snapshot().cold_open_refusals, 0);
+    assert_eq!(pool.snapshot().key_hits, 1);
+    assert_eq!(pool.snapshot().key_misses, 1);
+    assert_eq!(pool.snapshot().distinct_keys_seen, 1);
+    assert_eq!(pool.snapshot().fresh_cold_opens_avoided, 1);
+    assert_eq!(pool.snapshot().miss_empty_pool, 1);
+    assert_eq!(pool.snapshot().last_key_miss_reason, None);
     assert_eq!(pool.snapshot().concurrent_cold_opens_observed, 0);
     assert_eq!(
         pool.snapshot().imports,
@@ -182,8 +189,41 @@ fn distinct_session_key_respects_fixed_pool_limit() {
     assert_eq!(snapshot.cold_open_attempts, 2);
     assert_eq!(snapshot.cold_open_admitted, 1);
     assert_eq!(snapshot.cold_open_refusals, 1);
+    assert_eq!(snapshot.key_hits, 0);
+    assert_eq!(snapshot.key_misses, 2);
+    assert_eq!(snapshot.distinct_keys_seen, 2);
+    assert_eq!(snapshot.miss_empty_pool, 1);
+    assert_eq!(snapshot.miss_no_matching_key, 1);
+    assert_eq!(snapshot.last_key_miss_reason.as_deref(), Some("no_matching_key"));
     assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
     assert_eq!(snapshot.concurrent_cold_opens_observed, 0);
+}
+
+#[test]
+fn import_profile_partitions_pool_session_keys() {
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+
+    {
+        let mut lease = pool.acquire_lease(builder()).expect("pool opens first lease");
+        let response = lease
+            .run_json_command(&json_command(), &request("pool-profile-default"), None, None)
+            .expect("typed command succeeds");
+        assert!(response.accepted);
+    }
+
+    let err = pool
+        .acquire_lease(builder().import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat))
+        .expect_err("fixed-size pool should reject a second import profile");
+    match err {
+        LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
+        other => panic!("expected pool exhaustion, got {other:?}"),
+    }
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.key_hits, 0);
+    assert_eq!(snapshot.key_misses, 2);
+    assert_eq!(snapshot.distinct_keys_seen, 2);
+    assert_eq!(snapshot.miss_no_matching_key, 1);
+    assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
 }
 
 #[test]

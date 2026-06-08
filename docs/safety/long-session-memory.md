@@ -21,7 +21,7 @@ boundaries; it does not reset Lean's process-global runtime state.
 | `LeanCapabilities` | user + shim libraries, resolved capability symbols | library handles, symbol-table storage | Lean-side initialized module state |
 | `LeanSession` | one imported `Lean.Environment` as `Obj<'lean>` | one refcount on the environment (`lean_dec`) | anything Lean retained globally while importing those modules |
 | `Obj<'lean>` | one owned Lean refcount | that refcount; clones balance with `lean_inc` | persistent and compacted Lean objects (no refcount used) |
-| `SessionPool` slot | a retained environment `Obj<'lean>` keyed by imports | dropped when evicted, drained, or pool dropped | process-global Lean import/module state |
+| `SessionPool` slot | a retained environment `Obj<'lean>` keyed by canonical project root, ordered imports, and import profile | dropped when evicted, drained, or pool dropped | process-global Lean import/module state |
 
 The split has direct support in Lean's own sources. The runtime reference requires foreign code to initialize the
 runtime before calling any Lean code, and the FFI reference describes Lean-owned objects as reference-counted.
@@ -334,8 +334,9 @@ caches.
 
 ## Consumer Pattern
 
-Reuse imported environments. Keep a small `SessionPool` keyed by the import set and run introspection, elaboration,
-kernel checks, and `MetaM` calls against pooled sessions. For same-process hosts that may see many distinct import
+Reuse imported environments. Keep a small `SessionPool` keyed by the canonical project root, ordered import set, and
+import profile, then run introspection, elaboration, kernel checks, and `MetaM` calls against pooled sessions. Import
+order is preserved deliberately; Lean imports are not sorted as a cache convenience. For same-process hosts that may see many distinct import
 sets, configure `SessionPoolMemoryPolicy` so cache-miss imports fail before the process crosses a fresh-import or RSS
 budget. Steady operations against a warm environment do not accumulate RSS.
 
@@ -412,3 +413,7 @@ named `admission=...` report cold-open attempts, admitted opens, typed refusals,
 requests, and RSS before/after admission. Use the pool knobs together to avoid multiplying Lean import RSS across many
 local children. They do not change the underlying reset rule: only process exit resets Lean process-global retained
 memory.
+
+The same profiling output also emits `session_reuse=...` rows. These rows report key hits, key misses, distinct keys,
+fresh imports avoided, and miss reasons such as `empty_pool`, `reuse_disabled`, and `no_matching_key`. They explain
+whether a fresh import was avoided by warm reuse; admission rows explain whether a cold open was allowed.

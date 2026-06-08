@@ -243,6 +243,7 @@ fn print_timing(name: &str, iteration: u64, elapsed: Duration, pool: &LeanWorker
         snapshot.policy_restarts,
     );
     print_admission(name, iteration, pool);
+    print_session_reuse(name, iteration, pool);
 }
 
 fn print_snapshot(name: &str, pool: &LeanWorkerPool) {
@@ -283,6 +284,20 @@ fn print_admission(name: &str, iteration: u64, pool: &LeanWorkerPool) {
             .rss_after_open_kib
             .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
         snapshot.refusal_reason.as_deref().unwrap_or("none"),
+    );
+}
+
+fn print_session_reuse(name: &str, iteration: u64, pool: &LeanWorkerPool) {
+    let snapshot = pool.snapshot();
+    println!(
+        "session_reuse={name} iteration={iteration} layer=worker-pool key_hits={} key_misses={} distinct_keys_seen={} fresh_imports_avoided={} miss_empty_pool={} miss_reuse_disabled=0 miss_no_matching_key={} last_miss_reason={}",
+        snapshot.key_hits,
+        snapshot.key_misses,
+        snapshot.distinct_keys_seen,
+        snapshot.fresh_cold_opens_avoided,
+        snapshot.miss_empty_pool,
+        snapshot.miss_no_matching_key,
+        snapshot.last_key_miss_reason.as_deref().unwrap_or("none"),
     );
 }
 

@@ -711,6 +711,19 @@ fn report_pool_stats(label: &str, stats: PoolStats) {
         stats.drains,
         stats.drained
     );
+    println!(
+        "session_reuse={label} iteration=0 layer=host key_hits={} key_misses={} distinct_keys_seen={} fresh_imports_avoided={} miss_empty_pool={} miss_reuse_disabled={} miss_no_matching_key={} last_miss_reason={}",
+        stats.key_hits,
+        stats.key_misses,
+        stats.distinct_keys_seen,
+        stats.fresh_imports_avoided,
+        stats.miss_empty_pool,
+        stats.miss_reuse_disabled,
+        stats.miss_no_matching_key,
+        stats
+            .last_miss_reason
+            .map_or("none", lean_rs_host::SessionPoolKeyMissReason::label)
+    );
 }
 
 fn report_import_stats(label: &str, iteration: usize, profile_mode: &str, stats: &LeanImportStats) {

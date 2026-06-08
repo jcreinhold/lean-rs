@@ -59,6 +59,8 @@ pub struct WorkloadRun {
     pub timings: Vec<TimingSample>,
     #[serde(default)]
     pub admissions: Vec<AdmissionSample>,
+    #[serde(default)]
+    pub session_reuse: Vec<SessionReuseSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -148,6 +150,21 @@ pub struct AdmissionSample {
     pub rss_before_admission_kib: Option<u64>,
     pub rss_after_open_kib: Option<u64>,
     pub refusal_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionReuseSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub layer: String,
+    pub key_hits: u64,
+    pub key_misses: u64,
+    pub distinct_keys_seen: u64,
+    pub fresh_imports_avoided: u64,
+    pub miss_empty_pool: u64,
+    pub miss_reuse_disabled: u64,
+    pub miss_no_matching_key: u64,
+    pub last_miss_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

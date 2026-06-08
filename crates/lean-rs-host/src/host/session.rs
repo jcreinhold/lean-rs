@@ -747,17 +747,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// capability borrow. The returned session's [`SessionStats`] start
     /// at zero—accumulated counters from the previous owner do not
     /// leak across pool checkouts.
-    pub(crate) fn from_environment(
+    pub(crate) fn from_environment_with_import_stats(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
         environment: Obj<'lean>,
+        import_stats: LeanImportStats,
     ) -> LeanResult<Self> {
         let shims = HostShimBindings::resolve(capabilities.shim_capability())
             .map_err(|err| binding_error_to_lean_error(&err))?;
-        let import_stats = shims.env_import_stats.call(
-            environment.clone(),
-            LeanSessionImportProfile::default().import_level().as_str().to_owned(),
-            LeanSessionImportProfile::default().load_exts(),
-        )?;
         Ok(Self {
             capabilities,
             shims,

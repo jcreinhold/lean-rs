@@ -364,6 +364,9 @@ impl LeanWorkerCapabilityBuilder {
         .with_import_profile(self.import_profile)
         .with_import_workspace_root(self.effective_import_workspace_root())
         .restart_policy_class(restart_policy_class);
+        if let Some(manifest_path) = &self.built_manifest_path {
+            key = key.with_built_manifest_path(manifest_path.clone());
+        }
         if let Some(check) = &self.metadata_check {
             key = key.metadata_expectation(check.export.clone(), check.request.clone(), check.expected.clone());
         }
@@ -1851,6 +1854,7 @@ mod tests {
     use super::{LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
     use crate::supervisor::LeanWorkerConfig;
     use lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile;
+    use lean_toolchain::LeanBuiltCapability;
     use std::path::PathBuf;
 
     fn workspace_root() -> PathBuf {
@@ -1880,6 +1884,20 @@ mod tests {
         let key = capability_builder().session_key();
         assert_eq!(key.project_root(), interop_root().as_path());
         assert_eq!(key.import_workspace_root(), interop_root().as_path());
+    }
+
+    #[test]
+    fn project_root_is_canonicalized_for_session_reuse() {
+        assert_eq!(
+            capability_builder().session_key(),
+            LeanWorkerCapabilityBuilder::new(
+                interop_root().join("."),
+                "lean_rs_interop_consumer",
+                "LeanRsInteropConsumer",
+                ["LeanRsInteropConsumer.Callback"],
+            )
+            .session_key(),
+        );
     }
 
     #[test]
@@ -1918,6 +1936,56 @@ mod tests {
                 .import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat)
                 .session_key(),
         );
+    }
+
+    #[test]
+    fn built_manifest_path_participates_in_session_key() {
+        let manifest_dir = std::env::temp_dir().join(format!("lean-rs-worker-manifest-key-{}", std::process::id()));
+        std::fs::create_dir_all(&manifest_dir).expect("manifest temp dir");
+        let dylib = interop_root()
+            .join(".lake")
+            .join("build")
+            .join("lib")
+            .join(if cfg!(target_os = "macos") {
+                "liblean__rs__interop__consumer_LeanRsInteropConsumer.dylib"
+            } else {
+                "liblean__rs__interop__consumer_LeanRsInteropConsumer.so"
+            });
+        let manifest_a = manifest_dir.join("a.json");
+        let manifest_b = manifest_dir.join("b.json");
+        for manifest in [&manifest_a, &manifest_b] {
+            std::fs::write(
+                manifest,
+                format!(
+                    r#"{{"schema_version":2,"primary_dylib":{},"package":"lean_rs_interop_consumer","module":"LeanRsInteropConsumer"}}"#,
+                    serde_json::to_string(&dylib).expect("dylib path json")
+                ),
+            )
+            .expect("write manifest");
+        }
+
+        let key_a = LeanWorkerCapabilityBuilder::from_built_capability(
+            &LeanBuiltCapability::manifest_path(&manifest_a),
+            ["LeanRsInteropConsumer.Callback"],
+        )
+        .expect("manifest A accepted")
+        .session_key();
+        let key_a_dot = LeanWorkerCapabilityBuilder::from_built_capability(
+            &LeanBuiltCapability::manifest_path(manifest_dir.join(".").join("a.json")),
+            ["LeanRsInteropConsumer.Callback"],
+        )
+        .expect("canonical-equivalent manifest accepted")
+        .session_key();
+        let key_b = LeanWorkerCapabilityBuilder::from_built_capability(
+            &LeanBuiltCapability::manifest_path(&manifest_b),
+            ["LeanRsInteropConsumer.Callback"],
+        )
+        .expect("manifest B accepted")
+        .session_key();
+
+        assert_eq!(key_a, key_a_dot);
+        assert_ne!(key_a, key_b);
+        drop(std::fs::remove_dir_all(manifest_dir));
     }
 
     #[test]

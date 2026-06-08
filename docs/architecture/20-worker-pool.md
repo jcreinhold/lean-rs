@@ -86,8 +86,10 @@ Pool reuse is keyed by the facts that make a worker session safe and useful to r
 
 - capability Lake project root;
 - import workspace root;
+- manifest-backed capability identity, when supplied;
 - capability package and target;
-- import set;
+- ordered import set;
+- import profile;
 - capability metadata expectations;
 - Lean toolchain and `lean-rs` protocol fingerprint;
 - restart-policy class.

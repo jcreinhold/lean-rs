@@ -177,7 +177,8 @@ Use `long-session-derived` when the question is whether a query phase initialize
 proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import.
 Use the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig`
 guidance. Their `admission=...` rows distinguish cold worker/session attempts, typed refusals, import-like requests,
-and RSS before/after admission. The repo defaults now use a 1,572,864 KiB local cap and one worker/import job at a time.
+and RSS before/after admission. Their `session_reuse=...` rows distinguish equivalent warm reuse from fragmented keys.
+The repo defaults now use a 1,572,864 KiB local cap and one worker/import job at a time.
 On the 2026-06-08 local rebaseline, full-session worker cycling stayed within the older 2 GiB cap only at
 `max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one child under about 421 MiB. These are local
 KiB, not portable limits.

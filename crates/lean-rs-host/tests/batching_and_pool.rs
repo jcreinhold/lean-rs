@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use lean_rs::{HostStage, LeanDiagnosticCode, LeanError, LeanRuntime};
 use lean_rs_host::{
-    LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, SessionPool,
-    SessionPoolMemoryPolicy,
+    LeanCancellationToken, LeanCapabilities, LeanElabOptions, LeanHost, LeanSession, LeanSessionImportProfile,
+    SessionPool, SessionPoolKeyMissReason, SessionPoolMemoryPolicy,
 };
 
 // -- fixture setup -------------------------------------------------------
@@ -453,6 +453,133 @@ fn session_pool_reuses_session() {
     assert_eq!(stats.acquired, 2, "both acquires accounted for");
     assert_eq!(stats.released_to_pool, 2, "both Drops returned to the pool");
     assert_eq!(stats.released_dropped, 0, "capacity 4 is well above 1 live session");
+    assert_eq!(stats.key_hits, 1);
+    assert_eq!(stats.key_misses, 1);
+    assert_eq!(stats.distinct_keys_seen, 1);
+    assert_eq!(stats.fresh_imports_avoided, 1);
+    assert_eq!(stats.miss_empty_pool, 1);
+    assert_eq!(stats.last_miss_reason, None);
+}
+
+#[test]
+fn session_pool_default_and_explicit_default_profile_reuse() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_capacity(runtime, 1);
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("default acquire imports fresh"),
+    );
+    drop(
+        pool.acquire_with_profile(&caps, &imports, LeanSessionImportProfile::default(), None, None)
+            .expect("explicit default profile reuses the released env"),
+    );
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 1);
+    assert_eq!(stats.key_hits, 1);
+    assert_eq!(stats.key_misses, 1);
+    assert_eq!(stats.distinct_keys_seen, 1);
+}
+
+#[test]
+fn session_pool_import_profile_partitions_keys_before_import() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("default profile warms the pool"),
+    );
+    let err = pool
+        .acquire_with_profile(&caps, &imports, LeanSessionImportProfile::FullPrivateCompat, None, None)
+        .expect_err("distinct profile should miss and be refused before a second import");
+    assert_eq!(err.code(), LeanDiagnosticCode::ResourceExhausted);
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 0);
+    assert_eq!(stats.key_hits, 0);
+    assert_eq!(stats.key_misses, 2);
+    assert_eq!(stats.distinct_keys_seen, 2);
+    assert_eq!(stats.miss_no_matching_key, 1);
+    assert_eq!(stats.last_miss_reason, Some(SessionPoolKeyMissReason::NoMatchingKey));
+}
+
+#[test]
+fn session_pool_canonical_equivalent_project_roots_reuse() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let dotted_host = LeanHost::from_lake_project(runtime, fixture_lake_root().join(".")).expect("host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let dotted_caps = dotted_host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps from canonical-equivalent root");
+    let pool = SessionPool::with_capacity(runtime, 1);
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("first root warms the pool"),
+    );
+    drop(
+        pool.acquire(&dotted_caps, &imports, None, None)
+            .expect("canonical-equivalent root reuses"),
+    );
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.reused, 1);
+    assert_eq!(stats.distinct_keys_seen, 1);
+}
+
+#[test]
+fn session_pool_different_project_root_partitions_keys_before_import() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let workspace_host = LeanHost::from_lake_project(
+        runtime,
+        fixture_lake_root()
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("fixture lives below workspace"),
+    )
+    .expect("workspace host opens");
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let shims_only = workspace_host.load_shims_only().expect("load workspace shims");
+    let pool = SessionPool::with_memory_policy(runtime, 1, SessionPoolMemoryPolicy::disabled().max_fresh_imports(1));
+    let imports = ["LeanRsFixture.Handles"];
+
+    drop(
+        pool.acquire(&caps, &imports, None, None)
+            .expect("fixture root warms the pool"),
+    );
+    let err = pool
+        .acquire(&shims_only, &imports, None, None)
+        .expect_err("different root should miss and be refused before importing");
+    assert_eq!(err.code(), LeanDiagnosticCode::ResourceExhausted);
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 1);
+    assert_eq!(stats.key_hits, 0);
+    assert_eq!(stats.key_misses, 2);
+    assert_eq!(stats.distinct_keys_seen, 2);
+    assert_eq!(stats.miss_no_matching_key, 1);
 }
 
 #[test]
@@ -508,6 +635,12 @@ fn session_pool_distinct_imports_do_not_match() {
     );
     assert_eq!(stats.reused, 0, "no key collision possible across distinct imports");
     assert_eq!(pool.len(), 2, "both envs sit on the free list");
+    assert_eq!(stats.key_hits, 0);
+    assert_eq!(stats.key_misses, 2);
+    assert_eq!(stats.distinct_keys_seen, 2);
+    assert_eq!(stats.miss_empty_pool, 1);
+    assert_eq!(stats.miss_no_matching_key, 1);
+    assert_eq!(stats.last_miss_reason, Some(SessionPoolKeyMissReason::NoMatchingKey));
 }
 
 #[test]
@@ -527,6 +660,10 @@ fn session_pool_zero_capacity_never_reuses() {
     assert_eq!(stats.imports_performed, 2, "capacity 0 degenerates to always-import");
     assert_eq!(stats.released_dropped, 2, "every release drops");
     assert_eq!(pool.len(), 0, "free list never holds anything");
+    assert_eq!(stats.key_hits, 0);
+    assert_eq!(stats.key_misses, 2);
+    assert_eq!(stats.miss_reuse_disabled, 2);
+    assert_eq!(stats.last_miss_reason, Some(SessionPoolKeyMissReason::ReuseDisabled));
 }
 
 #[test]

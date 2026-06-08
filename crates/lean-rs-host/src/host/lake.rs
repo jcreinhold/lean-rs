@@ -59,9 +59,17 @@ impl LakeProject {
                 root.display()
             )));
         }
-        Ok(Self {
-            root: root.to_path_buf(),
-        })
+        let root = fs::canonicalize(root).map_err(|err| {
+            lean_rs::__host_internals::host_module_init(format!(
+                "Lake project root '{}' could not be canonicalized: {err}",
+                root.display()
+            ))
+        })?;
+        Ok(Self { root })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     /// On-disk path to the compiled capability dylib for the
