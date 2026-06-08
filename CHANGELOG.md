@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### `lean-toolchain`: explicit capability manifest dependencies
+
+`CargoLeanCapability` can now record caller-provided `LeanLibraryDependency` entries in the capability artifact
+manifest. Downstream build scripts that build a primary Lake shared library against another packaged Lean shared library
+can describe that dependency before the manifest is written, instead of editing JSON after `build_quiet()` returns. This
+is domain-neutral: source ownership, package names, module names, and export metadata still live in the downstream
+package that owns the Lean payload.
+
 ## [0.2.0]
 
 This is a breaking release (pre-1.0, so a minor bump). The worker wire protocol moved from `PROTOCOL_VERSION` 8 to 10,

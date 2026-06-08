@@ -40,7 +40,7 @@ use crate::diagnostics::LinkDiagnostics;
 use crate::discover::{DiscoverOptions, ToolchainInfo, discover_toolchain};
 use crate::fingerprint::ToolchainFingerprint;
 use crate::lakefile_toml::parse_lakefile_toml;
-use crate::loader::LeanExportSignature;
+use crate::loader::{LeanExportSignature, LeanLibraryDependency};
 
 /// Current JSON schema version for `CargoLeanCapability` artifact manifests.
 pub const CAPABILITY_MANIFEST_SCHEMA_VERSION: u32 = 2;
@@ -203,6 +203,7 @@ pub struct CargoLeanCapability {
     manifest_env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
     export_signatures: Vec<LeanExportSignature>,
+    dependencies: Vec<LeanLibraryDependency>,
 }
 
 impl CargoLeanCapability {
@@ -218,6 +219,7 @@ impl CargoLeanCapability {
             manifest_env_var: None,
             lean_sysroot: None,
             export_signatures: Vec::new(),
+            dependencies: Vec::new(),
         }
     }
 
@@ -283,6 +285,26 @@ impl CargoLeanCapability {
     #[must_use]
     pub fn export_signature(mut self, signature: LeanExportSignature) -> Self {
         self.export_signatures.push(signature);
+        self
+    }
+
+    /// Add a dependent Lean dylib that must be loaded before this capability.
+    ///
+    /// Use this when the capability imports another shipped Lake package whose
+    /// shared library was built separately. The dependency is recorded in the
+    /// same artifact manifest consumed by `lean-rs` and the worker parent, so
+    /// callers do not need to edit manifest JSON after the build.
+    #[must_use]
+    pub fn dependency(mut self, dependency: LeanLibraryDependency) -> Self {
+        self.dependencies.push(dependency);
+        self
+    }
+
+    /// Add multiple dependent Lean dylibs that must be loaded before this
+    /// capability.
+    #[must_use]
+    pub fn dependencies(mut self, dependencies: impl IntoIterator<Item = LeanLibraryDependency>) -> Self {
+        self.dependencies.extend(dependencies);
         self
     }
 
@@ -379,6 +401,7 @@ impl CargoLeanCapability {
             &dylib_path,
             &manifest_env_var,
             &self.export_signatures,
+            &self.dependencies,
             selected_toolchain,
         )?;
         cargo_metadata.println(format_args!("cargo:rustc-env={env_var}={}", dylib_path.display()));
@@ -955,10 +978,12 @@ fn write_capability_manifest(
     dylib_path: &Path,
     manifest_env_var: &str,
     export_signatures: &[LeanExportSignature],
+    explicit_dependencies: &[LeanLibraryDependency],
     selected_toolchain: Option<&ToolchainInfo>,
 ) -> Result<PathBuf, LinkDiagnostics> {
     let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
-    let dependencies = capability_dependencies(project_root, target_name)?;
+    let mut dependencies = capability_dependencies(project_root, target_name)?;
+    dependencies.extend(explicit_dependencies.iter().map(lean_library_dependency_to_json));
     let fingerprint = ToolchainFingerprint::current();
     let search_dirs = capability_search_dirs(project_root, dylib_path);
     let build_toolchain = selected_toolchain.map(|info| {
@@ -1160,6 +1185,23 @@ fn capability_dependencies(project_root: &Path, target_name: &str) -> Result<Vec
     Ok(dependencies)
 }
 
+fn lean_library_dependency_to_json(dependency: &LeanLibraryDependency) -> serde_json::Value {
+    let initializer = dependency.module_initializer().map(|initializer| {
+        serde_json::json!({
+            "package": initializer.package_name(),
+            "module": initializer.module_name(),
+        })
+    });
+    serde_json::json!({
+        "name": dependency
+            .module_initializer()
+            .map_or_else(|| dependency.path_ref().display().to_string(), |initializer| initializer.package_name().to_owned()),
+        "dylib_path": dependency.path_ref().display().to_string(),
+        "export_symbols_for_dependents": dependency.exports_symbols_for_dependents(),
+        "initializer": initializer,
+    })
+}
+
 fn sanitize_target_name(target_name: &str) -> String {
     target_name
         .chars()
@@ -1268,7 +1310,7 @@ mod tests {
     use crate::LinkDiagnostics;
     use crate::{
         LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership, LeanExportResultConvention, LeanExportReturnAbi,
-        LeanExportSignature,
+        LeanExportSignature, LeanLibraryDependency,
     };
     use std::cell::{Cell, RefCell};
     use std::fs;
@@ -1714,6 +1756,65 @@ mod tests {
                 .and_then(|export| export.get("symbol"))
                 .and_then(serde_json::Value::as_str),
             Some("my_capability_u8_identity"),
+        );
+    }
+
+    #[test]
+    fn cargo_capability_manifest_records_explicit_dependencies() {
+        let root = make_project("cargo-capability-explicit-dependency", "MyCapability");
+        let dependency = root.join(".lake").join("build").join("lib").join("libdependency.dylib");
+        write_file(&dependency, "dependency dylib");
+
+        let built = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .dependency(
+                LeanLibraryDependency::path(&dependency)
+                    .export_symbols_for_dependents()
+                    .initializer("dependency_pkg", "Dependency"),
+            )
+            .build_quiet()
+            .expect("cargo helper build");
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
+                .expect("manifest is valid JSON");
+        let dependencies = manifest
+            .get("dependencies")
+            .and_then(serde_json::Value::as_array)
+            .expect("manifest dependencies array");
+        assert_eq!(dependencies.len(), 1);
+        let dependency_json = dependencies.first().expect("one dependency");
+        assert_eq!(
+            dependency_json.get("name").and_then(serde_json::Value::as_str),
+            Some("dependency_pkg")
+        );
+        assert_eq!(
+            dependency_json
+                .get("dylib_path")
+                .and_then(serde_json::Value::as_str)
+                .map(Path::new),
+            Some(dependency.as_path())
+        );
+        assert_eq!(
+            dependency_json
+                .get("export_symbols_for_dependents")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            dependency_json
+                .get("initializer")
+                .and_then(|initializer| initializer.get("package"))
+                .and_then(serde_json::Value::as_str),
+            Some("dependency_pkg")
+        );
+        assert_eq!(
+            dependency_json
+                .get("initializer")
+                .and_then(|initializer| initializer.get("module"))
+                .and_then(serde_json::Value::as_str),
+            Some("Dependency")
         );
     }
 

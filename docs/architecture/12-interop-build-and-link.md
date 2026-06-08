@@ -30,6 +30,28 @@ It runs `lake build MyCapability:shared`, resolves Lake's supported dylib naming
 artifact manifest, and returns `BuiltLeanCapability` for build scripts that want to inspect the result. The manifest is
 the canonical runtime handoff for shipped crates; the direct dylib path remains a lower-level compatibility path.
 
+If the capability imports another shipped Lean shared library that was built separately, record it before building the
+manifest:
+
+```rust
+use lean_toolchain::LeanLibraryDependency;
+
+let dependency_dylib = "/path/to/libdependency.dylib";
+
+lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+    .package("my_app")
+    .module("MyCapability")
+    .dependency(
+        LeanLibraryDependency::path(dependency_dylib)
+            .export_symbols_for_dependents()
+            .initializer("dependency_pkg", "Dependency"),
+    )
+    .build()?;
+```
+
+This is only dependency metadata for the loader. The owning crate still decides how the dependency source is packaged,
+which Lake package/module names it uses, and which exports are trusted.
+
 Hosts that pin the Lean toolchain themselves can pass the matching sysroot explicitly:
 
 ```rust
