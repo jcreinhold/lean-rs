@@ -186,6 +186,12 @@ struct LeanWorkerMetadataExpectationKey {
 }
 
 /// Configuration for a local `LeanWorkerPool`.
+///
+/// Long-running hosts should configure the worker count, total child RSS
+/// budget, per-worker RSS ceiling, and each worker's
+/// `LeanWorkerRestartPolicy` together. The pool admits cold distinct session
+/// keys; the worker restart policy bounds retained Lean state inside an
+/// admitted child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerPoolConfig {
     max_workers: usize,
@@ -197,6 +203,11 @@ pub struct LeanWorkerPoolConfig {
 
 impl LeanWorkerPoolConfig {
     /// Create pool configuration with a fixed local worker limit.
+    ///
+    /// `max_workers` is clamped to at least one. Production callers should
+    /// normally add [`Self::max_total_child_rss_kib`] and
+    /// [`Self::per_worker_rss_ceiling_kib`] rather than relying on the worker
+    /// count alone.
     #[must_use]
     pub fn new(max_workers: usize) -> Self {
         Self {
@@ -218,7 +229,9 @@ impl LeanWorkerPoolConfig {
     ///
     /// RSS sampling is best effort. On platforms where the pool cannot obtain
     /// samples, it records unavailable samples and does not make a false
-    /// admission claim.
+    /// admission claim. Size this with the worker count; for example, a host
+    /// that admits `n` children under a per-worker cap should normally set this
+    /// to `n * per_worker_rss_ceiling_kib`.
     #[must_use]
     pub fn max_total_child_rss_kib(mut self, limit: u64) -> Self {
         self.max_total_child_rss_kib = Some(limit.max(1));
@@ -226,6 +239,10 @@ impl LeanWorkerPoolConfig {
     }
 
     /// Cycle a worker before assigning work when its sampled RSS reaches `limit`.
+    ///
+    /// This is the pool-side assignment guard. The worker's own
+    /// `LeanWorkerRestartPolicy::memory_bounded` should use a compatible RSS
+    /// cap so fresh import-like requests are checked before entering the child.
     #[must_use]
     pub fn per_worker_rss_ceiling_kib(mut self, limit: u64) -> Self {
         self.per_worker_rss_ceiling_kib = Some(limit.max(1));
@@ -1112,6 +1129,9 @@ impl LeanWorkerSessionLease<'_> {
     /// This is the warm proof-agent batch path for pool callers. It keeps
     /// worker identity, session reopening, policy checks, timeout handling,
     /// and `session_missing` retry inside the lease lifecycle wrapper.
+    /// Batching here reduces request/session churn on a warm child; it does
+    /// not reclaim Lean import memory or replace worker cycling for full
+    /// `loadExts := true` sessions.
     ///
     /// # Errors
     ///

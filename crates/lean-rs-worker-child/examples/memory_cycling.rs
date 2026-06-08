@@ -54,10 +54,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         LeanWorkerSessionConfig::new(&fixture, "lean_rs_fixture", "LeanRsFixture", ["LeanRsFixture.Handles"]);
     for iteration in 1..=imports {
         let before = worker.stats();
-        let started = Instant::now();
-        let session = worker.open_session(&session_config, None, None)?;
-        let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
-        drop(session);
+        let elapsed_ms = {
+            let started = Instant::now();
+            let _session = worker.open_session(&session_config, None, None)?;
+            started.elapsed().as_secs_f64() * 1_000.0
+        };
         let rss = worker.rss_kib();
         let stats = worker.stats();
         let open_kind = if before.requests == 0 || stats.restarts > before.restarts {

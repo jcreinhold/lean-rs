@@ -5,6 +5,9 @@ never give it back. Steady operations against a *reused* imported environment (b
 checks, `MetaM`) do not accumulate. The shipped consumer pattern follows directly: pool imported environments, and cycle
 the worker process when an import sweep exhausts the pool.
 
+For a new long-running Rust host, start with [`docs/production-hosting.md`](../production-hosting.md). This document is
+the retention model, measurements, and diagnostic background behind that pattern.
+
 The rest of this document records what `Drop` reclaims, what the reproducer measures, and what shape the measurement has
 on the supported toolchains.
 
@@ -333,6 +336,11 @@ rejected for a separate reason: the measured growth is not attributable to loade
 caches.
 
 ## Consumer Pattern
+
+The production caller story is summarized in [`docs/production-hosting.md`](../production-hosting.md): bounded worker
+pool, total and per-worker child RSS budgets, `LeanWorkerRestartPolicy::memory_bounded`, warm-session reuse, batched
+repeated work, and typed resource-failure reporting. The rest of this section explains the memory model that motivates
+those choices.
 
 Reuse imported environments. Keep a small `SessionPool` keyed by the canonical project root, ordered import set, and
 import profile, then run introspection, elaboration, kernel checks, and `MetaM` calls against pooled sessions. Import

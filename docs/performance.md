@@ -3,6 +3,10 @@
 Benchmarks and the regression-detection recipe. Numbers themselves are not tracked here; they are non-portable across
 machines and ship with each capture.
 
+For production hosting policy, start with [`docs/production-hosting.md`](production-hosting.md). The worker and pool
+profiling workloads below validate that pattern: bounded child processes, warm session reuse, batching through a lease,
+and typed resource refusals when the configured budget is exhausted.
+
 ## Run the benches
 
 ```sh

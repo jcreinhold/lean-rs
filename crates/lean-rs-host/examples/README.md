@@ -1,8 +1,13 @@
 # lean-rs examples
 
-**New to this project? Start here.** The examples below drive the curated `lean_rs::*` and `lean_rs_host::*` surfaces
-end to end against the in-tree fixture; reading them is the fastest path from a blank consumer project to a working
-integration.
+**New to same-process host APIs? Start here.** The examples below drive the curated `lean_rs::*` and `lean_rs_host::*`
+surfaces end to end against the in-tree fixture; reading them is the fastest path from a blank embedded or diagnostic
+consumer project to a working integration.
+
+For long-running production hosts, start with the worker-pool pattern in
+[`docs/production-hosting.md`](../../../docs/production-hosting.md): bounded workers, total and per-worker RSS budgets,
+memory-bounded child cycling, warm session reuse, and batched repeated work. The same-process examples remain useful
+for focused services and diagnostics, but they are not the safe default for unbounded import-heavy workloads.
 
 Five focused examples, one end-to-end tour, and one RSS reproducer. Each focused example sticks to one verb so a reader
 can scan it in a minute and reach for the matching crate API by analogy.
@@ -15,7 +20,7 @@ can scan it in a minute and reach for the matching crate API by analogy.
 | [`progress`](#progress) | Observe structured progress and cooperative cancellation on long-running calls. |
 | [`tour`](#tour) | Core host flows composed end to end in one process. |
 | [`lake_build_helper`](#lake_build_helper) | Build a Lake shared-library target through `lean-toolchain` without hand-written dylib path mangling. |
-| [`long_session_memory`](#long_session_memory) | RSS checkpoints for a long-lived process using fresh imports, pooled reuse, introspection, and elaboration. |
+| [`long_session_memory`](#long_session_memory) | Diagnostic RSS checkpoints for fresh imports, pooled reuse, introspection, and elaboration in one process. |
 
 ## Prerequisites
 
@@ -197,7 +202,7 @@ build scripts.
 
 ### long_session_memory
 
-**Goal:** characterize retained RSS across long-session lifetime boundaries: runtime initialization, capability loading,
+**Goal:** diagnose retained RSS across same-process lifetime boundaries: runtime initialization, capability loading,
 repeated fresh imports, bounded `SessionPool` reuse, bulk declaration queries, elaboration, and session/pool drops.
 
 **Run:**
@@ -214,8 +219,10 @@ Defaults are bounded. Raise `LEAN_RS_LONG_SESSION_IMPORTS` only after the previo
 The same workload is wrapped by `profiling/scripts/profile_memory.sh long-session` and
 `profiling/scripts/profile_with_samply.sh long-session`.
 
-This example is intentionally not a Criterion bench. It answers a retained-memory question over minutes and lifetime
-boundaries; Criterion answers per-iteration latency questions. The measured model and consumer guidance live in
+This example is intentionally not a production soak test and not a Criterion bench. It answers a retained-memory
+question over minutes and lifetime boundaries; Criterion answers per-iteration latency questions. The production
+worker-pool pattern lives in [`docs/production-hosting.md`](../../../docs/production-hosting.md), and the measured model
+lives in
 [`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
 ## Same-process callback interop

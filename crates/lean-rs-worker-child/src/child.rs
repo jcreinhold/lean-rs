@@ -1871,7 +1871,7 @@ fn declaration_search_host(search: &LeanWorkerDeclarationSearch) -> DeclarationS
     }
 }
 
-fn derived_work_facts_wire(facts: LeanDerivedWorkFacts) -> LeanWorkerDerivedWorkFacts {
+fn derived_work_facts_wire(facts: &LeanDerivedWorkFacts) -> LeanWorkerDerivedWorkFacts {
     LeanWorkerDerivedWorkFacts {
         source_range_lookups: facts.source_range_lookups,
         docstring_lookups: facts.docstring_lookups,
@@ -1988,7 +1988,7 @@ fn declaration_search_facts_wire(facts: lean_rs_host::DeclarationSearchFacts) ->
             rank_micros: facts.timings.rank_micros,
             source_micros: facts.timings.source_micros,
         },
-        derived_work: derived_work_facts_wire(facts.derived_work),
+        derived_work: derived_work_facts_wire(&facts.derived_work),
     }
 }
 
@@ -2013,7 +2013,7 @@ fn declaration_inspection_wire(declaration: DeclarationInspection) -> LeanWorker
         attributes: declaration.attributes,
         proof_search: declaration_proof_search_facts_wire(declaration.proof_search),
         flags: declaration_flags_wire(declaration.flags),
-        derived_work: derived_work_facts_wire(declaration.derived_work),
+        derived_work: derived_work_facts_wire(&declaration.derived_work),
         statement_rendering: declaration.statement_pretty.map(|pretty| {
             if pretty {
                 LeanWorkerRendering::Pretty

@@ -508,7 +508,7 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
     let cap_kib = key_value(&worker_one.key_values, "max_rss_kib")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(1_572_864);
-    let widen_threshold = cap_kib * 70 / 100;
+    let widen_threshold = cap_kib.saturating_mul(70) / 100;
     let recommended_max_imports = if worker_two
         .and_then(|run| run.peak_rss_kib)
         .is_some_and(|peak| peak <= cap_kib)
@@ -532,13 +532,11 @@ fn render_worker_policy_summary(out: &mut String, report: &PerformanceReport) {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "Local recommendation under the {} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({}, {})` with `LeanWorkerPoolConfig::new({}).per_worker_rss_ceiling_kib({}).max_total_child_rss_kib({})`.",
-        cap_kib, recommended_max_imports, cap_kib, max_workers, per_worker_rss, total_child_rss
+        "Local recommendation under the {cap_kib} KiB RSS budget: `LeanWorkerRestartPolicy::memory_bounded({recommended_max_imports}, {cap_kib})` with `LeanWorkerPoolConfig::new({max_workers}).per_worker_rss_ceiling_kib({per_worker_rss}).max_total_child_rss_kib({total_child_rss})`."
     );
     let _ = writeln!(
         out,
-        "The `max_imports=2` candidate is collected only when the `max_imports=1` run stays at or below the 70% widening threshold ({} KiB).",
-        widen_threshold
+        "The `max_imports=2` candidate is collected only when the `max_imports=1` run stays at or below the 70% widening threshold ({widen_threshold} KiB)."
     );
     if let Some(worker_two) = worker_two
         && worker_two.peak_rss_kib.is_some_and(|peak| peak > cap_kib)
@@ -571,11 +569,7 @@ fn render_worker_candidate_row(out: &mut String, run: &WorkloadRun, label: &str)
     let cold = first_timing_ms(&run.timings, "cold");
     let warm = first_timing_ms(&run.timings, "warm-same-child");
     let restarts = key_value(&run.key_values, "restarts").unwrap_or("-");
-    let _ = writeln!(
-        out,
-        "| {} | {} | {} | {} | {} | {} |",
-        label, status, peak, cold, warm, restarts
-    );
+    let _ = writeln!(out, "| {label} | {status} | {peak} | {cold} | {warm} | {restarts} |");
 }
 
 fn first_timing_ms(timings: &[TimingSample], kind: &str) -> String {
@@ -703,8 +697,12 @@ fn import_rss_gap(peak_rss_kib: Option<u64>, compacted_region_bytes: u64) -> Str
     let Some(peak_rss_kib) = peak_rss_kib else {
         return String::from("-");
     };
-    let peak_rss_bytes = i128::from(peak_rss_kib) * 1024;
-    let gap = peak_rss_bytes - i128::from(compacted_region_bytes);
+    let Some(peak_rss_bytes) = i128::from(peak_rss_kib).checked_mul(1024) else {
+        return String::from("-");
+    };
+    let Some(gap) = peak_rss_bytes.checked_sub(i128::from(compacted_region_bytes)) else {
+        return String::from("-");
+    };
     gap.to_string()
 }
 
@@ -963,8 +961,8 @@ mod tests {
                     request_delta: 1,
                     import_delta: 0,
                     elapsed_ms: 4.25,
-                    parent_rss_kib: Some(120000),
-                    child_rss_kib: Some(700000),
+                    parent_rss_kib: Some(120_000),
+                    child_rss_kib: Some(700_000),
                     result_items: 2,
                     item_failures: 0,
                     total_truncated: false,

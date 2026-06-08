@@ -44,6 +44,12 @@ cargo run -p lean-rs-host --example tour
 `tour` composes the standard Lean service flow in one process: open the runtime, load capabilities, open an import
 session, elaborate, kernel-check, run a bulk query, and call `Meta.whnf`.
 
+For long-running Rust hosts, start with the worker-pool pattern in
+[`docs/production-hosting.md`](docs/production-hosting.md): bounded local workers, total and per-worker RSS budgets,
+`LeanWorkerRestartPolicy::memory_bounded`, warm session reuse, and batched repeated work through a checked-out lease.
+Same-process host examples are still useful for embedded tools and diagnostics, but they are not the production pattern
+for unbounded import-heavy services.
+
 Browse the service-layer examples and walkthroughs at
 [`crates/lean-rs-host/examples/README.md`](crates/lean-rs-host/examples/README.md). That's the service-layer tour path
 for sessions, kernel checks, and `MetaM`.

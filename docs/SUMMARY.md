@@ -61,6 +61,7 @@
 
 # Operations
 
+- [Production hosting](production-hosting.md)
 - [Testing](testing.md)
 - [Performance](performance.md)
 - [Diagnostics](diagnostics.md)

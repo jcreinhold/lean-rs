@@ -4,6 +4,10 @@ This directory contains opt-in profiling commands for Lean import memory growth,
 release-note-ready baseline reports. The normal test suite should stay memory-bounded through `cargo nextest`; these
 commands are for diagnosis and performance evidence.
 
+The production-safe hosting pattern that these workloads validate is documented in
+[`docs/production-hosting.md`](../docs/production-hosting.md): bounded worker pools, memory-bounded child cycling, warm
+session reuse, batched repeated work, and typed resource-failure reporting.
+
 ## What To Use
 
 - Baseline reports: `collect_baseline_quick` and `collect_baseline_full`.
@@ -98,6 +102,8 @@ LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 
 Do not use same-process fresh-import loops as a production soak test. Long-running hosts should use worker children with
 `LeanWorkerRestartPolicy::memory_bounded` and `LeanWorkerPoolConfig` RSS ceilings.
+See [`docs/production-hosting.md`](../docs/production-hosting.md) for the caller-facing configuration and error-handling
+pattern; use this README when changing or recapturing the measurements behind it.
 
 The worker rebaseline collector records those ceilings explicitly instead of relying on example defaults:
 

@@ -709,6 +709,15 @@ struct ParsedOutput {
 mod tests {
     use super::parse_key_values;
 
+    #[allow(clippy::expect_used)]
+    fn first<T>(values: &[T]) -> &T {
+        values.first().expect("expected one parsed sample")
+    }
+
+    fn assert_float_eq(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < f64::EPSILON);
+    }
+
     #[test]
     fn parses_import_stats_lines() {
         let parsed = parse_key_values(
@@ -716,7 +725,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
-        let stats = &parsed.import_stats[0];
+        let stats = first(&parsed.import_stats);
         assert_eq!(stats.label, "import_matrix");
         assert_eq!(stats.iteration, Some(2));
         assert_eq!(stats.profile_mode, "exported-public");
@@ -738,7 +747,7 @@ mod tests {
             "import_stats=legacy iteration=1 profile_mode=private direct_imports=Init effective_modules=1 compacted_regions=1 memory_mapped_regions=0 imported_bytes=256 imported_constants=2 extension_count=0 total_imported_extension_entries=0 import_level=private import_all=false load_exts=true",
             "",
         );
-        let stats = &parsed.import_stats[0];
+        let stats = first(&parsed.import_stats);
         assert_eq!(stats.compacted_region_bytes, 256);
         assert_eq!(stats.memory_mapped_region_bytes, None);
         assert_eq!(stats.non_memory_mapped_region_bytes, None);
@@ -751,7 +760,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.import_stats.len(), 1);
-        let stats = &parsed.import_stats[0];
+        let stats = first(&parsed.import_stats);
         assert_eq!(stats.label, "bracketed_lightweight");
         assert_eq!(stats.profile_mode, "bracketed-private-no-exts");
         assert_eq!(stats.compacted_region_bytes, 8192);
@@ -768,12 +777,12 @@ mod tests {
             "",
         );
         assert_eq!(parsed.timings.len(), 1);
-        let timing = &parsed.timings[0];
+        let timing = first(&parsed.timings);
         assert_eq!(timing.label, "worker_cycling");
         assert_eq!(timing.iteration, Some(2));
         assert_eq!(timing.kind, "warm-same-child");
-        assert_eq!(timing.elapsed_ms, 12.5);
-        assert_eq!(timing.rss_kib, Some(700000));
+        assert_float_eq(timing.elapsed_ms, 12.5);
+        assert_eq!(timing.rss_kib, Some(700_000));
     }
 
     #[test]
@@ -783,7 +792,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.admissions.len(), 1);
-        let admission = &parsed.admissions[0];
+        let admission = first(&parsed.admissions);
         assert_eq!(admission.label, "worker_session_open");
         assert_eq!(admission.iteration, Some(2));
         assert_eq!(admission.kind, "cold");
@@ -794,7 +803,7 @@ mod tests {
         assert_eq!(admission.import_like_admitted, Some(1));
         assert_eq!(admission.concurrent_cold_opens_observed, 0);
         assert_eq!(admission.rss_before_admission_kib, Some(100));
-        assert_eq!(admission.rss_after_open_kib, Some(700000));
+        assert_eq!(admission.rss_after_open_kib, Some(700_000));
         assert_eq!(admission.refusal_reason, None);
     }
 
@@ -805,7 +814,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.session_reuse.len(), 1);
-        let sample = &parsed.session_reuse[0];
+        let sample = first(&parsed.session_reuse);
         assert_eq!(sample.label, "pooled-reuse");
         assert_eq!(sample.iteration, Some(2));
         assert_eq!(sample.layer, "host");
@@ -826,7 +835,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.replacements.len(), 1);
-        let sample = &parsed.replacements[0];
+        let sample = first(&parsed.replacements);
         assert_eq!(sample.label, "worker_session_open");
         assert_eq!(sample.iteration, Some(2));
         assert_eq!(sample.kind, "cold");
@@ -856,7 +865,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.batches.len(), 1);
-        let sample = &parsed.batches[0];
+        let sample = first(&parsed.batches);
         assert_eq!(sample.label, "warm_module_query_batch");
         assert_eq!(sample.iteration, Some(2));
         assert_eq!(sample.layer, "worker-pool");
@@ -864,9 +873,9 @@ mod tests {
         assert_eq!(sample.selectors, 2);
         assert_eq!(sample.request_delta, 1);
         assert_eq!(sample.import_delta, 0);
-        assert_eq!(sample.elapsed_ms, 4.25);
-        assert_eq!(sample.parent_rss_kib, Some(120000));
-        assert_eq!(sample.child_rss_kib, Some(700000));
+        assert_float_eq(sample.elapsed_ms, 4.25);
+        assert_eq!(sample.parent_rss_kib, Some(120_000));
+        assert_eq!(sample.child_rss_kib, Some(700_000));
         assert_eq!(sample.result_items, 2);
         assert_eq!(sample.item_failures, 0);
         assert!(!sample.total_truncated);
@@ -880,7 +889,7 @@ mod tests {
             "",
         );
         assert_eq!(parsed.derived_work.len(), 1);
-        let sample = &parsed.derived_work[0];
+        let sample = first(&parsed.derived_work);
         assert_eq!(sample.label, "proof_search_inspection");
         assert_eq!(sample.iteration, Some(1));
         assert_eq!(sample.pretty_prints, 1);
@@ -895,6 +904,6 @@ mod tests {
             "profiler: lazy discriminator import initialization 10ms",
         );
         assert_eq!(parsed.derived_work.len(), 1);
-        assert!(parsed.derived_work[0].lazy_discr_tree_import_initialization_observed);
+        assert!(first(&parsed.derived_work).lazy_discr_tree_import_initialization_observed);
     }
 }

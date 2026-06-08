@@ -35,6 +35,8 @@ reading order; use the sidebar groupings instead.
 - **Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)**—the process-boundary supervisor and its scale and
   observability story.
 - **Recipes**—task-oriented walkthroughs for shipping a Lean-backed crate or wiring a worker capability.
+- **[Production hosting](production-hosting.md)**—the worker-pool pattern for long-running Rust hosts: warm reuse,
+  bounded fresh imports, child cycling, batching, and typed resource reporting.
 - **Safety audits**—long-session memory bounds and the workspace `unsafe` inventory.
 - **Operations**—testing strategy, performance baselines, diagnostics, release process, toolchain bumps.
 
