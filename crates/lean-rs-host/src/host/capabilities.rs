@@ -155,6 +155,12 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// the default private profile. No profile falls back silently to
     /// another one: import and service failures are reported for the requested
     /// profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns a host resource error when same-process cargo-test imports are
+    /// blocked, a cancellation error when `cancellation` is already cancelled,
+    /// or the Lean/import failure surfaced by the requested profile.
     pub fn session_with_profile<'c>(
         &'c self,
         imports: &[&str],
@@ -170,6 +176,12 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     ///
     /// This exists for profiling import breadth only. Normal host sessions use
     /// [`Self::session`], whose default is [`LeanSessionImportProfile::Private`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a host resource error when same-process cargo-test imports are
+    /// blocked, or the Lean/import failure surfaced by the requested diagnostic
+    /// mode.
     pub fn profiling_session<'c>(
         &'c self,
         imports: &[&str],
@@ -189,6 +201,11 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// replacement for [`Self::session`]: parser, elaboration, proof-state,
     /// pretty-printing, and capability workflows require full sessions with
     /// loaded extensions.
+    ///
+    /// # Errors
+    ///
+    /// Returns the Lean/import or ABI-conversion failure encountered while
+    /// running the closed bracketed query.
     pub fn bracketed_import_query(
         &self,
         imports: &[&str],

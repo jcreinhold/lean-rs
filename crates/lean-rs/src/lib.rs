@@ -119,6 +119,7 @@ pub mod __host_internals {
     pub use crate::error::host_internal;
     pub use crate::error::host_module_init;
     pub use crate::error::host_resource_exhausted;
+    pub use crate::error::host_resource_exhausted_with_facts;
     pub use crate::error::host_unsupported;
 
     /// Build a Lean `String` object without allocating an intermediate Rust
@@ -149,7 +150,7 @@ pub use crate::callback::{
 pub use crate::error::{
     CapturedEvent, DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY, DiagnosticCapture, HostFailure, HostStage,
     LEAN_ERROR_MESSAGE_LIMIT, LeanCancelled, LeanDiagnosticCode, LeanError, LeanException, LeanExceptionKind,
-    LeanResult,
+    LeanResult, ResourceExhaustedFacts,
 };
 pub use crate::handle::{LeanDeclaration, LeanExpr, LeanLevel, LeanName};
 pub use crate::module::{

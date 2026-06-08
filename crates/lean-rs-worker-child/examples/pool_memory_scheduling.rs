@@ -240,7 +240,7 @@ fn admission_refusal_stress(worker_binary: &Path, knobs: MemoryPolicyKnobs) -> R
 
     let distinct = builder(worker_binary).restart_policy(LeanWorkerRestartPolicy::default().max_requests(99));
     match pool.acquire_lease(distinct) {
-        Err(LeanWorkerError::WorkerPoolExhausted { max_workers }) => {
+        Err(LeanWorkerError::WorkerPoolExhausted { max_workers, .. }) => {
             println!("admission_refusal_stress refused=max_workers max_workers={max_workers}");
         }
         Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {

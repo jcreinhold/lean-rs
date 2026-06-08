@@ -44,6 +44,27 @@ pub struct LeanWorkerImportStats {
     pub load_exts: bool,
 }
 
+/// Resource-boundary facts attached to worker errors or degraded results.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerResourceExhaustedFacts {
+    pub cause: String,
+    pub work_entered_child: bool,
+    pub operation: Option<String>,
+    pub current_rss_kib: Option<u64>,
+    pub limit_kib: Option<u64>,
+    pub import_count: Option<u64>,
+    pub worker_generation: Option<u64>,
+    pub restart_reason: Option<String>,
+    pub queue_wait_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub cold_open_attempts: Option<u64>,
+    pub cold_open_admitted: Option<u64>,
+    pub cold_open_refusals: Option<u64>,
+    pub import_like_requests: Option<u64>,
+    pub import_like_admitted: Option<u64>,
+    pub last_import_stats: Option<LeanWorkerImportStats>,
+}
+
 /// Closed full-session import profiles understood by worker children.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1159,6 +1180,8 @@ pub struct LeanWorkerModuleQueryCacheFacts {
     pub output_bytes: u64,
     pub cache_entry_count: Option<u64>,
     pub cache_approx_bytes: Option<u64>,
+    #[serde(default)]
+    pub resource: Option<Box<LeanWorkerResourceExhaustedFacts>>,
 }
 
 impl LeanWorkerModuleQueryCacheFacts {
@@ -1170,6 +1193,7 @@ impl LeanWorkerModuleQueryCacheFacts {
             output_bytes,
             cache_entry_count: None,
             cache_approx_bytes: None,
+            resource: None,
         }
     }
 }

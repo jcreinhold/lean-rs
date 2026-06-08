@@ -700,6 +700,21 @@ fn session_pool_memory_policy_refuses_cache_miss_after_import_budget() {
                 "message should include latest Lean import attribution: {}",
                 host.message(),
             );
+            let facts = host
+                .resource_exhausted_facts()
+                .expect("resource refusals carry structured facts");
+            assert_eq!(facts.cause, "same_process_fresh_import_limit");
+            assert!(!facts.work_entered_lean);
+            assert_eq!(facts.limit_kib, None);
+            assert_eq!(facts.import_count, Some(1));
+            assert_eq!(facts.import_limit, Some(1));
+            assert_eq!(facts.requested_imports, Some(1));
+            assert!(
+                facts
+                    .last_import_stats
+                    .as_ref()
+                    .is_some_and(|stats| stats.contains("compacted_region_bytes="))
+            );
         }
         LeanError::LeanException(other) => panic!("expected Host resource exhaustion, got LeanException {other:?}"),
         LeanError::Cancelled(other) => panic!("expected Host resource exhaustion, got Cancelled {other:?}"),

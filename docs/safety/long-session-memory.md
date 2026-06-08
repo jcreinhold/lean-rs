@@ -396,6 +396,22 @@ Cold import admission is intentionally local to the existing Rust boundaries:
 There is no global import semaphore and no `max_concurrent_imports` knob in this baseline. One pool cannot internally
 run concurrent cold opens because lease acquisition takes `&mut LeanWorkerPool`; multiple independent pools are a
 caller-level concurrency decision and should be bounded by their own process policy and RSS budget.
+
+Resource-boundary failures are reported as typed resource facts where the boundary can prove them. Same-process
+`SessionPool` refusals are `LeanDiagnosticCode::ResourceExhausted` host failures with `ResourceExhaustedFacts` attached:
+the facts name the cause, requested import count, import/RSS budget, latest import-stats diagnostic when available, and
+`work_entered_lean=false`. Worker and worker-pool resource failures expose `LeanWorkerResourceExhaustedFacts` through
+`LeanWorkerError::resource_exhausted_facts()`: pool admission refusals and pre-dispatch cancellation report
+`work_entered_child=false`, while in-flight RSS hard limits, timeouts, cancellations observed while reading worker
+events, and degraded module-query batches report `work_entered_child=true`.
+
+Callers should treat `work_entered_child=false` as a hard admission refusal: retry only after changing the budget,
+choosing a warmer/equivalent session key, or cycling according to policy. `work_entered_child=true` means Lean work
+started and the result is interrupted or degraded under runtime pressure; module-query batches preserve per-selector
+`BudgetExceeded` items and attach the same resource facts to the batch facts. Ordinary Lean diagnostics, missing
+declarations, unsupported exports, and protocol errors are not relabeled as resource exhaustion without runtime
+evidence.
+
 The pool memory-scheduling workload is:
 
 ```sh

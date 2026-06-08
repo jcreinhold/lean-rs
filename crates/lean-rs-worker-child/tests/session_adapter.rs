@@ -322,7 +322,7 @@ fn parent_can_cancel_long_worker_request_at_progress_boundary() {
         .expect_err("parent cancellation should stop worker request");
 
     match err {
-        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_declaration_kinds"),
+        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "worker_declaration_kinds"),
         other => panic!("expected worker cancellation, got {other:?}"),
     }
     assert!(

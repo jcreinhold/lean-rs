@@ -30,11 +30,17 @@ the same failure happens inside the worker crates, the parent observes a typed w
 | `Elaboration` | `lean_rs.elaboration` | Term parsing or elaboration produced diagnostics. Payload is `LeanElabFailure` with typed diagnostics. | Walk `failure.diagnostics()`: each carries a `severity`, bounded `message`, optional `position`, and `file_label`. If `failure.truncated() == true`, raise `LeanElabOptions::diagnostic_byte_limit` and rerun. |
 | `Unsupported` | `lean_rs.unsupported` | The host shim returned `unsupported` for the requested service, or an optional meta-service symbol was absent at load. | Rebuild the bundled host shims and the consumer capability with the same Lean toolchain. The fixture in this repo exercises all four meta services (`infer_type`, `whnf`, `heartbeat_burn`, `is_def_eq`). |
 | `Cancelled` | `lean_rs.cancelled` | A `lean-rs-host` cooperative cancellation token was observed before a host-controlled FFI dispatch. | Treat the operation as aborted and discard partial work. Create a fresh token before retrying. |
-| `ResourceExhausted` | `lean_rs.resource_exhausted` | A caller-configured resource budget was exhausted before the operation ran. | Reuse an existing session, cycle the worker process, reduce result size, or raise the explicit budget after measuring peak RSS. |
+| `ResourceExhausted` | `lean_rs.resource_exhausted` | A caller-configured resource budget was exhausted, or a worker request was interrupted by a resource guard. | Reuse an existing session, cycle the worker process, reduce result size, or raise the explicit budget after measuring peak RSS. |
 | `Internal` | `lean_rs.internal` | A `pub(crate)` invariant tripped, or a callback panicked inside the safe boundary. | File a bug; include the bounded message and the `as_str()` id. |
 
 The enum is `#[non_exhaustive]`; new variants may be added. Variant names and `as_str()` ids are stable across patch
 releases.
+
+Same-process host resource refusals may attach `ResourceExhaustedFacts` to `HostFailure`; worker and worker-pool
+resource outcomes expose `LeanWorkerResourceExhaustedFacts` through `LeanWorkerError::resource_exhausted_facts()` and,
+for degraded module-query batches, through the batch cache facts. These facts distinguish admission refusals
+(`work_entered_lean=false` or `work_entered_child=false`) from requests that entered the child and were then degraded or
+interrupted.
 
 ## Loader preflight
 

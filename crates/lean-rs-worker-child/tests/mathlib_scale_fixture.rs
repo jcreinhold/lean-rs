@@ -331,7 +331,7 @@ fn mathlib_scale_fixture_reports_timeout_cancellation_and_fatal_exit_distinctly(
         )
         .expect_err("sink cancellation stops mathlib-scale stream");
     match err {
-        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_run_data_stream"),
+        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "worker_run_data_stream"),
         other => panic!("expected cancellation, got {other:?}"),
     }
     assert!(!cancel_lease.is_valid());

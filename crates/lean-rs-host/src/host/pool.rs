@@ -58,6 +58,8 @@ use std::process::Command;
 
 use lean_rs::LeanRuntime;
 use lean_rs::Obj;
+use lean_rs::ResourceExhaustedFacts;
+use lean_rs::error::LeanError;
 use lean_rs::error::LeanResult;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
@@ -609,18 +611,58 @@ impl<'lean> SessionPool<'lean> {
         )
     }
 
+    fn latest_import_stats_for_resource_facts(&self) -> Option<String> {
+        self.last_import_stats
+            .borrow()
+            .as_ref()
+            .map(LeanImportStats::memory_diagnostic)
+    }
+
+    fn resource_refusal(
+        &self,
+        cause: &str,
+        message: String,
+        current_rss_kib: Option<u64>,
+        limit_kib: Option<u64>,
+        import_count: Option<u64>,
+        import_limit: Option<u64>,
+        requested_imports: u64,
+    ) -> LeanError {
+        lean_rs::__host_internals::host_resource_exhausted_with_facts(
+            message,
+            ResourceExhaustedFacts {
+                cause: cause.to_owned(),
+                work_entered_lean: false,
+                current_rss_kib,
+                limit_kib,
+                import_count,
+                import_limit,
+                requested_imports: Some(requested_imports),
+                last_import_stats: self.latest_import_stats_for_resource_facts(),
+            },
+        )
+    }
+
     fn enforce_before_fresh_import(&self, imports: &[&str]) -> LeanResult<()> {
         let stats = self.stats.get();
         if let Some(limit) = self.memory_policy.max_fresh_imports
             && stats.imports_performed >= limit
         {
             self.bump_fresh_import_refusal();
-            return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+            return Err(self.resource_refusal(
+                "same_process_fresh_import_limit",
+                format!(
                 "same-process SessionPool refused fresh import #{} for {} import(s): max_fresh_imports={limit}; {}; reuse a pooled environment or cycle the worker process",
                 stats.imports_performed.saturating_add(1),
                 imports.len(),
                 self.latest_import_stats_diagnostic(),
-            )));
+                ),
+                None,
+                None,
+                Some(stats.imports_performed),
+                Some(limit),
+                imports.len() as u64,
+            ));
         }
 
         if let Some(limit_kib) = self.memory_policy.max_rss_kib {
@@ -628,21 +670,37 @@ impl<'lean> SessionPool<'lean> {
                 Some(current_kib) if current_kib >= limit_kib => {
                     self.bump_rss_sample(false);
                     self.bump_fresh_import_refusal();
-                    return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+                    return Err(self.resource_refusal(
+                        "same_process_rss_ceiling",
+                        format!(
                         "same-process SessionPool refused fresh import for {} import(s): current RSS {current_kib} KiB reached max_rss_kib={limit_kib}; {}; cycle the worker process to reset Lean process-global import state",
                         imports.len(),
                         self.latest_import_stats_diagnostic(),
-                    )));
+                        ),
+                        Some(current_kib),
+                        Some(limit_kib),
+                        Some(stats.imports_performed),
+                        None,
+                        imports.len() as u64,
+                    ));
                 }
                 Some(_) => self.bump_rss_sample(false),
                 None => {
                     self.bump_rss_sample(true);
                     self.bump_fresh_import_refusal();
-                    return Err(lean_rs::__host_internals::host_resource_exhausted(format!(
+                    return Err(self.resource_refusal(
+                        "same_process_rss_sample_unavailable",
+                        format!(
                         "same-process SessionPool refused fresh import for {} import(s): current RSS sample unavailable while max_rss_kib={limit_kib} is configured; {}",
                         imports.len(),
                         self.latest_import_stats_diagnostic(),
-                    )));
+                        ),
+                        None,
+                        Some(limit_kib),
+                        Some(stats.imports_performed),
+                        None,
+                        imports.len() as u64,
+                    ));
                 }
             }
         }

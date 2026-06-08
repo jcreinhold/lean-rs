@@ -139,7 +139,7 @@ fn sink_requested_cancellation_cycles_child() {
         .expect_err("sink cancellation should stop the worker request");
 
     match err {
-        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "emit_test_rows"),
+        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "emit_test_rows"),
         other => panic!("expected cancellation, got {other:?}"),
     }
     assert_eq!(

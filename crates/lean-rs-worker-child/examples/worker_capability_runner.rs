@@ -122,7 +122,9 @@ fn demonstrate_timeout(capability: &mut LeanWorkerCapability) -> Result<(), Box<
     session.set_request_timeout(Duration::from_millis(50));
     let err = session.run_streaming_command(&command, &ShapeRequest::default(), &rows, None, None, None);
     match err {
-        Err(LeanWorkerError::Timeout { operation, duration }) => {
+        Err(LeanWorkerError::Timeout {
+            operation, duration, ..
+        }) => {
             println!("timeout operation={operation} duration_ms={}", duration.as_millis());
             capability.set_request_timeout(LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT);
             Ok(())

@@ -316,24 +316,18 @@ impl LeanImportLevel {
 /// Profiles intentionally expose names tied to host semantics rather than raw
 /// Lean import knobs. All full-session profiles keep `loadExts := true`; the
 /// no-extension variant remains a profiling-only diagnostic path.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum LeanSessionImportProfile {
-    /// Public exported declarations only. This is the default pre-1.0
-    /// operability profile.
+    /// Public exported declarations only.
     ExportedPublic,
     /// Server-level import data without `import all`.
     Server,
     /// Private-level import data without `import all`.
+    #[default]
     Private,
     /// Legacy compatibility import shape: `import all`, private level,
     /// extensions loaded.
     FullPrivateCompat,
-}
-
-impl Default for LeanSessionImportProfile {
-    fn default() -> Self {
-        Self::Private
-    }
 }
 
 impl LeanSessionImportProfile {

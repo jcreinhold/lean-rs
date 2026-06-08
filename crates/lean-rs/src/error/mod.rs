@@ -172,7 +172,20 @@ impl LeanError {
 
     /// Build a resource-exhaustion host failure for caller-configured limits.
     pub(crate) fn resource_exhausted(message: impl Into<String>) -> Self {
-        Self::host(HostStage::Resource, LeanDiagnosticCode::ResourceExhausted, message)
+        Self::resource_exhausted_with_facts(message, None)
+    }
+
+    /// Build a resource-exhaustion host failure with structured runtime facts.
+    pub(crate) fn resource_exhausted_with_facts(
+        message: impl Into<String>,
+        facts: Option<ResourceExhaustedFacts>,
+    ) -> Self {
+        Self::Host(HostFailure {
+            stage: HostStage::Resource,
+            code: LeanDiagnosticCode::ResourceExhausted,
+            message: bound_message(message.into()),
+            resource_facts: facts.map(Box::new),
+        })
     }
 
     /// Build a cooperative cancellation report.
@@ -190,6 +203,7 @@ impl LeanError {
             stage,
             code,
             message: bound_message(message.into()),
+            resource_facts: None,
         })
     }
 }
@@ -276,6 +290,7 @@ pub struct HostFailure {
     stage: HostStage,
     code: LeanDiagnosticCode,
     message: String,
+    resource_facts: Option<Box<ResourceExhaustedFacts>>,
 }
 
 impl HostFailure {
@@ -307,6 +322,31 @@ impl HostFailure {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    /// Structured runtime facts for a resource-boundary refusal, when the
+    /// construction site had them available.
+    #[must_use]
+    pub fn resource_exhausted_facts(&self) -> Option<&ResourceExhaustedFacts> {
+        self.resource_facts.as_deref()
+    }
+}
+
+/// Runtime facts attached to a caller-configured resource refusal.
+///
+/// This type deliberately stays generic enough for the base `lean-rs` crate:
+/// higher layers can attach concrete import-stat diagnostics in the
+/// `last_import_stats` string without forcing a dependency cycle back from
+/// the error core into host or worker crates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceExhaustedFacts {
+    pub cause: String,
+    pub work_entered_lean: bool,
+    pub current_rss_kib: Option<u64>,
+    pub limit_kib: Option<u64>,
+    pub import_count: Option<u64>,
+    pub import_limit: Option<u64>,
+    pub requested_imports: Option<u64>,
+    pub last_import_stats: Option<String>,
 }
 
 impl fmt::Display for HostFailure {
@@ -578,6 +618,12 @@ pub fn host_internal(message: impl Into<String>) -> LeanError {
 #[doc(hidden)]
 pub fn host_resource_exhausted(message: impl Into<String>) -> LeanError {
     LeanError::resource_exhausted(message)
+}
+
+/// Construct a host resource-exhaustion failure with structured runtime facts.
+#[doc(hidden)]
+pub fn host_resource_exhausted_with_facts(message: impl Into<String>, facts: ResourceExhaustedFacts) -> LeanError {
+    LeanError::resource_exhausted_with_facts(message, Some(facts))
 }
 
 /// Construct a callback-panic host failure. See [`LeanError::callback_panic`].

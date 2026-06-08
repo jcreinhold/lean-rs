@@ -211,7 +211,7 @@ fn cancellation_during_backpressure_invalidates_lease() {
         .expect_err("sink cancellation should stop a backpressured stream");
 
     match err {
-        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_run_data_stream"),
+        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "worker_run_data_stream"),
         other => panic!("expected cancellation, got {other:?}"),
     }
     let snapshot = lease.snapshot();

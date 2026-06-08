@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use lean_rs_worker_protocol::types::{
     LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQuerySelector,
-    LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
+    LeanWorkerOutputBudgets, LeanWorkerResourceExhaustedFacts, LeanWorkerSessionImportProfile,
 };
 
 use crate::capability::{LeanWorkerCapability, LeanWorkerCapabilityBuilder};
@@ -474,7 +474,10 @@ impl LeanWorkerPool {
             .ok_or_else(|| LeanWorkerError::Protocol {
                 message: "worker pool failed to retain newly opened entry".to_owned(),
             })?;
-        let _ = self.entries[index].sample_rss();
+        let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
+            message: "worker pool failed to retain newly opened entry".to_owned(),
+        })?;
+        let _ = entry.sample_rss();
         self.rss_after_open_kib = total_known_child_rss_kib(&self.entries);
         let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool failed to retain newly opened entry".to_owned(),
@@ -734,10 +737,18 @@ impl LeanWorkerPool {
         if rss.total_kib >= limit_kib {
             self.memory_budget_rejections = self.memory_budget_rejections.saturating_add(1);
             self.record_cold_open_refusal("rss_budget");
+            let last_import_stats = self.latest_import_stats();
             return Err(LeanWorkerError::WorkerPoolMemoryBudgetExceeded {
                 current_kib: rss.total_kib,
                 limit_kib,
-                last_import_stats: self.latest_import_stats(),
+                last_import_stats: last_import_stats.clone().map(Box::new),
+                resource: Box::new(self.pool_resource_facts(
+                    "worker_pool_total_rss_budget",
+                    Some(rss.total_kib),
+                    Some(limit_kib),
+                    None,
+                    last_import_stats,
+                )),
             });
         }
         Ok(())
@@ -789,6 +800,44 @@ impl LeanWorkerPool {
             .find_map(|entry| entry.capability.stats().last_import_stats)
     }
 
+    fn pool_resource_facts(
+        &self,
+        cause: &str,
+        current_rss_kib: Option<u64>,
+        limit_kib: Option<u64>,
+        queue_wait: Option<Duration>,
+        last_import_stats: Option<LeanWorkerImportStats>,
+    ) -> LeanWorkerResourceExhaustedFacts {
+        let restart_reason = self
+            .entries
+            .iter()
+            .find_map(|entry| entry.capability.stats().last_restart_reason)
+            .map(|reason| reason.stable_cause().to_owned());
+        let import_like_requests = self
+            .entries
+            .iter()
+            .map(|entry| entry.capability.stats().import_like_admission_attempts)
+            .fold(0_u64, u64::saturating_add);
+        LeanWorkerResourceExhaustedFacts {
+            cause: cause.to_owned(),
+            work_entered_child: false,
+            operation: Some("worker_pool_acquire_lease".to_owned()),
+            current_rss_kib,
+            limit_kib,
+            import_count: None,
+            worker_generation: None,
+            restart_reason,
+            queue_wait_ms: queue_wait.map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)),
+            duration_ms: None,
+            cold_open_attempts: Some(self.cold_open_attempts),
+            cold_open_admitted: Some(self.cold_open_admitted),
+            cold_open_refusals: Some(self.cold_open_refusals),
+            import_like_requests: Some(import_like_requests),
+            import_like_admitted: None,
+            last_import_stats,
+        }
+    }
+
     fn refresh_total_child_rss(&mut self) -> PoolRssTotal {
         let mut total_kib = 0_u64;
         let mut unavailable = 0_u64;
@@ -810,6 +859,13 @@ impl LeanWorkerPool {
             self.record_cold_open_refusal("max_workers");
             return Err(LeanWorkerError::WorkerPoolExhausted {
                 max_workers: self.config.max_workers,
+                resource: Box::new(self.pool_resource_facts(
+                    "worker_pool_max_workers",
+                    None,
+                    None,
+                    None,
+                    self.latest_import_stats(),
+                )),
             });
         }
         let started = Instant::now();
@@ -821,6 +877,13 @@ impl LeanWorkerPool {
         self.record_cold_open_refusal("queue_timeout");
         Err(LeanWorkerError::WorkerPoolQueueTimeout {
             waited: self.config.queue_wait_timeout,
+            resource: Box::new(self.pool_resource_facts(
+                "worker_pool_queue_timeout",
+                None,
+                None,
+                Some(self.config.queue_wait_timeout),
+                self.latest_import_stats(),
+            )),
         })
     }
 }
@@ -1175,7 +1238,7 @@ fn invalidates_lease(err: &LeanWorkerError) -> bool {
 }
 
 fn invalidation_reason(err: &LeanWorkerError) -> String {
-    if let LeanWorkerError::Cancelled { operation } = err {
+    if let LeanWorkerError::Cancelled { operation, .. } = err {
         format!("cancelled during {operation}")
     } else if let LeanWorkerError::Timeout { operation, .. } = err {
         format!("timed out during {operation}")

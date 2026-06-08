@@ -383,7 +383,7 @@ fn row_sink_cancellation_cycles_child_and_invalidates_session() {
             .expect_err("sink cancellation should stop the stream request");
 
         match err {
-            LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_run_data_stream"),
+            LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "worker_run_data_stream"),
             other => panic!("expected cancellation, got {other:?}"),
         }
         assert_eq!(
@@ -442,7 +442,9 @@ fn request_timeout_cycles_child_and_invalidates_session() {
             .expect_err("slow stream should time out");
 
         match err {
-            LeanWorkerError::Timeout { operation, duration } => {
+            LeanWorkerError::Timeout {
+                operation, duration, ..
+            } => {
                 assert_eq!(operation, "worker_run_data_stream");
                 assert_eq!(duration, Duration::from_millis(50));
             }

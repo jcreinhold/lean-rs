@@ -315,7 +315,11 @@ fn lease_module_query_batch_pre_cancelled_token_sends_no_request() {
         )
         .expect_err("pre-cancelled batch should stop before dispatch");
     match err {
-        LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_process_module_query_batch"),
+        LeanWorkerError::Cancelled { operation, resource } => {
+            assert_eq!(operation, "worker_process_module_query_batch");
+            assert_eq!(resource.cause, "worker_cancelled");
+            assert!(!resource.work_entered_child);
+        }
         other => panic!("expected cancellation, got {other:?}"),
     }
     let after = lease.snapshot();
@@ -353,7 +357,12 @@ fn distinct_session_key_respects_fixed_pool_limit() {
         .acquire_lease(different_imports)
         .expect_err("fixed-size pool should reject a second distinct key");
     match err {
-        LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
+        LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
+            assert_eq!(max_workers, 1);
+            assert_eq!(resource.cause, "worker_pool_max_workers");
+            assert!(!resource.work_entered_child);
+            assert_eq!(resource.cold_open_refusals, Some(1));
+        }
         other => panic!("expected pool exhaustion, got {other:?}"),
     }
     let snapshot = pool.snapshot();
@@ -386,7 +395,11 @@ fn import_profile_partitions_pool_session_keys() {
         .acquire_lease(builder().import_profile(LeanWorkerSessionImportProfile::FullPrivateCompat))
         .expect_err("fixed-size pool should reject a second import profile");
     match err {
-        LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
+        LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
+            assert_eq!(max_workers, 1);
+            assert_eq!(resource.cause, "worker_pool_max_workers");
+            assert!(!resource.work_entered_child);
+        }
         other => panic!("expected pool exhaustion, got {other:?}"),
     }
     let snapshot = pool.snapshot();
@@ -414,7 +427,11 @@ fn import_workspace_root_partitions_pool_session_keys() {
         .acquire_lease(different_import_root)
         .expect_err("fixed-size pool should reject a second import workspace root");
     match err {
-        LeanWorkerError::WorkerPoolExhausted { max_workers } => assert_eq!(max_workers, 1),
+        LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
+            assert_eq!(max_workers, 1);
+            assert_eq!(resource.cause, "worker_pool_max_workers");
+            assert!(!resource.work_entered_child);
+        }
         other => panic!("expected pool exhaustion, got {other:?}"),
     }
 }
@@ -614,10 +631,16 @@ fn memory_budget_rejects_new_distinct_worker_when_known_rss_is_exhausted() {
             current_kib,
             limit_kib,
             last_import_stats,
+            resource,
         }) => {
             assert_eq!(limit_kib, 1);
             assert!(current_kib >= limit_kib);
             assert!(last_import_stats.is_some());
+            assert_eq!(resource.cause, "worker_pool_total_rss_budget");
+            assert!(!resource.work_entered_child);
+            assert_eq!(resource.current_rss_kib, Some(current_kib));
+            assert_eq!(resource.limit_kib, Some(limit_kib));
+            assert!(resource.last_import_stats.is_some());
             "budget-exceeded"
         }
         Ok(lease) => {
@@ -655,7 +678,12 @@ fn queue_wait_timeout_is_typed_when_pool_is_full() {
         .acquire_lease(distinct_valid_builder())
         .expect_err("full pool should wait only until the configured queue timeout");
     match err {
-        LeanWorkerError::WorkerPoolQueueTimeout { waited } => assert_eq!(waited, Duration::from_millis(10)),
+        LeanWorkerError::WorkerPoolQueueTimeout { waited, resource } => {
+            assert_eq!(waited, Duration::from_millis(10));
+            assert_eq!(resource.cause, "worker_pool_queue_timeout");
+            assert!(!resource.work_entered_child);
+            assert_eq!(resource.queue_wait_ms, Some(10));
+        }
         other => panic!("expected queue timeout, got {other:?}"),
     }
     assert_eq!(pool.snapshot().queue_timeouts, 1);

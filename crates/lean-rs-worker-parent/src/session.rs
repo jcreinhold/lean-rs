@@ -27,7 +27,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
     LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
-    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerSessionImportProfile,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts, LeanWorkerSessionImportProfile,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -1012,12 +1012,13 @@ impl LeanWorkerSession<'_> {
                     metadata,
                 })
             }
-            Err(LeanWorkerError::Cancelled { .. }) => {
+            Err(LeanWorkerError::Cancelled { resource, .. }) => {
                 if let Some(err) = typed_sink.take_decode_error() {
                     Err(err)
                 } else {
                     Err(LeanWorkerError::Cancelled {
                         operation: "worker_run_data_stream",
+                        resource,
                     })
                 }
             }
@@ -1146,9 +1147,33 @@ pub(crate) fn check_cancelled(
     token: Option<&LeanWorkerCancellationToken>,
 ) -> Result<(), LeanWorkerError> {
     if token.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
-        Err(LeanWorkerError::Cancelled { operation })
+        Err(LeanWorkerError::Cancelled {
+            operation,
+            resource: Box::new(pre_dispatch_cancelled_resource(operation)),
+        })
     } else {
         Ok(())
+    }
+}
+
+fn pre_dispatch_cancelled_resource(operation: &'static str) -> LeanWorkerResourceExhaustedFacts {
+    LeanWorkerResourceExhaustedFacts {
+        cause: "worker_cancelled".to_owned(),
+        work_entered_child: false,
+        operation: Some(operation.to_owned()),
+        current_rss_kib: None,
+        limit_kib: None,
+        import_count: None,
+        worker_generation: None,
+        restart_reason: None,
+        queue_wait_ms: None,
+        duration_ms: None,
+        cold_open_attempts: None,
+        cold_open_admitted: None,
+        cold_open_refusals: None,
+        import_like_requests: None,
+        import_like_admitted: None,
+        last_import_stats: None,
     }
 }
 

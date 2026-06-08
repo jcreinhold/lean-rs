@@ -2677,6 +2677,7 @@ fn module_query_cache_facts_wire(facts: &ModuleQueryCacheFacts) -> LeanWorkerMod
         output_bytes: facts.output_bytes,
         cache_entry_count: facts.cache_entry_count,
         cache_approx_bytes: facts.cache_approx_bytes,
+        resource: None,
     }
 }
 

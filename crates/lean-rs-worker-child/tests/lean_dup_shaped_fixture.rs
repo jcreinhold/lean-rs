@@ -287,7 +287,9 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
             .run_streaming_command(&command, &ShapeRequest::default(), &sink, None, None, None)
             .expect_err("slow shape command should time out");
         match err {
-            LeanWorkerError::Timeout { operation, duration } => {
+            LeanWorkerError::Timeout {
+                operation, duration, ..
+            } => {
                 assert_eq!(operation, "worker_run_data_stream");
                 assert_eq!(duration, Duration::from_millis(50));
             }
@@ -319,7 +321,7 @@ fn timeout_cancellation_and_fatal_exit_have_distinct_worker_outcomes() {
             )
             .expect_err("sink cancellation should stop shape command");
         match err {
-            LeanWorkerError::Cancelled { operation } => assert_eq!(operation, "worker_run_data_stream"),
+            LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "worker_run_data_stream"),
             other => panic!("expected cancellation, got {other:?}"),
         }
     }

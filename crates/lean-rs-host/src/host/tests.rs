@@ -408,9 +408,8 @@ fn session_import_profiles_pass_full_host_gates() {
         LeanSessionImportProfile::ExportedPublic,
         LeanSessionImportProfile::Server,
     ] {
-        let err = match caps.session_with_profile(IMPORTS, profile, None, None) {
-            Ok(_) => panic!("{} should report the non-module fixture blocker", profile.label()),
-            Err(err) => err,
+        let Err(err) = caps.session_with_profile(IMPORTS, profile, None, None) else {
+            panic!("{} should report the non-module fixture blocker", profile.label());
         };
         let message = format!("{err:?}");
         assert!(

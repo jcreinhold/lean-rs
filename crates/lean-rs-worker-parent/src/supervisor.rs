@@ -22,7 +22,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
     LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
-    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts,
 };
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
@@ -564,6 +564,7 @@ pub enum LeanWorkerError {
     Timeout {
         operation: &'static str,
         duration: Duration,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
     },
     /// The worker was killed and replaced because an in-flight RSS sample
     /// crossed the hard parent-side limit.
@@ -571,10 +572,14 @@ pub enum LeanWorkerError {
         operation: &'static str,
         current_kib: u64,
         limit_kib: u64,
-        last_import_stats: Option<LeanWorkerImportStats>,
+        last_import_stats: Option<Box<LeanWorkerImportStats>>,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
     },
     /// A parent-side cancellation token was observed.
-    Cancelled { operation: &'static str },
+    Cancelled {
+        operation: &'static str,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
+    },
     /// A parent-side progress sink panicked while handling a worker event.
     ProgressPanic { message: String },
     /// A parent-side data sink panicked while handling a worker row.
@@ -613,15 +618,22 @@ pub enum LeanWorkerError {
     /// A pool session lease was invalidated by a worker lifecycle transition.
     LeaseInvalidated { reason: String },
     /// A local worker pool cannot admit another distinct session key.
-    WorkerPoolExhausted { max_workers: usize },
+    WorkerPoolExhausted {
+        max_workers: usize,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
+    },
     /// A local worker pool cannot admit work without exceeding its RSS budget.
     WorkerPoolMemoryBudgetExceeded {
         current_kib: u64,
         limit_kib: u64,
-        last_import_stats: Option<LeanWorkerImportStats>,
+        last_import_stats: Option<Box<LeanWorkerImportStats>>,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
     },
     /// Waiting for local worker-pool admission exceeded the configured limit.
-    WorkerPoolQueueTimeout { waited: Duration },
+    WorkerPoolQueueTimeout {
+        waited: Duration,
+        resource: Box<LeanWorkerResourceExhaustedFacts>,
+    },
     /// A supervising policy refused to restart the worker again in its current window.
     RestartLimitExceeded { restarts: u64, window: Duration },
     /// The public supervisor does not support the requested operation.
@@ -662,7 +674,9 @@ impl fmt::Display for LeanWorkerError {
             Self::Worker { code, message } => write!(f, "worker returned {code}: {message}"),
             Self::ChildExited { exit } => write_exit(f, "worker exited", exit),
             Self::ChildPanicOrAbort { exit } => write_exit(f, "worker exited fatally", exit),
-            Self::Timeout { operation, duration } => {
+            Self::Timeout {
+                operation, duration, ..
+            } => {
                 write!(f, "worker operation {operation} timed out after {duration:?}")
             }
             Self::RssHardLimitExceeded {
@@ -670,14 +684,15 @@ impl fmt::Display for LeanWorkerError {
                 current_kib,
                 limit_kib,
                 last_import_stats,
+                ..
             } => {
                 write!(
                     f,
                     "worker operation {operation} exceeded hard RSS limit; current_kib={current_kib} limit_kib={limit_kib}; {}",
-                    import_stats_diagnostic(last_import_stats.as_ref())
+                    import_stats_diagnostic(last_import_stats.as_deref())
                 )
             }
-            Self::Cancelled { operation } => write!(f, "worker operation {operation} was cancelled"),
+            Self::Cancelled { operation, .. } => write!(f, "worker operation {operation} was cancelled"),
             Self::ProgressPanic { message } => write!(f, "worker progress sink panicked: {message}"),
             Self::DataSinkPanic { message } => write!(f, "worker data sink panicked: {message}"),
             Self::DiagnosticSinkPanic { message } => {
@@ -724,7 +739,7 @@ impl fmt::Display for LeanWorkerError {
                 )
             }
             Self::LeaseInvalidated { reason } => write!(f, "worker pool lease was invalidated: {reason}"),
-            Self::WorkerPoolExhausted { max_workers } => {
+            Self::WorkerPoolExhausted { max_workers, .. } => {
                 write!(
                     f,
                     "worker pool cannot admit another session key; max_workers={max_workers}"
@@ -734,14 +749,15 @@ impl fmt::Display for LeanWorkerError {
                 current_kib,
                 limit_kib,
                 last_import_stats,
+                ..
             } => {
                 write!(
                     f,
                     "worker pool cannot admit work within RSS budget; current_kib={current_kib} limit_kib={limit_kib}; {}",
-                    import_stats_diagnostic(last_import_stats.as_ref())
+                    import_stats_diagnostic(last_import_stats.as_deref())
                 )
             }
-            Self::WorkerPoolQueueTimeout { waited } => {
+            Self::WorkerPoolQueueTimeout { waited, .. } => {
                 write!(f, "worker pool admission timed out after {waited:?}")
             }
             Self::RestartLimitExceeded { restarts, window } => {
@@ -794,6 +810,130 @@ impl std::error::Error for LeanWorkerError {
             | Self::UnsupportedRequest { .. } => None,
         }
     }
+}
+
+impl LeanWorkerError {
+    /// Structured resource-boundary facts for errors caused by an admission,
+    /// timeout, cancellation, or RSS limit. `None` means the error is a
+    /// protocol, Lean, build, or lifecycle failure without resource evidence.
+    #[must_use]
+    pub fn resource_exhausted_facts(&self) -> Option<&LeanWorkerResourceExhaustedFacts> {
+        match self {
+            Self::Timeout { resource, .. }
+            | Self::RssHardLimitExceeded { resource, .. }
+            | Self::Cancelled { resource, .. }
+            | Self::WorkerPoolExhausted { resource, .. }
+            | Self::WorkerPoolMemoryBudgetExceeded { resource, .. }
+            | Self::WorkerPoolQueueTimeout { resource, .. } => Some(resource.as_ref()),
+            Self::Spawn { .. }
+            | Self::WorkerChildUnresolved { .. }
+            | Self::WorkerChildNotExecutable { .. }
+            | Self::Bootstrap { .. }
+            | Self::CapabilityBuild { .. }
+            | Self::Setup { .. }
+            | Self::Handshake { .. }
+            | Self::Protocol { .. }
+            | Self::Worker { .. }
+            | Self::ChildExited { .. }
+            | Self::ChildPanicOrAbort { .. }
+            | Self::ProgressPanic { .. }
+            | Self::DataSinkPanic { .. }
+            | Self::DiagnosticSinkPanic { .. }
+            | Self::StreamExportFailed { .. }
+            | Self::StreamCallbackFailed { .. }
+            | Self::StreamRowMalformed { .. }
+            | Self::CapabilityMetadataMalformed { .. }
+            | Self::CapabilityMetadataMismatch { .. }
+            | Self::CapabilityDoctorMalformed { .. }
+            | Self::TypedCommandRequestEncode { .. }
+            | Self::TypedCommandResponseDecode { .. }
+            | Self::TypedCommandRowDecode { .. }
+            | Self::TypedCommandSummaryDecode { .. }
+            | Self::LeaseInvalidated { .. }
+            | Self::RestartLimitExceeded { .. }
+            | Self::UnsupportedRequest { .. }
+            | Self::Wait { .. } => None,
+        }
+    }
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "flat fact construction mirrors the public diagnostic payload"
+)]
+fn resource_facts(
+    cause: impl Into<String>,
+    work_entered_child: bool,
+    operation: Option<&'static str>,
+    current_rss_kib: Option<u64>,
+    limit_kib: Option<u64>,
+    import_count: Option<u64>,
+    worker_generation: Option<u64>,
+    restart_reason: Option<String>,
+    queue_wait: Option<Duration>,
+    duration: Option<Duration>,
+    cold_open_attempts: Option<u64>,
+    cold_open_admitted: Option<u64>,
+    cold_open_refusals: Option<u64>,
+    import_like_requests: Option<u64>,
+    import_like_admitted: Option<u64>,
+    last_import_stats: Option<LeanWorkerImportStats>,
+) -> LeanWorkerResourceExhaustedFacts {
+    LeanWorkerResourceExhaustedFacts {
+        cause: cause.into(),
+        work_entered_child,
+        operation: operation.map(str::to_owned),
+        current_rss_kib,
+        limit_kib,
+        import_count,
+        worker_generation,
+        restart_reason,
+        queue_wait_ms: queue_wait.map(duration_ms),
+        duration_ms: duration.map(duration_ms),
+        cold_open_attempts,
+        cold_open_admitted,
+        cold_open_refusals,
+        import_like_requests,
+        import_like_admitted,
+        last_import_stats,
+    }
+}
+
+fn worker_resource_facts(
+    cause: impl Into<String>,
+    work_entered_child: bool,
+    operation: Option<&'static str>,
+    stats: &LeanWorkerStats,
+    current_rss_kib: Option<u64>,
+    limit_kib: Option<u64>,
+    duration: Option<Duration>,
+) -> LeanWorkerResourceExhaustedFacts {
+    resource_facts(
+        cause,
+        work_entered_child,
+        operation,
+        current_rss_kib,
+        limit_kib,
+        Some(stats.imports),
+        Some(stats.restarts),
+        stats
+            .last_restart_reason
+            .as_ref()
+            .map(LeanWorkerRestartReason::stable_cause)
+            .map(str::to_owned),
+        None,
+        duration,
+        None,
+        None,
+        None,
+        Some(stats.import_like_admission_attempts),
+        Some(stats.import_like_admitted),
+        stats.last_import_stats.clone(),
+    )
 }
 
 /// Supervisor for one `lean-rs-worker` child process.
@@ -895,6 +1035,24 @@ impl LeanWorker {
                 return Err(LeanWorkerError::Timeout {
                     operation: "startup",
                     duration: config.startup_timeout,
+                    resource: Box::new(resource_facts(
+                        "worker_timeout",
+                        false,
+                        Some("startup"),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(config.startup_timeout),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )),
                 });
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1769,8 +1927,19 @@ impl LeanWorker {
             // As with verification: a child abort during a read-only proof-state
             // batch becomes a per-selector degraded item, not a hard error.
             Err(err) => {
+                let resource = err.resource_exhausted_facts().cloned().unwrap_or_else(|| {
+                    worker_resource_facts(
+                        "worker_child_abort",
+                        true,
+                        Some(OPERATION),
+                        &self.stats,
+                        self.stats.last_rss_kib,
+                        None,
+                        None,
+                    )
+                });
                 self.recover_child_abort(OPERATION, err)?;
-                Ok(degraded_query_batch_outcome(selectors))
+                Ok(degraded_query_batch_outcome(selectors, resource))
             }
         }
     }
@@ -2126,7 +2295,16 @@ impl LeanWorker {
                     operation,
                     current_kib,
                     limit_kib,
-                    last_import_stats: self.stats.last_import_stats.clone(),
+                    last_import_stats: self.stats.last_import_stats.clone().map(Box::new),
+                    resource: Box::new(worker_resource_facts(
+                        "worker_rss_hard_limit",
+                        true,
+                        Some(operation),
+                        &self.stats,
+                        Some(current_kib),
+                        Some(limit_kib),
+                        None,
+                    )),
                 })
             }
             Some(current_kib) => {
@@ -2212,6 +2390,15 @@ impl LeanWorker {
                     return Err(LeanWorkerError::Timeout {
                         operation,
                         duration: timeout,
+                        resource: Box::new(worker_resource_facts(
+                            "worker_timeout",
+                            true,
+                            Some(operation),
+                            &self.stats,
+                            self.stats.last_rss_kib,
+                            None,
+                            Some(timeout),
+                        )),
                     });
                 }
                 Some(remaining) => {
@@ -2237,6 +2424,15 @@ impl LeanWorker {
                             return Err(LeanWorkerError::Timeout {
                                 operation,
                                 duration: timeout,
+                                resource: Box::new(worker_resource_facts(
+                                    "worker_timeout",
+                                    true,
+                                    Some(operation),
+                                    &self.stats,
+                                    self.stats.last_rss_kib,
+                                    None,
+                                    Some(timeout),
+                                )),
                             });
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -2313,7 +2509,18 @@ impl LeanWorker {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
                         self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
-                        return Err(LeanWorkerError::Cancelled { operation });
+                        return Err(LeanWorkerError::Cancelled {
+                            operation,
+                            resource: Box::new(worker_resource_facts(
+                                "worker_cancelled",
+                                true,
+                                Some(operation),
+                                &self.stats,
+                                self.stats.last_rss_kib,
+                                None,
+                                None,
+                            )),
+                        });
                     }
                 }
                 Message::DataRow(row) => {
@@ -2331,7 +2538,18 @@ impl LeanWorker {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
                         self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
-                        return Err(LeanWorkerError::Cancelled { operation });
+                        return Err(LeanWorkerError::Cancelled {
+                            operation,
+                            resource: Box::new(worker_resource_facts(
+                                "worker_cancelled",
+                                true,
+                                Some(operation),
+                                &self.stats,
+                                self.stats.last_rss_kib,
+                                None,
+                                None,
+                            )),
+                        });
                     }
                 }
                 Message::Diagnostic(diagnostic) => {
@@ -2675,7 +2893,10 @@ fn truncate_for_display(text: &str, max_bytes: usize) -> String {
 /// Synthesise a degraded module-query batch outcome after a child abort: every
 /// requested selector reports `BudgetExceeded` so the caller sees an honest
 /// "could not complete under resource pressure" per id rather than a hard error.
-fn degraded_query_batch_outcome(selectors: &[LeanWorkerModuleQuerySelector]) -> LeanWorkerModuleQueryBatchOutcome {
+fn degraded_query_batch_outcome(
+    selectors: &[LeanWorkerModuleQuerySelector],
+    resource: LeanWorkerResourceExhaustedFacts,
+) -> LeanWorkerModuleQueryBatchOutcome {
     let items = selectors
         .iter()
         .map(|selector| LeanWorkerModuleQueryBatchItem::BudgetExceeded {
@@ -2689,7 +2910,10 @@ fn degraded_query_batch_outcome(selectors: &[LeanWorkerModuleQuerySelector]) -> 
             total_truncated: false,
         },
         imports: Vec::new(),
-        facts: LeanWorkerModuleQueryCacheFacts::uncached(0),
+        facts: LeanWorkerModuleQueryCacheFacts {
+            resource: Some(Box::new(resource)),
+            ..LeanWorkerModuleQueryCacheFacts::uncached(0)
+        },
     }
 }
 
@@ -2914,12 +3138,31 @@ mod tests {
             },
             LeanWorkerModuleQuerySelector::Diagnostics { id: "b".to_owned() },
         ];
-        let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, .. } =
-            super::degraded_query_batch_outcome(&selectors)
+        let resource = super::resource_facts(
+            "worker_child_abort",
+            true,
+            Some("worker_process_module_query_batch"),
+            None,
+            None,
+            Some(1),
+            Some(2),
+            Some("child_abort".to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, facts } =
+            super::degraded_query_batch_outcome(&selectors, resource.clone())
         else {
             panic!("degraded outcome should be Ok with per-selector items");
         };
         assert!(imports.is_empty());
+        assert_eq!(facts.resource.as_deref(), Some(&resource));
         assert_eq!(result.items.len(), 2);
         // `filter_map` keeps only `BudgetExceeded` items, so a non-degraded item
         // would drop out and the id vector would no longer match.

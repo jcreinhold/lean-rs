@@ -676,8 +676,8 @@ mod tests {
         LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
         LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
-        LeanWorkerDeclarationVerificationTarget, LeanWorkerElabFailure, LeanWorkerElabOptions,
-        LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+        LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerElabFailure,
+        LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
         LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
         LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
         LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
@@ -685,7 +685,7 @@ mod tests {
         LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
         LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
         LeanWorkerProofPositionSummary, LeanWorkerProofStateResult, LeanWorkerRenderedInfo, LeanWorkerRendering,
-        LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+        LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -949,7 +949,7 @@ mod tests {
                         rank_micros: 50,
                         source_micros: 0,
                     },
-                    derived_work: Default::default(),
+                    derived_work: LeanWorkerDerivedWorkFacts::default(),
                 },
             },
         });
@@ -1016,7 +1016,7 @@ mod tests {
                         class_name: None,
                     },
                     flags: LeanWorkerDeclarationFlags::default(),
-                    derived_work: Default::default(),
+                    derived_work: LeanWorkerDerivedWorkFacts::default(),
                     statement_rendering: Some(LeanWorkerRendering::Pretty),
                 }),
             },
@@ -1151,6 +1151,7 @@ mod tests {
                     output_bytes: 0,
                     cache_entry_count: Some(1),
                     cache_approx_bytes: Some(1024),
+                    resource: None,
                 },
             },
         });
@@ -1158,6 +1159,51 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("module query batch response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query batch response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn module_query_cache_facts_resource_is_additive_wire_field() {
+        let old_json = serde_json::json!({
+            "cache_status": "miss",
+            "timings": {
+                "header_import_micros": 0,
+                "elaboration_micros": 0,
+                "projection_micros": 0,
+                "rendering_micros": 0
+            },
+            "output_bytes": 0,
+            "cache_entry_count": null,
+            "cache_approx_bytes": null
+        });
+        let old_facts: LeanWorkerModuleQueryCacheFacts =
+            serde_json::from_value(old_json).expect("old cache facts deserialize without resource");
+        assert!(old_facts.resource.is_none());
+
+        let resource = LeanWorkerResourceExhaustedFacts {
+            cause: "worker_rss_hard_limit".to_owned(),
+            work_entered_child: true,
+            operation: Some("worker_process_module_query_batch".to_owned()),
+            current_rss_kib: Some(2048),
+            limit_kib: Some(1024),
+            import_count: Some(1),
+            worker_generation: Some(2),
+            restart_reason: Some("rss_hard_limit".to_owned()),
+            queue_wait_ms: None,
+            duration_ms: None,
+            cold_open_attempts: None,
+            cold_open_admitted: None,
+            cold_open_refusals: None,
+            import_like_requests: Some(1),
+            import_like_admitted: Some(1),
+            last_import_stats: None,
+        };
+        let facts = LeanWorkerModuleQueryCacheFacts {
+            resource: Some(Box::new(resource.clone())),
+            ..LeanWorkerModuleQueryCacheFacts::uncached(0)
+        };
+        let round_trip: LeanWorkerModuleQueryCacheFacts =
+            serde_json::from_value(serde_json::to_value(&facts).expect("facts serialize")).expect("facts deserialize");
+        assert_eq!(round_trip.resource.as_deref(), Some(&resource));
     }
 
     #[test]

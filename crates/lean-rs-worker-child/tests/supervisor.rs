@@ -331,7 +331,13 @@ fn startup_timeout_is_typed() {
     )
     .expect_err("non-worker child should not handshake");
     match err {
-        LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "startup"),
+        LeanWorkerError::Timeout {
+            operation, resource, ..
+        } => {
+            assert_eq!(operation, "startup");
+            assert_eq!(resource.cause, "worker_timeout");
+            assert!(!resource.work_entered_child);
+        }
         other => panic!("expected startup timeout, got {other:?}"),
     }
 }
