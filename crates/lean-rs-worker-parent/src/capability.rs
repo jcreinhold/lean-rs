@@ -8,7 +8,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult,
@@ -451,6 +451,7 @@ impl LeanWorkerCapabilityBuilder {
 
     fn open_unchecked(self) -> Result<LeanWorkerCapability, LeanWorkerError> {
         let import_workspace_root = self.effective_import_workspace_root();
+        let capability_load_started = Instant::now();
         let (dylib_path, manifest_path) = match (self.built_dylib_path, self.built_manifest_path) {
             (Some(dylib_path), Some(manifest_path)) => (dylib_path, manifest_path),
             (_, None) => {
@@ -470,6 +471,7 @@ impl LeanWorkerCapabilityBuilder {
                 (artifact.dylib_path, manifest_path)
             }
         };
+        let capability_load_elapsed = capability_load_started.elapsed();
         let mut worker = spawn_checked_worker(
             self.worker_child,
             self.startup_timeout,
@@ -489,8 +491,11 @@ impl LeanWorkerCapabilityBuilder {
         )
         .with_import_profile(self.import_profile);
 
+        let session_open_import_elapsed;
         let validated_metadata = {
+            let session_open_started = Instant::now();
             let mut session = worker.open_session(&session_config, None, None)?;
+            session_open_import_elapsed = session_open_started.elapsed();
             match self.metadata_check {
                 Some(check) => {
                     let metadata = session.capability_metadata(&check.export, &check.request, None, None)?;
@@ -508,6 +513,7 @@ impl LeanWorkerCapabilityBuilder {
                 None => None,
             }
         };
+        worker.record_capability_open_timing(capability_load_elapsed, session_open_import_elapsed);
 
         Ok(LeanWorkerCapability {
             worker,
@@ -1022,6 +1028,10 @@ impl LeanWorkerCapability {
 
     pub(crate) fn cycle_with_restart_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
         self.worker.cycle_with_restart_reason(reason)
+    }
+
+    pub(crate) fn record_command_timing(&mut self, first_command_after_open: bool, elapsed: Duration) {
+        self.worker.record_command_timing(first_command_after_open, elapsed);
     }
 
     /// Set the request timeout for subsequent commands.

@@ -20,7 +20,7 @@ use crate::session::{
     LeanWorkerRuntimeMetadata, LeanWorkerSession, LeanWorkerStreamingCommand, LeanWorkerTypedDataSink,
     LeanWorkerTypedStreamSummary,
 };
-use crate::supervisor::{LeanWorkerError, LeanWorkerRestartReason, LeanWorkerStatus};
+use crate::supervisor::{LeanWorkerError, LeanWorkerReplacementTiming, LeanWorkerRestartReason, LeanWorkerStatus};
 
 /// Coarse restart-policy class used in pool session keys.
 ///
@@ -317,6 +317,18 @@ pub struct LeanWorkerPoolSnapshot {
     pub rss_before_admission_kib: Option<u64>,
     pub rss_after_open_kib: Option<u64>,
     pub refusal_reason: Option<String>,
+    pub replacement_attempts: u64,
+    pub replacement_successes: u64,
+    pub replacement_failures: u64,
+    pub replacement_budget_admitted: u64,
+    pub replacement_budget_skipped: u64,
+    pub last_replacement_timing: Option<LeanWorkerReplacementTiming>,
+    pub last_replacement_skipped_reason: Option<String>,
+    pub last_spawn_handshake_elapsed: Option<Duration>,
+    pub last_capability_load_elapsed: Option<Duration>,
+    pub last_session_open_import_elapsed: Option<Duration>,
+    pub last_first_command_elapsed: Option<Duration>,
+    pub last_warm_command_elapsed: Option<Duration>,
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
     pub last_import_stats: Option<LeanWorkerImportStats>,
     pub stream_requests: u64,
@@ -450,6 +462,7 @@ impl LeanWorkerPool {
             last_restart_reason: None,
             policy_restarts: 0,
             active_leases: 0,
+            commands_since_open: 0,
         });
         let index = self
             .entries
@@ -592,6 +605,54 @@ fn snapshot_from_entries(
         rss_before_admission_kib,
         rss_after_open_kib,
         refusal_reason,
+        replacement_attempts: entries
+            .iter()
+            .map(|entry| entry.capability.stats().replacement_attempts)
+            .sum(),
+        replacement_successes: entries
+            .iter()
+            .map(|entry| entry.capability.stats().replacement_successes)
+            .sum(),
+        replacement_failures: entries
+            .iter()
+            .map(|entry| entry.capability.stats().replacement_failures)
+            .sum(),
+        replacement_budget_admitted: entries
+            .iter()
+            .map(|entry| entry.capability.stats().replacement_budget_admitted)
+            .sum(),
+        replacement_budget_skipped: entries
+            .iter()
+            .map(|entry| entry.capability.stats().replacement_budget_skipped)
+            .sum(),
+        last_replacement_timing: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_replacement_timing),
+        last_replacement_skipped_reason: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_replacement_skipped_reason),
+        last_spawn_handshake_elapsed: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_spawn_handshake_elapsed),
+        last_capability_load_elapsed: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_capability_load_elapsed),
+        last_session_open_import_elapsed: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_session_open_import_elapsed),
+        last_first_command_elapsed: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_first_command_elapsed),
+        last_warm_command_elapsed: entries
+            .iter()
+            .rev()
+            .find_map(|entry| entry.capability.stats().last_warm_command_elapsed),
         last_restart_reason: entries.iter().rev().find_map(|entry| entry.last_restart_reason.clone()),
         last_import_stats: entries
             .iter()
@@ -779,6 +840,7 @@ struct PoolEntry {
     last_restart_reason: Option<LeanWorkerRestartReason>,
     policy_restarts: u64,
     active_leases: u64,
+    commands_since_open: u64,
 }
 
 impl PoolEntry {
@@ -833,6 +895,7 @@ impl PoolEntry {
         self.last_activity = Instant::now();
         self.last_rss_kib = None;
         self.policy_restarts = self.policy_restarts.saturating_add(1);
+        self.commands_since_open = 0;
         Ok(())
     }
 }
@@ -986,6 +1049,8 @@ impl LeanWorkerSessionLease<'_> {
         self.ensure_valid()?;
         self.enforce_policy_before_request()?;
         let request_timeout = self.request_timeout_override;
+        let first_command_after_open = self.entry.commands_since_open == 0;
+        let command_started = Instant::now();
         let result = {
             let mut session = self.entry.capability.attach_open_session();
             if let Some(timeout) = request_timeout {
@@ -1006,6 +1071,10 @@ impl LeanWorkerSessionLease<'_> {
                 }),
             other => other,
         };
+        self.entry
+            .capability
+            .record_command_timing(first_command_after_open, command_started.elapsed());
+        self.entry.commands_since_open = self.entry.commands_since_open.saturating_add(1);
         self.map_lifecycle_result(result)
     }
 

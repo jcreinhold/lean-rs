@@ -148,6 +148,12 @@ fn compatible_session_key_reuses_one_worker() {
     assert_eq!(pool.snapshot().key_misses, 1);
     assert_eq!(pool.snapshot().distinct_keys_seen, 1);
     assert_eq!(pool.snapshot().fresh_cold_opens_avoided, 1);
+    assert!(pool.snapshot().last_spawn_handshake_elapsed.is_some());
+    assert!(pool.snapshot().last_capability_load_elapsed.is_some());
+    assert!(pool.snapshot().last_session_open_import_elapsed.is_some());
+    assert!(pool.snapshot().last_first_command_elapsed.is_some());
+    assert!(pool.snapshot().last_warm_command_elapsed.is_some());
+    assert_eq!(pool.snapshot().replacement_attempts, 0);
     assert_eq!(pool.snapshot().miss_empty_pool, 1);
     assert_eq!(pool.snapshot().last_key_miss_reason, None);
     assert_eq!(pool.snapshot().concurrent_cold_opens_observed, 0);
@@ -503,6 +509,16 @@ fn per_worker_rss_policy_invalidates_old_lease_before_work() {
                 assert!(reason.contains("memory policy"), "unexpected reason: {reason}");
                 let snapshot = lease.snapshot();
                 assert_eq!(snapshot.policy_restarts, 1);
+                assert_eq!(snapshot.replacement_attempts, 1);
+                assert_eq!(snapshot.replacement_successes, 1);
+                assert_eq!(snapshot.replacement_budget_admitted, 1);
+                assert_eq!(
+                    snapshot
+                        .last_replacement_timing
+                        .as_ref()
+                        .map(|timing| timing.replacement_reason.as_str()),
+                    Some("rss_ceiling")
+                );
                 match snapshot.last_restart_reason {
                     Some(LeanWorkerRestartReason::RssCeiling {
                         limit_kib: 1,

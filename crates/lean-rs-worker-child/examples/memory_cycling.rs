@@ -73,6 +73,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .map_or_else(|| "unavailable".to_owned(), |value| value.to_string()),
         );
         report_admission(iteration, open_kind, &before, &stats);
+        report_replacement(iteration, open_kind, &stats);
         println!(
             "iteration={iteration} requests={} imports={} restarts={} exits={} rss_kib={} last_reason={:?}",
             stats.requests,
@@ -123,11 +124,45 @@ fn report_admission(
     );
 }
 
+fn report_replacement(iteration: u64, kind: &str, stats: &lean_rs_worker_parent::LeanWorkerStats) {
+    let timing = stats.last_replacement_timing.as_ref();
+    println!(
+        "replacement=worker_session_open iteration={iteration} kind={kind} replacement_attempts={} replacement_successes={} replacement_failures={} replacement_budget_admitted={} replacement_budget_skipped={} spawn_handshake_ms={} capability_load_ms={} session_open_import_ms={} first_command_ms={} warm_command_ms={} replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
+        stats.replacement_attempts,
+        stats.replacement_successes,
+        stats.replacement_failures,
+        stats.replacement_budget_admitted,
+        stats.replacement_budget_skipped,
+        timing.map_or_else(|| "unavailable".to_owned(), |value| duration_ms(value.spawn_handshake)),
+        timing.map_or_else(|| "unavailable".to_owned(), |value| duration_ms(value.capability_load)),
+        stats
+            .last_session_open_import_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        stats
+            .last_first_command_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        stats
+            .last_warm_command_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        timing.map_or_else(
+            || "unavailable".to_owned(),
+            |value| duration_ms(value.replacement_total)
+        ),
+        timing.map_or("none", |value| value.replacement_reason.as_str()),
+        timing.map_or("none", |value| value.replacement_budget_status.as_str()),
+        stats.last_replacement_skipped_reason.as_deref().unwrap_or("none"),
+    );
+}
+
 fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(default)
+}
+
+fn duration_ms(duration: std::time::Duration) -> String {
+    format!("{:.3}", duration.as_secs_f64() * 1_000.0)
 }
 
 fn worker_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {

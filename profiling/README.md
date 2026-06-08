@@ -126,6 +126,13 @@ allowed. Session keys preserve Lean import order and include only session-safety
 profile, metadata expectation, toolchain identity, and manifest identity where applicable; they are not downstream result
 cache keys.
 
+Worker and pool workloads also print `replacement=...` rows. The Markdown report renders them under **Worker
+Replacement** with synchronous replacement attempts, successes, failures, spawn/handshake time, capability-load time,
+session-open/import time, first-command time, warm-command time, total replacement time, restart reason, and budget
+status. Prompt 24 keeps replacement synchronous and records `synchronous-no-overlap`; warm spares or background
+prewarming remain deferred until measurements show a latency need and total child RSS budget can admit temporary
+overlap.
+
 `collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
 run stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate
 whose peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative

@@ -61,6 +61,8 @@ pub struct WorkloadRun {
     pub admissions: Vec<AdmissionSample>,
     #[serde(default)]
     pub session_reuse: Vec<SessionReuseSample>,
+    #[serde(default)]
+    pub replacements: Vec<ReplacementSample>,
     pub key_values: Vec<KeyValue>,
     pub stdout_path: String,
     pub stderr_path: String,
@@ -165,6 +167,27 @@ pub struct SessionReuseSample {
     pub miss_reuse_disabled: u64,
     pub miss_no_matching_key: u64,
     pub last_miss_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplacementSample {
+    pub label: String,
+    pub iteration: Option<u64>,
+    pub kind: String,
+    pub replacement_attempts: u64,
+    pub replacement_successes: u64,
+    pub replacement_failures: u64,
+    pub replacement_budget_admitted: u64,
+    pub replacement_budget_skipped: u64,
+    pub spawn_handshake_ms: Option<f64>,
+    pub capability_load_ms: Option<f64>,
+    pub session_open_import_ms: Option<f64>,
+    pub first_command_ms: Option<f64>,
+    pub warm_command_ms: Option<f64>,
+    pub replacement_total_ms: Option<f64>,
+    pub replacement_reason: Option<String>,
+    pub replacement_budget_status: Option<String>,
+    pub skipped_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

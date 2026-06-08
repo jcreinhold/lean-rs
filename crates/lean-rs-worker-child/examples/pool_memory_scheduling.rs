@@ -244,6 +244,7 @@ fn print_timing(name: &str, iteration: u64, elapsed: Duration, pool: &LeanWorker
     );
     print_admission(name, iteration, pool);
     print_session_reuse(name, iteration, pool);
+    print_replacement(name, iteration, pool);
 }
 
 fn print_snapshot(name: &str, pool: &LeanWorkerPool) {
@@ -301,6 +302,47 @@ fn print_session_reuse(name: &str, iteration: u64, pool: &LeanWorkerPool) {
     );
 }
 
+fn print_replacement(name: &str, iteration: u64, pool: &LeanWorkerPool) {
+    let snapshot = pool.snapshot();
+    let timing = snapshot.last_replacement_timing.as_ref();
+    let kind = if iteration == 1 { "cold" } else { "warm-pool" };
+    println!(
+        "replacement={name} iteration={iteration} kind={kind} replacement_attempts={} replacement_successes={} replacement_failures={} replacement_budget_admitted={} replacement_budget_skipped={} spawn_handshake_ms={} capability_load_ms={} session_open_import_ms={} first_command_ms={} warm_command_ms={} replacement_total_ms={} replacement_reason={} replacement_budget_status={} skipped_reason={}",
+        snapshot.replacement_attempts,
+        snapshot.replacement_successes,
+        snapshot.replacement_failures,
+        snapshot.replacement_budget_admitted,
+        snapshot.replacement_budget_skipped,
+        timing.map_or_else(
+            || {
+                snapshot
+                    .last_spawn_handshake_elapsed
+                    .map_or_else(|| "unavailable".to_owned(), duration_ms)
+            },
+            |value| duration_ms(value.spawn_handshake)
+        ),
+        snapshot
+            .last_capability_load_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        snapshot
+            .last_session_open_import_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        snapshot
+            .last_first_command_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        snapshot
+            .last_warm_command_elapsed
+            .map_or_else(|| "unavailable".to_owned(), duration_ms),
+        timing.map_or_else(
+            || "unavailable".to_owned(),
+            |value| duration_ms(value.replacement_total)
+        ),
+        timing.map_or("none", |value| value.replacement_reason.as_str()),
+        timing.map_or("none", |value| value.replacement_budget_status.as_str()),
+        snapshot.last_replacement_skipped_reason.as_deref().unwrap_or("none"),
+    );
+}
+
 fn report_import_stats(label: &str, stats: &lean_rs_worker_protocol::types::LeanWorkerImportStats) {
     println!(
         "import_stats={label} iteration=0 profile_mode=worker-pool direct_imports={} effective_modules={} compacted_regions={} memory_mapped_regions={} compacted_region_bytes={} memory_mapped_region_bytes={} non_memory_mapped_region_bytes={} imported_bytes={} imported_constants={} extension_count={} total_imported_extension_entries={} import_level={} import_all={} load_exts={}",
@@ -319,6 +361,10 @@ fn report_import_stats(label: &str, stats: &lean_rs_worker_protocol::types::Lean
         stats.import_all,
         stats.load_exts,
     );
+}
+
+fn duration_ms(duration: Duration) -> String {
+    format!("{:.3}", duration.as_secs_f64() * 1_000.0)
 }
 
 fn builder(worker_binary: &Path) -> LeanWorkerCapabilityBuilder {

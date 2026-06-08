@@ -9,7 +9,7 @@ use lean_toolchain::LEAN_VERSION;
 use crate::common::{git_output, platform, profiling_example, results_dir, timestamp_utc, workspace_root};
 use crate::report_schema::{
     AdmissionSample, BaselineMode, DerivedWorkSample, EnvPair, ImportStatsSample, KeyValue, PerformanceReport,
-    ProfileArtifact, ReportMetadata, RssCheckpoint, SessionReuseSample, TimingSample, WorkloadRun,
+    ProfileArtifact, ReplacementSample, ReportMetadata, RssCheckpoint, SessionReuseSample, TimingSample, WorkloadRun,
 };
 use crate::report_writer::write_report;
 
@@ -351,6 +351,7 @@ fn run_command_path(
         timings: parsed.timings,
         admissions: parsed.admissions,
         session_reuse: parsed.session_reuse,
+        replacements: parsed.replacements,
         key_values: parsed.key_values,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
@@ -377,6 +378,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
     let mut timings = Vec::new();
     let mut admissions = Vec::new();
     let mut session_reuse = Vec::new();
+    let mut replacements = Vec::new();
     let mut peak_rss_kib = None;
 
     for line in output.lines() {
@@ -422,6 +424,9 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         if let Some(sample) = parse_session_reuse(&line_pairs) {
             session_reuse.push(sample);
         }
+        if let Some(sample) = parse_replacement(&line_pairs) {
+            replacements.push(sample);
+        }
     }
 
     if stderr.contains("lazy discriminator import initialization") {
@@ -454,6 +459,7 @@ fn parse_key_values(output: &str, stderr: &str) -> ParsedOutput {
         timings,
         admissions,
         session_reuse,
+        replacements,
         peak_rss_kib,
     }
 }
@@ -567,6 +573,35 @@ fn parse_session_reuse(pairs: &[(String, String)]) -> Option<SessionReuseSample>
     })
 }
 
+fn parse_replacement(pairs: &[(String, String)]) -> Option<ReplacementSample> {
+    let label = value(pairs, "replacement")?.to_owned();
+    let replacement_reason = value(pairs, "replacement_reason")
+        .and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
+    let replacement_budget_status = value(pairs, "replacement_budget_status")
+        .and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
+    let skipped_reason =
+        value(pairs, "skipped_reason").and_then(|value| if value == "none" { None } else { Some(value.to_owned()) });
+    Some(ReplacementSample {
+        label,
+        iteration: value(pairs, "iteration").and_then(|value| value.parse::<u64>().ok()),
+        kind: value(pairs, "kind").unwrap_or("unknown").to_owned(),
+        replacement_attempts: parse_u64(pairs, "replacement_attempts")?,
+        replacement_successes: parse_u64(pairs, "replacement_successes")?,
+        replacement_failures: parse_u64(pairs, "replacement_failures")?,
+        replacement_budget_admitted: parse_u64(pairs, "replacement_budget_admitted")?,
+        replacement_budget_skipped: parse_u64(pairs, "replacement_budget_skipped")?,
+        spawn_handshake_ms: parse_f64(pairs, "spawn_handshake_ms"),
+        capability_load_ms: parse_f64(pairs, "capability_load_ms"),
+        session_open_import_ms: parse_f64(pairs, "session_open_import_ms"),
+        first_command_ms: parse_f64(pairs, "first_command_ms"),
+        warm_command_ms: parse_f64(pairs, "warm_command_ms"),
+        replacement_total_ms: parse_f64(pairs, "replacement_total_ms"),
+        replacement_reason,
+        replacement_budget_status,
+        skipped_reason,
+    })
+}
+
 fn value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
     pairs
         .iter()
@@ -575,6 +610,10 @@ fn value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
 }
 
 fn parse_u64(pairs: &[(String, String)], key: &str) -> Option<u64> {
+    value(pairs, key)?.parse().ok()
+}
+
+fn parse_f64(pairs: &[(String, String)], key: &str) -> Option<f64> {
     value(pairs, key)?.parse().ok()
 }
 
@@ -635,6 +674,7 @@ struct ParsedOutput {
     timings: Vec<TimingSample>,
     admissions: Vec<AdmissionSample>,
     session_reuse: Vec<SessionReuseSample>,
+    replacements: Vec<ReplacementSample>,
     peak_rss_kib: Option<u64>,
 }
 
@@ -750,6 +790,36 @@ mod tests {
         assert_eq!(sample.miss_reuse_disabled, 0);
         assert_eq!(sample.miss_no_matching_key, 0);
         assert_eq!(sample.last_miss_reason, None);
+    }
+
+    #[test]
+    fn parses_replacement_lines() {
+        let parsed = parse_key_values(
+            "replacement=worker_session_open iteration=2 kind=cold replacement_attempts=1 replacement_successes=1 replacement_failures=0 replacement_budget_admitted=1 replacement_budget_skipped=0 spawn_handshake_ms=12.500 capability_load_ms=0.000 session_open_import_ms=90.250 first_command_ms=unavailable warm_command_ms=3.750 replacement_total_ms=15.000 replacement_reason=max_imports replacement_budget_status=synchronous-no-overlap skipped_reason=none",
+            "",
+        );
+        assert_eq!(parsed.replacements.len(), 1);
+        let sample = &parsed.replacements[0];
+        assert_eq!(sample.label, "worker_session_open");
+        assert_eq!(sample.iteration, Some(2));
+        assert_eq!(sample.kind, "cold");
+        assert_eq!(sample.replacement_attempts, 1);
+        assert_eq!(sample.replacement_successes, 1);
+        assert_eq!(sample.replacement_failures, 0);
+        assert_eq!(sample.replacement_budget_admitted, 1);
+        assert_eq!(sample.replacement_budget_skipped, 0);
+        assert_eq!(sample.spawn_handshake_ms, Some(12.5));
+        assert_eq!(sample.capability_load_ms, Some(0.0));
+        assert_eq!(sample.session_open_import_ms, Some(90.25));
+        assert_eq!(sample.first_command_ms, None);
+        assert_eq!(sample.warm_command_ms, Some(3.75));
+        assert_eq!(sample.replacement_total_ms, Some(15.0));
+        assert_eq!(sample.replacement_reason.as_deref(), Some("max_imports"));
+        assert_eq!(
+            sample.replacement_budget_status.as_deref(),
+            Some("synchronous-no-overlap")
+        );
+        assert_eq!(sample.skipped_reason, None);
     }
 
     #[test]

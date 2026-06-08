@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::common::results_dir;
 use crate::report_schema::{
-    AdmissionSample, BaselineMode, KeyValue, PerformanceReport, SessionReuseSample, TimingSample, WorkloadRun,
+    AdmissionSample, BaselineMode, KeyValue, PerformanceReport, ReplacementSample, SessionReuseSample, TimingSample,
+    WorkloadRun,
 };
 
 /// Write JSON and Markdown artifacts for a collected profiling report.
@@ -243,6 +244,55 @@ fn render_markdown(report: &PerformanceReport) -> String {
                     format_optional_u64(timing.worker_restarts),
                     format_optional_u64(timing.max_import_restarts),
                     format_optional_u64(timing.policy_restarts)
+                );
+            }
+        }
+    }
+
+    let replacement_workloads: Vec<_> = report
+        .workloads
+        .iter()
+        .filter(|run| !run.replacements.is_empty())
+        .collect();
+    if !replacement_workloads.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "## Worker Replacement");
+        for run in replacement_workloads {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "### {}", run.name);
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "| Label | Iteration | Kind | Attempts | Successes | Failures | Budget admitted | Budget skipped | Spawn+handshake ms | Capability load ms | Session import ms | First command ms | Warm command ms | Replacement total ms | Reason | Budget status | Skipped reason |"
+            );
+            let _ = writeln!(
+                out,
+                "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+            );
+            for sample in visible_replacements(&run.replacements) {
+                let iteration = sample
+                    .iteration
+                    .map_or_else(|| String::from("-"), |value| value.to_string());
+                let _ = writeln!(
+                    out,
+                    "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+                    sample.label,
+                    iteration,
+                    sample.kind,
+                    sample.replacement_attempts,
+                    sample.replacement_successes,
+                    sample.replacement_failures,
+                    sample.replacement_budget_admitted,
+                    sample.replacement_budget_skipped,
+                    format_optional_f64(sample.spawn_handshake_ms),
+                    format_optional_f64(sample.capability_load_ms),
+                    format_optional_f64(sample.session_open_import_ms),
+                    format_optional_f64(sample.first_command_ms),
+                    format_optional_f64(sample.warm_command_ms),
+                    format_optional_f64(sample.replacement_total_ms),
+                    sample.replacement_reason.as_deref().unwrap_or("-"),
+                    sample.replacement_budget_status.as_deref().unwrap_or("-"),
+                    sample.skipped_reason.as_deref().unwrap_or("-")
                 );
             }
         }
@@ -577,8 +627,23 @@ fn visible_session_reuse(samples: &[SessionReuseSample]) -> Vec<&SessionReuseSam
     visible
 }
 
+fn visible_replacements(samples: &[ReplacementSample]) -> Vec<&ReplacementSample> {
+    const HEAD: usize = 20;
+    const TAIL: usize = 5;
+    if samples.len() <= HEAD + TAIL {
+        return samples.iter().collect();
+    }
+    let mut visible: Vec<_> = samples.iter().take(HEAD).collect();
+    visible.extend(samples.iter().skip(samples.len().saturating_sub(TAIL)));
+    visible
+}
+
 fn format_optional_u64(value: Option<u64>) -> String {
     value.map_or_else(|| String::from("-"), |value| value.to_string())
+}
+
+fn format_optional_f64(value: Option<f64>) -> String {
+    value.map_or_else(|| String::from("-"), |value| format!("{value:.3}"))
 }
 
 fn import_rss_gap(peak_rss_kib: Option<u64>, compacted_region_bytes: u64) -> String {
@@ -601,8 +666,8 @@ fn compacted_region_bytes(stats: &crate::report_schema::ImportStatsSample) -> u6
 #[cfg(test)]
 mod tests {
     use crate::report_schema::{
-        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReportMetadata,
-        SessionReuseSample, TimingSample, WorkloadRun,
+        AdmissionSample, BaselineMode, EnvPair, ImportStatsSample, PerformanceReport, ReplacementSample,
+        ReportMetadata, SessionReuseSample, TimingSample, WorkloadRun,
     };
 
     use super::render_markdown;
@@ -653,6 +718,7 @@ mod tests {
                 timings: Vec::new(),
                 admissions: Vec::new(),
                 session_reuse: Vec::new(),
+                replacements: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -722,6 +788,7 @@ mod tests {
                     refusal_reason: None,
                 }],
                 session_reuse: Vec::new(),
+                replacements: Vec::new(),
                 key_values: vec![
                     crate::report_schema::KeyValue {
                         key: "max_rss_kib".to_owned(),
@@ -788,6 +855,7 @@ mod tests {
                     miss_no_matching_key: 0,
                     last_miss_reason: None,
                 }],
+                replacements: Vec::new(),
                 key_values: Vec::new(),
                 stdout_path: "stdout".to_owned(),
                 stderr_path: "stderr".to_owned(),
@@ -800,5 +868,65 @@ mod tests {
         assert!(markdown.contains("## Session Reuse Keys"));
         assert!(markdown.contains("Fresh imports avoided"));
         assert!(markdown.contains("| bounded_reuse_no_cycle | 2 | worker-pool | 1 | 1 | 1 | 1 | 1 | 0 | 0 | - |"));
+    }
+
+    #[test]
+    fn report_renders_replacement_table() {
+        let report = PerformanceReport {
+            metadata: ReportMetadata {
+                timestamp_utc: "now".to_owned(),
+                platform: "test".to_owned(),
+                git_commit: "abc".to_owned(),
+                git_branch: "main".to_owned(),
+                lean_version: "test".to_owned(),
+                tooling: "test".to_owned(),
+            },
+            baseline_mode: BaselineMode::Quick,
+            workloads: vec![WorkloadRun {
+                name: "worker-cycling".to_owned(),
+                command: "cmd".to_owned(),
+                env: Vec::<EnvPair>::new(),
+                exit_success: true,
+                exit_code: Some(0),
+                wall_time_ms: 1.0,
+                status: Some("ok".to_owned()),
+                peak_rss_kib: None,
+                checkpoints: Vec::new(),
+                import_stats: Vec::new(),
+                derived_work: Vec::new(),
+                timings: Vec::new(),
+                admissions: Vec::new(),
+                session_reuse: Vec::new(),
+                replacements: vec![ReplacementSample {
+                    label: "worker_session_open".to_owned(),
+                    iteration: Some(2),
+                    kind: "cold".to_owned(),
+                    replacement_attempts: 1,
+                    replacement_successes: 1,
+                    replacement_failures: 0,
+                    replacement_budget_admitted: 1,
+                    replacement_budget_skipped: 0,
+                    spawn_handshake_ms: Some(12.0),
+                    capability_load_ms: Some(0.0),
+                    session_open_import_ms: Some(90.5),
+                    first_command_ms: None,
+                    warm_command_ms: Some(3.25),
+                    replacement_total_ms: Some(15.0),
+                    replacement_reason: Some("max_imports".to_owned()),
+                    replacement_budget_status: Some("synchronous-no-overlap".to_owned()),
+                    skipped_reason: None,
+                }],
+                key_values: Vec::new(),
+                stdout_path: "stdout".to_owned(),
+                stderr_path: "stderr".to_owned(),
+            }],
+            profiles: Vec::new(),
+            notes: Vec::new(),
+        };
+
+        let markdown = render_markdown(&report);
+        assert!(markdown.contains("## Worker Replacement"));
+        assert!(markdown.contains("Spawn+handshake ms"));
+        assert!(markdown.contains("| worker_session_open | 2 | cold | 1 | 1 | 0 | 1 | 0 | 12.000 | 0.000 | 90.500 | - | 3.250 | 15.000 | max_imports | synchronous-no-overlap | - |"));
     }
 }

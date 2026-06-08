@@ -178,6 +178,9 @@ proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived 
 Use the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig`
 guidance. Their `admission=...` rows distinguish cold worker/session attempts, typed refusals, import-like requests,
 and RSS before/after admission. Their `session_reuse=...` rows distinguish equivalent warm reuse from fragmented keys.
+Their `replacement=...` rows break synchronous worker replacement into spawn/handshake, capability-load,
+session-open/import, first-command, warm-command, and total replacement timings. Prewarming is not enabled by default
+or implemented in this baseline; overlap must be admitted by RSS-budget evidence before adding that lifecycle behavior.
 The repo defaults now use a 1,572,864 KiB local cap and one worker/import job at a time.
 On the 2026-06-08 local rebaseline, full-session worker cycling stayed within the older 2 GiB cap only at
 `max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one child under about 421 MiB. These are local

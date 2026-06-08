@@ -417,3 +417,10 @@ memory.
 The same profiling output also emits `session_reuse=...` rows. These rows report key hits, key misses, distinct keys,
 fresh imports avoided, and miss reasons such as `empty_pool`, `reuse_disabled`, and `no_matching_key`. They explain
 whether a fresh import was avoided by warm reuse; admission rows explain whether a cold open was allowed.
+
+Prompt 24 adds `replacement=...` rows for worker and pool workloads. These rows break the current synchronous
+replacement path into spawn/handshake, capability-load, session-open/import, first-command, warm-command, and total
+replacement timings, plus the restart reason and budget status. The current status is `synchronous-no-overlap`: the
+old child exits before the replacement starts, so no warm-spare process temporarily doubles child RSS. Background
+replacement or warm spares remain a future opt-in design that must be admitted by the total child RSS budget before
+spawn/import begins.

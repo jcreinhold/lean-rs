@@ -315,6 +315,23 @@ impl LeanWorkerRestartReason {
     }
 }
 
+/// Timing facts for the most recent synchronous worker replacement.
+///
+/// These are observability facts only. A replacement remains a process cycle
+/// hidden behind supervisor or pool policy; callers do not receive child
+/// identities or lifecycle handles.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanWorkerReplacementTiming {
+    pub spawn_handshake: Duration,
+    pub capability_load: Duration,
+    pub session_open_import: Duration,
+    pub first_command: Option<Duration>,
+    pub warm_command: Option<Duration>,
+    pub replacement_total: Duration,
+    pub replacement_reason: String,
+    pub replacement_budget_status: String,
+}
+
 /// Snapshot of worker lifecycle counters.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LeanWorkerStats {
@@ -352,6 +369,30 @@ pub struct LeanWorkerStats {
     pub last_rss_kib: Option<u64>,
     /// Most recent restart reason, if any.
     pub last_restart_reason: Option<LeanWorkerRestartReason>,
+    /// Worker replacement attempts performed synchronously by this supervisor.
+    pub replacement_attempts: u64,
+    /// Successful worker replacements.
+    pub replacement_successes: u64,
+    /// Failed worker replacements.
+    pub replacement_failures: u64,
+    /// Replacements admitted by the configured policy without overlapping children.
+    pub replacement_budget_admitted: u64,
+    /// Replacement attempts skipped by a budget guard.
+    pub replacement_budget_skipped: u64,
+    /// Most recent replacement timing facts, if a replacement has succeeded.
+    pub last_replacement_timing: Option<LeanWorkerReplacementTiming>,
+    /// Most recent skipped replacement reason, if any.
+    pub last_replacement_skipped_reason: Option<String>,
+    /// Most recent worker spawn and protocol-handshake elapsed time.
+    pub last_spawn_handshake_elapsed: Option<Duration>,
+    /// Most recent capability build/load phase elapsed time observed by a capability builder.
+    pub last_capability_load_elapsed: Option<Duration>,
+    /// Most recent host-session open/import elapsed time.
+    pub last_session_open_import_elapsed: Option<Duration>,
+    /// Most recent first command elapsed time after opening or replacing a worker.
+    pub last_first_command_elapsed: Option<Duration>,
+    /// Most recent warm command elapsed time on an already-open worker.
+    pub last_warm_command_elapsed: Option<Duration>,
     /// Lean-native import attribution for the most recent opened host session, if any.
     pub last_import_stats: Option<LeanWorkerImportStats>,
     /// Streaming requests that entered a worker child.
@@ -788,6 +829,7 @@ impl LeanWorker {
     /// fails, the child exits before handshaking, or the startup timeout
     /// expires.
     pub fn spawn(config: &LeanWorkerConfig) -> Result<Self, LeanWorkerError> {
+        let spawn_started = Instant::now();
         let mut command = Command::new(&config.executable);
         command
             .stdin(Stdio::piped())
@@ -874,6 +916,7 @@ impl LeanWorker {
             message: format!("failed to send ConfigureFrameLimit: {err}"),
         })?;
 
+        let spawn_handshake_elapsed = spawn_started.elapsed();
         Ok(Self {
             config: config.clone(),
             child: Some(child),
@@ -882,7 +925,10 @@ impl LeanWorker {
             stderr,
             last_exit: None,
             runtime_metadata,
-            stats: LeanWorkerStats::default(),
+            stats: LeanWorkerStats {
+                last_spawn_handshake_elapsed: Some(spawn_handshake_elapsed),
+                ..LeanWorkerStats::default()
+            },
             requests_since_restart: 0,
             imports_since_restart: 0,
             last_activity: Instant::now(),
@@ -990,6 +1036,33 @@ impl LeanWorker {
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {
         self.stats.clone()
+    }
+
+    pub(crate) fn record_capability_open_timing(
+        &mut self,
+        capability_load_elapsed: Duration,
+        session_open_import_elapsed: Duration,
+    ) {
+        self.stats.last_capability_load_elapsed = Some(capability_load_elapsed);
+        self.stats.last_session_open_import_elapsed = Some(session_open_import_elapsed);
+        if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
+            timing.capability_load = capability_load_elapsed;
+            timing.session_open_import = session_open_import_elapsed;
+        }
+    }
+
+    pub(crate) fn record_command_timing(&mut self, first_command_after_open: bool, elapsed: Duration) {
+        if first_command_after_open {
+            self.stats.last_first_command_elapsed = Some(elapsed);
+            if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
+                timing.first_command = Some(elapsed);
+            }
+        } else {
+            self.stats.last_warm_command_elapsed = Some(elapsed);
+            if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
+                timing.warm_command = Some(elapsed);
+            }
+        }
     }
 
     /// Return policy-facing lifecycle facts for this supervisor.
@@ -1159,7 +1232,9 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
+        let before_restarts = self.stats.restarts;
         self.prepare_request(true)?;
+        let import_started = Instant::now();
         let mode = match config.mode() {
             LeanWorkerSessionMode::Capability {
                 package,
@@ -1181,6 +1256,13 @@ impl LeanWorker {
         self.record_request(true);
         match self.read_response_with_progress(OPERATION, progress, cancellation)? {
             Response::HostSessionOpened { import_stats } => {
+                let session_open_import_elapsed = import_started.elapsed();
+                self.stats.last_session_open_import_elapsed = Some(session_open_import_elapsed);
+                if self.stats.restarts > before_restarts
+                    && let Some(timing) = self.stats.last_replacement_timing.as_mut()
+                {
+                    timing.session_open_import = session_open_import_elapsed;
+                }
                 self.stats.last_import_stats = Some(import_stats);
                 Ok(())
             }
@@ -1970,12 +2052,46 @@ impl LeanWorker {
 
     fn restart_with_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
         let config = self.config.clone();
-        self.stop_existing_child()?;
+        let replacement_started = Instant::now();
+        self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
+        self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
+        if let Err(err) = self.stop_existing_child() {
+            self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
+            self.stats.last_replacement_skipped_reason = Some("stop_failed".to_owned());
+            return Err(err);
+        }
         self.stats.record_restart(reason);
         self.requests_since_restart = 0;
         self.imports_since_restart = 0;
-        let mut next = Self::spawn(&config)?;
-        next.stats = self.stats.clone();
+        let reason = self
+            .stats
+            .last_restart_reason
+            .as_ref()
+            .map_or_else(|| "unknown".to_owned(), |reason| reason.stable_cause().to_owned());
+        let mut next = match Self::spawn(&config) {
+            Ok(next) => next,
+            Err(err) => {
+                self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
+                self.stats.last_replacement_skipped_reason = Some("spawn_failed".to_owned());
+                return Err(err);
+            }
+        };
+        let spawn_handshake = next.stats.last_spawn_handshake_elapsed.unwrap_or_default();
+        let mut stats = self.stats.clone();
+        stats.replacement_successes = stats.replacement_successes.saturating_add(1);
+        stats.last_replacement_skipped_reason = None;
+        stats.last_spawn_handshake_elapsed = Some(spawn_handshake);
+        stats.last_replacement_timing = Some(LeanWorkerReplacementTiming {
+            spawn_handshake,
+            capability_load: stats.last_capability_load_elapsed.unwrap_or_default(),
+            session_open_import: Duration::ZERO,
+            first_command: stats.last_first_command_elapsed,
+            warm_command: stats.last_warm_command_elapsed,
+            replacement_total: replacement_started.elapsed(),
+            replacement_reason: reason,
+            replacement_budget_status: "synchronous-no-overlap".to_owned(),
+        });
+        next.stats = stats;
         next.last_activity = Instant::now();
         *self = next;
         Ok(())

@@ -69,6 +69,15 @@ fn explicit_restart_replaces_live_child() {
     assert_eq!(stats.restarts, 1);
     assert_eq!(stats.explicit_cycles, 1);
     assert_eq!(stats.last_restart_reason, Some(LeanWorkerRestartReason::Explicit));
+    assert_eq!(stats.replacement_attempts, 1);
+    assert_eq!(stats.replacement_successes, 1);
+    assert_eq!(stats.replacement_failures, 0);
+    let timing = stats
+        .last_replacement_timing
+        .as_ref()
+        .expect("explicit restart records replacement timing");
+    assert_eq!(timing.replacement_reason, "explicit");
+    assert_eq!(timing.replacement_budget_status, "synchronous-no-overlap");
     let exit = worker.terminate().expect("worker terminates");
     assert!(exit.success, "worker should exit cleanly after restart");
 }
@@ -84,6 +93,15 @@ fn explicit_cycle_replaces_child_and_records_reason() {
     assert_eq!(stats.explicit_cycles, 1);
     assert_eq!(stats.exits, 1);
     assert_eq!(stats.last_restart_reason, Some(LeanWorkerRestartReason::Explicit));
+    assert_eq!(stats.replacement_attempts, 1);
+    assert_eq!(stats.replacement_successes, 1);
+    assert_eq!(
+        stats
+            .last_replacement_timing
+            .as_ref()
+            .map(|timing| timing.replacement_reason.as_str()),
+        Some("explicit")
+    );
     let exit = worker.terminate().expect("worker terminates");
     assert!(exit.success, "worker should exit cleanly after cycle");
 }
@@ -132,6 +150,14 @@ fn max_import_policy_restarts_before_next_import() {
         stats.last_restart_reason,
         Some(LeanWorkerRestartReason::MaxImports { limit: 1 })
     );
+    assert_eq!(stats.replacement_attempts, 1);
+    assert_eq!(stats.replacement_successes, 1);
+    let timing = stats
+        .last_replacement_timing
+        .as_ref()
+        .expect("max-import restart records replacement timing");
+    assert_eq!(timing.replacement_reason, "max_imports");
+    assert_eq!(timing.replacement_budget_status, "synchronous-no-overlap");
     let exit = worker.terminate().expect("worker terminates");
     assert!(exit.success, "worker should exit cleanly after import policy restart");
 }
