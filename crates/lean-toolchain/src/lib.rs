@@ -30,6 +30,7 @@ mod limits;
 mod loader;
 pub mod manifest_validation;
 mod modules;
+mod source_package;
 
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
@@ -55,6 +56,10 @@ pub use manifest_validation::CapabilityManifest;
 pub use modules::{
     LeanLakeProjectModules, LeanModuleDescriptor, LeanModuleDiscoveryDiagnostic, LeanModuleDiscoveryOptions,
     LeanModuleSetFingerprint, discover_lake_modules,
+};
+pub use source_package::{
+    GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageMaterializationRequest,
+    SourcePackageProvenance, materialize_source_package,
 };
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.

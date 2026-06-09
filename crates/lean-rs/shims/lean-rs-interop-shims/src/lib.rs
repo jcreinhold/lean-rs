@@ -5,10 +5,12 @@
 //! copies only the Lean/C payload into a caller-owned root and writes a
 //! generated `lean-toolchain` for the downstream toolchain.
 
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use lean_toolchain::{
+    SourcePackageError, SourcePackageMaterializationRequest, materialize_source_package as materialize_with_toolchain,
+};
+use sha2::{Digest, Sha256};
 
 const SOURCE_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -37,118 +39,134 @@ pub struct LeanRsInteropShimsSourcePackage {
 ///
 /// # Errors
 ///
-/// Returns an I/O error if the source payload cannot be copied, the generated
-/// `lean-toolchain` cannot be written, or the materialized root cannot be
-/// installed.
+/// Returns [`SourcePackageError`] if the source payload cannot be copied, the
+/// generated `lean-toolchain` cannot be written, the provenance sidecar cannot
+/// be validated, or the materialized root cannot be installed.
 pub fn materialize_source_package(
     input: LeanRsInteropShimsSourcePackageRequest,
-) -> io::Result<LeanRsInteropShimsSourcePackage> {
+) -> Result<LeanRsInteropShimsSourcePackage, SourcePackageError> {
     let LeanRsInteropShimsSourcePackageRequest {
         cache_root,
         toolchain_label,
     } = input;
-    let root = cache_root.join(sanitize_toolchain_label(&toolchain_label));
-    if entry_matches(&root, &toolchain_label) {
-        return Ok(LeanRsInteropShimsSourcePackage { project_root: root });
-    }
-
-    remove_path_if_exists(&root)?;
-    fs::create_dir_all(&cache_root)?;
-    let temp = cache_root.join(format!(
-        ".lean-rs-interop-shims-{}-{}",
-        std::process::id(),
-        unique_nanos()
-    ));
-    remove_path_if_exists(&temp)?;
-    fs::create_dir_all(&temp)?;
-
-    copy_file("lakefile.lean", &temp)?;
-    copy_file("lake-manifest.json", &temp)?;
-    copy_file("LeanRsInterop.lean", &temp)?;
-    copy_dir("LeanRsInterop", &temp)?;
-    copy_dir("c", &temp)?;
-    fs::write(temp.join("lean-toolchain"), format!("{toolchain_label}\n"))?;
-
-    fs::rename(&temp, &root).inspect_err(|_| {
-        drop(remove_path_if_exists(&temp));
-    })?;
-    Ok(LeanRsInteropShimsSourcePackage { project_root: root })
-}
-
-fn entry_matches(root: &Path, toolchain_label: &str) -> bool {
-    root.join("lakefile.lean").is_file()
-        && root.join("lake-manifest.json").is_file()
-        && root.join("LeanRsInterop.lean").is_file()
-        && root.join("LeanRsInterop/Worker/Stream.lean").is_file()
-        && root.join("c/interop_callback.c").is_file()
-        && fs::read_to_string(root.join("lean-toolchain")).is_ok_and(|toolchain| toolchain.trim() == toolchain_label)
-}
-
-fn copy_file(relative: &str, dest_root: &Path) -> io::Result<()> {
-    let dest = dest_root.join(relative);
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::copy(Path::new(SOURCE_ROOT).join(relative), dest)?;
-    Ok(())
-}
-
-fn copy_dir(relative: &str, dest_root: &Path) -> io::Result<()> {
-    let source = Path::new(SOURCE_ROOT).join(relative);
-    let dest = dest_root.join(relative);
-    copy_dir_recursive(&source, &dest)
-}
-
-fn copy_dir_recursive(source: &Path, dest: &Path) -> io::Result<()> {
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        if source_path.is_dir() {
-            copy_dir_recursive(&source_path, &dest_path)?;
-        } else if source_path.is_file() {
-            fs::copy(&source_path, &dest_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn remove_path_if_exists(path: &Path) -> io::Result<()> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
+    let request = SourcePackageMaterializationRequest {
+        source_root: PathBuf::from(SOURCE_ROOT),
+        cache_root,
+        package_name: PACKAGE_NAME.to_owned(),
+        materialized_package_name: PACKAGE_NAME.to_owned(),
+        library_name: LIBRARY_NAME.to_owned(),
+        source_digest: compute_source_digest()?,
+        source_revision: env!("CARGO_PKG_VERSION").to_owned(),
+        crate_name: env!("CARGO_PKG_NAME").to_owned(),
+        crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+        toolchain_label,
+        include_paths: payload_include_paths(),
+        generated_files: Vec::new(),
+        sentinel_files: vec![
+            PathBuf::from("LeanRsInterop/Worker/Stream.lean"),
+            PathBuf::from("c/interop_callback.c"),
+        ],
     };
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
+    let package = materialize_with_toolchain(&request)?;
+    Ok(LeanRsInteropShimsSourcePackage {
+        project_root: package.project_root,
+    })
+}
+
+fn payload_include_paths() -> Vec<PathBuf> {
+    [
+        "lakefile.lean",
+        "lake-manifest.json",
+        "LeanRsInterop.lean",
+        "LeanRsInterop",
+        "c",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+fn compute_source_digest() -> Result<String, SourcePackageError> {
+    let source_root = Path::new(SOURCE_ROOT);
+    let mut entries = Vec::new();
+    for include in payload_include_paths() {
+        collect_digest_entries(source_root, &include, &mut entries)?;
     }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut outer = Sha256::new();
+    for (canonical_path, digest) in entries {
+        outer.update(digest.as_bytes());
+        outer.update(b"  ");
+        outer.update(canonical_path.as_bytes());
+        outer.update(b"\n");
+    }
+    Ok(hex_lower(&outer.finalize()))
 }
 
-fn sanitize_toolchain_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
+fn collect_digest_entries(
+    source_root: &Path,
+    relative: &Path,
+    entries: &mut Vec<(String, String)>,
+) -> Result<(), SourcePackageError> {
+    let source = source_root.join(relative);
+    let metadata = std::fs::symlink_metadata(&source).map_err(|source_error| SourcePackageError::Io {
+        action: "stat lean-rs interop shim payload path",
+        path: source.clone(),
+        source: source_error,
+    })?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        let dir_entries = std::fs::read_dir(&source).map_err(|source_error| SourcePackageError::Io {
+            action: "read lean-rs interop shim payload directory",
+            path: source.clone(),
+            source: source_error,
+        })?;
+        for entry in dir_entries {
+            let entry = entry.map_err(|source_error| SourcePackageError::Io {
+                action: "read lean-rs interop shim payload directory entry",
+                path: source.clone(),
+                source: source_error,
+            })?;
+            collect_digest_entries(source_root, &relative.join(entry.file_name()), entries)?;
+        }
+    } else if metadata.is_file() {
+        let bytes = std::fs::read(&source).map_err(|source_error| SourcePackageError::Io {
+            action: "read lean-rs interop shim payload file for digest",
+            path: source,
+            source: source_error,
+        })?;
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        entries.push((relative.to_string_lossy().into_owned(), hex_lower(&hasher.finalize())));
+    }
+    Ok(())
 }
 
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    reason = "hex encoding indexes a fixed 16-byte table with masked nibbles"
+)]
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(HEX[(byte >> 4) as usize]));
+        out.push(char::from(HEX[(byte & 0x0f) as usize]));
+    }
+    out
+}
+
+#[cfg(test)]
 fn unique_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos())
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::process::Command;
 
     use super::{LeanRsInteropShimsSourcePackageRequest, materialize_source_package};
@@ -160,7 +178,7 @@ mod tests {
             std::process::id(),
             super::unique_nanos()
         ));
-        drop(super::remove_path_if_exists(&temp));
+        drop(remove_path_if_exists(&temp));
         fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
         let toolchain = "leanprover/lean4:v4.31.0-rc1".to_owned();
         let package = materialize_source_package(LeanRsInteropShimsSourcePackageRequest {
@@ -177,6 +195,7 @@ mod tests {
         );
         assert!(package.project_root.join("LeanRsInterop/Worker/Stream.lean").is_file());
         assert!(package.project_root.join("c/interop_callback.c").is_file());
+        assert!(package.project_root.join("source-package.json").is_file());
         assert!(!package.project_root.join("Cargo.toml").exists());
         assert!(!package.project_root.join("src/lib.rs").exists());
 
@@ -187,7 +206,7 @@ mod tests {
         .map_err(|error| error.to_string())?;
         assert_eq!(warm.project_root, package.project_root);
 
-        drop(super::remove_path_if_exists(&temp));
+        drop(remove_path_if_exists(&temp));
         Ok(())
     }
 
@@ -222,5 +241,16 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    fn remove_path_if_exists(path: &Path) -> Result<(), String> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                fs::remove_dir_all(path).map_err(|error| error.to_string())
+            }
+            Ok(_) => fs::remove_file(path).map_err(|error| error.to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
     }
 }
