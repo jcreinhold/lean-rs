@@ -9,6 +9,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-09
+
 ### `lean-toolchain`: explicit capability manifest dependencies
 
 `CargoLeanCapability` can now record caller-provided `LeanLibraryDependency` entries in the capability artifact
@@ -16,6 +18,22 @@ manifest. Downstream build scripts that build a primary Lake shared library agai
 can describe that dependency before the manifest is written, instead of editing JSON after `build_quiet()` returns. This
 is domain-neutral: source ownership, package names, module names, and export metadata still live in the downstream
 package that owns the Lean payload.
+
+### `lean-toolchain`: shared source-package materialization
+
+`lean-toolchain` now exposes a domain-neutral source-package materializer for crates that ship Lean source payloads and
+need to build them under a caller-selected toolchain. The helper owns the repeated cache mechanics: digest-keyed cache
+entries, per-entry file locks, atomic temp-directory installation, generated `lean-toolchain` files, provenance
+sidecars, generated-file validation, and explicit Lake manifest policy. It hides the copy/cache protocol behind one
+request type so downstream crates do not hand-roll sibling-checkout discovery or racy `.lake` reuse.
+
+### `lean-rs-interop-shims`: release-shaped package surface
+
+The package-owned `lean-rs-interop-shims` crate now uses the shared materializer, ships its license texts explicitly,
+and has a package-list regression proving the Lean/C/Lake runtime payload and licenses are present while Rust crate
+scaffolding is not copied into materialized Lake roots. `lean-rs-host`'s parity guard now compares the runtime payload
+only, so the canonical package can carry Rust packaging files without forcing the host's bundled Lean payload copy to
+mirror them.
 
 ## [0.2.0]
 

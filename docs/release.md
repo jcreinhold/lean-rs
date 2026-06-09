@@ -53,7 +53,7 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/
 3. If the public API changed intentionally, regenerate the baselines in the same commit:
 
    ```sh
-   for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
+   for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
      cargo public-api -p "$c" --simplified > "docs/api-review/${c}-public.txt"
    done
    ```
@@ -128,8 +128,9 @@ the wrong workspace version.
 
 ## Step 7—Post-publish
 
-- Verify the release on crates.io: `cargo search lean-rs` (all seven crates should appear with the new version).
-- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other six)
+- Verify the release on crates.io: `cargo search lean-rs` (all eight published crates should appear with the new
+  version).
+- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other seven)
   within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 

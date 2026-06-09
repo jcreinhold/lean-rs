@@ -446,7 +446,7 @@ if [[ "$RUN_PUBLIC_API" == 1 ]]; then
 	else
 		run_public_api_diff() {
 			local fail=0
-			for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
+			for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host \
 				lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
 				local baseline="$REPO_ROOT/docs/api-review/${crate}-public.txt"
 				if [[ ! -f "$baseline" ]]; then

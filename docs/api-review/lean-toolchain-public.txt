@@ -335,6 +335,48 @@ impl core::marker::Unpin for lean_toolchain::LinkDiagnostics
 impl core::marker::UnsafeUnpin for lean_toolchain::LinkDiagnostics
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LinkDiagnostics
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LinkDiagnostics
+pub enum lean_toolchain::SourcePackageError
+pub lean_toolchain::SourcePackageError::InvalidPayload(alloc::string::String)
+pub lean_toolchain::SourcePackageError::Io
+pub lean_toolchain::SourcePackageError::Io::action: &'static str
+pub lean_toolchain::SourcePackageError::Io::path: std::path::PathBuf
+pub lean_toolchain::SourcePackageError::Io::source: std::io::error::Error
+pub lean_toolchain::SourcePackageError::Json
+pub lean_toolchain::SourcePackageError::Json::action: &'static str
+pub lean_toolchain::SourcePackageError::Json::path: std::path::PathBuf
+pub lean_toolchain::SourcePackageError::Json::source: serde_json::error::Error
+impl core::error::Error for lean_toolchain::SourcePackageError
+pub fn lean_toolchain::SourcePackageError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for lean_toolchain::SourcePackageError
+pub fn lean_toolchain::SourcePackageError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for lean_toolchain::SourcePackageError
+pub fn lean_toolchain::SourcePackageError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::SourcePackageError
+impl core::marker::Send for lean_toolchain::SourcePackageError
+impl core::marker::Sync for lean_toolchain::SourcePackageError
+impl core::marker::Unpin for lean_toolchain::SourcePackageError
+impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageError
+impl !core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageError
+impl !core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageError
+pub enum lean_toolchain::SourcePackageManifestPolicy
+pub lean_toolchain::SourcePackageManifestPolicy::AllowPackages
+pub lean_toolchain::SourcePackageManifestPolicy::ZeroPackages
+impl core::clone::Clone for lean_toolchain::SourcePackageManifestPolicy
+pub fn lean_toolchain::SourcePackageManifestPolicy::clone(&self) -> lean_toolchain::SourcePackageManifestPolicy
+impl core::cmp::Eq for lean_toolchain::SourcePackageManifestPolicy
+impl core::cmp::PartialEq for lean_toolchain::SourcePackageManifestPolicy
+pub fn lean_toolchain::SourcePackageManifestPolicy::eq(&self, &lean_toolchain::SourcePackageManifestPolicy) -> bool
+impl core::fmt::Debug for lean_toolchain::SourcePackageManifestPolicy
+pub fn lean_toolchain::SourcePackageManifestPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::StructuralPartialEq for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::Freeze for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::Send for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::Sync for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::Unpin for lean_toolchain::SourcePackageManifestPolicy
+impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageManifestPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageManifestPolicy
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageManifestPolicy
 pub struct lean_toolchain::BuiltLeanCapability
 impl lean_toolchain::BuiltLeanCapability
 pub fn lean_toolchain::BuiltLeanCapability::dylib_path(&self) -> &std::path::Path
@@ -392,6 +434,7 @@ pub struct lean_toolchain::CargoLeanCapability
 impl lean_toolchain::CargoLeanCapability
 pub fn lean_toolchain::CargoLeanCapability::build(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::Result<lean_toolchain::BuiltLeanCapability, lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::CargoLeanCapability::dependency(self, lean_toolchain::LeanLibraryDependency) -> Self
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
 pub fn lean_toolchain::CargoLeanCapability::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
@@ -430,6 +473,24 @@ impl core::marker::Unpin for lean_toolchain::DiscoverOptions
 impl core::marker::UnsafeUnpin for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::DiscoverOptions
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::DiscoverOptions
+pub struct lean_toolchain::GeneratedSourceFile
+pub lean_toolchain::GeneratedSourceFile::contents: alloc::vec::Vec<u8>
+pub lean_toolchain::GeneratedSourceFile::relative_path: std::path::PathBuf
+impl core::clone::Clone for lean_toolchain::GeneratedSourceFile
+pub fn lean_toolchain::GeneratedSourceFile::clone(&self) -> lean_toolchain::GeneratedSourceFile
+impl core::cmp::Eq for lean_toolchain::GeneratedSourceFile
+impl core::cmp::PartialEq for lean_toolchain::GeneratedSourceFile
+pub fn lean_toolchain::GeneratedSourceFile::eq(&self, &lean_toolchain::GeneratedSourceFile) -> bool
+impl core::fmt::Debug for lean_toolchain::GeneratedSourceFile
+pub fn lean_toolchain::GeneratedSourceFile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::GeneratedSourceFile
+impl core::marker::Freeze for lean_toolchain::GeneratedSourceFile
+impl core::marker::Send for lean_toolchain::GeneratedSourceFile
+impl core::marker::Sync for lean_toolchain::GeneratedSourceFile
+impl core::marker::Unpin for lean_toolchain::GeneratedSourceFile
+impl core::marker::UnsafeUnpin for lean_toolchain::GeneratedSourceFile
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::GeneratedSourceFile
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::GeneratedSourceFile
 pub struct lean_toolchain::LeanBuiltCapability
 impl lean_toolchain::LeanBuiltCapability
 pub fn lean_toolchain::LeanBuiltCapability::dependencies(self, impl core::iter::traits::collect::IntoIterator<Item = lean_toolchain::LeanLibraryDependency>) -> Self
@@ -717,6 +778,84 @@ impl core::marker::Unpin for lean_toolchain::LeanModuleSetFingerprint
 impl core::marker::UnsafeUnpin for lean_toolchain::LeanModuleSetFingerprint
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::LeanModuleSetFingerprint
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::LeanModuleSetFingerprint
+pub struct lean_toolchain::MaterializedSourcePackage
+pub lean_toolchain::MaterializedSourcePackage::project_root: std::path::PathBuf
+pub lean_toolchain::MaterializedSourcePackage::provenance: lean_toolchain::SourcePackageProvenance
+impl core::clone::Clone for lean_toolchain::MaterializedSourcePackage
+pub fn lean_toolchain::MaterializedSourcePackage::clone(&self) -> lean_toolchain::MaterializedSourcePackage
+impl core::cmp::Eq for lean_toolchain::MaterializedSourcePackage
+impl core::cmp::PartialEq for lean_toolchain::MaterializedSourcePackage
+pub fn lean_toolchain::MaterializedSourcePackage::eq(&self, &lean_toolchain::MaterializedSourcePackage) -> bool
+impl core::fmt::Debug for lean_toolchain::MaterializedSourcePackage
+pub fn lean_toolchain::MaterializedSourcePackage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::MaterializedSourcePackage
+impl core::marker::Freeze for lean_toolchain::MaterializedSourcePackage
+impl core::marker::Send for lean_toolchain::MaterializedSourcePackage
+impl core::marker::Sync for lean_toolchain::MaterializedSourcePackage
+impl core::marker::Unpin for lean_toolchain::MaterializedSourcePackage
+impl core::marker::UnsafeUnpin for lean_toolchain::MaterializedSourcePackage
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::MaterializedSourcePackage
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::MaterializedSourcePackage
+pub struct lean_toolchain::SourcePackageMaterializationRequest
+pub lean_toolchain::SourcePackageMaterializationRequest::cache_root: std::path::PathBuf
+pub lean_toolchain::SourcePackageMaterializationRequest::crate_name: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::crate_version: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::generated_files: alloc::vec::Vec<lean_toolchain::GeneratedSourceFile>
+pub lean_toolchain::SourcePackageMaterializationRequest::include_paths: alloc::vec::Vec<std::path::PathBuf>
+pub lean_toolchain::SourcePackageMaterializationRequest::library_name: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::manifest_policy: lean_toolchain::SourcePackageManifestPolicy
+pub lean_toolchain::SourcePackageMaterializationRequest::materialized_package_name: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::package_name: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::sentinel_files: alloc::vec::Vec<std::path::PathBuf>
+pub lean_toolchain::SourcePackageMaterializationRequest::source_digest: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::source_revision: alloc::string::String
+pub lean_toolchain::SourcePackageMaterializationRequest::source_root: std::path::PathBuf
+pub lean_toolchain::SourcePackageMaterializationRequest::toolchain_label: alloc::string::String
+impl core::clone::Clone for lean_toolchain::SourcePackageMaterializationRequest
+pub fn lean_toolchain::SourcePackageMaterializationRequest::clone(&self) -> lean_toolchain::SourcePackageMaterializationRequest
+impl core::cmp::Eq for lean_toolchain::SourcePackageMaterializationRequest
+impl core::cmp::PartialEq for lean_toolchain::SourcePackageMaterializationRequest
+pub fn lean_toolchain::SourcePackageMaterializationRequest::eq(&self, &lean_toolchain::SourcePackageMaterializationRequest) -> bool
+impl core::fmt::Debug for lean_toolchain::SourcePackageMaterializationRequest
+pub fn lean_toolchain::SourcePackageMaterializationRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::SourcePackageMaterializationRequest
+impl core::marker::Freeze for lean_toolchain::SourcePackageMaterializationRequest
+impl core::marker::Send for lean_toolchain::SourcePackageMaterializationRequest
+impl core::marker::Sync for lean_toolchain::SourcePackageMaterializationRequest
+impl core::marker::Unpin for lean_toolchain::SourcePackageMaterializationRequest
+impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageMaterializationRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageMaterializationRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageMaterializationRequest
+pub struct lean_toolchain::SourcePackageProvenance
+pub lean_toolchain::SourcePackageProvenance::crate_name: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::crate_version: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::generated_toolchain_file: bool
+pub lean_toolchain::SourcePackageProvenance::library_name: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::materialized_package_name: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::package_name: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::schema_version: u32
+pub lean_toolchain::SourcePackageProvenance::source_digest: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::source_revision: alloc::string::String
+pub lean_toolchain::SourcePackageProvenance::toolchain_label: alloc::string::String
+impl core::clone::Clone for lean_toolchain::SourcePackageProvenance
+pub fn lean_toolchain::SourcePackageProvenance::clone(&self) -> lean_toolchain::SourcePackageProvenance
+impl core::cmp::Eq for lean_toolchain::SourcePackageProvenance
+impl core::cmp::PartialEq for lean_toolchain::SourcePackageProvenance
+pub fn lean_toolchain::SourcePackageProvenance::eq(&self, &lean_toolchain::SourcePackageProvenance) -> bool
+impl core::fmt::Debug for lean_toolchain::SourcePackageProvenance
+pub fn lean_toolchain::SourcePackageProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_toolchain::SourcePackageProvenance
+impl serde_core::ser::Serialize for lean_toolchain::SourcePackageProvenance
+pub fn lean_toolchain::SourcePackageProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for lean_toolchain::SourcePackageProvenance
+pub fn lean_toolchain::SourcePackageProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_toolchain::SourcePackageProvenance
+impl core::marker::Send for lean_toolchain::SourcePackageProvenance
+impl core::marker::Sync for lean_toolchain::SourcePackageProvenance
+impl core::marker::Unpin for lean_toolchain::SourcePackageProvenance
+impl core::marker::UnsafeUnpin for lean_toolchain::SourcePackageProvenance
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::SourcePackageProvenance
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::SourcePackageProvenance
 pub struct lean_toolchain::ToolchainFingerprint
 pub lean_toolchain::ToolchainFingerprint::fixture_sha256: &'static str
 pub lean_toolchain::ToolchainFingerprint::header_sha256: &'static str
@@ -782,4 +921,5 @@ pub fn lean_toolchain::discover_lake_modules(lean_toolchain::LeanModuleDiscovery
 pub fn lean_toolchain::discover_toolchain(&lean_toolchain::DiscoverOptions) -> core::result::Result<lean_toolchain::ToolchainInfo, lean_toolchain::LinkDiagnostics>
 pub fn lean_toolchain::emit_lean_link_directives()
 pub fn lean_toolchain::emit_lean_link_directives_checked() -> core::result::Result<(), lean_toolchain::LinkDiagnostics>
+pub fn lean_toolchain::materialize_source_package(&lean_toolchain::SourcePackageMaterializationRequest) -> core::result::Result<lean_toolchain::MaterializedSourcePackage, lean_toolchain::SourcePackageError>
 pub fn lean_toolchain::required_symbols() -> &'static [&'static str]

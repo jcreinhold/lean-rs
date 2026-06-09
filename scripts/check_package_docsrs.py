@@ -16,12 +16,21 @@ CRATES = [
     "lean-rs-abi",
     "lean-rs-sys",
     "lean-toolchain",
+    "lean-rs-interop-shims",
     "lean-rs",
     "lean-rs-host",
     "lean-rs-worker-protocol",
     "lean-rs-worker-parent",
     "lean-rs-worker-child",
 ]
+
+CRATE_MANIFESTS = {
+    "lean-rs-interop-shims": pathlib.Path("crates/lean-rs/shims/lean-rs-interop-shims/Cargo.toml"),
+}
+
+
+def crate_manifest(crate: str) -> pathlib.Path:
+    return ROOT / CRATE_MANIFESTS.get(crate, pathlib.Path("crates") / crate / "Cargo.toml")
 
 
 def fail(message: str) -> None:
@@ -61,7 +70,7 @@ def check_docs_rs_metadata() -> str:
     version = root_manifest["workspace"]["package"]["version"]
 
     for crate in CRATES:
-        manifest = read_toml(ROOT / "crates" / crate / "Cargo.toml")
+        manifest = read_toml(crate_manifest(crate))
         metadata = manifest["package"].get("metadata", {})
         docs_rs = metadata.get("docs", {}).get("rs")
         if not docs_rs:
@@ -99,6 +108,22 @@ def package_contents(version: str) -> None:
             "src/build_helpers.rs",
             "src/diagnostics.rs",
             "src/fingerprint.rs",
+            "src/source_package.rs",
+        ],
+        "lean-rs-interop-shims": [
+            "Cargo.toml",
+            "LICENSE-APACHE",
+            "LICENSE-MIT",
+            "README.md",
+            "LeanRsInterop.lean",
+            "LeanRsInterop/Callback.lean",
+            "LeanRsInterop/Callback/String.lean",
+            "LeanRsInterop/Callback/Tick.lean",
+            "LeanRsInterop/Worker/Stream.lean",
+            "c/interop_callback.c",
+            "lake-manifest.json",
+            "lakefile.lean",
+            "src/lib.rs",
         ],
         "lean-rs": [
             "Cargo.toml",
@@ -107,11 +132,6 @@ def package_contents(version: str) -> None:
             "benches/hot_paths.rs",
             "examples/interop_callback.rs",
             "examples/string_streaming.rs",
-            "shims/lean-rs-interop-shims/LeanRsInterop.lean",
-            "shims/lean-rs-interop-shims/LeanRsInterop/Worker/Stream.lean",
-            "shims/lean-rs-interop-shims/c/interop_callback.c",
-            "shims/lean-rs-interop-shims/lakefile.lean",
-            "shims/lean-rs-interop-shims/lean-toolchain",
             "src/module/preflight.rs",
         ],
         "lean-rs-host": [
@@ -197,6 +217,7 @@ def template_package_contents() -> None:
 def release_docs_exist() -> None:
     for rel in [
         "docs/api-review/lean-rs-public.txt",
+        "docs/api-review/lean-rs-interop-shims-public.txt",
         "docs/api-review/lean-rs-worker-protocol-public.txt",
         "docs/api-review/lean-rs-worker-parent-public.txt",
         "docs/api-review/lean-rs-worker-child-public.txt",

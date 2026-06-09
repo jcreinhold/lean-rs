@@ -1,7 +1,7 @@
 # Version Matrix
 
-Tested configurations for the five published `lean-rs` crates. Configurations outside these tables are unsupported, even
-if they happen to compile.
+Tested configurations for the published `lean-rs` workspace crates. Configurations outside these tables are unsupported,
+even if they happen to compile.
 
 - Policy: [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md)
 - Release procedure: [`docs/release.md`](release.md)

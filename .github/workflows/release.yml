@@ -270,7 +270,7 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for crate in lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
+          for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
             baseline="docs/api-review/${crate}-public.txt"
             if [ ! -f "$baseline" ]; then
               echo "::error::Missing baseline: $baseline"

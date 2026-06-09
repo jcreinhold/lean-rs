@@ -5,18 +5,18 @@ belongs to Lean/Rust interop itself, not to the theorem-prover host session mode
 
 ## Package Boundary
 
-The canonical copy lives under
-[`crates/lean-rs/shims/lean-rs-interop-shims/`](../../crates/lean-rs/shims/lean-rs-interop-shims/). `lean-rs-host`
-carries its own bundled copy under
+The canonical package-owned crate lives under
+[`crates/lean-rs/shims/lean-rs-interop-shims/`](../../crates/lean-rs/shims/lean-rs-interop-shims/). It publishes the
+generic payload and materialization helper as `lean-rs-interop-shims`. `lean-rs-host` carries its own bundled copy under
 [`crates/lean-rs-host/shims/lean-rs-interop-shims/`](../../crates/lean-rs-host/shims/lean-rs-interop-shims/) so the host
 crate can build and load its shims without reaching into another crate's source directory at runtime. Its public Lean
 namespace is `LeanRsInterop`.
 
-The two copies are duplicated, not shared: a published crate's `Cargo.toml` `include` cannot reach outside its own
-directory, so each crate must vendor a self-contained runtime payload. The payload files **must be byte-identical**—the
-host payload is the canonical payload verbatim, never a host-trimmed subset (it carries `Callback.String` and
-`Worker.Stream` even though `lean-rs-host-shims` imports only `Callback.Tick`). The canonical directory is also a Rust
-crate, so its `Cargo.toml`, README, license texts, and `src/` scaffolding are intentionally not copied into
+The two Lean payload copies are duplicated, not shared: the host crate must be self-contained when packaged. The payload
+files **must be byte-identical**—the host payload is the canonical payload verbatim, never a host-trimmed subset (it
+carries `Callback.String` and `Worker.Stream` even though `lean-rs-host-shims` imports only `Callback.Tick`). The
+canonical directory is also a Rust crate, so its `Cargo.toml`, README, license texts, and `src/` scaffolding are
+intentionally not copied into
 `lean-rs-host`. The [`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces
 payload parity; edit the canonical payload and copy it over the host one, never one alone.
 

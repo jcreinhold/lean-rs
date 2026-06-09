@@ -1,0 +1,39 @@
+pub mod lean_rs_interop_shims
+pub struct lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+pub lean_rs_interop_shims::LeanRsInteropShimsSourcePackage::project_root: std::path::PathBuf
+impl core::clone::Clone for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackage::clone(&self) -> lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::cmp::Eq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::cmp::PartialEq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackage::eq(&self, &lean_rs_interop_shims::LeanRsInteropShimsSourcePackage) -> bool
+impl core::fmt::Debug for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::marker::Freeze for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::marker::Send for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::marker::Sync for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::marker::Unpin for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::marker::UnsafeUnpin for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_interop_shims::LeanRsInteropShimsSourcePackage
+pub struct lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+pub lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest::cache_root: std::path::PathBuf
+pub lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest::toolchain_label: alloc::string::String
+impl core::clone::Clone for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest::clone(&self) -> lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::cmp::Eq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::cmp::PartialEq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest::eq(&self, &lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest) -> bool
+impl core::fmt::Debug for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+pub fn lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::marker::Freeze for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::marker::Send for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::marker::Sync for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::marker::Unpin for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::marker::UnsafeUnpin for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest
+pub const lean_rs_interop_shims::LIBRARY_NAME: &str
+pub const lean_rs_interop_shims::PACKAGE_NAME: &str
+pub fn lean_rs_interop_shims::materialize_source_package(lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest) -> core::result::Result<lean_rs_interop_shims::LeanRsInteropShimsSourcePackage, lean_toolchain::source_package::SourcePackageError>

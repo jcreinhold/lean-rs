@@ -20,7 +20,7 @@ conversion, FFI batching, module loaders) is out of scope.
 
 ## Adopted Design
 
-Five published crates plus one workspace-internal helper:
+Published crates plus one workspace-internal helper:
 
 - **`lean-rs-sys`** (published). Raw `extern "C"` view of `lean.h`, split by semantic category; pure-Rust mirrors of
   `lean.h`'s `static inline` refcount helpers via `AtomicI32::from_ptr`; the `REQUIRED_SYMBOLS` allowlist; build-time
@@ -30,6 +30,10 @@ Five published crates plus one workspace-internal helper:
 - **`lean-toolchain`** (published). Toolchain discovery, typed `ToolchainFingerprint`, fixture digest, layered link
   diagnostics, build-script helpers. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS` from
   `lean-rs-sys` so the allowlist lives in one place.
+- **`lean-rs-interop-shims`** (published). Package-owned Lean/C source payload for the generic interop shim package,
+  with a build-script helper that materializes that payload under a caller-owned cache and caller-selected Lean
+  toolchain. It exists so downstream crates do not depend on a sibling `lean-rs` checkout for reusable callback and
+  worker-streaming helpers.
 - **`lean-rs`** (published). The safe FFI crate: bring the runtime up, open a Lake-built dylib, initialise a module,
   call typed `@[export]` functions, and register Rust callbacks through a generic shim package. Five public modules
   (`error`, `module`, `handle`, `runtime`, `abi`) plus one `#[doc(hidden)] pub mod __host_internals` giving the sibling

@@ -6,8 +6,9 @@ surface against these files on every PR; intentional changes regenerate the matc
 ## Regenerate
 
 ```sh
-for c in lean-rs-sys lean-toolchain lean-rs lean-rs-host \
-         lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
+for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs \
+         lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent \
+         lean-rs-worker-child; do
   cargo public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
 done
 ```
@@ -53,6 +54,7 @@ cargo test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
 test -f docs/api-review/lean-rs-sys-public.txt
 test -f docs/api-review/lean-toolchain-public.txt
+test -f docs/api-review/lean-rs-interop-shims-public.txt
 test -f docs/api-review/lean-rs-public.txt
 test -f docs/api-review/lean-rs-host-public.txt
 test -f docs/api-review/lean-rs-worker-protocol-public.txt

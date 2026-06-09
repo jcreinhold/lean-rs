@@ -3,9 +3,9 @@
 //! This module owns the cache mechanics that are easy to get subtly wrong in
 //! downstream `build.rs` helpers: digest-keyed directories, per-entry locking,
 //! atomic installation, generated `lean-toolchain` files, provenance sidecars,
-//! and zero-dependency Lake manifest validation. It does not know how to build
-//! Lake targets; callers pass the returned root to [`CargoLeanCapability`] or
-//! another build helper.
+//! and Lake manifest validation. It does not know how to build Lake targets;
+//! callers pass the returned root to [`CargoLeanCapability`] or another build
+//! helper.
 //!
 //! [`CargoLeanCapability`]: crate::CargoLeanCapability
 
@@ -181,8 +181,8 @@ impl StdError for SourcePackageError {
 /// # Errors
 ///
 /// Returns [`SourcePackageError`] when the request is invalid, the payload is
-/// not a zero-dependency Lake package, a filesystem operation fails, or the
-/// provenance sidecar cannot be decoded.
+/// violates the requested Lake manifest policy, a filesystem operation fails,
+/// or the provenance sidecar cannot be decoded.
 pub fn materialize_source_package(
     input: &SourcePackageMaterializationRequest,
 ) -> Result<MaterializedSourcePackage, SourcePackageError> {
