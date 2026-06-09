@@ -9,6 +9,7 @@ include = [
   "LeanRsInterop.lean",
   "LeanRsInterop/**/*.lean",
   "c/**/*.c",
+  "LICENSE-*",
   "README.md",
   "lake-manifest.json",
   "lakefile.lean",

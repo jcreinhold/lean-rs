@@ -149,6 +149,7 @@ fn unique_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::process::Command;
 
     use super::{LeanRsInteropShimsSourcePackageRequest, materialize_source_package};
 
@@ -187,6 +188,39 @@ mod tests {
         assert_eq!(warm.project_root, package.project_root);
 
         drop(super::remove_path_if_exists(&temp));
+        Ok(())
+    }
+
+    #[test]
+    fn package_list_contains_runtime_payload_and_license_texts() -> Result<(), String> {
+        let output = Command::new("cargo")
+            .args(["package", "--allow-dirty", "--list"])
+            .current_dir(super::SOURCE_ROOT)
+            .output()
+            .map_err(|error| format!("run cargo package --list: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "cargo package --list failed with status {}:\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8(output.stdout).map_err(|error| format!("package list is UTF-8: {error}"))?;
+
+        for expected in [
+            "LeanRsInterop.lean",
+            "LeanRsInterop/Worker/Stream.lean",
+            "c/interop_callback.c",
+            "lakefile.lean",
+            "lake-manifest.json",
+            "LICENSE-APACHE",
+            "LICENSE-MIT",
+        ] {
+            if !stdout.lines().any(|line| line == expected) {
+                return Err(format!("package list should include {expected}, got:\n{stdout}"));
+            }
+        }
         Ok(())
     }
 }

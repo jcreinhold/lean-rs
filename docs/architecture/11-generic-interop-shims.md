@@ -13,11 +13,12 @@ crate can build and load its shims without reaching into another crate's source 
 namespace is `LeanRsInterop`.
 
 The two copies are duplicated, not shared: a published crate's `Cargo.toml` `include` cannot reach outside its own
-directory, so each crate must vendor a self-contained copy. The copies **must be byte-identical**—the host copy is the
-canonical copy verbatim, never a host-trimmed subset (it carries `Callback.String` and `Worker.Stream` even though
-`lean-rs-host-shims` imports only `Callback.Tick`). The
-[`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces this; edit the canonical
-copy and copy it over the host one, never one alone.
+directory, so each crate must vendor a self-contained runtime payload. The payload files **must be byte-identical**—the
+host payload is the canonical payload verbatim, never a host-trimmed subset (it carries `Callback.String` and
+`Worker.Stream` even though `lean-rs-host-shims` imports only `Callback.Tick`). The canonical directory is also a Rust
+crate, so its `Cargo.toml`, README, license texts, and `src/` scaffolding are intentionally not copied into
+`lean-rs-host`. The [`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces
+payload parity; edit the canonical payload and copy it over the host one, never one alone.
 
 Current modules:
 
