@@ -58,8 +58,8 @@ pub use modules::{
     LeanModuleSetFingerprint, discover_lake_modules,
 };
 pub use source_package::{
-    GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageMaterializationRequest,
-    SourcePackageProvenance, materialize_source_package,
+    GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageManifestPolicy,
+    SourcePackageMaterializationRequest, SourcePackageProvenance, materialize_source_package,
 };
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.

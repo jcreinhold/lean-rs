@@ -54,6 +54,8 @@ pub struct SourcePackageMaterializationRequest {
     pub generated_files: Vec<GeneratedSourceFile>,
     /// Files that must exist in a valid warm cache entry.
     pub sentinel_files: Vec<PathBuf>,
+    /// Validation policy for `lake-manifest.json`.
+    pub manifest_policy: SourcePackageManifestPolicy,
 }
 
 /// Source-root-relative generated file written during materialization.
@@ -63,6 +65,15 @@ pub struct GeneratedSourceFile {
     pub relative_path: PathBuf,
     /// Complete file contents.
     pub contents: Vec<u8>,
+}
+
+/// Validation policy for the materialized `lake-manifest.json`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourcePackageManifestPolicy {
+    /// Require `"packages": []`.
+    ZeroPackages,
+    /// Require `packages` to be present and well-formed, but allow entries.
+    AllowPackages,
 }
 
 /// Materialized source package.
@@ -262,7 +273,7 @@ impl SourcePackageCache {
             "write generated source package lean-toolchain",
         )?;
         write_sidecar(&temp, &provenance)?;
-        ensure_zero_package_manifest(&temp.join("lake-manifest.json"))?;
+        validate_lake_manifest(&temp.join("lake-manifest.json"), input.manifest_policy)?;
         for sentinel in &input.sentinel_files {
             let path = temp.join(sentinel);
             if !path.is_file() {
@@ -400,7 +411,7 @@ fn entry_matches(
             return Ok(false);
         }
     }
-    ensure_zero_package_manifest(&root.join("lake-manifest.json"))?;
+    validate_lake_manifest(&root.join("lake-manifest.json"), input.manifest_policy)?;
     Ok(true)
 }
 
@@ -469,7 +480,7 @@ fn write_sidecar(root: &Path, provenance: &SourcePackageProvenance) -> Result<()
     write_file(&path, &bytes, "write source package provenance sidecar")
 }
 
-fn ensure_zero_package_manifest(path: &Path) -> Result<(), SourcePackageError> {
+fn validate_lake_manifest(path: &Path, policy: SourcePackageManifestPolicy) -> Result<(), SourcePackageError> {
     let manifest: serde_json::Value =
         serde_json::from_slice(&read_file(path, "read source package lake-manifest.json")?).map_err(|source| {
             SourcePackageError::Json {
@@ -484,7 +495,7 @@ fn ensure_zero_package_manifest(path: &Path) -> Result<(), SourcePackageError> {
         .ok_or_else(|| {
             SourcePackageError::InvalidPayload("lake-manifest.json must contain an array `packages`".to_owned())
         })?;
-    if !packages.is_empty() {
+    if policy == SourcePackageManifestPolicy::ZeroPackages && !packages.is_empty() {
         return Err(SourcePackageError::InvalidPayload(
             "lake-manifest.json must remain zero-dependency (`packages: []`)".to_owned(),
         ));
@@ -659,6 +670,7 @@ mod tests {
             ],
             generated_files: Vec::new(),
             sentinel_files: vec![PathBuf::from("Test/Extra.lean")],
+            manifest_policy: super::SourcePackageManifestPolicy::ZeroPackages,
         }
     }
 
@@ -782,6 +794,21 @@ mod tests {
             error.to_string().contains("zero-dependency"),
             "error should explain the zero-package invariant: {error}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn allow_packages_manifest_policy_accepts_dependency_manifests() -> Result<(), String> {
+        let source = source_root("allow-packages")?;
+        write(
+            &source.join("lake-manifest.json"),
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"name":"dep"}],"name":"test_pkg","lakeDir":".lake"}"#,
+        )?;
+        let cache = temp_root("cache-allow-packages")?;
+        let mut input = request(source, cache, "digest-allow-packages");
+        input.manifest_policy = super::SourcePackageManifestPolicy::AllowPackages;
+        let package = materialize_source_package(&input).map_err(|error| error.to_string())?;
+        assert!(package.project_root.join("lake-manifest.json").is_file());
         Ok(())
     }
 
