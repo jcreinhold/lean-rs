@@ -230,8 +230,8 @@ Two `#[doc(hidden)] pub` bridges substitute for Cargo's missing "friend crate" v
   utility, not a constructor wrapper.
 
 The supertrait `lean_rs::abi::traits::sealed::SealedAbi` is similarly `pub` so this crate can implement `LeanAbi` for
-its own host-defined types (`LeanEvidence`, etc.); external crates are blocked by the orphan rule plus the
-`#[doc(hidden)]` marker on the parent module.
+its own host-defined types (`LeanEvidence`, etc.); external crates are blocked by Rust's coherence rules (the orphan
+rule prevents implementing a foreign trait you do not own) plus the `#[doc(hidden)]` marker on the parent module.
 
 ## Rejected approaches
 

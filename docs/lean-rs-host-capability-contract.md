@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 28 mandatory + 9 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
+The 32 mandatory + 10 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
 [`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host`
 crate ships the implementation under `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop
 dependency under `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
@@ -31,7 +31,7 @@ the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](a
 A missing or signature-mismatched mandatory symbol fails session construction. A missing optional symbol stores `None`
 in the typed binding table; the relevant `LeanSession` method returns its `Unsupported` response at dispatch time.
 
-## Mandatory contract (28 symbols)
+## Mandatory contract (32 symbols)
 
 Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`, `KernelOutcome`, `ProofSummary`,
 `MetaOpts`, `MetaResponse`, `DeclarationFilter`, `SourceRange`) live in
@@ -75,7 +75,7 @@ report `compactedRegionBytes`, `memoryMappedRegionBytes`, and `nonMemoryMappedRe
 | `lean_rs_host_env_declaration_name_bulk_progress` | `(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_name_bulk(names, None, Some(progress))` |
 | `lean_rs_host_env_expr_to_string_raw` | `(e : Expr) : String` | `expr_to_string_raw(expr, cancellation)` |
 
-### Elaboration, kernel check, evidence (5)
+### Elaboration, kernel check, evidence (7)
 
 | Lean symbol | Lean signature | Rust method on `LeanSession` |
 | --- | --- | --- |

@@ -2,7 +2,7 @@
 
 Adding a version requires two verifications: the `lean.h` layout is unchanged from an existing entry, and every symbol
 in `REQUIRED_SYMBOLS` still resolves in the new `libleanshared`. The single source of truth is
-[`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs); the steps below either update that file
+[`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs); the steps below either update that file
 or follow from it. Budget ~30 minutes plus CI time. End state: the workspace builds and tests cleanly against the new
 release on every CI cell.
 
@@ -23,7 +23,7 @@ shasum -a 256 \
   ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h | cut -d' ' -f1
 ```
 
-Compare against existing entries in [`SUPPORTED_TOOLCHAINS`](../crates/lean-rs-sys/src/supported.rs):
+Compare against existing entries in [`SUPPORTED_TOOLCHAINS`](../crates/lean-rs-abi/src/supported.rs):
 
 - **Digest matches an existing entry** → append `"X.Y.Z"` to that entry's `versions` array, then jump to step 4. The
   common case; Lean often ships point releases without touching `lean.h`.
@@ -54,7 +54,7 @@ Empty output: every required symbol resolves. Non-empty: a symbol disappeared up
 
 ### 4. Update the `SUPPORTED_TOOLCHAINS` table
 
-Edit [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs):
+Edit [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs):
 
 - Add a new `SupportedToolchain { versions: &["X.Y.Z"], header_digest: "<digest>", missing_symbols: &[] }` entry in
   version order, **or** append `"X.Y.Z"` to an existing entry's `versions` array when the digest matched.

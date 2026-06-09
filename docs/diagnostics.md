@@ -3,7 +3,7 @@
 `lean-rs` and `lean-rs-host` project errors to the same stable [`lean_rs::LeanDiagnosticCode`] taxonomy and emit
 structured `tracing` spans against the `lean_rs` target. Long-running host session operations can also report live
 progress through `lean_rs_host::LeanProgressSink`; see
-[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md). The worker crates use its own
+[`architecture/13-structured-progress.md`](architecture/13-structured-progress.md). The worker crates use their own
 `LeanWorkerError` surface for process-boundary outcomes such as child exit, request timeout, cancellation, data-sink
 panic, diagnostic-sink panic, and typed command decode failures. A downstream caller gets:
 
@@ -97,7 +97,7 @@ child pids, pipe handles, protocol frames, loader flags, or `std::process` confi
 | `WorkerChildUnresolved` | `lean_rs.worker.bootstrap.child_unresolved` | The configured child locator did not resolve to a file. | Ship an app-owned worker child binary beside the application or set the documented worker-child override. |
 | `WorkerChildNotExecutable` | `lean_rs.worker.bootstrap.child_not_executable` | The child path is missing or is not executable on this platform. | Build the worker child binary and package it with executable permissions. |
 | `CapabilityPreflight { code: ... }` | `lean_rs.loader.*` | Manifest-backed loader preflight failed. | Follow the loader-code repair hint: rebuild through `CargoLeanCapability`, package missing artifacts, or use a compatible Lean toolchain. |
-| `WorkerHandshakeFailed` | `lean_rs.worker.bootstrap.handshake_failed` | The child started but did not speak the worker protocol. | Ensure the binary calls `lean_rs_worker::run_worker_child_stdio()` and matches the parent crate version. |
+| `WorkerHandshakeFailed` | `lean_rs.worker.bootstrap.handshake_failed` | The child started but did not speak the worker protocol. | Ensure the binary calls `lean_rs_worker_child::run_worker_child_stdio()` and matches the parent crate version. |
 | `CapabilityMetadataMismatch` | `lean_rs.worker.bootstrap.metadata_mismatch` | The capability metadata export did not match the caller's expectation. | Select or rebuild the intended capability package. |
 | `WorkerStartupFailed` | `lean_rs.worker.bootstrap.startup_failed` | Startup failed outside a more specific bootstrap class. | Run the bootstrap check in the deployment environment and inspect the bounded message. |
 

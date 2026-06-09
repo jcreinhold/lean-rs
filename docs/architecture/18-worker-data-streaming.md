@@ -1,6 +1,6 @@
 # Worker Data Streaming
 
-The worker crates needs a row stream for downstream protocols that produce arbitrary user data while a worker request is
+The worker crates need a row stream for downstream protocols that produce arbitrary user data while a worker request is
 running. The host-session adapter can already return copied theorem-prover values and progress events, but that is not
 enough for tools that need a sequence of downstream-owned rows such as JSONL-like `lean-dup` output.
 
@@ -25,7 +25,7 @@ is assigned by the worker crates per stream within one request. `payload` is arb
 protocol.
 
 This type is intentionally generic at the worker boundary and intentionally not schema-free inside downstream tools. The
-worker crates carries rows. It does not define `lean-dup` row structs, theorem-search result schemas, or application
+worker crates carry rows. They do not define `lean-dup` row structs, theorem-search result schemas, or application
 business objects.
 
 ## Chosen Boundary

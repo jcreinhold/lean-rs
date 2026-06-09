@@ -185,8 +185,8 @@ machines or operating systems.
 
 ## Derived Index Attribution
 
-Full sessions still import with `loadExts := true`, so they cannot use `Environment.freeRegions`. Prompt 19 narrows a
-different cost: work derived from the already imported environment after a caller asks a query. The profiling workload
+Full sessions still import with `loadExts := true`, so they cannot use `Environment.freeRegions`. Derived-index
+attribution narrows a different cost: work derived from the already imported environment after a caller asks a query. The profiling workload
 `derived-indexes` prints `query_derived_work=...` rows for query phases such as cheap declaration inspection, raw and
 pretty statement rendering, opt-in proof-search facts, declaration search with and without source ranges, module
 proof-state queries, proof attempts, and declaration verification.
@@ -221,7 +221,7 @@ Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LO
 
 ## Measured Shape
 
-Post-reduction rebaseline on 2026-06-08, commit `396bdf3`, macOS aarch64, Lean 4.31.0-rc1, profiling profile,
+Post-reduction rebaseline on 2026-06-08, macOS aarch64, Lean 4.31.0-rc1, profiling profile,
 `LEAN_RS_NUM_THREADS=1`, and a local `2,097,152` KiB RSS budget. Current repo defaults are stricter:
 `test-threads=1`, `build.jobs=1`, `RUST_TEST_THREADS=1`, `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864`, and profiling RSS caps
 of 1,572,864 KiB.
@@ -358,7 +358,7 @@ stable import set. Drain cadence is policy for the embedding application: drain 
 bound workloads that continuously create fresh import sets. Those still require cycling the worker process at a bounded
 import count or RSS ceiling.
 
-The worker crates provide that process-cycling policy. Its restart policy can cycle explicitly, before a configured
+The worker crates provide that process-cycling policy. Their restart policy can cycle explicitly, before a configured
 request count, before a configured import-like request count, after an idle interval, or when a best-effort child RSS
 sample reaches a ceiling. Memory guardrail errors include the latest Lean import stats when a session has opened in
 that process, so an RSS refusal can be read next to the retained `.olean` region shape that preceded it.
@@ -442,14 +442,14 @@ The same profiling output also emits `session_reuse=...` rows. These rows report
 fresh imports avoided, and miss reasons such as `empty_pool`, `reuse_disabled`, and `no_matching_key`. They explain
 whether a fresh import was avoided by warm reuse; admission rows explain whether a cold open was allowed.
 
-Prompt 24 adds `replacement=...` rows for worker and pool workloads. These rows break the current synchronous
+The `replacement=...` rows for worker and pool workloads break the current synchronous
 replacement path into spawn/handshake, capability-load, session-open/import, first-command, warm-command, and total
 replacement timings, plus the restart reason and budget status. The current status is `synchronous-no-overlap`: the
 old child exits before the replacement starts, so no warm-spare process temporarily doubles child RSS. Background
 replacement or warm spares remain a future opt-in design that must be admitted by the total child RSS budget before
 spawn/import begins.
 
-Prompt 25 adds `batch=...` rows for the warm `process_module_query_batch` proof-agent path. The implementation reuses
+The `batch=...` rows cover the warm `process_module_query_batch` proof-agent path. Their implementation reuses
 the existing bounded module-query batch API through one checked-out worker-pool lease; it does not add a new Lean shim
 or batch protocol. These rows are evidence about request/session churn on a warm child. They do not imply compacted
 regions were reclaimed, do not hide cold import cost, and do not replace worker cycling for full `loadExts := true`

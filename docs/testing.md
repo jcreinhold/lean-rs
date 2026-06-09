@@ -29,8 +29,7 @@ Doctests are not picked up by nextest:
 cargo test --doc --workspace
 ```
 
-For a local Prompt-28-style smoke check that avoids same-process import-heavy
-targets, use:
+For a local smoke check that avoids same-process import-heavy targets, use:
 
 ```sh
 cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci

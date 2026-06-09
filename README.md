@@ -99,8 +99,8 @@ The minimum same-process setup is five pieces: a `Cargo.toml`, a `build.rs`, a L
 a Rust `main.rs`. The example calls a user-authored `@[export]` Lean function from Rust without depending on
 `lean-rs-host`.
 
-All five crates are published on crates.io at the same workspace version. The `Cargo.toml` snippets in this repo use
-`"0.1"` so they pick up the latest 0.1.x.
+All published crates share one workspace version. The `Cargo.toml` snippets in this repo pin `"0.2"` to pick up the
+latest 0.2.x.
 
 **`Cargo.toml`**: `lean-rs` for the API; `lean-toolchain` is a build-dep that emits link directives and the runtime
 rpath:
@@ -112,10 +112,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lean-rs = "0.1"
+lean-rs = "0.2"
 
 [build-dependencies]
-lean-toolchain = "0.1"
+lean-toolchain = "0.2"
 ```
 
 **`build.rs`**: the high-level helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun
@@ -197,7 +197,7 @@ convention, trusted export signatures, and the artifact manifest handoff. `LeanC
 the build-time path, dependency bundle, initializer names, and checked export metadata together at runtime. Use
 `build_lake_target`, `LeanLibraryBundle`, and `LeanLibrary` directly only for lower-level custom interop.
 
-For sessions, kernel checking, and `MetaM`, add `lean-rs-host = "0.1"` and follow
+For sessions, kernel checking, and `MetaM`, add `lean-rs-host = "0.2"` and follow
 [`crates/lean-rs-host/README.md`](crates/lean-rs-host/README.md). The host crate ships and builds its own shim packages;
 your Lake package only declares your capability library.
 
@@ -253,7 +253,8 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 - [`06-panic-containment.md`](docs/architecture/06-panic-containment.md): panic containment via process boundary.
 - [`07-cooperative-cancellation.md`](docs/architecture/07-cooperative-cancellation.md): cancellation token contract.
 - [`08-reusable-interop.md`](docs/architecture/08-reusable-interop.md): reusable Lean/Rust interop boundary.
-- [`09-callback-abi-spike.md`](docs/architecture/09-callback-abi-spike.md): callback ABI proof.
+- [`09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md): module-query projection and
+  degraded-verdict semantics.
 - [`10-callback-registry.md`](docs/architecture/10-callback-registry.md): RAII callback registry rules.
 - [`11-generic-interop-shims.md`](docs/architecture/11-generic-interop-shims.md): reusable Lean-side interop shims.
 - [`12-interop-build-and-link.md`](docs/architecture/12-interop-build-and-link.md): build-script helper path and cache.

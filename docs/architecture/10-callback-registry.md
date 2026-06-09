@@ -3,7 +3,7 @@
 `lean-rs` exposes a narrow Rust callback registry for Lean-to-Rust calls. This is a same-process primitive, not a
 `LeanSession` feature and not the worker-facing data streaming API. A callback handle is the low-level same-process
 mechanism used when an exported Lean function must push data into Rust before it returns. Worker-style callers should
-normally use The worker crates typed commands and row sinks; the worker child may use callbacks internally, but parent
+normally use the worker crates' typed commands and row sinks; the worker child may use callbacks internally, but parent
 callers do not receive or pass callback handles.
 
 ## Public Shape
@@ -28,6 +28,19 @@ trampoline    : USize
 Lean treats both values as opaque and passes them to a payload-specific helper such as `LeanRsInterop.Callback.Tick` or
 `LeanRsInterop.Callback.String`. The helper invokes the Rust trampoline through its matching C symbol. Callers cannot
 supply their own trampoline function pointer through the public API.
+
+### Underlying ABI
+
+Lean never calls the Rust trampoline pointer directly. It passes the opaque handle and trampoline `USize` values to a
+small C helper linked into the shim dylib (for the tick payload, `lean_rs_interop_tick_callback_call`), which casts the
+trampoline to its stable C signature and invokes it:
+
+```c
+uint8_t (*)(uintptr_t handle, uint64_t current, uint64_t total)
+```
+
+This keeps the mechanism free of any process-global exported Rust symbol: the Rust caller owns both the handle and the
+trampoline, and the shim knows only the C ABI shape.
 
 ## Payloads
 
@@ -103,4 +116,5 @@ has diagnostic code `lean_rs.internal` and stage `CallbackPanic`.
 - Registry: `crates/lean-rs/src/callback.rs`
 - Generic Lean helpers: `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/Tick.lean` and
   `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/String.lean`
-- Tests: `crates/lean-rs/tests/callback_registry.rs`
+- C trampoline helper: `crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c`
+- Tests: `crates/lean-rs/tests/callback_registry.rs` and `crates/lean-rs/tests/callback_trampoline.rs`

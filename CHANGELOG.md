@@ -172,7 +172,7 @@ churn as the bottleneck.
   block elaborates against the untouched goal and the original tactics' downstream errors are reported as downstream,
   not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after`. The variant is additive on the
   `#[non_exhaustive]` `LeanWorkerProofPositionSelector` (wire) and `ProofPositionSelector` (host); `Index { index }`
-  keeps its existing "index-th tactic state" meaning. See [`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md).
+  keeps its existing "index-th tactic state" meaning. See [`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md).
 
 ### Worker robustness: no verify crash, honest degraded verdict, pretty proof-state locals
 
@@ -203,7 +203,7 @@ cap surfaced three defects in the read-only query path; all three are fixed.
 No new verification-status variant or protocol version bump: `BudgetExceeded` is reused for the degraded case and
 `locals_raw` is backward compatible via `#[serde(default)]`. The internal env var `LEAN_RS_VERIFY_RSS_TAINT_KIB`
 (plumbed from the pool's per-worker RSS ceiling) gates the child-side taint and defaults to off. See
-[`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md) for the degraded-verdict
+[`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md) for the degraded-verdict
 semantics and locals rendering modes, and
 [`docs/architecture/06-panic-containment.md`](docs/architecture/06-panic-containment.md) for the supervisor
 verdict-on-abort contract.
@@ -219,7 +219,7 @@ discards as a `needs_build` / `files_skipped` degrade. The Lean shim now short-c
 `elaboration_micros = 0`, bounding each per-file query in a project-scope scan to header parsing instead of a full
 failing elaboration. No protocol or API change; the `MissingImports` outcome and `missing` list are unchanged. The
 remaining cross-query cost on a large scan — cold header re-import after an RSS-driven worker cycle — is documented in
-[`docs/architecture/info-tree-projection.md`](docs/architecture/info-tree-projection.md) with its mitigations
+[`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md) with its mitigations
 (`limit`, or build the project first).
 
 ### Worker robustness: read-only resolution queries inside the panic boundary

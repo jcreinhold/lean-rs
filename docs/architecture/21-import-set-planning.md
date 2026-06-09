@@ -56,7 +56,7 @@ can run against the same worker session requirements." It does not say whether a
 result, or report is valid for reuse. That remains downstream policy.
 
 The import planner is therefore deliberately not a `lean-dup` API. A `lean-dup` integration can map its source modules
-into planned batches, then run typed worker commands through pool leases. The worker crates still does not define
+into planned batches, then run typed worker commands through pool leases. The worker crates still do not define
 `extract`, `features`, `index`, or `probe` methods.
 
 ## Performance Claim

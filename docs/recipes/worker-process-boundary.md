@@ -6,7 +6,7 @@ page explains the lower-level process-boundary mechanics and the raw row escape 
 Run the worker streaming example from a clean checkout:
 
 ```sh
-cargo run -p lean-rs-worker --example worker_streaming
+cargo run -p lean-rs-worker-child --example worker_streaming
 ```
 
 The example uses `LeanWorkerCapabilityBuilder` to build the downstream Lake target, start a worker child, open a worker
@@ -213,7 +213,7 @@ The result is a process boundary with structured rows, not a `lean-dup` protocol
 For a larger worker-capability check, run:
 
 ```sh
-cargo run --release -p lean-rs-worker --example worker_capability_probe
+cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 ```
 
 The probe uses fixture exports with command-like names `version`, `doctor`, `extract`, `features`, `index`, and `probe`.
@@ -235,8 +235,8 @@ local comparison against an existing subprocess worker, pass the command explici
 
 ```sh
 LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
-  cargo run --release -p lean-rs-worker --example worker_capability_probe
+  cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 ```
 
-Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the The
-worker crates contract.
+Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the
+worker crates' contract.

@@ -15,7 +15,7 @@
 - [Panic containment](architecture/06-panic-containment.md)
 - [Cooperative cancellation](architecture/07-cooperative-cancellation.md)
 - [Reusable interop](architecture/08-reusable-interop.md)
-- [Callback ABI spike](architecture/09-callback-abi-spike.md)
+- [Info-tree projection](architecture/09-info-tree-projection.md)
 - [Callback registry](architecture/10-callback-registry.md)
 - [Generic interop shims](architecture/11-generic-interop-shims.md)
 - [Interop build and link](architecture/12-interop-build-and-link.md)
@@ -23,7 +23,6 @@
 - [Interop release contract](architecture/14-interop-release-contract.md)
 - [Callback payloads](architecture/15-callback-payloads.md)
 - [Loader and artifact boundary](architecture/29-loader-and-artifact-boundary.md)
-- [Info-tree projection](architecture/info-tree-projection.md)
 
 # Standard Lean services (`lean-rs-host`)
 

@@ -104,7 +104,7 @@ version bumps without breaking downstream code that uses the `pub unsafe fn` hel
 each crate root. Items inside `lean-rs`'s `pub(crate)` modules (`runtime`, `abi`) and the internal helper modules under
 `module/` and `host/` are **not** part of the public API; they can be renamed, moved, or collapsed without a minor bump
 as long as the curated re-exports keep their shape. `lean-rs-host` also depends on its bundled host shim package's
-`@[export]` contract. The worker crates's semver surface is its supervisor, capability-builder, typed-command, row,
+`@[export]` contract. The worker crates' semver surface is their supervisor, capability-builder, typed-command, row,
 diagnostic, timeout, and restart-policy API; private protocol frame shapes are not public API.
 
 **Lean shim packages.** Same toolchain window. `lean-rs` bundles `lean-rs-interop-shims` for generic callback ABI

@@ -16,20 +16,26 @@ Before writing code, read the architecture charter and any topic-specific docs t
 
 ## Workspace shape
 
-Five published crates plus one workspace-internal helper:
+Nine published crates plus two workspace-internal helpers:
 
 | Crate | Role |
 | --- | --- |
-| `lean-rs-sys` | Raw Lean 4 C ABI bindings. Opaque public types, pure-Rust refcount mirrors, `REQUIRED_SYMBOLS` allowlist, header digest. Opt-in unsafe raw FFI. |
-| `lean-toolchain` | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, build helpers. Re-exports `lean-rs-sys`'s allowlist. |
+| `lean-rs-sys` | Raw Lean 4 C ABI bindings: extern declarations, opaque public types, `#[repr(C)]` layout mirrors (`pub(crate) LeanObjectRepr`), pure-Rust refcount mirrors. Opt-in unsafe raw FFI. |
+| `lean-rs-abi` | Link-free Lean ABI and toolchain metadata: `REQUIRED_SYMBOLS` allowlist, `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and the `SUPPORTED_TOOLCHAINS` window. No `extern "C"`, no linker directives. |
+| `lean-toolchain` | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, Lake module discovery, build helpers. Re-exports `lean-rs-abi`'s metadata. |
 | `lean-rs` | L1 safe front door. Runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. |
+| `lean-rs-interop-shims` | Package-owned Lean source for the generic interop shims; `materialize_source_package` copies the `LeanRsInterop` Lake package into a caller-owned build root. |
 | `lean-rs-host` | L2 theorem-prover-host stack: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. |
-| `lean-rs-worker` | Process-boundary supervisor around `lean-rs-host`: child lifecycle, request timeouts, memory cycling, typed commands, row streaming, local pool. |
-| `lean-rs-test-support` | Internal fixtures (`publish = false`). |
+| `lean-rs-worker-protocol` | Wire-stable parent/child IPC types and frame codec. Does not link `libleanshared`. |
+| `lean-rs-worker-parent` | Parent-side supervisor and pool: child lifecycle, request timeouts, memory cycling, typed commands, row streaming. Does not link `libleanshared`. |
+| `lean-rs-worker-child` | Child runtime and the `lean-rs-worker-child` binary; the only worker crate that links `libleanshared`. |
 
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`; `lean-rs-worker` wraps the host stack in a
-child-process boundary. Raw `lean_*` symbols enter only through `lean-rs-sys`; the safe layers in `lean-rs` and above
-never re-export them. Advanced users who need raw FFI can depend on `lean-rs-sys` directly (opt-in unsafe).
+Workspace-internal (`publish = false`): the `lean-rs-profiling` harness and the `lean-rs-fuzz` target.
+
+Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`, with `lean-rs-abi` underneath as the link-free
+metadata crate. The worker boundary is three sibling crates: `-protocol` (wire types), `-parent` (supervisor and pool),
+`-child` (Lean-linked runtime). Raw `lean_*` symbols enter only through `lean-rs-sys`; the safe layers in `lean-rs` and
+above never re-export them. Advanced users who need raw FFI can depend on `lean-rs-sys` directly (opt-in unsafe).
 
 ## Build and verify
 
@@ -49,9 +55,10 @@ the rationale and the per-test debugging escape hatch.
 
 - **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
   signature in the active Lean header, extend the extern declarations in the appropriate
-  `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist. To extend the supported Lean
-  toolchain window, follow `docs/bump-toolchain.md`: add a row to `crates/lean-rs-sys/src/supported.rs`
-  (`SUPPORTED_TOOLCHAINS`), a CI matrix cell, and (if layout shifted) the `pub(crate) LeanObjectRepr`.
+  `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist in `crates/lean-rs-abi/src/symbols.rs`.
+  To extend the supported Lean toolchain window, follow `docs/bump-toolchain.md`: add a row to
+  `crates/lean-rs-abi/src/supported.rs` (`SUPPORTED_TOOLCHAINS`), a CI matrix cell, and (if layout shifted) the
+  `pub(crate) LeanObjectRepr` in `crates/lean-rs-sys/src/repr.rs`.
 - **`lean-rs-sys` is published with opaque public types.** Downstream users see `lean_object` as `[u8; 0] + PhantomData`
   and reach state only through `pub unsafe fn` helpers. Never expose `LeanObjectRepr` outside the crate; never add
   public `pub` fields to FFI types. Every `unsafe { ... }` block carries a `// SAFETY:` comment; every `pub unsafe fn`

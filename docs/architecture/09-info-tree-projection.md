@@ -75,7 +75,7 @@ locals collector so the concern lives in one place:
   the goal's `MetaM` context, so binders resolve to user names and notation is applied, then bound under the diagnostic
   byte budget. On a pretty-printer failure it falls back to the raw renderer. This matches the goal renderer and is
   *cheaper* than the raw unfolded form (the raw locals, `((((Quiver.Hom.{v,u} _uniq.NNNN)…`, were the proximate trigger
-  of the field RSS spike).
+  of the RSS spike).
 - **`raw`**: the previous `Expr`-string form, opt-in via the `locals_raw` selector field.
 - **`skip`**: render no locals at all. The verify path and the try-proof-step goals path read only `goals_after` and
   discard locals, so they pass `skip` and pay nothing for locals they never inspect.
@@ -129,7 +129,7 @@ signal is authoritative:
    answer. After a verify job the child samples its own RSS; if it is at or above `LEAN_RS_VERIFY_RSS_TAINT_KIB` **and**
    the verdict is non-positive (never `Accepted`), it relabels the verdict to `BudgetExceeded` and clears axioms. The
    ceiling is gated high (well above the warm mathlib baseline) and defaults to off (`0`); a missing RSS sample taints
-   nothing. The Lean side additionally reclassifies *loud* cases: a `notFound` whose diagnostics carry a resource marker
+   nothing. The Lean side also reclassifies *loud* cases: a `notFound` whose diagnostics carry a resource marker
    (`diagnosticIndicatesResourceLimit`: deep recursion, interrupted, out of memory) becomes `timeout` or
    `BudgetExceeded` rather than `NotFound`.
 3. **Supervisor verdict-on-abort (Layer C, authoritative backstop).** A residual abort that escapes Layer A is an

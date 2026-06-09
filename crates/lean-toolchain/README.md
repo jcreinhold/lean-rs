@@ -10,12 +10,12 @@ helpers downstream embedders can call from their own `build.rs`. Re-exports `LEA
 
 It also owns Lake module discovery for higher layers. `discover_lake_modules` resolves a Lake root, discovers `lean_lib`
 source roots, validates module names, enumerates Lean source files deterministically, and returns source-set
-fingerprints. This discovery layer does not know worker pools or downstream cache policy; `lean-rs-worker` uses it to
-build import/session batches.
+fingerprints. This discovery layer does not know worker pools or downstream cache policy; `lean-rs-worker-parent` uses
+it to build import/session batches.
 
 Runtime application code usually does not depend on this crate directly: it shows up transitively through `lean-rs`.
 Downstream crates that ship Lean source commonly depend on it from `build.rs`, where `CargoLeanCapability` builds the
-Lake shared library and emits the compile-time path that runtime code opens through `lean-rs` or `lean-rs-worker`.
+Lake shared library and emits the compile-time path that runtime code opens through `lean-rs` or `lean-rs-worker-parent`.
 Same-process apps pair that path with `LeanCapability`; worker apps pair it with `LeanWorkerChild` and an app-owned
 worker-child binary. See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
@@ -24,7 +24,7 @@ worker-child binary. See
 
 ```toml
 [build-dependencies]
-lean-toolchain = "0.1"
+lean-toolchain = "0.2"
 ```
 
 ```rust,ignore
@@ -55,7 +55,7 @@ See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md)
 for the canonical shipped-crate layout.
 
-See the [workspace README](https://github.com/jcreinhold/lean-rs) for the five-crate architecture overview and
+See the [workspace README](https://github.com/jcreinhold/lean-rs) for the workspace architecture overview and
 [`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)
 for the supported Lean window.
 

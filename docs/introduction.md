@@ -8,9 +8,7 @@ meaning. This project handles the Rust hosting work around Lean: linking, runtim
 loading, error and panic boundaries, scheduling, diagnostics, batching, process isolation, and packaging.
 
 This site collects the architecture charter, design notes, recipes, safety audits, and operational runbooks that ship in
-the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs). New users should start with the
-[repository README](https://github.com/jcreinhold/lean-rs#readme), which walks through the crate layout, the minimal
-same-process example, and the worked examples.
+the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs).
 
 ## Start Here
 

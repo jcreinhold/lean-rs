@@ -1,7 +1,7 @@
 # Downstream Worker Replacement Fixture
 
 A boundary check showing that the generic worker foundation can replace the subprocess worker used by a `lean-dup`-class
-tool (a downstream tool that drives Lean through its own child process). The worker crates pool hosts the operational
+tool (a downstream tool that drives Lean through its own child process). The worker-crate pool hosts the operational
 responsibilities; downstream crates keep their schemas and semantic policy. This is not a `lean-dup` implementation and
 not a migration guide.
 
@@ -65,8 +65,8 @@ A downstream project still owns:
 - command names and CLI policy;
 - any compatibility decisions based on downstream metadata.
 
-This is the intended split. The worker crates carries typed commands, rows, diagnostics, terminal summaries, timeouts,
-cycling, backpressure, and pool state; it does not know what a downstream row means.
+This is the intended split. The worker crates carry typed commands, rows, diagnostics, terminal summaries, timeouts,
+cycling, backpressure, and pool state; they do not know what a downstream row means.
 
 ## Comparison Input
 

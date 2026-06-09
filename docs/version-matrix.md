@@ -10,7 +10,7 @@ even if they happen to compile.
 ## Lean toolchain window
 
 Supported window: Lean 4.26.0–4.31.0-rc1 (eight entries). Authoritative list, including `lean.h` SHA-256 digests, lives
-in [`crates/lean-rs-sys/src/supported.rs`](../crates/lean-rs-sys/src/supported.rs). Releases that ship a byte-identical
+in [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs). Releases that ship a byte-identical
 `lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is
 platform-independent; digests are identical across the two target triples.
 
@@ -24,8 +24,9 @@ release contract is documented in
 
 ## `lean-rs-sys` symbol coverage
 
-`pub const REQUIRED_SYMBOLS` in [`crates/lean-rs-sys/src/lib.rs`](../crates/lean-rs-sys/src/lib.rs) enumerates the
-**88** `LEAN_EXPORT`'d symbols the crate's `extern "C"` blocks declare. `tests/linkage.rs` resolves every entry against
+`pub const REQUIRED_SYMBOLS` in [`crates/lean-rs-abi/src/symbols.rs`](../crates/lean-rs-abi/src/symbols.rs) enumerates
+the **88** `LEAN_EXPORT`'d symbols that `lean-rs-sys`'s `extern "C"` blocks declare. `tests/linkage.rs` resolves every
+entry against
 `libleanshared` at link time on every version × OS cell; the parallel test in `lean-toolchain` imports the same set via
 `lean_rs_sys::REQUIRED_SYMBOLS`. All 88 symbols are present in every release in the window
 (`SupportedToolchain::missing_symbols` is empty for every entry).

@@ -1,6 +1,6 @@
 # Interop Release Contract
 
-The reusable interop stack is stable enough for `0.1.x` consumers when they stay inside the documented boundaries:
+The reusable interop stack is stable enough for `0.2.x` consumers when they stay inside the documented boundaries:
 explicit Lean exports, typed Rust calls, crate-owned callback handles, bundled shim packages, and `lean-toolchain` build
 helpers. The model is close to PyO3/maturin in the parts Lean exposes: a Rust crate can build a Lean shared-library
 target, load it, call typed exports, and pass an opaque Rust callback handle back into Lean. It is not Python-style
@@ -24,9 +24,8 @@ Consumer-facing contracts live in these documents:
 - [`13-structured-progress.md`](13-structured-progress.md): `LeanProgressSink` semantics.
 - [`../lean-rs-host-capability-contract.md`](../lean-rs-host-capability-contract.md): fixed host shim symbol contract.
 
-Implementation notes, spike rationale, and rejected designs remain in [`08-reusable-interop.md`](08-reusable-interop.md)
-and [`09-callback-abi-spike.md`](09-callback-abi-spike.md). They explain why the current boundary exists, but the
-documents above are the release contract consumers should follow.
+Implementation notes and rejected designs remain in [`08-reusable-interop.md`](08-reusable-interop.md). It explains why
+the current boundary exists, but the documents above are the release contract consumers should follow.
 
 ## What The Stack Provides
 
@@ -35,7 +34,7 @@ documents above are the release contract consumers should follow.
 same-process Lean-to-Rust callbacks. Callback handles carry only opaque ABI values and a crate-owned trampoline;
 downstream code does not pass arbitrary function pointers to Lean. Payloads are a sealed family owned by `lean-rs`;
 current payloads are `LeanProgressTick` and `LeanStringEvent`. This is the mechanism layer. Worker-class interfaces
-should expose The worker crates typed commands and row sinks instead of callback handles.
+should expose the worker crates' typed commands and row sinks instead of callback handles.
 
 `lean-toolchain` provides the build-script path: link directives for the active Lean toolchain and `build_lake_target`
 for Lake shared-library targets. It owns Lake dylib naming, cache metadata, Cargo rerun directives, and typed link/build
@@ -47,7 +46,7 @@ structured progress. It ships the host and generic shim sources it needs, builds
 the consumer capability dylib.
 
 The worker crates provide the process-boundary product interface for worker-style tools: builder-managed capability
-startup, typed commands, live rows, diagnostic sinks, terminal summaries, request timeouts, and worker cycling. It may
+startup, typed commands, live rows, diagnostic sinks, terminal summaries, request timeouts, and worker cycling. They may
 use same-process callbacks inside the child, but the parent-facing API is worker IPC, not cross-process callbacks.
 
 ## What It Does Not Provide

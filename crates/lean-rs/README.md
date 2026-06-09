@@ -31,10 +31,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lean-rs = "0.1"
+lean-rs = "0.2"
 
 [build-dependencies]
-lean-toolchain = "0.1"
+lean-toolchain = "0.2"
 ```
 
 **`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun triggers, the
@@ -118,8 +118,8 @@ dependency bundle, initializer names, and checked export metadata together at ru
 
 See the complete shipping recipe at
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
-Worker applications use the same built capability descriptor with `lean-rs-worker` and point `LeanWorkerChild` at an
-app-owned worker-child binary; the recipe shows that packaging path as well.
+Worker applications use the same built capability descriptor with `lean-rs-worker-parent` and point `LeanWorkerChild` at
+an app-owned worker-child binary; the recipe shows that packaging path as well.
 
 For a complete advanced same-process example that also lets Lean call a Rust callback, run
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
@@ -127,7 +127,7 @@ For a complete advanced same-process example that also lets Lean call a Rust cal
 For a trusted same-process string callback example, run `cargo run -p lean-rs --example string_streaming` and read
 [`docs/recipes/string-callback-streaming.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/string-callback-streaming.md).
 Worker tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling should
-use `lean-rs-worker` typed commands instead of exposing callback handles.
+use `lean-rs-worker-parent` typed commands instead of exposing callback handles.
 
 The `Args` and `R` generics on `LeanModule::exported_unchecked` are sealed by the `LeanAbi` / `LeanArgs` /
 `DecodeCallResult` traits, so unsupported types fail at compile time rather than producing wrong decodes at runtime.

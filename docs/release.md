@@ -8,9 +8,9 @@ creation, the per-crate live publish in dependency order, and opens a GitHub Rel
 This document is the **human checklist** for the steps before the tag push. The steps after the tag push are owned by
 the workflow.
 
-**Supported Lean window for v0.1.x:** 4.26.0 through 4.31.0-rc1. Adding the next release follows the
+**Supported Lean window for v0.2.x:** 4.26.0 through 4.31.0-rc1. Adding the next release follows the
 [bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
-`crates/lean-rs-sys/src/supported.rs` before any release.
+`crates/lean-rs-abi/src/supported.rs` before any release.
 
 **Publishing is `cargo publish --workspace` (stable since Rust 1.90).** Cargo computes the workspace dependency DAG,
 verifies every crate against a local registry overlay so downstream crates can see pending upstream publishes before
@@ -47,7 +47,7 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/
 ## Step 2—CHANGELOG + version bump
 
 1. Move `## [Unreleased]` entries into a new `## [X.Y.Z]` section (or compose fresh). The workflow extracts the section
-   body whose heading matches the pushed tag—heading text must match exactly (e.g., `## [0.1.1]` for tag `v0.1.1`).
+   body whose heading matches the pushed tag—heading text must match exactly (e.g., `## [0.2.1]` for tag `v0.2.1`).
 2. Bump `[workspace.package].version` and `[workspace.dependencies]` in the root `Cargo.toml` if they don't already
    match. The workflow asserts `"v${workspace.package.version}" == "${GITHUB_REF_NAME}"` before any publish.
 3. If the public API changed intentionally, regenerate the baselines in the same commit:
@@ -83,8 +83,8 @@ not arise.
 Only after the merge commit is on `main`:
 
 ```sh
-git tag -s v0.1.2 -m "lean-rs v0.1.2"
-git push origin v0.1.2
+git tag -s v0.2.1 -m "lean-rs v0.2.1"
+git push origin v0.2.1
 ```
 
 `-s` for a signed tag (recommended) or `-a` for unsigned annotated. The tag fires the workflow.
@@ -107,7 +107,7 @@ The workflow:
 7. Runs `cargo package --workspace --no-verify` to create the package tarballs.
 8. Publishes the workspace with `cargo publish --workspace` (one step, topological order, no fixed sleeps).
 9. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
-10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.1.0-rc.1`) are marked prerelease
+10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.2.0-rc.1`) are marked prerelease
     automatically.
 
 **If the workflow fails after one crate has published** (a partial release), crates.io versions are immutable, so a
@@ -116,7 +116,7 @@ exists` before it reaches the crates that did not upload. The common cause is th
 propagation race (`no packages ready to publish but 1 packages remain in plan ... awaiting confirmation`).
 
 Recover **without burning a version** by running the `release-recover.yml` workflow (Actions → "Release recovery" →
-Run workflow), passing the same `version` (e.g. `0.1.17`). It walks the crates in dependency order, skips any already on
+Run workflow), passing the same `version` (e.g. `0.2.3`). It walks the crates in dependency order, skips any already on
 crates.io at that version, publishes only the missing ones one at a time, and ensures the GitHub Release exists. It is
 idempotent—safe to re-run; a fully published version is a no-op. Run it with `dry_run: true` first to verify-build the
 missing crates without uploading. The workspace version on the default branch must equal the `version` input, since the
@@ -128,10 +128,9 @@ the wrong workspace version.
 
 ## Step 7—Post-publish
 
-- Verify the release on crates.io: `cargo search lean-rs` (all eight published crates should appear with the new
-  version).
-- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for the other seven)
-  within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
+- Verify the release on crates.io: `cargo search lean-rs` (every published crate should appear with the new version).
+- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for each of the other
+  published crates) within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
 - Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
 
 ## Fallback—local publish when CI is unavailable

@@ -55,7 +55,7 @@ until a soundness proof produces a scoped API. Neither byte nor object callbacks
 
 ## Evidence
 
-The scale claim is backed by named workloads, not by intent:
+Named workloads back the scale claim:
 
 - pool API and lease tests cover reuse, death, cancellation, timeout, metadata mismatch, memory-policy invalidation, and
   typed command execution;

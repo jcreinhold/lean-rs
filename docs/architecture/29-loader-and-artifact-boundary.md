@@ -26,8 +26,8 @@ CargoLeanCapability artifact description
 - `lean-rs` owns runtime loader lifetime and symbol visibility. It opens the capability and any dependent Lean dylibs in
   the required order, keeps those handles alive for the full capability lifetime, preflights the manifest and artifacts
   into stable diagnostics, initializes the requested module, and hides platform loader differences.
-- The worker crates own the process boundary. It locates and starts the app-owned worker child, builds the child
-  environment, opens the capability in the child, reports bootstrap diagnostics, and keeps protocol pipes private.
+- The worker crates own the process boundary. They locate and start the app-owned worker child, build the child
+  environment, open the capability in the child, report bootstrap diagnostics, and keep protocol pipes private.
 
 Callers still know their own Lake package and root module, exported command names, typed request and row schemas, and
 whether the workload should run in process or behind worker isolation. Those are application decisions. Loader order,

@@ -22,11 +22,12 @@ dependencies:
 
 ```toml
 [dependencies]
-lean-rs = "0.1"
-lean-rs-worker = "0.1" # only for worker apps
+lean-rs = "0.2"
+lean-rs-worker-parent = "0.2" # worker apps: supervisor and pool
+lean-rs-worker-child = "0.2"  # worker apps: the child runtime binary
 
 [build-dependencies]
-lean-toolchain = "0.1"
+lean-toolchain = "0.2"
 ```
 
 ## File Layout
@@ -46,7 +47,7 @@ Add `lean-toolchain` as a build dependency:
 
 ```toml
 [build-dependencies]
-lean-toolchain = "0.1"
+lean-toolchain = "0.2"
 ```
 
 Use the high-level helper in `build.rs`:
@@ -123,7 +124,7 @@ automatically.
 ```rust,ignore
 // src/bin/my_app_lean_worker.rs
 fn main() -> std::process::ExitCode {
-    lean_rs_worker::run_worker_child_stdio()
+    lean_rs_worker_child::run_worker_child_stdio()
 }
 ```
 
@@ -136,9 +137,9 @@ let spec = lean_rs::LeanBuiltCapability::manifest_path(
 .manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST");
 
 let builder =
-    lean_rs_worker::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
+    lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
         .worker_child(
-            lean_rs_worker::LeanWorkerChild::sibling("my_app_lean_worker")
+            lean_rs_worker_parent::LeanWorkerChild::sibling("my_app_lean_worker")
                 .env_override("MY_APP_LEAN_WORKER"),
         );
 
@@ -180,7 +181,8 @@ toolchain.
   emitted by your own `build.rs`.
 - Include Lean sources, `lakefile.lean`, `lean-toolchain`, and `lake-manifest.json` in the published crate.
 - Exclude `.lake/`; it is platform- and toolchain-specific build output.
-- Worker applications should ship an app-owned worker child binary that calls `lean_rs_worker::run_worker_child_stdio`.
+- Worker applications should ship an app-owned worker child binary that calls
+  `lean_rs_worker_child::run_worker_child_stdio`.
 - Do not rely on dependency binaries for the worker child; normal Cargo packaging does not install them as part of your
   application.
 - Avoid nullary unboxed scalar exports in examples and app APIs. Give exported functions at least one argument, as in
