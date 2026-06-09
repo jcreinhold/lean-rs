@@ -114,9 +114,13 @@ jobs:
           set -euo pipefail
           version="${{ inputs.version }}"
           dry="${{ inputs.dry_run }}"
-          # Dependency (topological) order — same list release.yml's public-API
-          # diff iterates, which is a valid publish order.
-          crates="lean-rs-sys lean-toolchain lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child"
+          # Dependency (topological) order covering every publishable workspace
+          # member, matching what `cargo publish --workspace` in release.yml
+          # uploads. Keep this list complete: a crate missing here silently falls
+          # through recovery (lean-rs-interop-shims, new in 0.2.1, did exactly
+          # that). The membership check below is idempotent, so listing a crate
+          # already on crates.io is a safe no-op.
+          crates="lean-rs-abi lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child"
           published=0
           skipped=0
           for c in $crates; do
