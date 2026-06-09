@@ -393,6 +393,13 @@ fn entry_matches(
     if toolchain.trim() != input.toolchain_label {
         return Ok(false);
     }
+    for generated in &input.generated_files {
+        let path = root.join(&generated.relative_path);
+        let bytes = read_file(&path, "read generated source package file")?;
+        if bytes != generated.contents {
+            return Ok(false);
+        }
+    }
     ensure_zero_package_manifest(&root.join("lake-manifest.json"))?;
     Ok(true)
 }
@@ -826,6 +833,30 @@ mod tests {
         ];
         let package = materialize_source_package(&input).map_err(|error| error.to_string())?;
         assert!(read_string(&package.project_root.join("lakefile.lean"))?.contains("generated_pkg"));
+        Ok(())
+    }
+
+    #[test]
+    fn generated_file_mismatch_rematerializes_entry() -> Result<(), String> {
+        let source = source_root("generated-mismatch")?;
+        let cache = temp_root("cache-generated-mismatch")?;
+        let mut input = request(source, cache, "digest-generated-mismatch");
+        input.generated_files = vec![GeneratedSourceFile {
+            relative_path: PathBuf::from("generated.txt"),
+            contents: b"expected".to_vec(),
+        }];
+        let first = materialize_source_package(&input).map_err(|error| error.to_string())?;
+        let marker = first.project_root.join("warm-marker");
+        fs::write(&marker, b"warm").map_err(|error| error.to_string())?;
+        fs::write(first.project_root.join("generated.txt"), b"stale").map_err(|error| error.to_string())?;
+
+        let second = materialize_source_package(&input).map_err(|error| error.to_string())?;
+        assert_eq!(first.project_root, second.project_root);
+        assert!(
+            !marker.exists(),
+            "generated file mismatch should force rematerialization"
+        );
+        assert_eq!(read_string(&second.project_root.join("generated.txt"))?, "expected");
         Ok(())
     }
 
