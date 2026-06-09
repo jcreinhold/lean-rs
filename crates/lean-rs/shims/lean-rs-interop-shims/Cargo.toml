@@ -1,0 +1,29 @@
+[package]
+authors.workspace = true
+categories = ["api-bindings", "development-tools::build-utils"]
+description = "Package-owned Lean source payload for the generic lean-rs interop shims."
+documentation = "https://docs.rs/lean-rs-interop-shims"
+edition.workspace = true
+include = [
+  "Cargo.toml",
+  "LeanRsInterop.lean",
+  "LeanRsInterop/**/*.lean",
+  "c/**/*.c",
+  "README.md",
+  "lake-manifest.json",
+  "lakefile.lean",
+  "src/**/*.rs",
+]
+keywords = ["build", "interop", "lean", "lean4", "shims"]
+license.workspace = true
+name = "lean-rs-interop-shims"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

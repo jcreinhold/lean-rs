@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "profiling"]
+members = ["crates/*", "crates/lean-rs/shims/lean-rs-interop-shims", "profiling"]
 resolver = "3"
 
 [workspace.package]
@@ -15,6 +15,7 @@ version = "0.2.0"
 lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.2.0" }
 lean-rs = { path = "crates/lean-rs", version = "0.2.0" }
 lean-rs-host = { path = "crates/lean-rs-host", version = "0.2.0" }
+lean-rs-interop-shims = { path = "crates/lean-rs/shims/lean-rs-interop-shims", version = "0.2.0" }
 lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.2.0" }
 lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.2.0" }
 lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.2.0" }

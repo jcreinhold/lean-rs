@@ -300,14 +300,6 @@ impl CargoLeanCapability {
         self
     }
 
-    /// Add multiple dependent Lean dylibs that must be loaded before this
-    /// capability.
-    #[must_use]
-    pub fn dependencies(mut self, dependencies: impl IntoIterator<Item = LeanLibraryDependency>) -> Self {
-        self.dependencies.extend(dependencies);
-        self
-    }
-
     /// Emit link directives, build the Lake shared library, write the
     /// artifact manifest, and emit `cargo:rustc-env` directives for the
     /// manifest and compatibility dylib path.
@@ -1192,14 +1184,24 @@ fn lean_library_dependency_to_json(dependency: &LeanLibraryDependency) -> serde_
             "module": initializer.module_name(),
         })
     });
+    let name = dependency.module_initializer().map_or_else(
+        || stable_dependency_name(dependency.path_ref()),
+        |initializer| initializer.package_name().to_owned(),
+    );
     serde_json::json!({
-        "name": dependency
-            .module_initializer()
-            .map_or_else(|| dependency.path_ref().display().to_string(), |initializer| initializer.package_name().to_owned()),
+        "name": name,
         "dylib_path": dependency.path_ref().display().to_string(),
         "export_symbols_for_dependents": dependency.exports_symbols_for_dependents(),
         "initializer": initializer,
     })
+}
+
+fn stable_dependency_name(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("lean_dependency")
+        .to_owned()
 }
 
 fn sanitize_target_name(target_name: &str) -> String {
@@ -1815,6 +1817,39 @@ mod tests {
                 .and_then(|initializer| initializer.get("module"))
                 .and_then(serde_json::Value::as_str),
             Some("Dependency")
+        );
+    }
+
+    #[test]
+    fn cargo_capability_dependency_without_initializer_uses_stable_file_name() {
+        let root = make_project("cargo-capability-explicit-dependency-no-init", "MyCapability");
+        let dependency = root.join(".lake").join("build").join("lib").join("libsupport.dylib");
+        write_file(&dependency, "dependency dylib");
+
+        let built = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .dependency(LeanLibraryDependency::path(&dependency))
+            .build_quiet()
+            .expect("cargo helper build");
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
+                .expect("manifest is valid JSON");
+        let dependency_json = manifest
+            .get("dependencies")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|dependencies| dependencies.first())
+            .expect("one dependency");
+        assert_eq!(
+            dependency_json.get("name").and_then(serde_json::Value::as_str),
+            Some("libsupport")
+        );
+        assert!(
+            dependency_json
+                .get("initializer")
+                .is_some_and(serde_json::Value::is_null),
+            "dependencies without initializers record null initializer"
         );
     }
 
