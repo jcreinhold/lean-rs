@@ -1,20 +1,19 @@
 name: Release recovery
 
-# Idempotent completion of a PARTIAL release. The happy path is the tag-driven
-# `release.yml`, which runs `cargo publish --workspace`. That single command
-# uploads the workspace in dependency order, but it is all-or-nothing on re-run:
-# once any crate version is on the index, re-invoking it fails with
-# `crate <name>@<ver> already exists on crates.io index` before it can reach the
-# crates that did NOT upload (e.g. a tail crate that lost cargo's index-
-# propagation race: "no packages ready to publish but 1 packages remain in plan
-# ... awaiting confirmation").
+# Idempotent completion of a PARTIAL release, plus a standalone re-trigger of the
+# publish step. The happy path is the tag-driven `release.yml`, whose publish job
+# now runs the same idempotent scripts/publish-workspace.sh as this workflow — so
+# a partial upload there is normally completed just by re-running that failed job
+# ("Re-run failed jobs" in the Actions UI), which skips the crates already on
+# crates.io and publishes the rest.
 #
-# This workflow recovers from that state WITHOUT burning a version. It walks the
-# crates in dependency order, skips any already on crates.io at the requested
-# version, and publishes only the missing ones one at a time (so each upload is
-# in the index before the next crate's verify build resolves it). It then
-# ensures the GitHub Release exists. It is safe to re-run: a fully published
-# version is a no-op.
+# This workflow exists for the cases where re-running the tag job is undesirable
+# or unavailable: the heavy `verify` matrix has already passed and you want a
+# light, publish-only run; the tag job's environment is wedged; or you are
+# completing a release out-of-band. It checks out this ref, builds the Lake
+# shims the verify build needs, runs the shared publish script (skip-published,
+# one crate at a time), and ensures the GitHub Release exists. Safe to re-run: a
+# fully published version is a no-op.
 #
 # Manual trigger only. `version` must equal the workspace version (the crate
 # contents on this ref are what get uploaded). crates.io versions are immutable,
@@ -108,44 +107,18 @@ jobs:
           fi
           echo "Workspace version $wsver matches requested version."
 
+      # Same idempotent per-crate publish that `release.yml` now uses; the
+      # algorithm and crate order live once in scripts/publish-workspace.sh. The
+      # script derives the version from cargo metadata, which the step above has
+      # already asserted equals `inputs.version`.
       - name: Publish missing crates (idempotent, dependency order)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -euo pipefail
-          version="${{ inputs.version }}"
-          dry="${{ inputs.dry_run }}"
-          # Dependency (topological) order covering every publishable workspace
-          # member, matching what `cargo publish --workspace` in release.yml
-          # uploads. Keep this list complete: a crate missing here silently falls
-          # through recovery (lean-rs-interop-shims, new in 0.2.1, did exactly
-          # that). The membership check below is idempotent, so listing a crate
-          # already on crates.io is a safe no-op.
-          crates="lean-rs-abi lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child"
-          published=0
-          skipped=0
-          for c in $crates; do
-            # crates.io returns 200 for an existing version, 404 otherwise.
-            if curl -sf -o /dev/null \
-                 -H "User-Agent: lean-rs-release-recover (github.com/jcreinhold/lean-rs)" \
-                 "https://crates.io/api/v1/crates/$c/$version"; then
-              echo "✓ $c@$version already on crates.io — skipping"
-              skipped=$((skipped + 1))
-              continue
-            fi
-            echo "→ $c@$version is missing — publishing"
-            if [ "$dry" = "true" ]; then
-              cargo publish -p "$c" --dry-run
-            else
-              # Single-crate publish waits for the upload to land in the index
-              # before returning, so the next crate's verify build resolves it.
-              cargo publish -p "$c"
-            fi
-            published=$((published + 1))
-          done
-          echo "Recovery summary: published=$published skipped=$skipped (dry_run=$dry)"
-          if [ "$dry" != "true" ] && [ "$published" = "0" ]; then
-            echo "Nothing to publish — $version was already complete on crates.io."
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/publish-workspace.sh --dry-run
+          else
+            scripts/publish-workspace.sh
           fi
 
       - name: Extract CHANGELOG section

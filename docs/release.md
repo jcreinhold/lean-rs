@@ -12,10 +12,14 @@ the workflow.
 [bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
 `crates/lean-rs-abi/src/supported.rs` before any release.
 
-**Publishing is `cargo publish --workspace` (stable since Rust 1.90).** Cargo computes the workspace dependency DAG,
-verifies every crate against a local registry overlay so downstream crates can see pending upstream publishes before
-crates.io indexes them, then uploads in topological order—in parallel where the DAG allows. The previous per-crate loop
-with 90-second sleeps is gone.
+**Publishing is [`scripts/publish-workspace.sh`](../scripts/publish-workspace.sh): idempotent, per-crate, in dependency
+order.** It walks the crates topologically, skips any already on crates.io at the workspace version, and publishes each
+missing one with its own `cargo publish -p` (which waits for that upload to land in the index before the next crate's
+verify build resolves it). Because already-published crates are skipped, **re-running the publish job after a partial
+upload completes the release without burning a version**—no separate recovery run is needed in the common case. We do
+not use `cargo publish --workspace`: its single global index-propagation deadline aborts the entire plan when one crate
+loses the race, stranding the crates that had not uploaded and forcing a recovery run on nearly every release. The same
+script backs `release-recover.yml`.
 
 ## One-time setup
 
@@ -74,9 +78,11 @@ workflow" → check **dry_run**). Runs every gate including workspace package cr
 the live publish and the GitHub Release. Useful when CHANGELOG section extraction or the public-API diff needs a sanity
 check that doesn't show up in the regular CI run.
 
-The live workflow runs `cargo publish --workspace`, which verifies every package against a local registry overlay that
-serves the pending upstream tarballs—so the dry-run-style "no matching package" failures of the older per-crate flow do
-not arise.
+The dry run invokes `scripts/publish-workspace.sh --dry-run`, which verify-builds each crate without uploading. One
+caveat: a dry run cannot resolve a downstream crate against an upstream workspace crate that has not actually been
+uploaded, so a dry run of the full chain fails on the first crate with an unpublished workspace dependency. That failure
+is a dry-run artifact (the real run uploads each crate before the next resolves it), so use the dry run to exercise the
+gates and CHANGELOG/baseline checks, not as a publish rehearsal.
 
 ## Step 5—Cut the tag
 
@@ -105,22 +111,24 @@ The workflow:
 6. Runs `python3 scripts/check_package_docsrs.py`, which packages the workspace, checks crate/template package contents,
    unpacks the normalized tarballs, hides Lean/elan/lake from `PATH`, and builds docs with `DOCS_RS=1`.
 7. Runs `cargo package --workspace --no-verify` to create the package tarballs.
-8. Publishes the workspace with `cargo publish --workspace` (one step, topological order, no fixed sleeps).
+8. Publishes the workspace with `scripts/publish-workspace.sh` (idempotent, per-crate, topological order; skips crates
+   already on crates.io).
 9. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
 10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.2.0-rc.1`) are marked prerelease
     automatically.
 
-**If the workflow fails after one crate has published** (a partial release), crates.io versions are immutable, so a
-plain re-run of the tag release fails: `cargo publish --workspace` rejects the run with `crate <name>@<ver> already
-exists` before it reaches the crates that did not upload. The common cause is the tail crate losing cargo's index-
-propagation race (`no packages ready to publish but 1 packages remain in plan ... awaiting confirmation`).
+**If the workflow fails after some crates have published** (a partial release), crates.io versions are immutable, but
+the publish step is idempotent, so recovery does **not** burn a version:
 
-Recover **without burning a version** by running the `release-recover.yml` workflow (Actions → "Release recovery" →
-Run workflow), passing the same `version` (e.g. `0.2.3`). It walks the crates in dependency order, skips any already on
-crates.io at that version, publishes only the missing ones one at a time, and ensures the GitHub Release exists. It is
-idempotent—safe to re-run; a fully published version is a no-op. Run it with `dry_run: true` first to verify-build the
-missing crates without uploading. The workspace version on the default branch must equal the `version` input, since the
-recovery uploads the crate contents on that ref (workflow-only commits since the tag do not change crate contents).
+1. **Re-run the failed job** (Actions → the failed run → "Re-run failed jobs"). The publish script skips the crates
+   already on crates.io and publishes only the rest. This is the normal fix—a partial upload from an index-propagation
+   race (`... awaiting confirmation`) completes on the second attempt.
+2. **If re-running the tag job is undesirable or unavailable** (the heavy `verify` matrix already passed and you want a
+   light publish-only run, or the tag job's environment is wedged), run the `release-recover.yml` workflow (Actions →
+   "Release recovery" → Run workflow) with the same `version` (e.g. `0.2.3`). It runs the same idempotent publish script
+   on a fresh checkout and ensures the GitHub Release exists. The workspace version on the checked-out ref must equal the
+   `version` input, since it uploads the crate contents on that ref. `dry_run: true` verify-builds without uploading
+   (subject to the dry-run interdependency caveat above).
 
 Only when a crate's *contents* must change (a genuine build break, not a propagation race) do you bump the patch
 version: repeat steps 1–3 and re-tag at the new merge commit. The tag-vs-version assertion prevents re-tagging against
@@ -141,7 +149,7 @@ Use only when CI is genuinely blocked (account suspension, runner outage, secret
 version=$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
 
-cargo publish --workspace
+scripts/publish-workspace.sh
 
 git tag -s "v${version}" -m "lean-rs v${version}"
 git push origin "v${version}"
@@ -151,6 +159,8 @@ gh release create "v${version}" \
 
 Prerequisite: `cargo login` once with the same scoped publish token.
 
-If any `cargo publish` fails—**stop**. Do not re-run with `--allow-dirty` or attempt to overwrite the published version.
-crates.io versions are immutable; a failed publish that uploaded but failed to index requires bumping the patch version.
-`cargo publish --dry-run` doesn't need credentials and is safe to run anytime.
+If the script fails partway—**stop**, then simply re-run `scripts/publish-workspace.sh`: it skips the crates already on
+crates.io and resumes with the rest (the same idempotence the CI job relies on). Do not use `--allow-dirty` or attempt
+to overwrite a published version; crates.io versions are immutable. Only a genuine *content* change (a build break, not
+an index race) requires bumping the patch version. `scripts/publish-workspace.sh --dry-run` needs no credentials,
+subject to the interdependency caveat above.

@@ -288,21 +288,22 @@ jobs:
           done
           exit "$fail"
 
-      # `cargo publish --workspace` (stabilised in Rust 1.90) computes the
-      # workspace dependency DAG, packages every crate, runs `cargo publish`'s
-      # verify build against a local registry overlay so downstream crates can
-      # see pending upstream publishes before the crates.io index has updated,
-      # then uploads in topological order (and in parallel where the DAG
-      # allows). For dry runs, `--dry-run` exercises the same verify path
-      # without uploading or contacting crates.io for credentials.
+      # Idempotent per-crate publish in dependency order (see the script header
+      # for why this replaces `cargo publish --workspace`: that command imposes a
+      # single global deadline on index propagation and aborts the entire plan —
+      # stranding the crates that had not uploaded yet — when one crate loses the
+      # race, which then forced a separate recovery run on essentially every
+      # release). This loop skips crates already on crates.io and waits per-crate,
+      # so re-running this job after a partial upload completes the release
+      # without burning a version. The same script backs `release-recover.yml`.
       - name: Publish workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            cargo publish --workspace --dry-run
+            scripts/publish-workspace.sh --dry-run
           else
-            cargo publish --workspace
+            scripts/publish-workspace.sh
           fi
 
       - name: Extract CHANGELOG section for this release

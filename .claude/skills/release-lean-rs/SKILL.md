@@ -10,9 +10,10 @@ cross-file invariants CI only catches *after* you tag, when it is too late: crat
 botched publish burns a version permanently.
 
 **Publishing happens only in CI.** Pushing a `vX.Y.Z` git tag fires `.github/workflows/release.yml`, which runs the gate
-set, the public-API diff, and `cargo publish --workspace`, then opens the GitHub Release. NEVER run `cargo publish`
-locally, NEVER use `--allow-dirty`, and do not propose a local-publish plan — the only exception is the documented
-"Fallback—local publish when CI is unavailable" section of `docs/release.md`, and only when CI is genuinely broken.
+set, the public-API diff, and the idempotent per-crate publish (`scripts/publish-workspace.sh`), then opens the GitHub
+Release. NEVER run `cargo publish` locally, NEVER use `--allow-dirty`, and do not propose a local-publish plan — the only
+exception is the documented "Fallback—local publish when CI is unavailable" section of `docs/release.md`, and only when
+CI is genuinely broken.
 
 ## Steps
 
@@ -87,13 +88,13 @@ Tags containing `-` (e.g. `vX.Y.Z-rc.1`) are auto-marked prerelease.
 
 crates.io versions are immutable, so the fix depends on *why* it failed.
 
-**Partial publish** (the common case) — some crates uploaded, the rest did not, often the tail crate losing cargo's
-index-propagation race (`no packages ready to publish ... awaiting confirmation`). The crate *contents* are fine; only
-the upload is incomplete. Do **not** bump the version and do **not** re-run the tag release — `cargo publish
---workspace` rejects a re-run with `crate <name>@<ver> already exists` before it reaches the missing crates. Run the
-**`release-recover.yml`** workflow instead (Actions → "Release recovery") with the same `version`: it skips crates
-already on crates.io, publishes only the missing ones one at a time, and ensures the GitHub Release. It is idempotent —
-preview with `dry_run: true`, then run for real.
+**Partial publish** (some crates uploaded, the rest did not — often a crate losing the index-propagation race,
+`... awaiting confirmation`). The crate *contents* are fine; only the upload is incomplete, and the publish step is
+idempotent. Do **not** bump the version. **Re-run the failed publish job** (Actions → the failed run → "Re-run failed
+jobs"): `scripts/publish-workspace.sh` skips the crates already on crates.io and publishes only the rest. If re-running
+the tag job is undesirable (heavy `verify` matrix already passed, or its environment is wedged), run the
+**`release-recover.yml`** workflow (Actions → "Release recovery") with the same `version` — it runs the same idempotent
+script on a fresh checkout and ensures the GitHub Release. Both are safe to re-run; a fully published version is a no-op.
 
 **Contents must change** — a genuine build break, not a propagation race. Bump the patch version, repeat steps 2–5, and
 re-tag at the new merge commit; the already-published crates keep their old version.
