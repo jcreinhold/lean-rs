@@ -128,7 +128,7 @@ pub fn check_static(manifest_path: &Path) -> LeanLoaderReport {
     LeanLoaderReport::new(Some(manifest_path.to_path_buf()), checks)
 }
 
-/// Validate the toolchain fingerprint against the current `lean-rs-abi` build.
+/// Validate the toolchain fingerprint against this `lean-toolchain` build.
 pub fn check_fingerprint(manifest: &CapabilityManifest, checks: &mut Vec<LeanLoaderCheck>) {
     if let Some(version) = manifest.lean_version.as_deref()
         && lean_rs_abi::supported_for(version).is_none()

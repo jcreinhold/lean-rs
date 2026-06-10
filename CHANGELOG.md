@@ -9,6 +9,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-10
+
 ### `lean-rs-abi` is purely static; toolchain probing moves to the crates that link or discover Lean
 
 `lean-rs-abi` no longer has a build script. Previously its `build.rs` probed an installed Lean toolchain (hashing

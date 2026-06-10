@@ -88,7 +88,6 @@ def package_contents(version: str) -> None:
         "lean-rs-abi": [
             "Cargo.toml",
             "README.md",
-            "build.rs",
             "src/lib.rs",
             "src/consts.rs",
             "src/supported.rs",

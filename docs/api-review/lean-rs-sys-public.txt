@@ -1,8 +1,4 @@
 pub mod lean_rs_sys
-pub use lean_rs_sys::LEAN_HEADER_DIGEST
-pub use lean_rs_sys::LEAN_HEADER_PATH
-pub use lean_rs_sys::LEAN_RESOLVED_VERSION
-pub use lean_rs_sys::LEAN_VERSION
 pub use lean_rs_sys::REQUIRED_SYMBOLS
 pub use lean_rs_sys::SUPPORTED_TOOLCHAINS
 pub use lean_rs_sys::SupportedToolchain
@@ -56,6 +52,10 @@ pub unsafe fn lean_rs_sys::closure::lean_closure_num_fixed(*mut lean_rs_sys::typ
 pub unsafe fn lean_rs_sys::closure::lean_closure_set(lean_rs_sys::types::u_lean_obj_arg, u32, lean_rs_sys::types::lean_obj_arg)
 pub mod lean_rs_sys::consts
 pub use lean_rs_sys::consts::<<lean_rs_abi::consts::*>>
+pub const lean_rs_sys::consts::LEAN_HEADER_DIGEST: &str
+pub const lean_rs_sys::consts::LEAN_HEADER_PATH: &str
+pub const lean_rs_sys::consts::LEAN_RESOLVED_VERSION: &str
+pub const lean_rs_sys::consts::LEAN_VERSION: &str
 pub mod lean_rs_sys::ctor
 pub unsafe fn lean_rs_sys::ctor::lean_alloc_ctor(u8, u8, usize) -> lean_rs_sys::types::lean_obj_res
 pub unsafe fn lean_rs_sys::ctor::lean_box_float(f64) -> lean_rs_sys::types::lean_obj_res
@@ -241,6 +241,10 @@ impl !core::marker::Unpin for lean_rs_sys::types::lean_object
 impl core::marker::UnsafeUnpin for lean_rs_sys::types::lean_object
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_sys::types::lean_object
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_sys::types::lean_object
+pub const lean_rs_sys::LEAN_HEADER_DIGEST: &str
+pub const lean_rs_sys::LEAN_HEADER_PATH: &str
+pub const lean_rs_sys::LEAN_RESOLVED_VERSION: &str
+pub const lean_rs_sys::LEAN_VERSION: &str
 pub type lean_rs_sys::b_lean_obj_arg = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::b_lean_obj_res = *mut lean_rs_sys::types::lean_object
 pub type lean_rs_sys::lean_obj_arg = *mut lean_rs_sys::types::lean_object

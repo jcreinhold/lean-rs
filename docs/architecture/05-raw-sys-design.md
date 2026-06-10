@@ -131,7 +131,7 @@ split-by-category layout (openssl-sys / pyo3-ffi style) is the right answer at t
 ```
 crates/lean-rs-sys/src/
   lib.rs       crate doc, lint allow, compatibility re-exports
-  consts.rs    compatibility re-exports for lean-rs-abi constants
+  consts.rs    lean.h layout literals (re-exported from lean-rs-abi) + build-baked live toolchain identity (LEAN_VERSION/HEADER_PATH/HEADER_DIGEST/RESOLVED_VERSION)
   types.rs     opaque lean_object + ABI typedefs
   refcount.rs  Rust mirrors of lean_inc / lean_dec / friends
   object.rs    ctor / closure alloc, box, unbox, ptr_tag, is_scalar, casts
