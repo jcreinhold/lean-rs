@@ -9,6 +9,19 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-10
+
+### Supported Lean toolchain window: add 4.31.0-rc2
+
+Lean 4.31.0-rc2 ships a byte-identical `lean.h` to 4.31.0-rc1, so it joins the same ABI-equivalence entry in
+`SUPPORTED_TOOLCHAINS` and becomes the new head of the supported window (now 4.26.0 through 4.31.0-rc2). No public API or
+layout change; the workspace test suite passes against rc2 on the local toolchain sweep.
+
+### Release recovery covers all publishable crates
+
+The `release-recover.yml` recovery workflow now walks every publishable crate in dependency order, so a partial publish
+that stalls on any crate—not just the tail—can be completed without burning a version.
+
 ## [0.2.1] - 2026-06-09
 
 ### `lean-toolchain`: explicit capability manifest dependencies
