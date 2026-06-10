@@ -253,6 +253,7 @@ TOOLCHAIN_FILES=(
 	"$REPO_ROOT/crates/lean-rs-host/shims/lean-rs-host-shims/lean-toolchain"
 	"$REPO_ROOT/fixtures/lean/lean-toolchain"
 	"$REPO_ROOT/fixtures/interop-shims/lean-toolchain"
+	"$REPO_ROOT/templates/shipped-lean-crate/lean/lean-toolchain"
 )
 
 declare -a BACKED_UP=()

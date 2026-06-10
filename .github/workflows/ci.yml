@@ -114,6 +114,7 @@ jobs:
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > crates/lean-rs-host/shims/lean-rs-host-shims/lean-toolchain
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/lean/lean-toolchain
           printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > fixtures/interop-shims/lean-toolchain
+          printf 'leanprover/lean4:v%s\n' "${{ matrix.lean_version }}" > templates/shipped-lean-crate/lean/lean-toolchain
 
       - name: Check clean-source Rust packaging before Lake fixture builds
         run: |
