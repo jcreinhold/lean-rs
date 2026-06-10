@@ -1,8 +1,4 @@
 pub mod lean_toolchain
-pub use lean_toolchain::LEAN_HEADER_DIGEST
-pub use lean_toolchain::LEAN_HEADER_PATH
-pub use lean_toolchain::LEAN_RESOLVED_VERSION
-pub use lean_toolchain::LEAN_VERSION
 pub use lean_toolchain::SUPPORTED_TOOLCHAINS
 pub use lean_toolchain::SupportedToolchain
 pub use lean_toolchain::supported_by_digest
@@ -908,8 +904,12 @@ pub const lean_toolchain::HOST_TRIPLE: &str
 pub const lean_toolchain::LAKE_FIXTURE_DIGEST: &str
 pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT: usize
 pub const lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX: usize
+pub const lean_toolchain::LEAN_HEADER_DIGEST: &str
+pub const lean_toolchain::LEAN_HEADER_PATH: &str
 pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT: u64
 pub const lean_toolchain::LEAN_HEARTBEAT_LIMIT_MAX: u64
+pub const lean_toolchain::LEAN_RESOLVED_VERSION: &str
+pub const lean_toolchain::LEAN_VERSION: &str
 pub const lean_toolchain::LOADER_DIAGNOSTIC_TEXT_LIMIT: usize
 pub const lean_toolchain::VERSION: &str
 pub fn lean_toolchain::bound_loader_text(alloc::string::String) -> alloc::string::String

@@ -22,6 +22,12 @@ sha2 = { workspace = true }
 toml = { workspace = true }
 
 [build-dependencies]
+# `lean-rs-abi` is purely static (no build script, no Lean link), so depending
+# on it here pulls in no Lean runtime: the build script reads
+# `SUPPORTED_TOOLCHAINS` to match the active `lean.h` against the supported
+# window and to fall back to the latest supported entry on a metadata-only
+# build with no toolchain present.
+lean-rs-abi = { workspace = true }
 sha2 = { workspace = true }
 
 [lints]

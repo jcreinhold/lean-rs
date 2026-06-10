@@ -1,9 +1,13 @@
 //! Link-free Lean 4 ABI and toolchain metadata.
 //!
-//! This crate owns metadata that both build tooling and raw FFI bindings need:
-//! the supported Lean toolchain window, the required Lean runtime symbol names,
-//! and the build-time Lean version/header fingerprint. It deliberately does not
-//! declare `extern "C"` items and does not emit Lean link directives.
+//! This crate owns the static metadata that both build tooling and raw FFI
+//! bindings need: the supported Lean toolchain window, the required Lean
+//! runtime symbol names, and the `lean.h` layout constants. It is purely
+//! static — no build script, no `extern "C"` items, no link directives, and no
+//! probe of an installed toolchain — so any crate can depend on it without a
+//! Lean toolchain present. Live toolchain identity (installed version, header
+//! path, header digest) belongs to `lean-toolchain`, the crate whose job is
+//! toolchain discovery.
 
 #![forbid(unsafe_code)]
 
@@ -13,10 +17,9 @@ pub mod supported;
 mod symbols;
 
 pub use consts::{
-    LEAN_ARRAY, LEAN_CLOSURE, LEAN_CLOSURE_MAX_ARGS, LEAN_EXTERNAL, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH,
-    LEAN_MAX_CTOR_FIELDS, LEAN_MAX_CTOR_SCALARS_SIZE, LEAN_MAX_CTOR_TAG, LEAN_MAX_SMALL_OBJECT_SIZE, LEAN_MPZ,
-    LEAN_OBJECT_SIZE_DELTA, LEAN_PROMISE, LEAN_REF, LEAN_RESERVED, LEAN_RESOLVED_VERSION, LEAN_SCALAR_ARRAY,
-    LEAN_STRING, LEAN_STRUCT_ARRAY, LEAN_TASK, LEAN_THUNK, LEAN_VERSION,
+    LEAN_ARRAY, LEAN_CLOSURE, LEAN_CLOSURE_MAX_ARGS, LEAN_EXTERNAL, LEAN_MAX_CTOR_FIELDS, LEAN_MAX_CTOR_SCALARS_SIZE,
+    LEAN_MAX_CTOR_TAG, LEAN_MAX_SMALL_OBJECT_SIZE, LEAN_MPZ, LEAN_OBJECT_SIZE_DELTA, LEAN_PROMISE, LEAN_REF,
+    LEAN_RESERVED, LEAN_SCALAR_ARRAY, LEAN_STRING, LEAN_STRUCT_ARRAY, LEAN_TASK, LEAN_THUNK,
 };
 pub use supported::{
     SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for, symbol_present_in_window,
@@ -37,7 +40,7 @@ pub fn symbol_in_all(symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{LEAN_HEADER_DIGEST, LEAN_VERSION, REQUIRED_SYMBOLS, VERSION, symbol_in_all};
+    use super::{REQUIRED_SYMBOLS, VERSION, symbol_in_all};
 
     #[test]
     fn version_constant_matches_package() {
@@ -57,12 +60,5 @@ mod tests {
                 "{symbol} is not marked present in every supported toolchain",
             );
         }
-    }
-
-    #[test]
-    fn lean_metadata_is_baked() {
-        assert!(!LEAN_VERSION.is_empty());
-        assert_eq!(LEAN_HEADER_DIGEST.len(), 64);
-        assert!(LEAN_HEADER_DIGEST.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

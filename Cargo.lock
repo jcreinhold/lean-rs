@@ -373,9 +373,6 @@ dependencies = [
 [[package]]
 name = "lean-rs-abi"
 version = "0.2.2"
-dependencies = [
- "sha2",
-]
 
 [[package]]
 name = "lean-rs-host"

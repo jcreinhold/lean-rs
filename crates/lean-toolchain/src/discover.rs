@@ -201,7 +201,7 @@ fn build_info(prefix: PathBuf, source: DiscoverySource, opts: &DiscoverOptions) 
         .as_deref()
         .and_then(parse_toolchain_file)
         .or_else(|| parse_version_header(&prefix))
-        .unwrap_or_else(|| lean_rs_abi::LEAN_VERSION.to_string());
+        .unwrap_or_else(|| crate::LEAN_VERSION.to_string());
     ToolchainInfo {
         prefix,
         lean_binary,

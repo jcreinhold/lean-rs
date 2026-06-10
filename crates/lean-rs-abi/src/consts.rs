@@ -1,27 +1,15 @@
-//! Compile-time constants resolved by `build.rs` (version + header digest)
-//! plus the tag enum from `lean.h:83–95`.
-
-/// `LEAN_VERSION_STRING` as read from the active toolchain's `version.h`
-/// (e.g. `"4.29.1"`).
-pub const LEAN_VERSION: &str = env!("LEAN_VERSION");
-
-/// Version string from the matched supported-toolchain entry.
-///
-/// The build script resolves this from the
-/// [`SupportedToolchain`](crate::SupportedToolchain) entry whose
-/// `header_digest` matched at build time. Equal to one of the `versions`
-/// entries in [`SUPPORTED_TOOLCHAINS`](crate::SUPPORTED_TOOLCHAINS); in
-/// practice equal to [`LEAN_VERSION`], but the build accepts any version
-/// whose `lean.h` digest matches a supported entry.
-pub const LEAN_RESOLVED_VERSION: &str = env!("LEAN_RESOLVED_VERSION");
-
-/// Filesystem path to the `lean.h` that the build was resolved against.
-pub const LEAN_HEADER_PATH: &str = env!("LEAN_HEADER_PATH");
-
-/// SHA-256 of the resolved `lean.h`. Computed by `build.rs` and equal to
-/// the `header_digest` of the matched
-/// [`SupportedToolchain`](crate::SupportedToolchain) entry.
-pub const LEAN_HEADER_DIGEST: &str = env!("LEAN_HEADER_DIGEST");
+//! Static `lean.h` layout constants: object tag bytes, allocator ceilings, and
+//! constructor-shape limits.
+//!
+//! These are layout facts of the Lean C ABI, identical across the supported
+//! toolchain window, so they are plain literals with no build-time probe.
+//!
+//! Live toolchain identity (the installed version, header path, and header
+//! digest) is deliberately *not* here: resolving it requires probing an
+//! installed toolchain, which a link-free metadata crate must not do. It lives
+//! in `lean-toolchain` (`LEAN_VERSION`, `LEAN_HEADER_PATH`,
+//! `LEAN_HEADER_DIGEST`, `LEAN_RESOLVED_VERSION`), the crate whose job is
+//! toolchain discovery.
 
 // Tag constants—`lean.h:83–95`.
 pub const LEAN_MAX_CTOR_TAG: u8 = 243;

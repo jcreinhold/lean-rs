@@ -21,8 +21,8 @@ Nine published crates plus two workspace-internal helpers:
 | Crate | Role |
 | --- | --- |
 | `lean-rs-sys` | Raw Lean 4 C ABI bindings: extern declarations, opaque public types, `#[repr(C)]` layout mirrors (`pub(crate) LeanObjectRepr`), pure-Rust refcount mirrors. Opt-in unsafe raw FFI. |
-| `lean-rs-abi` | Link-free Lean ABI and toolchain metadata: `REQUIRED_SYMBOLS` allowlist, `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and the `SUPPORTED_TOOLCHAINS` window. No `extern "C"`, no linker directives. |
-| `lean-toolchain` | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, Lake module discovery, build helpers. Re-exports `lean-rs-abi`'s metadata. |
+| `lean-rs-abi` | Link-free, **purely static** Lean ABI metadata: `REQUIRED_SYMBOLS` allowlist, the `SUPPORTED_TOOLCHAINS` window, and `lean.h` layout literals. No build script, no `extern "C"`, no linker directives, no toolchain probe — builds with no Lean present. |
+| `lean-toolchain` | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, Lake module discovery, build helpers. Its `build.rs` probes the active toolchain to bake the live identity (`LEAN_VERSION`, `LEAN_HEADER_PATH`, `LEAN_HEADER_DIGEST`, `LEAN_RESOLVED_VERSION`), degrading to the latest supported entry when none is installed. Re-exports `lean-rs-abi`'s static metadata. |
 | `lean-rs` | L1 safe front door. Runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. |
 | `lean-rs-interop-shims` | Package-owned Lean source for the generic interop shims; `materialize_source_package` copies the `LeanRsInterop` Lake package into a caller-owned build root. |
 | `lean-rs-host` | L2 theorem-prover-host stack: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. |

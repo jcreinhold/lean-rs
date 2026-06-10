@@ -142,28 +142,28 @@ pub fn check_fingerprint(manifest: &CapabilityManifest, checks: &mut Vec<LeanLoa
         return;
     }
     if let Some(digest) = manifest.lean_header_sha256.as_deref()
-        && digest != lean_rs_abi::LEAN_HEADER_DIGEST
+        && digest != crate::LEAN_HEADER_DIGEST
     {
         checks.push(LeanLoaderCheck::error(
             LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
             digest,
             format!(
                 "manifest Lean header digest {digest} does not match this process digest {}",
-                lean_rs_abi::LEAN_HEADER_DIGEST
+                crate::LEAN_HEADER_DIGEST
             ),
             "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
         ));
         return;
     }
     if let Some(resolved) = manifest.resolved_lean_version.as_deref()
-        && resolved != lean_rs_abi::LEAN_RESOLVED_VERSION
+        && resolved != crate::LEAN_RESOLVED_VERSION
     {
         checks.push(LeanLoaderCheck::error(
             LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
             resolved,
             format!(
                 "manifest resolved Lean version {resolved} does not match this process resolved version {}",
-                lean_rs_abi::LEAN_RESOLVED_VERSION
+                crate::LEAN_RESOLVED_VERSION
             ),
             "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
         ));

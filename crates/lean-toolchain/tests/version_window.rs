@@ -1,11 +1,11 @@
 //! End-to-end check that the toolchain this binary was built against
 //! is inside [`lean_rs_abi::SUPPORTED_TOOLCHAINS`].
 //!
-//! `lean-rs-abi`'s `build.rs` already fails the build when the active
+//! This crate's `build.rs` already fails the build when an *installed*
 //! toolchain's `lean.h` digest is outside the window, so this test is
 //! a runtime backstop: it proves the resolved version is reachable via
 //! [`lean_rs_abi::supported_for`] and the matched entry's digest agrees
-//! with [`lean_rs_abi::LEAN_HEADER_DIGEST`].
+//! with [`lean_toolchain::LEAN_HEADER_DIGEST`].
 
 #![allow(clippy::panic, clippy::expect_used)]
 

@@ -22,7 +22,7 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.31.0-rc1 | `99ef35d69709…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build script hash-checks against.
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
@@ -80,11 +80,15 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the rationale behind `lea
 
 ## Header digest
 
-`lean-rs-abi`'s build script computes a SHA-256 over the discovered `lean.h` and looks it up in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A miss fails the build with a bounded diagnostic
-naming the discovered digest and the full window; a hit emits `cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so
-per-version divergences can be `#[cfg]`-gated, and bakes the resolved version into `LEAN_RESOLVED_VERSION` for runtime
-inspection.
+The probe lives in the crates that actually have a toolchain at build time, not in the static `lean-rs-abi`. The build
+scripts of `lean-rs-sys` (which links `libleanshared`) and `lean-toolchain` (the discovery crate) each compute a SHA-256
+over the discovered `lean.h` and look it up in
+[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A miss against an *installed* toolchain fails the
+build with a bounded diagnostic naming the discovered digest and the full window; `lean-rs-sys` additionally emits
+`cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so per-version divergences can be `#[cfg]`-gated. Both bake the
+resolved version into `LEAN_RESOLVED_VERSION` for runtime inspection. `lean-toolchain` degrades to the latest supported
+window entry when no toolchain is present (so link-free downstream crates build without Lean); `lean-rs-sys`, which must
+link Lean, has no such fallback.
 
 The digest's two jobs: (1) refuse to compile the Rust refcount mirrors against a `lean.h` whose layout has not been
 audited; (2) refuse to silently link a consumer's binary against a different `libleanshared` than the one whose ABI the

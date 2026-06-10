@@ -9,6 +9,27 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### `lean-rs-abi` is purely static; toolchain probing moves to the crates that link or discover Lean
+
+`lean-rs-abi` no longer has a build script. Previously its `build.rs` probed an installed Lean toolchain (hashing
+`lean.h`, reading the version) and panicked when none was found, so a crate documented as "link-free metadata" could not
+be built by any pure-Rust consumer without a Lean toolchain on `PATH` (or `DOCS_RS=1`) — which kept downstream Rust-only
+CI red. The crate is now purely static: the `SUPPORTED_TOOLCHAINS` window, `REQUIRED_SYMBOLS`, and the `lean.h` layout
+literals, with no probe.
+
+The live toolchain identity it used to bake (`LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`,
+`LEAN_HEADER_DIGEST`) moves to the crates that legitimately have a toolchain at build time:
+
+- `lean-rs-sys` (which links `libleanshared`) now bakes these from its own build script and exposes them at the same
+  paths (`lean_rs_sys::LEAN_VERSION`, `lean_rs_sys::consts::*`).
+- `lean-toolchain` (the discovery crate) now bakes them in its own `build.rs` and re-exports them at the same paths
+  (`lean_toolchain::LEAN_VERSION`, …). Its probe **degrades** to the latest supported window entry when no toolchain is
+  present instead of failing, so link-free downstream crates (and `docs.rs`) build with no Lean installed. It still
+  fails the build when an *installed* toolchain's `lean.h` is outside the supported window.
+
+`lean_rs_abi::LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, and `LEAN_HEADER_DIGEST` are removed; consume
+them from `lean-rs-sys` or `lean-toolchain` instead. No other public API or layout change.
+
 ## [0.2.2] - 2026-06-10
 
 ### Supported Lean toolchain window: add 4.31.0-rc2

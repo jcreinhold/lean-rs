@@ -5,8 +5,10 @@ above [`lean-rs-abi`](https://docs.rs/lean-rs-abi) (link-free ABI/toolchain meta
 [`lean-rs`](https://docs.rs/lean-rs).
 
 Owns the typed `ToolchainFingerprint`, the Lake fixture digest, layered link diagnostics, and reusable build-script
-helpers downstream embedders can call from their own `build.rs`. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and
-`REQUIRED_SYMBOLS` from `lean-rs-abi` so metadata consumers do not depend on the raw FFI/link crate.
+helpers downstream embedders can call from their own `build.rs`. Its `build.rs` probes the active toolchain (degrading to
+the latest supported entry when none is installed) to bake the live `LEAN_VERSION`, `LEAN_HEADER_PATH`,
+`LEAN_HEADER_DIGEST`, and `LEAN_RESOLVED_VERSION`; it re-exports `REQUIRED_SYMBOLS` and the supported-window table from
+the purely static `lean-rs-abi` so metadata consumers depend on neither the raw FFI/link crate nor a probe in `abi`.
 
 It also owns Lake module discovery for higher layers. `discover_lake_modules` resolves a Lake root, discovers `lean_lib`
 source roots, validates module names, enumerates Lean source files deterministically, and returns source-set

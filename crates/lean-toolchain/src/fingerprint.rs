@@ -1,16 +1,17 @@
 //! Typed composition of the build-baked Lean toolchain identity.
 //!
-//! Every field is a `&'static str` resolved at build time—by
-//! `lean-rs-abi`'s build script (`LEAN_VERSION`, `LEAN_HEADER_DIGEST`) or by
-//! this crate's `build.rs` (`LAKE_FIXTURE_DIGEST`, `HOST_TRIPLE`). Published
-//! crate builds that do not contain the workspace fixture record a zero
-//! `LAKE_FIXTURE_DIGEST`; the value is a workspace regression key, not a
-//! downstream compatibility promise. The
-//! fingerprint is therefore stable across runs for a given build and cheap to
-//! use as a cache key.
+//! Every field is a `&'static str` resolved at build time by this crate's
+//! `build.rs`: the toolchain identity (`LEAN_VERSION`, `LEAN_RESOLVED_VERSION`,
+//! `LEAN_HEADER_DIGEST`) from probing the active toolchain, and the workspace
+//! `LAKE_FIXTURE_DIGEST` / `HOST_TRIPLE`. Builds with no toolchain present
+//! record the latest supported version/digest; builds without the workspace
+//! fixture record a zero `LAKE_FIXTURE_DIGEST` (a workspace regression key, not
+//! a downstream compatibility promise). The fingerprint is therefore stable
+//! across runs for a given build and cheap to use as a cache key.
 
-// `LAKE_FIXTURE_DIGEST` and `HOST_TRIPLE` are emitted as `pub const` by
-// `build.rs`.
+// `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`,
+// `LEAN_HEADER_DIGEST`, `LAKE_FIXTURE_DIGEST`, and `HOST_TRIPLE` are emitted as
+// `pub const` by `build.rs`.
 include!(concat!(env!("OUT_DIR"), "/metadata.rs"));
 
 /// Typed identity of the Lean toolchain this crate was compiled against.
@@ -43,9 +44,9 @@ impl ToolchainFingerprint {
     #[must_use]
     pub const fn current() -> Self {
         Self {
-            lean_version: lean_rs_abi::LEAN_VERSION,
-            resolved_version: lean_rs_abi::LEAN_RESOLVED_VERSION,
-            header_sha256: lean_rs_abi::LEAN_HEADER_DIGEST,
+            lean_version: LEAN_VERSION,
+            resolved_version: LEAN_RESOLVED_VERSION,
+            header_sha256: LEAN_HEADER_DIGEST,
             fixture_sha256: LAKE_FIXTURE_DIGEST,
             host_triple: HOST_TRIPLE,
         }

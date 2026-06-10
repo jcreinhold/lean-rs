@@ -9,9 +9,11 @@
 //!
 //! ## Single typed entry point
 //!
-//! [`LEAN_VERSION`], [`LEAN_HEADER_PATH`], and [`LEAN_HEADER_DIGEST`] are re-exported from
-//! [`lean_rs_abi`] so embedders that depend on this crate need only one import for build
-//! metadata. The allowlist comes through [`required_symbols`] (no copy).
+//! [`LEAN_VERSION`], [`LEAN_HEADER_PATH`], [`LEAN_HEADER_DIGEST`], and [`LEAN_RESOLVED_VERSION`]
+//! are resolved by this crate's `build.rs` (probing the active toolchain, degrading to the latest
+//! supported entry when none is installed), so embedders need only one import for build metadata.
+//! Live toolchain identity lives here, not in [`lean_rs_abi`], which is purely static. The
+//! allowlist comes through [`required_symbols`] (no copy).
 //!
 //! ## Layering
 //!
@@ -40,8 +42,10 @@ pub use build_helpers::{
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
 pub use discover::{DiscoverOptions, DiscoverySource, ToolchainInfo, discover_toolchain};
-pub use fingerprint::{HOST_TRIPLE, LAKE_FIXTURE_DIGEST, ToolchainFingerprint};
-pub use lean_rs_abi::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION};
+pub use fingerprint::{
+    HOST_TRIPLE, LAKE_FIXTURE_DIGEST, LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION,
+    ToolchainFingerprint,
+};
 pub use lean_rs_abi::{SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for};
 pub use limits::{
     LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX, LEAN_HEARTBEAT_LIMIT_DEFAULT,

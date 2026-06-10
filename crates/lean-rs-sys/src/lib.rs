@@ -54,8 +54,9 @@ pub mod types;
 
 pub(crate) mod repr;
 
+pub use consts::{LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION};
 pub use lean_rs_abi::{
-    LEAN_HEADER_DIGEST, LEAN_HEADER_PATH, LEAN_RESOLVED_VERSION, LEAN_VERSION, REQUIRED_SYMBOLS, SUPPORTED_TOOLCHAINS,
-    SupportedToolchain, supported_by_digest, supported_for, symbol_in_all, symbol_present_in_window,
+    REQUIRED_SYMBOLS, SUPPORTED_TOOLCHAINS, SupportedToolchain, supported_by_digest, supported_for, symbol_in_all,
+    symbol_present_in_window,
 };
 pub use types::{b_lean_obj_arg, b_lean_obj_res, lean_obj_arg, lean_obj_res, lean_object, u_lean_obj_arg};
