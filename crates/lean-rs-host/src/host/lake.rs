@@ -197,7 +197,17 @@ fn manifest_package_root(project_root: &Path, packages_dir: &str, package: &Valu
     {
         return Some(project_root.join(dir));
     }
-    Some(project_root.join(packages_dir).join(package_name))
+    // A git dependency is checked out to `<packagesDir>/<name>`, but when the
+    // Lake package lives in a subdirectory of that repo (the `require ... / "sub"`
+    // form), Lake records the subpath as `subDir` and the package root — hence
+    // its `.lake/build` tree — is nested under it. Dropping `subDir` points the
+    // search path at the repo root instead of the package, so its `.olean`
+    // files become unreachable.
+    let mut package_root = project_root.join(packages_dir).join(&package_name);
+    if let Some(sub_dir) = package.get("subDir").and_then(Value::as_str) {
+        package_root.push(sub_dir);
+    }
+    Some(package_root)
 }
 
 fn normalize_lake_identifier(raw: &str) -> String {
@@ -356,6 +366,45 @@ mod tests {
                     .join("build")
                     .join("lib")
                     .join("lean"),
+            ]
+        );
+    }
+
+    #[test]
+    fn olean_search_paths_nests_git_subdir_packages() {
+        let project = TempProject::new("git-subdir");
+        project.write_manifest(
+            r#"{
+                "version":"1.2.0",
+                "packagesDir":".lake/packages",
+                "packages":[
+                    {"type":"git","name":"«lean-semantic-search»","subDir":"lean"},
+                    {"type":"git","name":"shims","subDir":"crates/lean-rs/shims/lean-rs-interop-shims"}
+                ]
+            }"#,
+        );
+
+        let olean_suffix = |base: PathBuf| base.join(".lake").join("build").join("lib").join("lean");
+        assert_eq!(
+            project.project().olean_search_paths(),
+            vec![
+                project.own_olean_path(),
+                olean_suffix(
+                    project
+                        .canonical_root()
+                        .join(".lake")
+                        .join("packages")
+                        .join("lean-semantic-search")
+                        .join("lean")
+                ),
+                olean_suffix(
+                    project
+                        .canonical_root()
+                        .join(".lake")
+                        .join("packages")
+                        .join("shims")
+                        .join("crates/lean-rs/shims/lean-rs-interop-shims")
+                ),
             ]
         );
     }

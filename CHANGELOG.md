@@ -9,6 +9,19 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-10
+
+### `lean-rs-host` honors `subDir` for git dependencies when building the `.olean` search path
+
+`LakeProject::olean_search_paths` enumerates each `lake-manifest.json` package into a `.lake/build/lib/lean` search-path
+entry. It honored the `dir` field of `path` dependencies but ignored the `subDir` field that Lake records for a git
+dependency declared with the subdirectory form (`require «pkg» from git "url" @ "tag" / "sub"`). Lake checks such a
+package out to `<packagesDir>/<name>/<subDir>`, so dropping `subDir` pointed the search path at the repo root instead of
+the package and the package's modules became unreachable (`unknown module prefix '...'` at import time). The enumeration
+now appends `subDir` when present, so git-subdirectory dependencies resolve. This also fixes the same import failure when
+the search path is built for an out-of-process worker, since the worker child resolves imports through the same
+`LakeProject` enumeration.
+
 ## [0.2.3] - 2026-06-10
 
 ### `lean-rs-abi` is purely static; toolchain probing moves to the crates that link or discover Lean
