@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### `lean-rs-worker-parent` documents that worker-child provisioning is the caller's job
+
+`LeanWorkerChild`'s docs now state explicitly that the locator only *finds* a worker child and never installs one, and
+that the build-from-source fallback for the default `lean-rs-worker-child` name is an `lean-rs`-source-tree-only
+developer convenience (keyed to the crate's own `CARGO_MANIFEST_DIR`) that is inert for downstream consumers. Downstreams
+must ship the binary beside their host, point at it explicitly, or supply it via an env override. Documentation only — no
+API or behavior change.
+
 ## [0.2.4] - 2026-06-10
 
 ### `lean-rs-host` honors `subDir` for git dependencies when building the `.olean` search path

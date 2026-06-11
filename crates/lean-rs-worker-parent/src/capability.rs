@@ -1509,6 +1509,23 @@ fn apply_module_cache_limits(mut config: LeanWorkerConfig, limits: &LeanWorkerMo
 /// passthroughs leak implementation knowledge (env var names, framing
 /// invariants) into every caller and erode the structural guarantee that
 /// supported configurations cannot be misconstructed.
+///
+/// # Provisioning is the caller's job
+///
+/// This locator only *finds* a worker child; it does not install one.
+/// Dependency binaries are not shipped with downstream applications, so a
+/// downstream must provision its own worker child — ship it beside the host
+/// binary (resolved by [`Self::sibling`]), point at it explicitly
+/// ([`Self::path`] / [`Self::for_toolchain`]), or supply it through an
+/// [`Self::env_override`] variable. The one exception is a developer
+/// convenience internal to the `lean-rs` source tree: when the requested name
+/// is the default `lean-rs-worker-child` *and* resolution runs from within the
+/// `lean-rs` workspace, [`Self::sibling`] also falls back to building that
+/// binary with `cargo build -p lean-rs-worker-child` (so the workspace's own
+/// examples and profiling harness run with no extra steps). That fallback is
+/// keyed to `lean-rs`'s own `CARGO_MANIFEST_DIR` and is **inert for every
+/// downstream** — outside the source tree it finds no workspace to build and
+/// no-ops. Do not rely on it from a consuming crate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerChild {
     executable_name: Option<String>,
@@ -1520,6 +1537,13 @@ pub struct LeanWorkerChild {
 impl LeanWorkerChild {
     /// Locate a worker child beside the current executable, or beside the
     /// Cargo profile directory during tests and `cargo run`.
+    ///
+    /// For the default name `lean-rs-worker-child`, resolution additionally
+    /// falls back to building the binary from source — but only inside the
+    /// `lean-rs` workspace itself. See the [type-level provisioning
+    /// note](Self#provisioning-is-the-callers-job): that fallback is an
+    /// in-tree developer convenience and is inert for downstream callers, which
+    /// must ship or point at their own worker child.
     #[must_use]
     pub fn sibling(executable_name: impl Into<String>) -> Self {
         Self {
@@ -1614,6 +1638,10 @@ impl LeanWorkerChild {
             .clone()
             .unwrap_or_else(|| with_exe_suffix("lean-rs-worker-child".to_owned()));
         tried.extend(candidate_sibling_worker_paths(&executable_name));
+        // In-tree convenience only: `try_build_workspace_worker_child` can build
+        // exactly the `lean-rs-worker-child` binary and only when run from the
+        // `lean-rs` workspace, so it is gated on that name (a differently-named
+        // sibling would otherwise build the wrong binary) and no-ops downstream.
         if executable_name == with_exe_suffix("lean-rs-worker-child".to_owned())
             && let Some(path) = try_build_workspace_worker_child(&executable_name, &mut tried)
         {
@@ -1813,6 +1841,16 @@ fn normalize_import_workspace_root(path: PathBuf) -> PathBuf {
     std::fs::canonicalize(&path).unwrap_or(path)
 }
 
+/// Build `lean-rs-worker-child` from source as an in-tree developer
+/// convenience for the workspace's own examples, tests, and profiling harness.
+///
+/// `CARGO_MANIFEST_DIR` is baked at compile time of this crate, so the derived
+/// `workspace` only contains `crates/lean-rs-worker-child/Cargo.toml` when this
+/// crate is being built *as part of the `lean-rs` source tree*. For a
+/// downstream that depends on the published crate, `CARGO_MANIFEST_DIR` points
+/// into the registry cache, the guard below fails, and this returns `None`
+/// without side effects. Downstreams must therefore provision their own worker
+/// child (see [`LeanWorkerChild`]).
 fn try_build_workspace_worker_child(executable_name: &str, tried: &mut Vec<PathBuf>) -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest_dir.parent()?.parent()?;
