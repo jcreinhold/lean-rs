@@ -294,7 +294,7 @@ or stale-session invalidation.
 
 ## Proof Status
 
-This document is the mathematical runtime model used by the Rust implementation. It is not a checked Lean proof
-package. The approved proof home is [`31-runtime-model-proof-home.md`](31-runtime-model-proof-home.md). Mechanized
-proofs should preserve these labels or update this document first, then prove a `Step` relation and trace-refinement
-theorem for the worker and pool transition systems.
+This document is the mathematical runtime model used by the Rust implementation. The approved proof home is
+[`31-runtime-model-proof-home.md`](31-runtime-model-proof-home.md), and the first checked Lean skeleton lives under
+`formal/RuntimeModel/`. Mechanized proofs should preserve these labels or update this document first, then prove a
+`Step` relation and trace-refinement theorem for the worker and pool transition systems.

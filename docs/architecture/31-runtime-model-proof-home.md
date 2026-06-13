@@ -10,7 +10,8 @@ does not add Lean files or a Lake package.
 `formal/RuntimeModel/`.
 
 The package is not a fixture, not a worker child, and not a runtime integration test. It is a small Lean development for
-the abstract transition systems and invariants named in the canonical runtime model. Prompt 36 may create this package.
+the abstract transition systems and invariants named in the canonical runtime model. Prompt 36 created this package
+skeleton.
 
 ## Existing Lean Roots
 
