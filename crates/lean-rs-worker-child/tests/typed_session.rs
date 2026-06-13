@@ -21,15 +21,16 @@ use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionFields,
     LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
     LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchScope,
-    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
-    LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerElabOptions,
-    LeanWorkerError, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
-    LeanWorkerProofAttemptResult, LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
-    LeanWorkerProofPositionSelector, LeanWorkerProofStateResult, LeanWorkerRendering, LeanWorkerSessionConfig,
-    LeanWorkerSorryPolicy,
+    LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
+    LeanWorkerDeclarationVerificationTarget, LeanWorkerElabOptions, LeanWorkerError, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptStatus,
+    LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector, LeanWorkerProofStateResult,
+    LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy,
 };
 
 fn worker_binary() -> PathBuf {
@@ -1703,6 +1704,63 @@ fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
         }
         other => panic!("expected rejected verification, got {other:?}"),
     }
+}
+
+#[test]
+fn declaration_verification_batch_returns_ordered_rows_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/batch.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationVerificationBatchRequest {
+        source: "\
+theorem closed : True := by
+  trivial
+theorem withSorry : True := by
+  sorry
+"
+        .to_owned(),
+        targets: vec![
+            LeanWorkerDeclarationVerificationBatchItem {
+                id: "closed-row".to_owned(),
+                target: LeanWorkerDeclarationVerificationTarget::Name {
+                    name: "closed".to_owned(),
+                },
+            },
+            LeanWorkerDeclarationVerificationBatchItem {
+                id: "sorry-row".to_owned(),
+                target: LeanWorkerDeclarationVerificationTarget::Name {
+                    name: "withSorry".to_owned(),
+                },
+            },
+        ],
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .verify_declaration_batch(&request, &opts, None, None)
+        .expect("batch verification succeeds");
+    let LeanWorkerDeclarationVerificationBatchResult::Ok { results, imports } = result else {
+        panic!("expected Ok batch verification, got {result:?}");
+    };
+    assert!(imports.is_empty());
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].id, "closed-row");
+    assert_eq!(
+        results[0].verification_status,
+        LeanWorkerDeclarationVerificationStatus::Accepted
+    );
+    assert!(results[0].facts.axioms_available);
+    assert_eq!(results[1].id, "sorry-row");
+    assert_eq!(
+        results[1].verification_status,
+        LeanWorkerDeclarationVerificationStatus::Rejected
+    );
+    assert!(results[1].facts.contains_sorry);
 }
 
 #[test]

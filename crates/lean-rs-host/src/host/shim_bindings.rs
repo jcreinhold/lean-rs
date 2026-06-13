@@ -18,9 +18,10 @@ use crate::host::elaboration::LeanElabFailure;
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaResponse, LeanMetaTransparency};
 use crate::host::process::{
-    DeclarationVerificationOutcome, DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome,
-    ModuleQueryBatchOutcome, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
-    ModuleSnapshotCacheClearResult, ProofAttemptOutcome, ProofAttemptRequest,
+    DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationOutcome,
+    DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome,
+    ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector, ModuleSnapshotCacheClearResult,
+    ProofAttemptOutcome, ProofAttemptRequest,
 };
 use crate::host::session::{LeanDeclarationFilter, LeanImportStats, LeanSourceRange};
 
@@ -139,6 +140,9 @@ macro_rules! host_shim_exports {
             optional verify_declaration => "lean_rs_host_verify_declaration"
                 => [(Obj<'lean>, DeclarationVerificationRequest, String, String, u64, usize)]
                 => [LeanIo<DeclarationVerificationOutcome>];
+            optional verify_declaration_batch => "lean_rs_host_verify_declaration_batch"
+                => [(Obj<'lean>, DeclarationVerificationBatchRequest, String, String, u64, usize)]
+                => [LeanIo<DeclarationVerificationBatchOutcome>];
             optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
                 => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
         }

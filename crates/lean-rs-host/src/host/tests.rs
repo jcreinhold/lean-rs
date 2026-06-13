@@ -2143,6 +2143,170 @@ fn session_process_module_query_reports_missing_imports_with_result() {
 }
 
 #[test]
+fn declaration_verification_batch_preserves_order_and_uses_one_dispatch() {
+    use crate::host::process::{
+        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
+        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let source = "\
+theorem closed : True := by
+  trivial
+theorem withSorry : True := by
+  sorry
+";
+    let request = DeclarationVerificationBatchRequest {
+        source: source.to_owned(),
+        targets: vec![
+            DeclarationVerificationBatchItem {
+                id: "closed-row".to_owned(),
+                target: DeclarationVerificationTarget::Name {
+                    name: "closed".to_owned(),
+                },
+            },
+            DeclarationVerificationBatchItem {
+                id: "sorry-row".to_owned(),
+                target: DeclarationVerificationTarget::Name {
+                    name: "withSorry".to_owned(),
+                },
+            },
+            DeclarationVerificationBatchItem {
+                id: "missing-row".to_owned(),
+                target: DeclarationVerificationTarget::Name {
+                    name: "notDefinedHere".to_owned(),
+                },
+            },
+        ],
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+
+    let before = session.stats();
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let after = session.stats();
+    assert_eq!(after.ffi_calls, before.ffi_calls + 1);
+    assert_eq!(after.batch_items, before.batch_items + 3);
+
+    let DeclarationVerificationBatchOutcome::Ok { results, imports } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only input should have no imports");
+    let ids: Vec<&str> = results.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(ids, ["closed-row", "sorry-row", "missing-row"]);
+    let statuses: Vec<DeclarationVerificationStatus> = results.iter().map(|row| row.status).collect();
+    assert_eq!(
+        statuses,
+        [
+            DeclarationVerificationStatus::Accepted,
+            DeclarationVerificationStatus::Rejected,
+            DeclarationVerificationStatus::NotFound,
+        ]
+    );
+    let [closed, with_sorry, _missing] = results.as_slice() else {
+        panic!("expected three verification rows, got {results:?}");
+    };
+    assert!(
+        closed.facts.axioms_available,
+        "resolved first row should have an axiom walk when requested"
+    );
+    assert!(with_sorry.facts.contains_sorry);
+}
+
+#[test]
+fn declaration_verification_batch_empty_targets_still_reports_missing_imports() {
+    use crate::host::process::{
+        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let request = DeclarationVerificationBatchRequest {
+        source: "import Foo.Bar.Baz\n\ndef x := 1\n".to_owned(),
+        targets: Vec::new(),
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let DeclarationVerificationBatchOutcome::MissingImports {
+        results,
+        imports,
+        missing,
+    } = outcome
+    else {
+        panic!("expected MissingImports batch outcome, got {outcome:?}");
+    };
+    assert!(results.is_empty());
+    assert_eq!(imports, vec!["Foo.Bar.Baz".to_string()]);
+    assert_eq!(missing, vec!["Foo.Bar.Baz".to_string()]);
+}
+
+#[test]
+fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget_rows() {
+    use crate::host::process::{
+        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
+        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let request = DeclarationVerificationBatchRequest {
+        source: "theorem a : True := by trivial\ntheorem b : True := by trivial\n".to_owned(),
+        targets: vec![
+            DeclarationVerificationBatchItem {
+                id: "a-row".to_owned(),
+                target: DeclarationVerificationTarget::Name { name: "a".to_owned() },
+            },
+            DeclarationVerificationBatchItem {
+                id: "b-row".to_owned(),
+                target: DeclarationVerificationTarget::Name { name: "b".to_owned() },
+            },
+        ],
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets {
+            per_field_bytes: 1024,
+            total_bytes: 1,
+        },
+    };
+
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    let [first, second] = results.as_slice() else {
+        panic!("expected two verification rows, got {results:?}");
+    };
+    assert_eq!(first.id, "a-row");
+    assert_eq!(second.id, "b-row");
+    assert!(
+        results
+            .iter()
+            .all(|row| row.status == DeclarationVerificationStatus::BudgetExceeded),
+        "tiny total budget should produce BudgetExceeded rows, got {results:?}",
+    );
+}
+
+#[test]
 fn session_process_module_query_surfaces_header_parse_error() {
     use crate::host::process::{ModuleQuery, ModuleQueryOutcome};
 

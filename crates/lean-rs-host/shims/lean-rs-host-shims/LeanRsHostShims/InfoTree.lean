@@ -333,6 +333,19 @@ structure DeclarationVerificationRequest where
   budgets : ModuleQueryOutputBudgets
   deriving Inhabited
 
+structure DeclarationVerificationBatchItem where
+  id : String
+  target : DeclarationVerificationTarget
+  deriving Inhabited
+
+structure DeclarationVerificationBatchRequest where
+  source : String
+  targets : Array DeclarationVerificationBatchItem
+  sorryPolicy : Nat
+  reportAxioms : Nat
+  budgets : ModuleQueryOutputBudgets
+  deriving Inhabited
+
 inductive DeclarationVerificationStatus where
   | accepted
   | rejected
@@ -368,6 +381,21 @@ inductive DeclarationVerificationOutcome where
   | missingImports
       (status : DeclarationVerificationStatus) (facts : DeclarationVerificationFacts)
       (imports missing : Array String)
+  | headerParseFailed (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
+  | unsupported
+  deriving Inhabited
+
+structure DeclarationVerificationBatchRow where
+  id : String
+  target : DeclarationVerificationTarget
+  status : DeclarationVerificationStatus
+  facts : DeclarationVerificationFacts
+  deriving Inhabited
+
+inductive DeclarationVerificationBatchOutcome where
+  | ok (results : Array DeclarationVerificationBatchRow) (imports : Array String)
+  | missingImports
+      (results : Array DeclarationVerificationBatchRow) (imports missing : Array String)
   | headerParseFailed (diagnostics : LeanRsFixture.Elaboration.ElabFailure)
   | unsupported
   deriving Inhabited
@@ -2202,6 +2230,95 @@ private def verificationStatus (policy : Nat) (degraded : Bool) (facts : Declara
     else
       .accepted
 
+private def unavailableVerificationFacts : DeclarationVerificationFacts :=
+  {
+    target := none,
+    diagnostics := { diagnostics := #[], truncated := LeanRsFixture.Elaboration.Truncation.complete },
+    unresolvedGoals := #[],
+    containsSorry := false,
+    containsAdmit := false,
+    containsSorryAx := false,
+    axioms := #[],
+    axiomsTruncated := false,
+    outputTruncated := false,
+    candidates := #[],
+    axiomsAvailable := false
+  }
+
+private def verificationTargetBytes : DeclarationVerificationTarget → Nat
+  | .name name => name.utf8ByteSize
+  | .span span => spanBytes span
+
+private def verificationFactsBytes (facts : DeclarationVerificationFacts) : Nat :=
+  (match facts.target with | some target => declarationTargetInfoBytes target | none => 0) +
+    failureBytes facts.diagnostics +
+    facts.unresolvedGoals.foldl (init := 0) (fun bytes goal => bytes + renderedBytes goal) +
+    facts.axioms.foldl (init := 0) (fun bytes axiomName => bytes + axiomName.utf8ByteSize) +
+    facts.candidates.foldl (init := 0) (fun bytes candidate => bytes + declarationTargetInfoBytes candidate)
+
+private def verificationBatchRowBytes (row : DeclarationVerificationBatchRow) : Nat :=
+  row.id.utf8ByteSize + verificationTargetBytes row.target + verificationFactsBytes row.facts
+
+private def verifyDeclarationRow
+    (request : DeclarationVerificationBatchRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
+    (heartbeats : UInt64) (item : DeclarationVerificationBatchItem) :
+    IO DeclarationVerificationBatchRow := do
+  let singleRequest : DeclarationVerificationRequest :=
+    {
+      source := request.source,
+      target := item.target,
+      sorryPolicy := request.sorryPolicy,
+      reportAxioms := request.reportAxioms,
+      budgets := request.budgets
+    }
+  let targetResult := resolveVerificationTarget snapshot item.target
+  let (status, facts) ←
+    match targetResult with
+    | .target info => do
+      let candidate? ← findTacticCandidate snapshot.document snapshot.trees
+        info.bodySpan.startLine info.bodySpan.startColumn
+      let (facts, degraded) ← verificationFacts singleRequest snapshot fileLabel (some info) candidate? #[] heartbeats
+      pure (verificationStatus request.sorryPolicy degraded facts, facts)
+    | .notFound => do
+      let (facts, _) ← verificationFacts singleRequest snapshot fileLabel none none #[] heartbeats
+      let status :=
+        if !snapshot.missing.isEmpty then .needsBuild
+        else if diagnosticMentionsHeartbeat facts.diagnostics then .timeout
+        else if diagnosticIndicatesResourceLimit facts.diagnostics then .budgetExceeded
+        else .notFound
+      pure (status, facts)
+    | .ambiguous candidates => do
+      let (facts, _) ← verificationFacts singleRequest snapshot fileLabel none none candidates heartbeats
+      pure (.ambiguous, facts)
+  pure { id := item.id, target := item.target, status, facts }
+
+private def verificationBudgetExceededRow (item : DeclarationVerificationBatchItem) :
+    DeclarationVerificationBatchRow :=
+  {
+    id := item.id,
+    target := item.target,
+    status := .budgetExceeded,
+    facts := { unavailableVerificationFacts with outputTruncated := true }
+  }
+
+private def verifyDeclarationRows
+    (request : DeclarationVerificationBatchRequest) (snapshot : ModuleSnapshot) (fileLabel : String)
+    (heartbeats : UInt64) : IO (Array DeclarationVerificationBatchRow) := do
+  let mut rows : Array DeclarationVerificationBatchRow := #[]
+  let mut spent : Nat := 0
+  for item in request.targets do
+    if spent ≥ request.budgets.totalBytes then
+      rows := rows.push (verificationBudgetExceededRow item)
+    else
+      let row ← verifyDeclarationRow request snapshot fileLabel heartbeats item
+      let bytes := verificationBatchRowBytes row
+      if bytes > request.budgets.perFieldBytes || spent + bytes > request.budgets.totalBytes then
+        rows := rows.push (verificationBudgetExceededRow item)
+      else
+        rows := rows.push row
+        spent := spent + bytes
+  pure rows
+
 private def parseCachePolicy (raw : String) : ModuleQueryCachePolicy :=
   match raw.splitOn "\n" with
   | [fileIdentity, key, maxEntries, ttlMillis, maxBytes] =>
@@ -2462,6 +2579,22 @@ def verifyDeclaration
       pure <| .ok status facts snapshot.imports
     else
       pure <| .missingImports status facts snapshot.imports snapshot.missing
+
+@[export lean_rs_host_verify_declaration_batch]
+def verifyDeclarationBatch
+    (env : Environment) (request : DeclarationVerificationBatchRequest)
+    (namespaceContext : String) (fileLabel : String)
+    (heartbeats : UInt64) (diagBytes : USize)
+    : IO DeclarationVerificationBatchOutcome := do
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+      (oneShotPolicy request.source fileLabel) with
+  | .error (failure, _) => pure <| .headerParseFailed failure
+  | .ok (snapshot, _) =>
+    let rows ← verifyDeclarationRows request snapshot fileLabel heartbeats
+    if snapshot.missing.isEmpty then
+      pure <| .ok rows snapshot.imports
+    else
+      pure <| .missingImports rows snapshot.imports snapshot.missing
 
 @[export lean_rs_host_clear_module_snapshot_cache]
 def clearModuleSnapshotCache (_unit : Unit) : IO ModuleSnapshotCacheClearResult := do

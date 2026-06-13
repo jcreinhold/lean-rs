@@ -22,7 +22,8 @@ use lean_rs_worker_protocol::protocol::{DataRow, Diagnostic, StreamSummary};
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
     LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
@@ -764,6 +765,26 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
         self.with_session(|worker| worker.worker_verify_declaration(request, options, cancellation, progress))
+    }
+
+    /// Verify several declarations in one in-memory source snapshot.
+    ///
+    /// The whole batch is one worker request for lifecycle, timeout, and
+    /// progress purposes. Header/import state is returned once at the batch
+    /// level; rows preserve the input target order.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` under the same conditions as
+    /// [`Self::verify_declaration`].
+    pub fn verify_declaration_batch(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationBatchRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationBatchResult, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_verify_declaration_batch(request, options, cancellation, progress))
     }
 
     /// Enumerate the session's open environment and return the matching

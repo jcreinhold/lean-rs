@@ -221,6 +221,23 @@ pub struct DeclarationVerificationRequest {
     pub budgets: ModuleQueryOutputBudgets,
 }
 
+/// One target inside a batch declaration-verification request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationVerificationBatchItem {
+    pub id: String,
+    pub target: DeclarationVerificationTarget,
+}
+
+/// Bounded request to verify several declarations in one source snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationVerificationBatchRequest {
+    pub source: String,
+    pub targets: Vec<DeclarationVerificationBatchItem>,
+    pub sorry_policy: SorryPolicy,
+    pub report_axioms: bool,
+    pub budgets: ModuleQueryOutputBudgets,
+}
+
 /// Verification policy result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeclarationVerificationStatus {
@@ -265,6 +282,33 @@ pub enum DeclarationVerificationOutcome {
     MissingImports {
         status: DeclarationVerificationStatus,
         facts: Box<DeclarationVerificationFacts>,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanElabFailure,
+    },
+    Unsupported,
+}
+
+/// One ordered row inside a batch declaration-verification result.
+#[derive(Clone, Debug)]
+pub struct DeclarationVerificationBatchRow {
+    pub id: String,
+    pub target: DeclarationVerificationTarget,
+    pub status: DeclarationVerificationStatus,
+    pub facts: Box<DeclarationVerificationFacts>,
+}
+
+/// Header-aware batch declaration-verification outcome.
+#[derive(Clone, Debug)]
+pub enum DeclarationVerificationBatchOutcome {
+    Ok {
+        results: Vec<DeclarationVerificationBatchRow>,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        results: Vec<DeclarationVerificationBatchRow>,
         imports: Vec<String>,
         missing: Vec<String>,
     },
@@ -637,6 +681,28 @@ impl<'lean> IntoLean<'lean> for DeclarationVerificationTarget {
     }
 }
 
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationTarget {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        match sum_tag(&obj)? {
+            0 => {
+                let [name] = take_ctor_objects::<1>(obj, 0, "DeclarationVerificationTarget::name")?;
+                Ok(Self::Name {
+                    name: String::try_from_lean(name)?,
+                })
+            }
+            1 => {
+                let [span] = take_ctor_objects::<1>(obj, 1, "DeclarationVerificationTarget::span")?;
+                Ok(Self::Span {
+                    span: ModuleSourceSpan::try_from_lean(span)?,
+                })
+            }
+            other => Err(conversion_error(format!(
+                "expected Lean DeclarationVerificationTarget ctor (tag 0..=1), found tag {other}"
+            ))),
+        }
+    }
+}
+
 impl<'lean> IntoLean<'lean> for SorryPolicy {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
         match self {
@@ -690,6 +756,60 @@ impl<'lean> LeanAbi<'lean> for &DeclarationVerificationRequest {
     fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
         Err(conversion_error(
             "&DeclarationVerificationRequest cannot decode a Lean call result; use DeclarationVerificationRequest for owned values",
+        ))
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationVerificationBatchItem {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(runtime, 0, [self.id.into_lean(runtime), self.target.into_lean(runtime)])
+    }
+}
+
+impl<'lean> IntoLean<'lean> for DeclarationVerificationBatchRequest {
+    fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        alloc_ctor_with_objects(
+            runtime,
+            0,
+            [
+                self.source.into_lean(runtime),
+                self.targets.into_lean(runtime),
+                self.sorry_policy.into_lean(runtime),
+                (u32::from(self.report_axioms)).into_lean(runtime),
+                self.budgets.into_lean(runtime),
+            ],
+        )
+    }
+}
+
+impl sealed::SealedAbi for DeclarationVerificationBatchRequest {}
+
+impl<'lean> LeanAbi<'lean> for DeclarationVerificationBatchRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "DeclarationVerificationBatchRequest cannot decode a Lean call result; it is an argument-only type",
+        ))
+    }
+}
+
+impl sealed::SealedAbi for &DeclarationVerificationBatchRequest {}
+
+impl<'lean> LeanAbi<'lean> for &DeclarationVerificationBatchRequest {
+    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
+
+    fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
+        self.clone().into_lean(runtime).into_raw()
+    }
+
+    fn from_c(_c: Self::CRepr, _runtime: &'lean LeanRuntime) -> lean_rs::LeanResult<Self> {
+        Err(conversion_error(
+            "&DeclarationVerificationBatchRequest cannot decode a Lean call result; use DeclarationVerificationBatchRequest for owned values",
         ))
     }
 }
@@ -1117,6 +1237,55 @@ impl<'lean> TryFromLean<'lean> for DeclarationVerificationOutcome {
             3 => Ok(Self::Unsupported),
             other => Err(conversion_error(format!(
                 "expected Lean DeclarationVerificationOutcome ctor (tag 0..=3), found tag {other}"
+            ))),
+        }
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationBatchRow {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let ctor = view(&obj).ctor_shape(0, 3, "DeclarationVerificationBatchRow")?;
+        let status =
+            DeclarationVerificationStatus::from_scalar(ctor.uint8(0, "DeclarationVerificationBatchRow.status")?)?;
+        let [id, target, facts] = take_ctor_objects::<3>(obj, 0, "DeclarationVerificationBatchRow")?;
+        Ok(Self {
+            id: String::try_from_lean(id)?,
+            target: DeclarationVerificationTarget::try_from_lean(target)?,
+            status,
+            facts: Box::new(DeclarationVerificationFacts::try_from_lean(facts)?),
+        })
+    }
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationVerificationBatchOutcome {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        match sum_tag(&obj)? {
+            0 => {
+                let [results, imports] = take_ctor_objects::<2>(obj, 0, "DeclarationVerificationBatchOutcome::ok")?;
+                Ok(Self::Ok {
+                    results: Vec::<DeclarationVerificationBatchRow>::try_from_lean(results)?,
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                })
+            }
+            1 => {
+                let [results, imports, missing] =
+                    take_ctor_objects::<3>(obj, 1, "DeclarationVerificationBatchOutcome::missingImports")?;
+                Ok(Self::MissingImports {
+                    results: Vec::<DeclarationVerificationBatchRow>::try_from_lean(results)?,
+                    imports: Vec::<String>::try_from_lean(imports)?,
+                    missing: Vec::<String>::try_from_lean(missing)?,
+                })
+            }
+            2 => {
+                let [diagnostics] =
+                    take_ctor_objects::<1>(obj, 2, "DeclarationVerificationBatchOutcome::headerParseFailed")?;
+                Ok(Self::HeaderParseFailed {
+                    diagnostics: LeanElabFailure::try_from_lean(diagnostics)?,
+                })
+            }
+            3 => Ok(Self::Unsupported),
+            other => Err(conversion_error(format!(
+                "expected Lean DeclarationVerificationBatchOutcome ctor (tag 0..=3), found tag {other}"
             ))),
         }
     }

@@ -60,6 +60,7 @@
 //! | `lean_rs_host_process_module_query`                    | optional   | `Environment -> String -> ModuleQuery -> String -> String -> UInt64 -> USize -> IO ModuleQueryOutcome`                                                               |
 //! | `lean_rs_host_process_module_query_batch`              | optional   | `Environment -> String -> Array ModuleQuerySelector -> ModuleQueryOutputBudgets -> String -> String -> UInt64 -> USize -> IO ModuleQueryBatchOutcome`                |
 //! | `lean_rs_host_process_module_query_batch_cached`       | optional   | `Environment -> String -> Array ModuleQuerySelector -> ModuleQueryOutputBudgets -> String -> String -> UInt64 -> USize -> String -> IO ModuleQueryBatchCachedOutcome`|
+//! | `lean_rs_host_verify_declaration_batch`                | optional   | `Environment -> DeclarationVerificationBatchRequest -> String -> String -> UInt64 -> USize -> IO DeclarationVerificationBatchOutcome`                                |
 //! | `lean_rs_host_clear_module_snapshot_cache`             | optional   | `Unit -> IO ModuleSnapshotCacheClearResult`                                                                                                                          |
 //!
 //! Missing **mandatory** symbols surface at `load_capabilities` as
@@ -146,8 +147,9 @@ use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use crate::host::process::{
-    DeclarationVerificationOutcome, DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome,
-    ModuleQueryBatchOutcome, ModuleQueryCachePolicy, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
+    DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationOutcome,
+    DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome,
+    ModuleQueryCachePolicy, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
     ModuleSnapshotCacheClearResult, ProofAttemptOutcome, ProofAttemptRequest,
 };
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
@@ -1831,6 +1833,52 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.diagnostic_byte_limit_usize(),
         );
         self.record_call(1, t.elapsed());
+        result
+    }
+
+    /// Verify several declarations in one in-memory source snapshot.
+    ///
+    /// The shim is optional. When the loaded capability dylib does not export
+    /// `lean_rs_host_verify_declaration_batch`, the method returns
+    /// [`DeclarationVerificationBatchOutcome::Unsupported`] without an FFI
+    /// call. The returned rows preserve request order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cancellation is already requested, if the shim
+    /// raises an `IO` exception, or if the Lean result cannot be decoded.
+    pub fn verify_declaration_batch(
+        &mut self,
+        request: &DeclarationVerificationBatchRequest,
+        options: &LeanElabOptions,
+        cancellation: Option<&LeanCancellationToken>,
+    ) -> LeanResult<DeclarationVerificationBatchOutcome> {
+        let _span = tracing::debug_span!(
+            target: "lean_rs",
+            "lean_rs.host.session.verify_declaration_batch",
+            source_len = request.source.len(),
+            targets = request.targets.len(),
+            report_axioms = request.report_axioms,
+            per_field_bytes = request.budgets.per_field_bytes,
+            total_bytes = request.budgets.total_bytes,
+            heartbeats = options.heartbeats(),
+            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
+        )
+        .entered();
+        check_cancellation(cancellation)?;
+        let Some(call) = self.shims.verify_declaration_batch.as_ref() else {
+            return Ok(DeclarationVerificationBatchOutcome::Unsupported);
+        };
+        let t = Instant::now();
+        let result = call.call(
+            self.environment.clone(),
+            request.clone(),
+            options.namespace_context_str().to_owned(),
+            options.file_label_str().to_owned(),
+            options.heartbeats(),
+            options.diagnostic_byte_limit_usize(),
+        );
+        self.record_call(u64::try_from(request.targets.len()).unwrap_or(u64::MAX), t.elapsed());
         result
     }
 

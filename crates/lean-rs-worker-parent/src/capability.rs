@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult,
-    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerElabOptions, LeanWorkerModuleQuery,
     LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
     LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
@@ -1275,6 +1276,25 @@ impl LeanWorkerHostHandle {
     ) -> Result<LeanWorkerDeclarationVerificationResult, LeanWorkerError> {
         self.with_session_imports(imports, cancellation, progress, |session| {
             session.verify_declaration(request, options, cancellation, progress)
+        })
+    }
+
+    /// Open a session with `imports` and verify several declarations in one
+    /// in-memory source snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::process_module_query_with_imports`].
+    pub fn verify_declaration_batch_with_imports(
+        &mut self,
+        imports: Vec<String>,
+        request: &LeanWorkerDeclarationVerificationBatchRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationBatchResult, LeanWorkerError> {
+        self.with_session_imports(imports, cancellation, progress, |session| {
+            session.verify_declaration_batch(request, options, cancellation, progress)
         })
     }
 

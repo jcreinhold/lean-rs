@@ -9,11 +9,12 @@
 mod query;
 
 pub use self::query::{
-    DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationFacts,
-    DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
-    DeclarationVerificationTarget, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchCachedOutcome,
-    ModuleQueryBatchEnvelope, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
-    ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
+    DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationBatchItem,
+    DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationBatchRow,
+    DeclarationVerificationFacts, DeclarationVerificationOutcome, DeclarationVerificationRequest,
+    DeclarationVerificationStatus, DeclarationVerificationTarget, GoalAtResult, LocalInfo, ModuleQuery,
+    ModuleQueryBatchCachedOutcome, ModuleQueryBatchEnvelope, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
+    ModuleQueryBatchResult, ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
     ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
     ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope, ProofAttemptOutcome,
     ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,

@@ -878,6 +878,24 @@ pub struct LeanWorkerDeclarationVerificationRequest {
     pub budgets: LeanWorkerOutputBudgets,
 }
 
+/// One target inside a batch declaration-verification request.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationVerificationBatchItem {
+    pub id: String,
+    pub target: LeanWorkerDeclarationVerificationTarget,
+}
+
+/// Bounded request to verify several declarations in one in-memory source
+/// snapshot.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationVerificationBatchRequest {
+    pub source: String,
+    pub targets: Vec<LeanWorkerDeclarationVerificationBatchItem>,
+    pub sorry_policy: LeanWorkerSorryPolicy,
+    pub report_axioms: bool,
+    pub budgets: LeanWorkerOutputBudgets,
+}
+
 /// Verification policy result after diagnostics and declaration facts are
 /// collected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -965,6 +983,35 @@ pub enum LeanWorkerDeclarationVerificationResult {
     MissingImports {
         verification_status: LeanWorkerDeclarationVerificationStatus,
         facts: Box<LeanWorkerDeclarationVerificationFacts>,
+        imports: Vec<String>,
+        missing: Vec<String>,
+    },
+    HeaderParseFailed {
+        diagnostics: LeanWorkerElabFailure,
+    },
+    Unsupported,
+}
+
+/// One ordered row inside a batch declaration-verification result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationVerificationBatchRow {
+    pub id: String,
+    pub target: LeanWorkerDeclarationVerificationTarget,
+    pub verification_status: LeanWorkerDeclarationVerificationStatus,
+    pub facts: Box<LeanWorkerDeclarationVerificationFacts>,
+}
+
+/// Header-aware batch declaration-verification outcome.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerDeclarationVerificationBatchResult {
+    Ok {
+        results: Vec<LeanWorkerDeclarationVerificationBatchRow>,
+        imports: Vec<String>,
+    },
+    MissingImports {
+        results: Vec<LeanWorkerDeclarationVerificationBatchRow>,
         imports: Vec<String>,
         missing: Vec<String>,
     },

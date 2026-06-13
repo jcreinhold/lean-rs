@@ -12,15 +12,16 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationFacts,
-    DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
-    DeclarationVerificationTarget, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchCachedOutcome,
-    ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryCacheFacts,
-    ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult,
-    ModuleQuerySelector, ModuleQueryTimings, ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode,
-    ProofAttemptEnvelope, ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus,
-    ProofCandidate, ProofEditTarget, ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy,
-    SurroundingDeclarationResult, TypeAtResult,
+    DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationBatchItem,
+    DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationBatchRow,
+    DeclarationVerificationFacts, DeclarationVerificationOutcome, DeclarationVerificationRequest,
+    DeclarationVerificationStatus, DeclarationVerificationTarget, GoalAtResult, LocalInfo, ModuleQuery,
+    ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+    ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
+    ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
+    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope, ProofAttemptOutcome,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofStateInfo,
+    ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -47,12 +48,15 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
     LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
-    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
-    LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
-    LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
-    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerImportStats,
-    LeanWorkerKernelResult, LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
+    LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
+    LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
+    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
+    LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
+    LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
+    LeanWorkerGoalAtResult, LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerKernelStatus,
+    LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
@@ -575,6 +579,20 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 let response = match host_session.as_mut() {
                     Some(state) => match state.verify_declaration(&request, &options, progress, &writer) {
                         Ok(result) => Response::DeclarationVerification { result },
+                        Err(err) => error_response(&err),
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::VerifyDeclarationBatch {
+                request,
+                options,
+                progress,
+            } => {
+                let response = match host_session.as_mut() {
+                    Some(state) => match state.verify_declaration_batch(&request, &options, progress, &writer) {
+                        Ok(result) => Response::DeclarationVerificationBatch { result },
                         Err(err) => error_response(&err),
                     },
                     None => missing_session_response(),
@@ -1408,6 +1426,27 @@ impl HostSessionState {
         ))
     }
 
+    fn verify_declaration_batch(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationBatchRequest,
+        options: &LeanWorkerElabOptions,
+        progress: bool,
+        writer: &ProtocolWriter,
+    ) -> LeanResult<LeanWorkerDeclarationVerificationBatchResult> {
+        if progress {
+            emit_progress(writer, "verify_declaration_batch", 0, Some(1));
+        }
+        let request = declaration_verification_batch_request_host(request)?;
+        let options = elab_options_to_host(options);
+        let result = self.session.verify_declaration_batch(&request, &options, None)?;
+        if progress {
+            emit_progress(writer, "verify_declaration_batch", 1, Some(1));
+        }
+        Ok(taint_verification_batch_under_memory_pressure(
+            declaration_verification_batch_outcome_wire(result),
+        ))
+    }
+
     fn list_declarations_strings(
         &mut self,
         filter: LeanWorkerDeclarationFilter,
@@ -2210,6 +2249,31 @@ fn declaration_verification_request_host(
     })
 }
 
+fn declaration_verification_batch_item_host(
+    item: &LeanWorkerDeclarationVerificationBatchItem,
+) -> LeanResult<DeclarationVerificationBatchItem> {
+    Ok(DeclarationVerificationBatchItem {
+        id: item.id.clone(),
+        target: declaration_verification_target_host(&item.target)?,
+    })
+}
+
+fn declaration_verification_batch_request_host(
+    request: &LeanWorkerDeclarationVerificationBatchRequest,
+) -> LeanResult<DeclarationVerificationBatchRequest> {
+    Ok(DeclarationVerificationBatchRequest {
+        source: request.source.clone(),
+        targets: request
+            .targets
+            .iter()
+            .map(declaration_verification_batch_item_host)
+            .collect::<LeanResult<Vec<_>>>()?,
+        sorry_policy: sorry_policy_host(request.sorry_policy),
+        report_axioms: request.report_axioms,
+        budgets: module_query_budgets_host(&request.budgets),
+    })
+}
+
 fn module_cache_env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
@@ -2543,6 +2607,44 @@ fn apply_memory_pressure_taint(
     result
 }
 
+fn taint_verification_batch_under_memory_pressure(
+    result: LeanWorkerDeclarationVerificationBatchResult,
+) -> LeanWorkerDeclarationVerificationBatchResult {
+    let ceiling = module_cache_env_u64("LEAN_RS_VERIFY_RSS_TAINT_KIB", 0);
+    apply_batch_memory_pressure_taint(result, ceiling, current_rss_kib())
+}
+
+fn apply_batch_memory_pressure_taint(
+    mut result: LeanWorkerDeclarationVerificationBatchResult,
+    ceiling_kib: u64,
+    current_rss_kib: Option<u64>,
+) -> LeanWorkerDeclarationVerificationBatchResult {
+    if ceiling_kib == 0 {
+        return result;
+    }
+    let Some(current_kib) = current_rss_kib else {
+        return result;
+    };
+    if current_kib < ceiling_kib {
+        return result;
+    }
+    let rows = match &mut result {
+        LeanWorkerDeclarationVerificationBatchResult::Ok { results, .. }
+        | LeanWorkerDeclarationVerificationBatchResult::MissingImports { results, .. } => results,
+        LeanWorkerDeclarationVerificationBatchResult::HeaderParseFailed { .. }
+        | LeanWorkerDeclarationVerificationBatchResult::Unsupported => return result,
+        _ => return result,
+    };
+    for row in rows {
+        if verification_status_non_positive(row.verification_status) {
+            row.verification_status = LeanWorkerDeclarationVerificationStatus::BudgetExceeded;
+            row.facts.axioms.clear();
+            row.facts.axioms_available = false;
+        }
+    }
+    result
+}
+
 fn declaration_verification_status_wire(
     status: DeclarationVerificationStatus,
 ) -> LeanWorkerDeclarationVerificationStatus {
@@ -2555,6 +2657,17 @@ fn declaration_verification_status_wire(
         DeclarationVerificationStatus::BudgetExceeded => LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
         DeclarationVerificationStatus::Unsupported => LeanWorkerDeclarationVerificationStatus::Unsupported,
         DeclarationVerificationStatus::NeedsBuild => LeanWorkerDeclarationVerificationStatus::NeedsBuild,
+    }
+}
+
+fn declaration_verification_target_wire(
+    target: DeclarationVerificationTarget,
+) -> LeanWorkerDeclarationVerificationTarget {
+    match target {
+        DeclarationVerificationTarget::Name { name } => LeanWorkerDeclarationVerificationTarget::Name { name },
+        DeclarationVerificationTarget::Span { span } => LeanWorkerDeclarationVerificationTarget::Span {
+            span: module_source_span_wire(&span),
+        },
     }
 }
 
@@ -2600,6 +2713,51 @@ fn declaration_verification_outcome_wire(
             }
         }
         DeclarationVerificationOutcome::Unsupported => LeanWorkerDeclarationVerificationResult::Unsupported,
+    }
+}
+
+fn declaration_verification_batch_row_wire(
+    row: DeclarationVerificationBatchRow,
+) -> LeanWorkerDeclarationVerificationBatchRow {
+    LeanWorkerDeclarationVerificationBatchRow {
+        id: row.id,
+        target: declaration_verification_target_wire(row.target),
+        verification_status: declaration_verification_status_wire(row.status),
+        facts: Box::new(declaration_verification_facts_wire(*row.facts)),
+    }
+}
+
+fn declaration_verification_batch_outcome_wire(
+    outcome: DeclarationVerificationBatchOutcome,
+) -> LeanWorkerDeclarationVerificationBatchResult {
+    match outcome {
+        DeclarationVerificationBatchOutcome::Ok { results, imports } => {
+            LeanWorkerDeclarationVerificationBatchResult::Ok {
+                results: results
+                    .into_iter()
+                    .map(declaration_verification_batch_row_wire)
+                    .collect(),
+                imports,
+            }
+        }
+        DeclarationVerificationBatchOutcome::MissingImports {
+            results,
+            imports,
+            missing,
+        } => LeanWorkerDeclarationVerificationBatchResult::MissingImports {
+            results: results
+                .into_iter()
+                .map(declaration_verification_batch_row_wire)
+                .collect(),
+            imports,
+            missing,
+        },
+        DeclarationVerificationBatchOutcome::HeaderParseFailed { diagnostics } => {
+            LeanWorkerDeclarationVerificationBatchResult::HeaderParseFailed {
+                diagnostics: elab_failure_wire(&diagnostics),
+            }
+        }
+        DeclarationVerificationBatchOutcome::Unsupported => LeanWorkerDeclarationVerificationBatchResult::Unsupported,
     }
 }
 

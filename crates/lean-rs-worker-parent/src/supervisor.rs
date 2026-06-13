@@ -16,14 +16,16 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationFacts,
-    LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
-    LeanWorkerDeclarationVerificationStatus, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
-    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
-    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationBatchRow,
+    LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus, LeanWorkerDoctorReport,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult,
+    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
+    LeanWorkerResourceExhaustedFacts,
 };
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
@@ -2074,6 +2076,42 @@ impl LeanWorker {
         }
     }
 
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "round_trip deliberately collapses per-method Response wildcards into a uniform unexpected_response branch; a new variant surfaces at runtime, not compile time"
+    )]
+    pub(crate) fn worker_verify_declaration_batch(
+        &mut self,
+        request: &LeanWorkerDeclarationVerificationBatchRequest,
+        options: &LeanWorkerElabOptions,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerDeclarationVerificationBatchResult, LeanWorkerError> {
+        const OPERATION: &str = "worker_verify_declaration_batch";
+        let outcome = self.round_trip(
+            OPERATION,
+            Request::VerifyDeclarationBatch {
+                request: request.clone(),
+                options: options.clone(),
+                progress: progress.is_some(),
+            },
+            false,
+            cancellation,
+            progress,
+            |response, operation| match response {
+                Response::DeclarationVerificationBatch { result } => Ok(result),
+                other => Err(unexpected_response(operation, &other)),
+            },
+        );
+        match outcome {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                self.recover_child_abort(OPERATION, err)?;
+                Ok(degraded_declaration_verification_batch_result(request))
+            }
+        }
+    }
+
     #[allow(
         clippy::needless_pass_by_value,
         reason = "filter is cheap to clone, passed by value matches caller shape"
@@ -3665,6 +3703,24 @@ fn degraded_query_batch_outcome(
     }
 }
 
+fn degraded_declaration_verification_batch_result(
+    request: &LeanWorkerDeclarationVerificationBatchRequest,
+) -> LeanWorkerDeclarationVerificationBatchResult {
+    LeanWorkerDeclarationVerificationBatchResult::Ok {
+        results: request
+            .targets
+            .iter()
+            .map(|target| LeanWorkerDeclarationVerificationBatchRow {
+                id: target.id.clone(),
+                target: target.target.clone(),
+                verification_status: LeanWorkerDeclarationVerificationStatus::BudgetExceeded,
+                facts: Box::new(LeanWorkerDeclarationVerificationFacts::unavailable()),
+            })
+            .collect(),
+        imports: Vec::new(),
+    }
+}
+
 fn unexpected_response(operation: &'static str, response: &Response) -> LeanWorkerError {
     LeanWorkerError::Protocol {
         message: format!("worker sent unexpected {operation} response: {response:?}"),
@@ -3777,11 +3833,16 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::{
-        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationFacts, LeanWorkerError,
+        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationBatchResult,
+        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationStatus, LeanWorkerError,
         LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
         LeanWorkerModuleQuerySelector, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
         MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, WorkerRequestId,
         stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
+    };
+    use lean_rs_worker_protocol::types::{
+        LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
+        LeanWorkerDeclarationVerificationTarget, LeanWorkerOutputBudgets, LeanWorkerSorryPolicy,
     };
     use std::path::PathBuf;
     use std::time::Duration;
@@ -4022,6 +4083,39 @@ mod tests {
             result.items.as_slice(),
             [LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. }] if id == "outline"
         ));
+    }
+
+    #[test]
+    fn declaration_verification_batch_degraded_result_preserves_target_order() {
+        let request = LeanWorkerDeclarationVerificationBatchRequest {
+            source: "theorem a : True := by trivial\n".to_owned(),
+            targets: vec![
+                LeanWorkerDeclarationVerificationBatchItem {
+                    id: "first".to_owned(),
+                    target: LeanWorkerDeclarationVerificationTarget::Name { name: "a".to_owned() },
+                },
+                LeanWorkerDeclarationVerificationBatchItem {
+                    id: "second".to_owned(),
+                    target: LeanWorkerDeclarationVerificationTarget::Name { name: "b".to_owned() },
+                },
+            ],
+            sorry_policy: LeanWorkerSorryPolicy::Deny,
+            report_axioms: true,
+            budgets: LeanWorkerOutputBudgets::default(),
+        };
+        let LeanWorkerDeclarationVerificationBatchResult::Ok { results, imports } =
+            super::degraded_declaration_verification_batch_result(&request)
+        else {
+            panic!("degraded batch verification should be an Ok batch");
+        };
+        assert!(imports.is_empty());
+        let ids: Vec<&str> = results.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, vec!["first", "second"]);
+        assert!(results.iter().all(|row| {
+            row.verification_status == LeanWorkerDeclarationVerificationStatus::BudgetExceeded
+                && !row.facts.axioms_available
+                && row.facts.axioms.is_empty()
+        }));
     }
 
     #[test]

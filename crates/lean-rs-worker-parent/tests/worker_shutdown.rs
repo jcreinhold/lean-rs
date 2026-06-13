@@ -17,18 +17,20 @@ use std::process::Command;
 
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig,
-    LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
+    LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDeclarationVerificationBatchItem,
+    LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationTarget, LeanWorkerError,
+    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome, LeanWorkerSorryPolicy,
 };
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
 use lean_rs_worker_protocol::types::{
-    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo, LeanWorkerElabOptions, LeanWorkerImportStats,
-    LeanWorkerModuleCacheStatus, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
-    LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets,
-    LeanWorkerSessionImportProfile,
+    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationBatchResult,
+    LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
+    LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerModuleCacheStatus,
+    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
 };
 use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
@@ -122,6 +124,10 @@ fn main() {
         (
             "declaration_outline_batch_selector_reaches_parent_session_path",
             declaration_outline_batch_selector_reaches_parent_session_path,
+        ),
+        (
+            "declaration_verification_batch_reaches_parent_session_path",
+            declaration_verification_batch_reaches_parent_session_path,
         ),
     ];
 
@@ -268,6 +274,29 @@ fn run_fake_child(mode: &str) {
                     MAX_FRAME_BYTES,
                 )
                 .expect("fake child writes module query batch response");
+            }
+            Request::VerifyDeclarationBatch { request, .. } => {
+                let rows = request
+                    .targets
+                    .into_iter()
+                    .map(|target| LeanWorkerDeclarationVerificationBatchRow {
+                        id: target.id,
+                        target: target.target,
+                        verification_status: LeanWorkerDeclarationVerificationStatus::Accepted,
+                        facts: Box::new(LeanWorkerDeclarationVerificationFacts::unavailable()),
+                    })
+                    .collect();
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::DeclarationVerificationBatch {
+                        result: LeanWorkerDeclarationVerificationBatchResult::Ok {
+                            results: rows,
+                            imports: Vec::new(),
+                        },
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child writes declaration verification batch response");
             }
             Request::Terminate if mode == "terminate_hang" => sleep_forever(),
             Request::Terminate => {
@@ -1155,6 +1184,51 @@ fn declaration_outline_batch_selector_reaches_parent_session_path() -> Result<()
         .ok_or_else(|| "missing declaration-outline row".to_owned())?;
     assert_eq!(declaration.declaration_name, "Fake.outlined");
     assert!(!outline.truncated);
+    Ok(())
+}
+
+fn declaration_verification_batch_reaches_parent_session_path() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("declaration-verification-batch")?;
+    let mut capability = fixture
+        .builder("normal", ["Init"])?
+        .open()
+        .map_err(|err| err.to_string())?;
+    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+
+    let request = LeanWorkerDeclarationVerificationBatchRequest {
+        source: "theorem checked : True := by\n  trivial\n".to_owned(),
+        targets: vec![LeanWorkerDeclarationVerificationBatchItem {
+            id: "checked-row".to_owned(),
+            target: LeanWorkerDeclarationVerificationTarget::Name {
+                name: "checked".to_owned(),
+            },
+        }],
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: true,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanWorkerElabOptions::default(), None, None)
+        .map_err(|err| err.to_string())?;
+    let LeanWorkerDeclarationVerificationBatchResult::Ok { results, imports } = outcome else {
+        return Err(format!(
+            "expected Ok declaration-verification batch outcome, got {outcome:?}"
+        ));
+    };
+    assert!(imports.is_empty());
+    let [row] = results.as_slice() else {
+        return Err(format!("expected one verification row, got {results:?}"));
+    };
+    assert_eq!(row.id, "checked-row");
+    assert_eq!(
+        row.verification_status,
+        LeanWorkerDeclarationVerificationStatus::Accepted
+    );
+    assert!(
+        !row.facts.axioms_available,
+        "fake child uses unavailable facts for transport-only verification"
+    );
     Ok(())
 }
 

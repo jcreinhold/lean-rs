@@ -25,7 +25,8 @@ use serde_json::value::RawValue;
 use crate::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationInspectionRequest,
     LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
-    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchRequest,
+    LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
     LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
     LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
@@ -209,6 +210,11 @@ pub enum Request {
         options: LeanWorkerElabOptions,
         progress: bool,
     },
+    VerifyDeclarationBatch {
+        request: LeanWorkerDeclarationVerificationBatchRequest,
+        options: LeanWorkerElabOptions,
+        progress: bool,
+    },
     ListDeclarationsStrings {
         filter: LeanWorkerDeclarationFilter,
         progress: bool,
@@ -327,6 +333,9 @@ pub enum Response {
     },
     DeclarationVerification {
         result: LeanWorkerDeclarationVerificationResult,
+    },
+    DeclarationVerificationBatch {
+        result: LeanWorkerDeclarationVerificationBatchResult,
     },
     DeclarationBulk {
         rows: Vec<LeanWorkerDeclarationRow>,
@@ -676,7 +685,9 @@ mod tests {
         LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias,
         LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
         LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
-        LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationFacts,
+        LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationBatchItem,
+        LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
+        LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
         LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
         LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery,
@@ -1467,6 +1478,48 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("verification response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("verification response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn declaration_verification_batch_request_and_response_round_trip() {
+        let target = LeanWorkerDeclarationVerificationTarget::Name { name: "t".to_owned() };
+        let request = Message::Request(Request::VerifyDeclarationBatch {
+            request: LeanWorkerDeclarationVerificationBatchRequest {
+                source: "theorem t : True := by\n  trivial\n".to_owned(),
+                targets: vec![LeanWorkerDeclarationVerificationBatchItem {
+                    id: "row-1".to_owned(),
+                    target: target.clone(),
+                }],
+                sorry_policy: LeanWorkerSorryPolicy::Deny,
+                report_axioms: true,
+                budgets: LeanWorkerOutputBudgets::default(),
+            },
+            options: LeanWorkerElabOptions::default(),
+            progress: false,
+        });
+        assert_frame_round_trips(&request);
+
+        let response = Message::Response(Response::DeclarationVerificationBatch {
+            result: LeanWorkerDeclarationVerificationBatchResult::Ok {
+                results: vec![LeanWorkerDeclarationVerificationBatchRow {
+                    id: "row-1".to_owned(),
+                    target,
+                    verification_status: LeanWorkerDeclarationVerificationStatus::Accepted,
+                    facts: Box::new(verification_facts_fixture(Vec::new(), true)),
+                }],
+                imports: Vec::new(),
+            },
+        });
+        assert_frame_round_trips(&response);
+
+        let missing = Message::Response(Response::DeclarationVerificationBatch {
+            result: LeanWorkerDeclarationVerificationBatchResult::MissingImports {
+                results: Vec::new(),
+                imports: vec!["Mathlib.Tactic".to_owned()],
+                missing: vec!["Mathlib.Unbuilt.Dep".to_owned()],
+            },
+        });
+        assert_frame_round_trips(&missing);
     }
 
     #[test]
