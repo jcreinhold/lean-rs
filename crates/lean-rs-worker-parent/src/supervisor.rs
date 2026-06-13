@@ -4086,6 +4086,41 @@ mod tests {
     }
 
     #[test]
+    fn command_message_degraded_query_batch_outcome_uses_diagnostics_selector_id() {
+        let selectors = vec![LeanWorkerModuleQuerySelector::Diagnostics {
+            id: "messages".to_owned(),
+        }];
+        let resource = super::resource_facts(
+            "worker_child_abort",
+            true,
+            Some("worker_process_module_query_batch"),
+            None,
+            None,
+            Some(1),
+            Some(2),
+            Some("child_abort".to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let LeanWorkerModuleQueryBatchOutcome::Ok { result, facts, .. } =
+            super::degraded_query_batch_outcome(&selectors, resource.clone())
+        else {
+            panic!("degraded outcome should be Ok with per-selector items");
+        };
+        assert_eq!(facts.resource.as_deref(), Some(&resource));
+        assert!(matches!(
+            result.items.as_slice(),
+            [LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. }] if id == "messages"
+        ));
+    }
+
+    #[test]
     fn declaration_verification_batch_degraded_result_preserves_target_order() {
         let request = LeanWorkerDeclarationVerificationBatchRequest {
             source: "theorem a : True := by trivial\n".to_owned(),

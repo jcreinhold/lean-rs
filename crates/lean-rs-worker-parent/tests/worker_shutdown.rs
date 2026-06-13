@@ -27,10 +27,11 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationBatchResult,
     LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
-    LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerModuleCacheStatus,
-    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-    LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector,
-    LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
+    LeanWorkerDeclarationVerificationStatus, LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions,
+    LeanWorkerImportStats, LeanWorkerModuleCacheStatus, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
+    LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
 };
 use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
@@ -128,6 +129,10 @@ fn main() {
         (
             "declaration_verification_batch_reaches_parent_session_path",
             declaration_verification_batch_reaches_parent_session_path,
+        ),
+        (
+            "command_message_diagnostics_selector_reaches_parent_session_path",
+            command_message_diagnostics_selector_reaches_parent_session_path,
         ),
     ];
 
@@ -238,6 +243,12 @@ fn run_fake_child(mode: &str) {
                 let items = selectors
                     .into_iter()
                     .map(|selector| match selector {
+                        LeanWorkerModuleQuerySelector::Diagnostics { id } => LeanWorkerModuleQueryBatchItem::Ok {
+                            id,
+                            result: Box::new(LeanWorkerModuleQueryBatchResult::Diagnostics(
+                                fake_command_message_diagnostics(),
+                            )),
+                        },
                         LeanWorkerModuleQuerySelector::DeclarationOutline { id } => {
                             LeanWorkerModuleQueryBatchItem::Ok {
                                 id,
@@ -248,7 +259,7 @@ fn run_fake_child(mode: &str) {
                         }
                         other => LeanWorkerModuleQueryBatchItem::Unavailable {
                             id: other.id().to_owned(),
-                            message: "fake child only implements declaration outline".to_owned(),
+                            message: "fake child only implements diagnostics and declaration outline".to_owned(),
                         },
                     })
                     .collect();
@@ -358,6 +369,21 @@ fn fake_declaration_outline() -> LeanWorkerDeclarationOutlineResult {
             declaration_span: span.clone(),
             name_span: span.clone(),
             body_span: span,
+        }],
+        truncated: false,
+    }
+}
+
+fn fake_command_message_diagnostics() -> LeanWorkerElabFailure {
+    LeanWorkerElabFailure {
+        diagnostics: vec![LeanWorkerDiagnostic {
+            severity: "info".to_owned(),
+            message: "Nat.add : Nat -> Nat -> Nat".to_owned(),
+            file_label: "/fake-command-message.lean".to_owned(),
+            line: Some(1),
+            column: Some(1),
+            end_line: None,
+            end_column: None,
         }],
         truncated: false,
     }
@@ -1228,6 +1254,47 @@ fn declaration_verification_batch_reaches_parent_session_path() -> Result<(), St
     assert!(
         !row.facts.axioms_available,
         "fake child uses unavailable facts for transport-only verification"
+    );
+    Ok(())
+}
+
+fn command_message_diagnostics_selector_reaches_parent_session_path() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("command-message")?;
+    let mut capability = fixture
+        .builder("normal", ["Init"])?
+        .open()
+        .map_err(|err| err.to_string())?;
+    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+
+    let outcome = session
+        .process_module_query_batch(
+            "#check Nat.add\n",
+            &[LeanWorkerModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &LeanWorkerElabOptions::default(),
+            None,
+            None,
+        )
+        .map_err(|err| err.to_string())?;
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, .. } = outcome else {
+        return Err(format!("expected Ok command-message outcome, got {outcome:?}"));
+    };
+    assert!(imports.is_empty());
+    let [LeanWorkerModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        return Err(format!("expected one diagnostics item, got {:?}", result.items));
+    };
+    let LeanWorkerModuleQueryBatchResult::Diagnostics(diagnostics) = result.as_ref() else {
+        return Err(format!("expected diagnostics result, got {result:?}"));
+    };
+    assert!(
+        diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "info" && diagnostic.message.contains("Nat.add")),
+        "fake command-message diagnostics should cross the parent session path, got {diagnostics:?}",
     );
     Ok(())
 }

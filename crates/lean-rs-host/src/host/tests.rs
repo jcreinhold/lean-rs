@@ -1717,6 +1717,201 @@ fn session_process_module_query_returns_diagnostics_without_info_tree_payload() 
 }
 
 #[test]
+fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "#check Nat.add\n#print axioms Nat.add_assoc\n",
+            &[ModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+
+    let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
+        panic!("expected Ok command-message outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only command source should have no imports");
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one diagnostics item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::Diagnostics(diagnostics) = result.as_ref() else {
+        panic!("expected diagnostics result, got {result:?}");
+    };
+    let messages: Vec<&str> = diagnostics.diagnostics().iter().map(|d| d.message()).collect();
+    assert!(
+        diagnostics
+            .diagnostics()
+            .iter()
+            .all(|d| d.severity() != LeanSeverity::Error),
+        "valid commands should not produce error diagnostics, got {messages:?}",
+    );
+    assert!(
+        messages.iter().any(|message| message.contains("Nat.add")),
+        "#check output should mention Nat.add, got {messages:?}",
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("Nat.add_assoc") && message.contains("axioms")),
+        "#print axioms output should mention Nat.add_assoc axioms, got {messages:?}",
+    );
+}
+
+#[test]
+fn command_message_capture_invalid_command_returns_error_diagnostics() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "#check definitelyMissingCommandMessage\n",
+            &[ModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("invalid command is a normal diagnostics outcome");
+
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok diagnostics outcome for invalid command, got {outcome:?}");
+    };
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one diagnostics item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::Diagnostics(diagnostics) = result.as_ref() else {
+        panic!("expected diagnostics result, got {result:?}");
+    };
+    assert!(
+        diagnostics
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity() == LeanSeverity::Error && d.message().contains("definitelyMissingCommandMessage")),
+        "invalid command should return an error diagnostic mentioning the missing name, got {:?}",
+        diagnostics.diagnostics(),
+    );
+}
+
+#[test]
+fn command_message_capture_missing_import_uses_module_query_missing_imports() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "import LeanRsFixture.DoesNotExist\n\n#check symbolThatWouldFailIfBodyRan\n",
+            &[ModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("missing import is a normal module-query outcome");
+
+    let ModuleQueryBatchOutcome::MissingImports {
+        result,
+        imports,
+        missing,
+    } = outcome
+    else {
+        panic!("expected MissingImports command-message outcome, got {outcome:?}");
+    };
+    assert_eq!(imports, vec!["LeanRsFixture.DoesNotExist".to_owned()]);
+    assert_eq!(missing, vec!["LeanRsFixture.DoesNotExist".to_owned()]);
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one diagnostics item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::Diagnostics(diagnostics) = result.as_ref() else {
+        panic!("expected diagnostics result, got {result:?}");
+    };
+    assert!(
+        diagnostics.diagnostics().is_empty(),
+        "missing import should skip body command elaboration, got {:?}",
+        diagnostics.diagnostics(),
+    );
+}
+
+#[test]
+fn command_message_capture_small_budget_truncates_later_messages() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "#check Nat.add\n#check Nat.mul\n",
+            &[ModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets {
+                per_field_bytes: 1,
+                total_bytes: 1024,
+            },
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("budgeted command-message query succeeds");
+
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok command-message outcome, got {outcome:?}");
+    };
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one diagnostics item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::Diagnostics(diagnostics) = result.as_ref() else {
+        panic!("expected diagnostics result, got {result:?}");
+    };
+    assert!(
+        diagnostics.truncated(),
+        "tiny budget should drop later command messages, got {:?}",
+        diagnostics.diagnostics(),
+    );
+    assert!(
+        !diagnostics.diagnostics().is_empty(),
+        "diagnostic truncation should keep at least one message"
+    );
+}
+
+#[test]
 fn session_process_module_query_type_at_returns_one_selected_term() {
     use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
 

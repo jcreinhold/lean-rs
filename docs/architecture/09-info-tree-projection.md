@@ -49,6 +49,25 @@ Budgets are internal policy, not public knobs:
 This keeps the API narrow and makes frame size a consequence of query shape. Worker frame limits remain a final
 transport guard, not the first place oversized full-file expression strings are discovered.
 
+## Command Message Capture
+
+Callers that need Lean command output should use the existing diagnostics projection. Build an in-memory module source
+from the desired command body, open the worker session with the import context the commands should see, and request
+`process_module_query_batch` with one `Diagnostics { id: ... }` selector. Commands such as `#check Nat.add` and
+`#print axioms Nat.add_assoc` elaborate through the same `processCommands` path as ordinary module bodies; their
+informational output is returned as bounded diagnostics. Invalid commands return error-severity diagnostics, not worker
+errors.
+
+No separate `command_message`, `trial`, or `probe` protocol request exists upstream because this is already the generic
+module-processing operation. Downstream hosts may wrap the pattern in product-specific names such as `lean_trial`, but
+the worker boundary stays the same: one normal module-query request, one terminal outcome, existing cancellation,
+timeout, generation, restart, and frame-limit behavior.
+
+This operation is non-mutating in the filesystem sense: `lean-rs` constructs an in-memory module and never writes the
+submitted command source to disk. It is not an OS sandbox. Lean commands run inside the worker child process with the
+same capabilities as any source the caller asks the worker to elaborate; expensive or effectful commands remain a
+downstream policy concern.
+
 ## Project-scope scans
 
 A project-scope reference scan is driven by the caller (one per-file query per `.lean` file), not by the worker. The

@@ -1176,6 +1176,19 @@ mod tests {
     }
 
     #[test]
+    fn command_message_capture_uses_existing_module_diagnostics_selector() {
+        let request = Message::Request(Request::ProcessModuleQueryBatch {
+            source: "#check Nat.add\n#print axioms Nat.add_assoc\n".to_owned(),
+            selectors: vec![LeanWorkerModuleQuerySelector::Diagnostics {
+                id: "messages".to_owned(),
+            }],
+            budgets: LeanWorkerOutputBudgets::default(),
+            options: LeanWorkerElabOptions::default(),
+        });
+        assert_frame_round_trips(&request);
+    }
+
+    #[test]
     fn declaration_outline_selector_and_result_round_trip() {
         let outline = LeanWorkerDeclarationOutlineResult {
             declarations: vec![
