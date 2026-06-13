@@ -29,6 +29,13 @@ fn main() -> std::process::ExitCode {
 }
 ```
 
+## Parent Loss
+
+The child treats stdin/stdout as the control channel. If stdin reaches EOF or a response write fails because stdout is
+closed, the child exits instead of waiting for another request. On Linux, startup also installs a best-effort
+`PR_SET_PDEATHSIG(SIGTERM)` guard so abrupt parent death can terminate the child even when inherited stdio descriptors
+remain open. Other platforms rely on the portable control-channel behavior and external process-manager policy.
+
 ## License
 
 Dual-licensed under MIT or Apache-2.0 at your option.

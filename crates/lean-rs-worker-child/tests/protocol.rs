@@ -1,9 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use lean_rs_worker_protocol::harness::{WorkerDataRow, WorkerHarnessError, WorkerProcess};
+use lean_rs_worker_protocol::protocol::{MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, read_frame, write_frame};
 use serde_json::json;
 
 fn worker_binary() -> PathBuf {
@@ -26,6 +29,56 @@ fn fixture_root() -> PathBuf {
 fn ensure_fixture_built() {
     let fixture = fixture_root();
     lean_toolchain::build_lake_target_quiet(&fixture, "LeanRsFixture").expect("fixture Lake target builds");
+}
+
+struct RawWorker {
+    child: Child,
+    stdin: BufWriter<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+}
+
+fn spawn_raw_worker() -> RawWorker {
+    let mut child = Command::new(worker_binary())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("LEAN_ABORT_ON_PANIC", "1")
+        .env("LEAN_BACKTRACE", "0")
+        .env("RUST_BACKTRACE", "0")
+        .spawn()
+        .expect("worker starts");
+    let stdin = child.stdin.take().map(BufWriter::new).expect("worker stdin is piped");
+    let stdout = child.stdout.take().map(BufReader::new).expect("worker stdout is piped");
+    RawWorker { child, stdin, stdout }
+}
+
+fn expect_handshake_and_configure(worker: &mut RawWorker) {
+    let frame = read_frame(&mut worker.stdout, MAX_FRAME_BYTES).expect("worker sends handshake");
+    match frame.message {
+        Message::Handshake { protocol_version, .. } => assert_eq!(protocol_version, PROTOCOL_VERSION),
+        other => panic!("expected handshake, got {other:?}"),
+    }
+    write_frame(
+        &mut worker.stdin,
+        Message::ConfigureFrameLimit {
+            max_frame_bytes: MAX_FRAME_BYTES,
+        },
+        MAX_FRAME_BYTES,
+    )
+    .expect("parent sends frame limit");
+}
+
+fn wait_for_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("child status can be queried") {
+            return Some(status);
+        }
+        if started.elapsed() >= timeout {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -57,6 +110,124 @@ fn terminate_request_exits_cleanly() {
     let worker = WorkerProcess::spawn(&worker_binary()).expect("worker starts");
     let status = worker.terminate().expect("worker terminates");
     assert!(status.success(), "worker should exit cleanly");
+}
+
+#[test]
+fn stdin_eof_exits_without_waiting_for_another_request() {
+    let mut worker = spawn_raw_worker();
+    expect_handshake_and_configure(&mut worker);
+
+    drop(worker.stdin);
+
+    let status =
+        wait_for_exit(&mut worker.child, Duration::from_secs(5)).expect("worker exits promptly after stdin EOF");
+    assert!(
+        !status.success(),
+        "stdin EOF is reported as a protocol/channel loss, not graceful termination"
+    );
+}
+
+#[test]
+fn broken_stdout_write_exits_without_waiting_for_another_request() {
+    let mut worker = spawn_raw_worker();
+    expect_handshake_and_configure(&mut worker);
+
+    drop(worker.stdout);
+    write_frame(&mut worker.stdin, Message::Request(Request::Health), MAX_FRAME_BYTES)
+        .expect("parent sends health request before closing stdin");
+    drop(worker.stdin);
+
+    let status = wait_for_exit(&mut worker.child, Duration::from_secs(5))
+        .expect("worker exits promptly after stdout write failure");
+    assert!(
+        !status.success(),
+        "broken stdout is reported as a protocol/channel loss, not graceful termination"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_parent_death_signal_exits_when_stdio_stays_open() {
+    use std::fs;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let temp_root = std::env::temp_dir().join(format!("lean-rs-worker-parent-death-{}", std::process::id()));
+    fs::create_dir_all(&temp_root).expect("temp dir is created");
+    let fifo = temp_root.join("stdin.fifo");
+    let stdout = temp_root.join("stdout.log");
+    let stderr = temp_root.join("stderr.log");
+    let pidfile = temp_root.join("worker.pid");
+
+    let fifo_c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).expect("fifo path has no nul");
+    // SAFETY: `mkfifo` receives a valid nul-terminated path and creates one
+    // filesystem node used only by this test.
+    let rc = unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) };
+    assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+
+    let _held_fifo = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_CLOEXEC)
+        .open(&fifo)
+        .expect("test holds FIFO open so child stdin does not reach EOF");
+
+    let helper = Command::new("sh")
+        .arg("-c")
+        .arg("\"$1\" < \"$2\" > \"$3\" 2> \"$4\" & echo $! > \"$5\"")
+        .arg("sh")
+        .arg(worker_binary())
+        .arg(&fifo)
+        .arg(&stdout)
+        .arg(&stderr)
+        .arg(&pidfile)
+        .status()
+        .expect("helper shell starts worker");
+    assert!(helper.success(), "helper shell exits cleanly");
+
+    let mut pid_text = String::new();
+    for _ in 0..100 {
+        pid_text = fs::read_to_string(&pidfile).unwrap_or_default();
+        if !pid_text.trim().is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pid: libc::pid_t = pid_text.trim().parse().expect("worker pid is written");
+
+    let exited = wait_for_pid_to_disappear(pid, Duration::from_secs(5));
+    if !exited {
+        // SAFETY: best-effort cleanup for a failed test; `pid` came from the
+        // helper shell that spawned the worker child.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+    }
+    let _ = fs::remove_dir_all(&temp_root);
+
+    assert!(
+        exited,
+        "worker pid {pid} stayed alive after its parent shell exited while stdin remained open"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_pid_to_disappear(pid: libc::pid_t, timeout: Duration) -> bool {
+    let started = Instant::now();
+    loop {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status"));
+        match status {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return true,
+            Ok(status)
+                if status
+                    .lines()
+                    .any(|line| line.starts_with("State:") && line.contains('Z')) =>
+            {
+                return true;
+            }
+            Ok(_) | Err(_) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(10)),
+            Ok(_) | Err(_) => return false,
+        }
+    }
 }
 
 #[test]

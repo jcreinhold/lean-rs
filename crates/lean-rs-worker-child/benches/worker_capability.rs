@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::env;
 use std::io::{self, Write as _};
