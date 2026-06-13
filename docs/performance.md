@@ -38,8 +38,8 @@ decode, row throughput, and allocation pressure. Two guards live alongside it: `
 compares per-row raw JSON frames with batched raw JSON frames so any future batch protocol must justify itself against
 the current per-row baseline. `worker::row_payload::data_plane` compares JSON, raw JSON, simulated binary envelopes,
 MessagePack, and CBOR so any future format change must show a measured win. `worker_capability` covers the
-downstream-style worker fixture: cold startup, first import, import-once streaming, cancellation latency, fatal-exit
-recovery, worker cycling, row throughput, and memory growth.
+downstream-style worker fixture: cold startup, first import, import-once streaming, graceful shutdown latency,
+cancellation latency, fatal-exit recovery, worker cycling, row throughput, and memory growth.
 
 Progress changes must benchmark the no-progress path explicitly. The retained fast path for bulk introspection is:
 

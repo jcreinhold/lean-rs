@@ -97,7 +97,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "summary requests={} imports={} restarts={} exits={} rss_unavailable={}",
         stats.requests, stats.imports, stats.restarts, stats.exits, stats.rss_samples_unavailable
     );
-    let exit = worker.terminate()?;
+    let exit = worker.shutdown()?.exit;
     println!("worker_exit_success={}", exit.success);
     println!("status=ok");
     Ok(())

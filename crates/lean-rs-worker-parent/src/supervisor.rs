@@ -44,6 +44,12 @@ pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30
 /// Suggested deadline for long-running worker requests.
 pub const LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING: Duration = Duration::from_mins(10);
 
+/// Default deadline for graceful child shutdown before kill escalation.
+pub const LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT: Duration = Duration::from_secs(2);
+
+/// Default deadline for waiting on a killed child process to be reaped.
+pub const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(5);
+
 /// Configuration for starting a `lean-rs-worker` child process.
 ///
 /// The executable should be the `lean-rs-worker-child` binary.
@@ -72,6 +78,7 @@ pub struct LeanWorkerConfig {
     env: Vec<(OsString, OsString)>,
     startup_timeout: Duration,
     request_timeout: Duration,
+    shutdown_timeout: Duration,
     restart_policy: LeanWorkerRestartPolicy,
     rss_hard_limit_kib: Option<u64>,
     rss_sample_interval: Duration,
@@ -87,6 +94,7 @@ impl LeanWorkerConfig {
             env: Vec::new(),
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
+            shutdown_timeout: LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT,
             restart_policy: LeanWorkerRestartPolicy::default(),
             rss_hard_limit_kib: None,
             rss_sample_interval: Duration::from_millis(250),
@@ -133,6 +141,17 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
+        self
+    }
+
+    /// Set the maximum time to wait for graceful worker shutdown.
+    ///
+    /// Explicit shutdown and `Drop` both ask the child to terminate first.
+    /// If this deadline expires before the child exits, the supervisor kills
+    /// the process and waits for it to be reaped.
+    #[must_use]
+    pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.shutdown_timeout = timeout;
         self
     }
 
@@ -534,6 +553,38 @@ impl LeanWorkerExit {
     }
 }
 
+/// Structured result of shutting down a worker child.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerShutdownReport {
+    /// How shutdown reached a terminal child state.
+    pub outcome: LeanWorkerShutdownOutcome,
+    /// Final child-process exit information.
+    pub exit: LeanWorkerExit,
+    /// Graceful-shutdown deadline used for this operation.
+    pub graceful_timeout: Duration,
+    /// Total elapsed shutdown time observed by the parent.
+    pub elapsed: Duration,
+    /// Time spent after kill escalation, when a kill was needed.
+    pub kill_elapsed: Option<Duration>,
+    /// Time spent waiting for the final child exit.
+    pub wait_elapsed: Duration,
+}
+
+/// Shutdown path used to reach a terminal child state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LeanWorkerShutdownOutcome {
+    /// The child had already exited before shutdown was requested.
+    AlreadyExited,
+    /// The child accepted `Request::Terminate` and exited without escalation.
+    Graceful,
+    /// The child did not exit before the graceful deadline, so the parent killed it.
+    GracefulTimedOutKilled,
+    /// The graceful protocol path failed, so the parent killed the child.
+    GracefulProtocolFailedKilled,
+    /// The caller requested an immediate kill/reap path.
+    KillOnly,
+}
+
 /// Errors reported by the worker supervisor.
 #[derive(Debug)]
 pub enum LeanWorkerError {
@@ -651,6 +702,15 @@ pub enum LeanWorkerError {
     UnsupportedRequest { operation: &'static str },
     /// Waiting for a child process failed.
     Wait { source: std::io::Error },
+    /// Killing a child process failed.
+    Kill { source: std::io::Error },
+    /// Waiting for a child process exceeded the configured bounded wait.
+    WaitTimeout {
+        operation: &'static str,
+        duration: Duration,
+    },
+    /// The worker has begun shutdown and no longer accepts new requests.
+    ShutdownInProgress { operation: &'static str },
 }
 
 impl fmt::Display for LeanWorkerError {
@@ -781,6 +841,19 @@ impl fmt::Display for LeanWorkerError {
                 write!(f, "worker operation {operation} is not supported")
             }
             Self::Wait { source } => write!(f, "failed to wait for worker child: {source}"),
+            Self::Kill { source } => write!(f, "failed to kill worker child: {source}"),
+            Self::WaitTimeout { operation, duration } => {
+                write!(
+                    f,
+                    "timed out waiting for worker child during {operation} after {duration:?}"
+                )
+            }
+            Self::ShutdownInProgress { operation } => {
+                write!(
+                    f,
+                    "worker operation {operation} was rejected because shutdown is in progress"
+                )
+            }
         }
     }
 }
@@ -788,7 +861,7 @@ impl fmt::Display for LeanWorkerError {
 impl std::error::Error for LeanWorkerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Spawn { source, .. } | Self::Wait { source } => Some(source),
+            Self::Spawn { source, .. } | Self::Wait { source } | Self::Kill { source } => Some(source),
             Self::CapabilityBuild { diagnostic } => Some(diagnostic),
             Self::WorkerChildUnresolved { .. } | Self::WorkerChildNotExecutable { .. } | Self::Bootstrap { .. } => None,
             Self::Setup { .. }
@@ -818,7 +891,9 @@ impl std::error::Error for LeanWorkerError {
             | Self::WorkerPoolMemoryBudgetExceeded { .. }
             | Self::WorkerPoolQueueTimeout { .. }
             | Self::RestartLimitExceeded { .. }
-            | Self::UnsupportedRequest { .. } => None,
+            | Self::UnsupportedRequest { .. }
+            | Self::WaitTimeout { .. }
+            | Self::ShutdownInProgress { .. } => None,
         }
     }
 }
@@ -837,6 +912,7 @@ impl LeanWorkerError {
             | Self::WorkerPoolMemoryBudgetExceeded { resource, .. }
             | Self::WorkerPoolQueueTimeout { resource, .. } => Some(resource.as_ref()),
             Self::Spawn { .. }
+            | Self::Kill { .. }
             | Self::WorkerChildUnresolved { .. }
             | Self::WorkerChildNotExecutable { .. }
             | Self::Bootstrap { .. }
@@ -863,6 +939,8 @@ impl LeanWorkerError {
             | Self::LeaseInvalidated { .. }
             | Self::RestartLimitExceeded { .. }
             | Self::UnsupportedRequest { .. }
+            | Self::WaitTimeout { .. }
+            | Self::ShutdownInProgress { .. }
             | Self::Wait { .. } => None,
         }
     }
@@ -947,11 +1025,23 @@ fn worker_resource_facts(
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkerLifecycleState {
+    Running,
+    ShuttingDown,
+    Exited,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct InFlightRequest {
+    operation: &'static str,
+}
+
 /// Supervisor for one `lean-rs-worker` child process.
 ///
-/// Dropping a live supervisor attempts to terminate the child and then waits
-/// for it. Drop never panics; explicit `terminate` is preferred when callers
-/// need the exit status.
+/// Dropping a live supervisor starts the same bounded shutdown path as
+/// explicit shutdown, but cannot report kill or wait failures. Call
+/// [`LeanWorker::shutdown`] when callers need structured exit status.
 #[derive(Debug)]
 pub struct LeanWorker {
     config: LeanWorkerConfig,
@@ -965,6 +1055,8 @@ pub struct LeanWorker {
     requests_since_restart: u64,
     imports_since_restart: u64,
     last_activity: Instant,
+    lifecycle: WorkerLifecycleState,
+    in_flight: Option<InFlightRequest>,
 }
 
 #[allow(
@@ -1101,6 +1193,8 @@ impl LeanWorker {
             requests_since_restart: 0,
             imports_since_restart: 0,
             last_activity: Instant::now(),
+            lifecycle: WorkerLifecycleState::Running,
+            in_flight: None,
         })
     }
 
@@ -1176,9 +1270,11 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
         if let Some(exit) = &self.last_exit {
+            self.lifecycle = WorkerLifecycleState::Exited;
             return Ok(LeanWorkerStatus::Exited(exit.clone()));
         }
         let Some(child) = self.child.as_mut() else {
+            self.lifecycle = WorkerLifecycleState::Exited;
             return Ok(LeanWorkerStatus::Exited(LeanWorkerExit {
                 success: false,
                 code: None,
@@ -1195,6 +1291,7 @@ impl LeanWorker {
                 self.stdin = None;
                 self.stdout = None;
                 self.stats.exits = self.stats.exits.saturating_add(1);
+                self.lifecycle = WorkerLifecycleState::Exited;
                 Ok(LeanWorkerStatus::Exited(exit))
             }
             None => Ok(LeanWorkerStatus::Running),
@@ -1321,8 +1418,15 @@ impl LeanWorker {
         let Some(child) = self.child.as_mut() else {
             return Err(self.dead_error());
         };
-        child.kill().map_err(|source| LeanWorkerError::Wait { source })?;
+        child.kill().map_err(|source| LeanWorkerError::Kill { source })?;
         Ok(())
+    }
+
+    #[doc(hidden)]
+    /// Return the child process id for supervisor tests.
+    #[must_use]
+    pub fn __child_pid_for_test(&self) -> Option<u32> {
+        self.child.as_ref().map(Child::id)
     }
 
     /// Ask the child to terminate cleanly and wait for it.
@@ -1331,12 +1435,20 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if the worker is already dead, the protocol
     /// fails, or waiting for the child process fails.
-    pub fn terminate(mut self) -> Result<LeanWorkerExit, LeanWorkerError> {
-        self.send_request(Request::Terminate)?;
-        match self.read_response("terminate")? {
-            Response::Terminating => self.wait_for_exit(),
-            other => Err(unexpected_response("terminate", &other)),
-        }
+    #[deprecated(note = "use LeanWorker::shutdown for structured shutdown status")]
+    pub fn terminate(self) -> Result<LeanWorkerExit, LeanWorkerError> {
+        self.shutdown().map(|report| report.exit)
+    }
+
+    /// Shut down the worker child, escalating to kill after a bounded grace period.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if the terminate request cannot be written,
+    /// kill escalation fails, or the child cannot be reaped within the bounded
+    /// wait.
+    pub fn shutdown(mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.shutdown_child(ShutdownIntent::Graceful)
     }
 
     #[doc(hidden)]
@@ -2145,6 +2257,10 @@ impl LeanWorker {
 
     fn send_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
         self.ensure_running()?;
+        self.write_request(request)
+    }
+
+    fn write_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
         let max_frame_bytes = self.config.max_frame_bytes;
         let Some(stdin) = self.stdin.as_mut() else {
             return Err(self.dead_error());
@@ -2152,6 +2268,14 @@ impl LeanWorker {
         write_frame(stdin, Message::Request(request), max_frame_bytes).map_err(|err| LeanWorkerError::Protocol {
             message: err.to_string(),
         })
+    }
+
+    fn begin_in_flight(&mut self, operation: &'static str) {
+        self.in_flight = Some(InFlightRequest { operation });
+    }
+
+    fn finish_in_flight(&mut self) {
+        self.in_flight = None;
     }
 
     fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
@@ -2231,15 +2355,36 @@ impl LeanWorker {
     }
 
     fn restart_with_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
+        self.restart_with_reason_before_spawn(reason, || {})
+    }
+
+    fn restart_with_reason_before_spawn(
+        &mut self,
+        reason: LeanWorkerRestartReason,
+        before_spawn: impl FnOnce(),
+    ) -> Result<(), LeanWorkerError> {
         let config = self.config.clone();
         let replacement_started = Instant::now();
         self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
         self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
-        if let Err(err) = self.stop_existing_child() {
+        let stop_intent = if matches!(
+            &reason,
+            LeanWorkerRestartReason::Explicit
+                | LeanWorkerRestartReason::MaxRequests { .. }
+                | LeanWorkerRestartReason::MaxImports { .. }
+                | LeanWorkerRestartReason::RssCeiling { .. }
+                | LeanWorkerRestartReason::Idle { .. }
+        ) {
+            ShutdownIntent::Graceful
+        } else {
+            ShutdownIntent::KillOnly
+        };
+        if let Err(err) = self.shutdown_child(stop_intent) {
             self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
             self.stats.last_replacement_skipped_reason = Some("stop_failed".to_owned());
             return Err(err);
         }
+        before_spawn();
         self.stats.record_restart(reason);
         self.requests_since_restart = 0;
         self.imports_since_restart = 0;
@@ -2289,42 +2434,20 @@ impl LeanWorker {
         }
     }
 
-    fn check_hard_rss_limit(&mut self, operation: &'static str) -> Result<(), LeanWorkerError> {
-        let Some(limit_kib) = self.config.rss_hard_limit_kib else {
-            return Ok(());
-        };
+    fn hard_rss_limit_exceeded(&mut self) -> Option<(u64, u64)> {
+        let limit_kib = self.config.rss_hard_limit_kib?;
         match self.child_rss_kib() {
             Some(current_kib) if current_kib >= limit_kib => {
                 self.stats.last_rss_kib = Some(current_kib);
-                self.restart_with_reason(LeanWorkerRestartReason::RssHardLimit {
-                    operation,
-                    current_kib,
-                    limit_kib,
-                    last_import_stats: self.stats.last_import_stats.clone(),
-                })?;
-                Err(LeanWorkerError::RssHardLimitExceeded {
-                    operation,
-                    current_kib,
-                    limit_kib,
-                    last_import_stats: self.stats.last_import_stats.clone().map(Box::new),
-                    resource: Box::new(worker_resource_facts(
-                        "worker_rss_hard_limit",
-                        true,
-                        Some(operation),
-                        &self.stats,
-                        Some(current_kib),
-                        Some(limit_kib),
-                        None,
-                    )),
-                })
+                Some((current_kib, limit_kib))
             }
             Some(current_kib) => {
                 self.stats.last_rss_kib = Some(current_kib);
-                Ok(())
+                None
             }
             None => {
                 self.stats.rss_samples_unavailable = self.stats.rss_samples_unavailable.saturating_add(1);
-                Ok(())
+                None
             }
         }
     }
@@ -2385,19 +2508,60 @@ impl LeanWorker {
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
         let max_frame_bytes = self.config.max_frame_bytes;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let _reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
+        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
+        self.begin_in_flight(operation);
 
         loop {
-            self.check_hard_rss_limit(operation)?;
+            if let Some((current_kib, limit_kib)) = self.hard_rss_limit_exceeded() {
+                if streaming {
+                    self.record_stream_failure(started, request_backpressure_waits);
+                }
+                let last_import_stats = self.stats.last_import_stats.clone();
+                self.restart_with_reason_before_spawn(
+                    LeanWorkerRestartReason::RssHardLimit {
+                        operation,
+                        current_kib,
+                        limit_kib,
+                        last_import_stats: last_import_stats.clone(),
+                    },
+                    || {
+                        drop(receiver);
+                        drop(reader.join());
+                    },
+                )?;
+                self.finish_in_flight();
+                return Err(LeanWorkerError::RssHardLimitExceeded {
+                    operation,
+                    current_kib,
+                    limit_kib,
+                    last_import_stats: last_import_stats.map(Box::new),
+                    resource: Box::new(worker_resource_facts(
+                        "worker_rss_hard_limit",
+                        true,
+                        Some(operation),
+                        &self.stats,
+                        Some(current_kib),
+                        Some(limit_kib),
+                        None,
+                    )),
+                });
+            }
             let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
                 Some(remaining) if remaining.is_zero() => {
                     if streaming {
                         self.record_stream_failure(started, request_backpressure_waits);
                     }
-                    self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
-                        operation,
-                        duration: timeout,
-                    })?;
+                    self.restart_with_reason_before_spawn(
+                        LeanWorkerRestartReason::RequestTimeout {
+                            operation,
+                            duration: timeout,
+                        },
+                        || {
+                            drop(receiver);
+                            drop(reader.join());
+                        },
+                    )?;
+                    self.finish_in_flight();
                     return Err(LeanWorkerError::Timeout {
                         operation,
                         duration: timeout,
@@ -2428,10 +2592,17 @@ impl LeanWorker {
                             if streaming {
                                 self.record_stream_failure(started, request_backpressure_waits);
                             }
-                            self.restart_with_reason(LeanWorkerRestartReason::RequestTimeout {
-                                operation,
-                                duration: timeout,
-                            })?;
+                            self.restart_with_reason_before_spawn(
+                                LeanWorkerRestartReason::RequestTimeout {
+                                    operation,
+                                    duration: timeout,
+                                },
+                                || {
+                                    drop(receiver);
+                                    drop(reader.join());
+                                },
+                            )?;
+                            self.finish_in_flight();
                             return Err(LeanWorkerError::Timeout {
                                 operation,
                                 duration: timeout,
@@ -2447,6 +2618,8 @@ impl LeanWorker {
                             });
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            self.finish_in_flight();
+                            drop(reader.join());
                             return Err(LeanWorkerError::Protocol {
                                 message: "worker response reader exited without a terminal response".to_owned(),
                             });
@@ -2456,6 +2629,8 @@ impl LeanWorker {
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_err) => {
+                        self.finish_in_flight();
+                        drop(reader.join());
                         return Err(LeanWorkerError::Protocol {
                             message: "worker response reader exited without a terminal response".to_owned(),
                         });
@@ -2474,6 +2649,8 @@ impl LeanWorker {
                             if streaming {
                                 self.record_stream_failure(started, request_backpressure_waits);
                             }
+                            self.finish_in_flight();
+                            drop(reader.join());
                             return Err(LeanWorkerError::Worker { code, message });
                         }
                         Message::Response(response) => {
@@ -2484,9 +2661,13 @@ impl LeanWorker {
                                     self.record_stream_failure(started, request_backpressure_waits);
                                 }
                             }
+                            self.finish_in_flight();
+                            drop(reader.join());
                             return Ok(response);
                         }
                         other => {
+                            self.finish_in_flight();
+                            drop(reader.join());
                             return Err(LeanWorkerError::Protocol {
                                 message: format!("worker sent unexpected {operation} message: {other:?}"),
                             });
@@ -2497,6 +2678,8 @@ impl LeanWorker {
                     if streaming {
                         self.record_stream_failure(started, request_backpressure_waits);
                     }
+                    self.finish_in_flight();
+                    drop(reader.join());
                     return if eof {
                         Err(self.record_exit_error())
                     } else {
@@ -2513,13 +2696,21 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
+                        self.finish_in_flight();
                         return Err(err);
                     }
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
+                        self.restart_with_reason_before_spawn(
+                            LeanWorkerRestartReason::Cancelled { operation },
+                            || {
+                                drop(receiver);
+                                drop(reader.join());
+                            },
+                        )?;
+                        self.finish_in_flight();
                         return Err(LeanWorkerError::Cancelled {
                             operation,
                             resource: Box::new(worker_resource_facts(
@@ -2540,6 +2731,7 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
+                        self.finish_in_flight();
                         return Err(err);
                     }
                     self.stats.data_rows_delivered = self.stats.data_rows_delivered.saturating_add(1);
@@ -2548,7 +2740,14 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        self.restart_with_reason(LeanWorkerRestartReason::Cancelled { operation })?;
+                        self.restart_with_reason_before_spawn(
+                            LeanWorkerRestartReason::Cancelled { operation },
+                            || {
+                                drop(receiver);
+                                drop(reader.join());
+                            },
+                        )?;
+                        self.finish_in_flight();
                         return Err(LeanWorkerError::Cancelled {
                             operation,
                             resource: Box::new(worker_resource_facts(
@@ -2568,11 +2767,16 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
+                        self.finish_in_flight();
                         return Err(err);
                     }
                 }
-                Message::Response(response) => return Err(unexpected_response(operation, &response)),
+                Message::Response(response) => {
+                    self.finish_in_flight();
+                    return Err(unexpected_response(operation, &response));
+                }
                 other => {
+                    self.finish_in_flight();
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
                     });
@@ -2582,6 +2786,14 @@ impl LeanWorker {
     }
 
     fn ensure_running(&mut self) -> Result<(), LeanWorkerError> {
+        if self.lifecycle == WorkerLifecycleState::ShuttingDown {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: self
+                    .in_flight
+                    .as_ref()
+                    .map_or("worker_request", |request| request.operation),
+            });
+        }
         match self.status()? {
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(exit) if exit.success => Err(LeanWorkerError::ChildExited { exit }),
@@ -2607,14 +2819,43 @@ impl LeanWorker {
             return Err(self.dead_error());
         };
         let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
+        Ok(self.finalize_child_exit(status))
+    }
+
+    fn wait_for_exit_bounded(
+        &mut self,
+        operation: &'static str,
+        timeout: Duration,
+    ) -> Result<(LeanWorkerExit, Duration), LeanWorkerError> {
+        let started = Instant::now();
+        loop {
+            let Some(child) = self.child.as_mut() else {
+                return Err(self.dead_error());
+            };
+            match child.try_wait().map_err(|source| LeanWorkerError::Wait { source })? {
+                Some(status) => return Ok((self.finalize_child_exit(status), started.elapsed())),
+                None if started.elapsed() >= timeout => {
+                    return Err(LeanWorkerError::WaitTimeout {
+                        operation,
+                        duration: timeout,
+                    });
+                }
+                None => thread::sleep(Duration::from_millis(10).min(timeout.saturating_sub(started.elapsed()))),
+            }
+        }
+    }
+
+    fn finalize_child_exit(&mut self, status: ExitStatus) -> LeanWorkerExit {
         let diagnostics = self.read_stderr();
         let exit = LeanWorkerExit::from_status(status, diagnostics);
         self.last_exit = Some(exit.clone());
         self.child = None;
         self.stdin = None;
         self.stdout = None;
+        self.lifecycle = WorkerLifecycleState::Exited;
+        self.finish_in_flight();
         self.stats.exits = self.stats.exits.saturating_add(1);
-        Ok(exit)
+        exit
     }
 
     fn record_exit_error(&mut self) -> LeanWorkerError {
@@ -2625,18 +2866,188 @@ impl LeanWorker {
         }
     }
 
-    fn stop_existing_child(&mut self) -> Result<(), LeanWorkerError> {
-        if let Some(child) = self.child.as_mut() {
-            drop(child.kill());
-            let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
-            let diagnostics = self.read_stderr();
-            self.last_exit = Some(LeanWorkerExit::from_status(status, diagnostics));
-            self.stats.exits = self.stats.exits.saturating_add(1);
+    fn shutdown_child(&mut self, intent: ShutdownIntent) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        let started = Instant::now();
+        let graceful_timeout = self.config.shutdown_timeout;
+        match self.status()? {
+            LeanWorkerStatus::Exited(exit) => {
+                return Ok(LeanWorkerShutdownReport {
+                    outcome: LeanWorkerShutdownOutcome::AlreadyExited,
+                    exit,
+                    graceful_timeout,
+                    elapsed: started.elapsed(),
+                    kill_elapsed: None,
+                    wait_elapsed: Duration::ZERO,
+                });
+            }
+            LeanWorkerStatus::Running => {}
         }
-        self.child = None;
-        self.stdin = None;
-        self.stdout = None;
-        Ok(())
+
+        self.lifecycle = WorkerLifecycleState::ShuttingDown;
+        self.finish_in_flight();
+
+        if intent == ShutdownIntent::Graceful {
+            match self.write_request(Request::Terminate) {
+                Ok(()) => return self.wait_for_graceful_shutdown(started, graceful_timeout),
+                Err(LeanWorkerError::Protocol { .. } | LeanWorkerError::Worker { .. }) => {
+                    return self.kill_and_report(
+                        started,
+                        graceful_timeout,
+                        LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled,
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        self.kill_and_report(started, graceful_timeout, LeanWorkerShutdownOutcome::KillOnly)
+    }
+
+    fn wait_for_graceful_shutdown(
+        &mut self,
+        started: Instant,
+        graceful_timeout: Duration,
+    ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        let grace_started = Instant::now();
+        let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
+        let max_frame_bytes = self.config.max_frame_bytes;
+        let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
+        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
+
+        loop {
+            if let Some(child) = self.child.as_mut()
+                && let Some(status) = child.try_wait().map_err(|source| LeanWorkerError::Wait { source })?
+            {
+                drop(receiver);
+                drop(reader.join());
+                let wait_elapsed = grace_started.elapsed();
+                let exit = self.finalize_child_exit(status);
+                return Ok(LeanWorkerShutdownReport {
+                    outcome: LeanWorkerShutdownOutcome::Graceful,
+                    exit,
+                    graceful_timeout,
+                    elapsed: started.elapsed(),
+                    kill_elapsed: None,
+                    wait_elapsed,
+                });
+            }
+
+            let elapsed = grace_started.elapsed();
+            if elapsed >= graceful_timeout {
+                let kill_started = Instant::now();
+                if let Some(child) = self.child.as_mut() {
+                    child.kill().map_err(|source| LeanWorkerError::Kill { source })?;
+                }
+                drop(receiver);
+                drop(reader.join());
+                let (exit, wait_elapsed) =
+                    self.wait_for_exit_bounded("kill_wait", LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT)?;
+                return Ok(LeanWorkerShutdownReport {
+                    outcome: LeanWorkerShutdownOutcome::GracefulTimedOutKilled,
+                    exit,
+                    graceful_timeout,
+                    elapsed: started.elapsed(),
+                    kill_elapsed: Some(kill_started.elapsed()),
+                    wait_elapsed,
+                });
+            }
+
+            let receive_timeout = Duration::from_millis(10).min(graceful_timeout.saturating_sub(elapsed));
+            match receiver.recv_timeout(receive_timeout) {
+                Ok(RequestReaderEvent::Terminal {
+                    message: Message::Response(Response::Terminating),
+                    stdout,
+                    ..
+                }) => {
+                    drop(reader.join());
+                    self.stdout = Some(stdout);
+                    let remaining = graceful_timeout.saturating_sub(grace_started.elapsed());
+                    match self.wait_for_exit_bounded("shutdown", remaining) {
+                        Ok((exit, wait_elapsed)) => {
+                            return Ok(LeanWorkerShutdownReport {
+                                outcome: LeanWorkerShutdownOutcome::Graceful,
+                                exit,
+                                graceful_timeout,
+                                elapsed: started.elapsed(),
+                                kill_elapsed: None,
+                                wait_elapsed,
+                            });
+                        }
+                        Err(LeanWorkerError::WaitTimeout { .. }) => {
+                            return self.kill_and_report(
+                                started,
+                                graceful_timeout,
+                                LeanWorkerShutdownOutcome::GracefulTimedOutKilled,
+                            );
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+                Ok(RequestReaderEvent::Terminal { stdout, .. }) => {
+                    drop(reader.join());
+                    self.stdout = Some(stdout);
+                    return self.kill_and_report(
+                        started,
+                        graceful_timeout,
+                        LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled,
+                    );
+                }
+                Ok(RequestReaderEvent::ReadError { eof: true, .. }) => {
+                    drop(reader.join());
+                    let remaining = graceful_timeout.saturating_sub(grace_started.elapsed());
+                    match self.wait_for_exit_bounded("shutdown", remaining) {
+                        Ok((exit, wait_elapsed)) => {
+                            return Ok(LeanWorkerShutdownReport {
+                                outcome: LeanWorkerShutdownOutcome::Graceful,
+                                exit,
+                                graceful_timeout,
+                                elapsed: started.elapsed(),
+                                kill_elapsed: None,
+                                wait_elapsed,
+                            });
+                        }
+                        Err(LeanWorkerError::WaitTimeout { .. }) => {
+                            return self.kill_and_report(
+                                started,
+                                graceful_timeout,
+                                LeanWorkerShutdownOutcome::GracefulTimedOutKilled,
+                            );
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+                Ok(RequestReaderEvent::ReadError { .. }) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    drop(reader.join());
+                    return self.kill_and_report(
+                        started,
+                        graceful_timeout,
+                        LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled,
+                    );
+                }
+                Ok(RequestReaderEvent::Message { .. }) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
+    }
+
+    fn kill_and_report(
+        &mut self,
+        started: Instant,
+        graceful_timeout: Duration,
+        outcome: LeanWorkerShutdownOutcome,
+    ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        let kill_started = Instant::now();
+        if let Some(child) = self.child.as_mut() {
+            child.kill().map_err(|source| LeanWorkerError::Kill { source })?;
+        }
+        let (exit, wait_elapsed) = self.wait_for_exit_bounded("kill_wait", LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT)?;
+        Ok(LeanWorkerShutdownReport {
+            outcome,
+            exit,
+            graceful_timeout,
+            elapsed: started.elapsed(),
+            kill_elapsed: Some(kill_started.elapsed()),
+            wait_elapsed,
+        })
     }
 
     fn dead_error(&self) -> LeanWorkerError {
@@ -2682,6 +3093,12 @@ enum RequestReaderEvent {
         eof: bool,
         backpressure_waits: u64,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShutdownIntent {
+    Graceful,
+    KillOnly,
 }
 
 impl RequestReaderEvent {
@@ -2767,10 +3184,7 @@ fn send_reader_event(sender: &mpsc::SyncSender<RequestReaderEvent>, event: Reque
 
 impl Drop for LeanWorker {
     fn drop(&mut self) {
-        if let Some(child) = self.child.as_mut() {
-            drop(child.kill());
-            drop(child.wait());
-        }
+        drop(self.shutdown_child(ShutdownIntent::Graceful));
     }
 }
 

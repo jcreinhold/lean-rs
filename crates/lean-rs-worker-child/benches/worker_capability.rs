@@ -1,13 +1,20 @@
 #![allow(clippy::expect_used)]
 
+use std::env;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, Instant};
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 use lean_rs_worker_parent::{
-    LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig,
-    LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
+    LeanWorker, LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerConfig, LeanWorkerError,
+    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
+    LeanWorkerTypedStreamSummary,
+};
+use lean_rs_worker_protocol::protocol::{
+    MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +54,72 @@ fn capability_builder() -> LeanWorkerCapabilityBuilder {
     .streaming_command_export("lean_rs_interop_consumer_worker_shape_extract")
     .streaming_command_export("lean_rs_interop_consumer_worker_shape_panic_after_row")
     .streaming_command_export("lean_rs_interop_consumer_worker_shape_mathlib_scale_index")
+}
+
+fn fake_worker_config(mode: &'static str) -> LeanWorkerConfig {
+    LeanWorkerConfig::new(env::current_exe().expect("bench executable path is available"))
+        .env("LEAN_RS_WORKER_CAPABILITY_BENCH_FAKE_CHILD", mode)
+        .startup_timeout(Duration::from_secs(1))
+        .shutdown_timeout(Duration::from_millis(20))
+}
+
+fn run_fake_child(mode: &str) {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    write_frame(
+        &mut stdout,
+        Message::Handshake {
+            worker_version: "fake-worker-capability-bench".to_owned(),
+            protocol_version: PROTOCOL_VERSION,
+        },
+        MAX_FRAME_BYTES,
+    )
+    .expect("fake child writes handshake");
+
+    let frame_limit = {
+        let mut stdin = io::stdin().lock();
+        read_frame(&mut stdin, MAX_FRAME_BYTES).expect("fake child reads frame-limit")
+    };
+    match frame_limit.message {
+        Message::ConfigureFrameLimit { .. } => {}
+        other => panic!("expected frame-limit configuration, got {other:?}"),
+    }
+
+    loop {
+        let frame = {
+            let mut stdin = io::stdin().lock();
+            let Ok(frame) = read_frame(&mut stdin, MAX_FRAME_BYTES) else {
+                return;
+            };
+            frame
+        };
+        let Message::Request(request) = frame.message else {
+            continue;
+        };
+        match request {
+            Request::Terminate if mode == "terminate_hang" => loop {
+                thread::sleep(Duration::from_mins(1));
+            },
+            Request::Terminate => {
+                write_frame(&mut stdout, Message::Response(Response::Terminating), MAX_FRAME_BYTES)
+                    .expect("fake child writes terminating response");
+                stdout.flush().expect("fake child flushes terminating response");
+                return;
+            }
+            other => {
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::Error {
+                        code: "fake.unsupported".to_owned(),
+                        message: format!("unsupported fake request: {other:?}"),
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child writes unsupported response");
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -247,6 +320,26 @@ fn bench_operational_shape(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("graceful_shutdown", |b| {
+        b.iter(|| {
+            let capability = capability_builder().open().expect("capability opens");
+            let report = capability.shutdown().expect("worker shutdown succeeds");
+            std::hint::black_box(report.outcome);
+            std::hint::black_box(report.exit.success);
+        });
+    });
+
+    group.bench_function("terminate_timeout_kill", |b| {
+        b.iter(|| {
+            let worker = LeanWorker::spawn(&fake_worker_config("terminate_hang")).expect("fake worker starts");
+            let report = worker
+                .shutdown()
+                .expect("terminate-hung fake worker is killed and reaped");
+            std::hint::black_box(report.outcome);
+            std::hint::black_box(report.exit.success);
+        });
+    });
+
     group.bench_function("fatal_exit_recovery", |b| {
         b.iter(|| {
             let mut capability = capability_builder().open().expect("capability opens");
@@ -309,4 +402,11 @@ fn bench_operational_shape(c: &mut Criterion) {
 }
 
 criterion_group!(benches, bench_operational_shape);
-criterion_main!(benches);
+
+fn main() {
+    if let Ok(mode) = env::var("LEAN_RS_WORKER_CAPABILITY_BENCH_FAKE_CHILD") {
+        run_fake_child(&mode);
+        return;
+    }
+    benches();
+}

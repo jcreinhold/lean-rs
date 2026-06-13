@@ -72,7 +72,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let second = run_stream_once(&mut capability, &request, "after_cycle")?;
     println!("post_cycle_stream_rows={second}");
 
-    let exit = capability.terminate()?;
+    let exit = capability.shutdown()?.exit;
     println!("worker_exit_success={}", exit.success);
     println!("status=ok");
     Ok(())

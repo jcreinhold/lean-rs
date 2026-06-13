@@ -39,9 +39,10 @@ pub use session::{
     LeanWorkerStreamingCommand, LeanWorkerTypedDataRow, LeanWorkerTypedDataSink, LeanWorkerTypedStreamSummary,
 };
 pub use supervisor::{
-    LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig,
+    LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
+    LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT, LeanWorker, LeanWorkerConfig,
     LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
-    LeanWorkerStats, LeanWorkerStatus,
+    LeanWorkerShutdownOutcome, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
 };
 
 // Curated re-exports of the wire types that appear on this crate's public

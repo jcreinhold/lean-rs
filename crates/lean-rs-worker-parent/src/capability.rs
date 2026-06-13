@@ -32,7 +32,8 @@ use crate::session::{
 };
 use crate::supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError,
-    LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats, LeanWorkerStatus,
+    LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerShutdownReport,
+    LeanWorkerStats, LeanWorkerStatus,
 };
 
 const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
@@ -70,6 +71,7 @@ pub struct LeanWorkerCapabilityBuilder {
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
+    shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
@@ -107,6 +109,7 @@ impl LeanWorkerCapabilityBuilder {
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
+            shutdown_timeout: None,
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
@@ -151,6 +154,7 @@ impl LeanWorkerCapabilityBuilder {
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
+            shutdown_timeout: None,
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
@@ -217,6 +221,13 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the maximum time to wait for graceful worker shutdown.
+    #[must_use]
+    pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.shutdown_timeout = Some(timeout);
         self
     }
 
@@ -400,7 +411,7 @@ impl LeanWorkerCapabilityBuilder {
 
         match self.clone().open_unchecked() {
             Ok(capability) => {
-                drop(capability.terminate());
+                drop(capability.shutdown());
             }
             Err(err) => checks.push(check_from_open_error(&err)),
         }
@@ -476,6 +487,7 @@ impl LeanWorkerCapabilityBuilder {
             self.worker_child,
             self.startup_timeout,
             self.request_timeout,
+            self.shutdown_timeout,
             self.restart_policy,
             self.rss_hard_limit,
             self.module_cache_limits,
@@ -539,6 +551,7 @@ pub struct LeanWorkerHostHandleBuilder {
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
+    shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
@@ -617,6 +630,7 @@ impl LeanWorkerHostHandleBuilder {
             worker_child: None,
             startup_timeout: None,
             request_timeout: None,
+            shutdown_timeout: None,
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
@@ -656,6 +670,13 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the maximum time to wait for graceful worker shutdown.
+    #[must_use]
+    pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.shutdown_timeout = Some(timeout);
         self
     }
 
@@ -711,7 +732,7 @@ impl LeanWorkerHostHandleBuilder {
 
         match self.clone().open_unchecked() {
             Ok(handle) => {
-                drop(handle.terminate());
+                drop(handle.shutdown());
             }
             Err(err) => checks.push(check_from_open_error(&err)),
         }
@@ -749,6 +770,7 @@ impl LeanWorkerHostHandleBuilder {
             self.worker_child,
             self.startup_timeout,
             self.request_timeout,
+            self.shutdown_timeout,
             self.restart_policy,
             self.rss_hard_limit,
             self.module_cache_limits,
@@ -1055,8 +1077,18 @@ impl LeanWorkerCapability {
     ///
     /// Returns `LeanWorkerError` if the worker is already dead, the terminate
     /// request fails, or waiting for the child fails.
+    #[deprecated(note = "use LeanWorkerCapability::shutdown for structured shutdown status")]
     pub fn terminate(self) -> Result<crate::supervisor::LeanWorkerExit, LeanWorkerError> {
-        self.worker.terminate()
+        self.worker.shutdown().map(|report| report.exit)
+    }
+
+    /// Shut down the worker child and return structured shutdown status.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if shutdown escalation or wait/reap fails.
+    pub fn shutdown(self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.worker.shutdown()
     }
 }
 
@@ -1308,8 +1340,18 @@ impl LeanWorkerHostHandle {
     ///
     /// Returns `LeanWorkerError` if the worker is already dead, the terminate
     /// request fails, or waiting for the child fails.
+    #[deprecated(note = "use LeanWorkerHostHandle::shutdown for structured shutdown status")]
     pub fn terminate(self) -> Result<crate::supervisor::LeanWorkerExit, LeanWorkerError> {
-        self.worker.terminate()
+        self.worker.shutdown().map(|report| report.exit)
+    }
+
+    /// Shut down the worker child and return structured shutdown status.
+    ///
+    /// # Errors
+    ///
+    /// Returns `LeanWorkerError` if shutdown escalation or wait/reap fails.
+    pub fn shutdown(self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.worker.shutdown()
     }
 }
 
@@ -1423,6 +1465,7 @@ fn spawn_checked_worker(
     worker_child: Option<LeanWorkerChild>,
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
+    shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
@@ -1439,6 +1482,9 @@ fn spawn_checked_worker(
     }
     if let Some(timeout) = request_timeout {
         config = config.request_timeout(timeout);
+    }
+    if let Some(timeout) = shutdown_timeout {
+        config = config.shutdown_timeout(timeout);
     }
     if let Some(policy) = restart_policy {
         config = config.restart_policy(policy);
@@ -1762,7 +1808,10 @@ fn check_from_open_error(err: &LeanWorkerError) -> LeanWorkerBootstrapCheck {
         | LeanWorkerError::WorkerPoolQueueTimeout { .. }
         | LeanWorkerError::RestartLimitExceeded { .. }
         | LeanWorkerError::UnsupportedRequest { .. }
-        | LeanWorkerError::Wait { .. }) => LeanWorkerBootstrapCheck::error(
+        | LeanWorkerError::Wait { .. }
+        | LeanWorkerError::Kill { .. }
+        | LeanWorkerError::WaitTimeout { .. }
+        | LeanWorkerError::ShutdownInProgress { .. }) => LeanWorkerBootstrapCheck::error(
             LeanWorkerBootstrapDiagnosticCode::WorkerStartupFailed,
             "worker bootstrap",
             other.to_string(),

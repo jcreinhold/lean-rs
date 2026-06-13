@@ -38,6 +38,11 @@ workspace = true
 [lib]
 doctest = false
 
+[[test]]
+harness = false
+name = "worker_shutdown"
+path = "tests/worker_shutdown.rs"
+
 [package.metadata.docs.rs]
 default-target = "x86_64-unknown-linux-gnu"
 targets = []

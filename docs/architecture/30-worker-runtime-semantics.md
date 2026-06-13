@@ -86,6 +86,30 @@ Fairness is out of scope for the current runtime. There is no scheduler theorem 
 piece of work is eventually admitted. Admission depends on caller control flow, pool capacity, RSS policy, worker
 liveness, and configured timeouts.
 
+## Shutdown Contract
+
+`lean-rs-worker-parent` owns the worker child lifecycle. Once shutdown starts, the supervisor state moves from
+`Running` to `ShuttingDown`, and new request admission returns `LeanWorkerError::ShutdownInProgress`. The current
+runtime admits at most one request per worker, so in-flight terminalization means that accepted request receives exactly
+one terminal outcome: a terminal `Response`, `Timeout`, `Cancelled`, `RssHardLimitExceeded`, `ChildExited`,
+`ChildPanicOrAbort`, or a typed parent-side sink/protocol error.
+
+`LeanWorker::shutdown` is the structured public shutdown path. It sends `Request::Terminate`, waits up to
+`LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT` by default, then escalates to `kill` and waits up to
+`LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT` for the process to be reaped. The returned `LeanWorkerShutdownReport` records
+whether the child was already exited, stopped gracefully, or required kill escalation. `terminate` remains only as a
+deprecated compatibility wrapper that returns the final `LeanWorkerExit`.
+
+Policy restarts and explicit cycles use the same cleanup machinery. Idle/request-count/import-count/RSS-ceiling cycles
+try graceful shutdown before replacing the child. In-flight timeout, cancellation, and hard-RSS failures use the kill
+path because the child may be wedged or already executing a request. Fatal child exit is finalized through the same
+wait/reap path.
+
+`Drop for LeanWorker` also invokes the bounded shutdown path. Rust `Drop` cannot return `kill`, protocol, or wait
+failures to the caller, so callers that need status must call `shutdown`. Drop still attempts graceful stop, kill
+escalation, and wait/reap; it does not silently abandon a child. Abrupt parent process death remains outside Rust
+cleanup and must be contained by the host's process manager.
+
 ## Runtime Controls And Cleanup Audit
 
 The runtime has two different control boundaries. `lean-rs-host` exposes same-process Lean controls through FFI and Lean
@@ -103,9 +127,9 @@ above the worker crates.
 | Diagnostic and row-size limits | `LeanElabOptions`, `LeanMetaOptions`, `ModuleQueryOutputBudgets`, protocol frame cap, bounded worker event buffer | Diagnostics, rendered fields, frames, and parent-side event buffering are bounded; backpressure blocks instead of dropping committed rows | No library-wide semantic commit policy for downstream row payloads | `lean-rs-host`, `lean-rs-worker-protocol`, `lean-rs-worker-parent` | Buffer or commit rows only after terminal success when atomicity matters | Prompt 30; downstream policy |
 | Import breadth and cache controls | `LeanSessionImportProfile`; `LeanImportProfileMode`; module snapshot cache and clear request | Full sessions use closed import profiles with `loadExts := true`; profiling can measure import shape; module snapshots are bounded and clearable | Downstream cache validity, cross-run invalidation, and semantic reuse policy are not decided by the worker | `lean-rs-host`, `lean-rs-worker-child` | Own semantic cache keys, source provenance, and result invalidation | Prompt 30; downstream policy |
 | Restricted `loadExts := false` import/free-region behavior | `LeanRsHostShims.Environment.bracketedImportQuery`; Lean `withImportModules`; `Environment.freeRegions` | The bracketed lightweight query imports with `loadExts := false`, serializes Rust-owned data, then frees compacted regions | Not safe for normal `LeanSession` or capability workflows with loaded environment extensions | `lean-rs-host` | Use bracketed results only for the restricted read-only query shape | Prompt 30 |
-| Normal shutdown | `Request::Terminate`; `LeanWorker::terminate`; child stdio loop returns after `Response::Terminating` | Explicit termination asks the child to exit and the parent waits for the process | Does not define application/server shutdown order above the worker | `lean-rs-worker-parent`, `lean-rs-worker-child` | Stop accepting work, drain/cancel requests, and decide service shutdown policy | Prompt 31; downstream policy |
-| Dropped worker handles | `Drop for LeanWorker`; `Drop for LeanWorkerSessionLease` | Dropping a live worker attempts `kill` then `wait`; dropping a lease decrements the active-lease count | `Drop` cannot report wait/kill failure to callers | `lean-rs-worker-parent` | Prefer explicit `terminate`/cycle paths when exit status matters | Prompt 31 |
-| Timeout kill and wait/reap | `read_response_with_events`; `restart_with_reason`; `stop_existing_child` | Request timeout records failure, kills the current child, waits for it, respawns, and reports typed timeout facts | Cannot prove child-side side effects did not happen before the timeout | `lean-rs-worker-parent` | Retry only idempotent or deduplicated operations | Prompt 31 |
+| Normal shutdown | `Request::Terminate`; `LeanWorker::shutdown`; child stdio loop returns after `Response::Terminating` | Explicit shutdown stops admission, asks the child to exit, escalates to kill after a bounded timeout, and waits/reaps | Does not define application/server shutdown order above the worker | `lean-rs-worker-parent`, `lean-rs-worker-child` | Stop accepting service work before dropping handles, and decide service shutdown policy | Prompt 31; downstream policy |
+| Dropped worker handles | `Drop for LeanWorker`; `Drop for LeanWorkerSessionLease` | Dropping a live worker runs best-effort bounded shutdown/kill/wait; dropping a lease decrements the active-lease count | `Drop` cannot report wait/kill failure to callers | `lean-rs-worker-parent` | Prefer explicit `shutdown`/cycle paths when exit status matters | Prompt 31 |
+| Timeout kill and wait/reap | `read_response_with_events`; `restart_with_reason`; shared shutdown helpers | Request timeout records failure, kills the current child, waits for it, joins the reader, respawns, and reports typed timeout facts | Cannot prove child-side side effects did not happen before the timeout | `lean-rs-worker-parent` | Retry only idempotent or deduplicated operations | Prompt 31 |
 | Child crash | EOF/read error classification; `wait_for_exit`; `record_exit_error`; child SIGABRT immediate-exit handler | Fatal child exit becomes typed `ChildPanicOrAbort`/`ChildExited` with captured diagnostics; selected read-only calls can restart and return degraded results | No recovery of the crashed child session; no guarantee that child-side side effects are absent | `lean-rs-worker-parent`, `lean-rs-worker-child` | Treat affected in-flight work as failed or tentative | Prompt 31 |
 | Wedged child | Parent request timeout and optional in-flight RSS hard limit | A child that stops producing frames is killed and replaced when the parent deadline or hard RSS guard fires | No same-process recovery if Lean is embedded without the worker boundary | `lean-rs-worker-parent` | Use worker boundary for workloads that can wedge | Prompt 31 |
 | In-flight request terminalization | Per-request stdout reader; terminal `Response`; EOF/read error; timeout/cancel/RSS restart paths | One parent request ends with a terminal response, EOF/exit error, timeout, cancellation-triggered cycle, or RSS hard-limit cycle | Terminal success is the only success acknowledgement; partial rows remain tentative | `lean-rs-worker-parent` | Commit rows and downstream effects only after terminal success | Prompt 31 |
@@ -113,7 +137,7 @@ above the worker crates.
 | Stale output rejection | Serial request model; parent owns stdout during one request and restores it only after terminal response; replacement drops old pipes | Normal serial operation cannot interleave two live requests on one child; replacement prevents old child output from being read on the new child | No explicit request-id-based stale-frame rejection if a future protocol admits overlapping requests | `lean-rs-worker-parent`, `lean-rs-worker-protocol` | Avoid assuming cross-request output identity beyond the current serial contract | Prompt 32 |
 | Restart intensity limits | `LeanWorkerError::RestartLimitExceeded` reserved; docs state no restart window is implemented | Current policy cycles by explicit, count, import count, RSS, idle, timeout, cancellation, and hard RSS triggers | No "N restarts per time window" guard | `lean-rs-worker-parent` | Apply process-manager or service-level restart limits if needed today | Prompt 32 or later |
 | Parent/control-channel death | Child stdio loop reads stdin and exits on protocol read error/EOF; parent owns child pipes | Loss of stdin causes the child loop to fail and process exit under ordinary pipe semantics | No explicit parent-death sentinel, process-group contract, or cross-platform parent-loss watchdog | `lean-rs-worker-child` | Use an external supervisor/process manager for service-level parent death policy | Prompt 33 |
-| Orphan and zombie prevention | Parent `Drop`, `terminate`, timeout, cancellation, RSS, and restart paths kill/wait or request terminate/wait | Parent-owned children are reaped on explicit lifecycle paths and best-effort `Drop` | No guarantee if the parent process itself is killed before running cleanup; child-side parent-loss handling is best effort | `lean-rs-worker-parent`, `lean-rs-worker-child` | Configure OS/process-manager containment for abrupt parent death | Prompt 33; downstream policy |
+| Orphan and zombie prevention | Parent `Drop`, `shutdown`, timeout, cancellation, RSS, and restart paths kill/wait or request terminate/wait | Parent-owned children are reaped on explicit lifecycle paths and best-effort `Drop` | No guarantee if the parent process itself is killed before running cleanup; child-side parent-loss handling is best effort | `lean-rs-worker-parent`, `lean-rs-worker-child` | Configure OS/process-manager containment for abrupt parent death | Prompt 33; downstream policy |
 
 Core child cleanup semantics belong below downstream hosts. Downstream tools such as MCP servers may choose admission,
 retry, and service shutdown policy, but they should not become the owner of worker child kill/reap, timeout replacement,

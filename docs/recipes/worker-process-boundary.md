@@ -168,6 +168,18 @@ Startup timeout only covers the child handshake. Request timeout covers one requ
 live rows, diagnostics, progress, and terminal response. If it expires, the supervisor kills and replaces the child,
 returns `LeanWorkerError::Timeout`, records `LeanWorkerRestartReason::RequestTimeout`, and invalidates the open session.
 
+Use `shutdown()` when the caller needs explicit cleanup status:
+
+```rust
+let report = capability.shutdown()?;
+eprintln!("worker shutdown outcome: {:?}", report.outcome);
+```
+
+`shutdown()` stops request admission, asks the child to terminate, escalates to kill after the configured shutdown
+timeout, and waits for the child to be reaped. The older `terminate()` methods remain as deprecated exit-only wrappers
+for compatibility. Dropping a worker handle runs the same best-effort cleanup path, but Rust `Drop` cannot return kill
+or wait failures; call `shutdown()` when those facts matter.
+
 ## Failure And Lifecycle Rules
 
 Malformed row JSON, missing `stream`, and missing `payload` are typed worker errors. Nonzero downstream status bytes are

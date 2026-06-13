@@ -39,7 +39,7 @@ fn public_health_check_succeeds() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     worker.health().expect("health check succeeds");
     assert_eq!(worker.status().expect("status succeeds"), LeanWorkerStatus::Running);
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly");
 }
 
@@ -55,7 +55,7 @@ fn public_fixture_export_call_succeeds() {
         .call_fixture_mul(&fixture, 9, 8)
         .expect("worker calls fixture export");
     assert_eq!(value, 72);
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly");
 }
 
@@ -78,7 +78,7 @@ fn explicit_restart_replaces_live_child() {
         .expect("explicit restart records replacement timing");
     assert_eq!(timing.replacement_reason, "explicit");
     assert_eq!(timing.replacement_budget_status, "synchronous-no-overlap");
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after restart");
 }
 
@@ -102,7 +102,7 @@ fn explicit_cycle_replaces_child_and_records_reason() {
             .map(|timing| timing.replacement_reason.as_str()),
         Some("explicit")
     );
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after cycle");
 }
 
@@ -122,7 +122,7 @@ fn max_request_policy_restarts_before_next_request() {
         stats.last_restart_reason,
         Some(LeanWorkerRestartReason::MaxRequests { limit: 1 })
     );
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after policy restart");
 }
 
@@ -158,7 +158,7 @@ fn max_import_policy_restarts_before_next_import() {
         .expect("max-import restart records replacement timing");
     assert_eq!(timing.replacement_reason, "max_imports");
     assert_eq!(timing.replacement_budget_status, "synchronous-no-overlap");
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after import policy restart");
 }
 
@@ -186,7 +186,7 @@ fn memory_bounded_policy_restarts_before_next_import() {
         stats.last_restart_reason,
         Some(LeanWorkerRestartReason::MaxImports { limit: 1 })
     );
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after import policy restart");
 }
 
@@ -205,7 +205,7 @@ fn idle_restart_policy_restarts_before_next_request() {
         Some(LeanWorkerRestartReason::Idle { limit, .. }) => assert_eq!(limit, idle_limit),
         other => panic!("expected idle restart reason, got {other:?}"),
     }
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after idle restart");
 }
 
@@ -233,7 +233,7 @@ fn rss_policy_restarts_or_records_unavailable_sample() {
             other => panic!("expected RSS restart reason, got {other:?}"),
         }
     }
-    let exit = worker.terminate().expect("worker terminates");
+    let exit = worker.shutdown().expect("worker terminates").exit;
     assert!(exit.success, "worker should exit cleanly after RSS policy check");
 }
 
@@ -276,7 +276,7 @@ fn child_crash_and_policy_restart_are_distinguishable() {
     worker.health().expect("first request succeeds");
     worker.health().expect("policy restart happens before second request");
     assert_eq!(worker.stats().max_request_restarts, 1);
-    let exit = worker.terminate().expect("policy worker terminates");
+    let exit = worker.shutdown().expect("policy worker terminates").exit;
     assert!(exit.success, "policy worker should exit cleanly");
 
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
@@ -308,7 +308,7 @@ fn missing_fixture_path_maps_to_capability_build_error() {
         }
         other => panic!("expected capability build error, got {other:?}"),
     }
-    let exit = worker.terminate().expect("worker terminates after typed error");
+    let exit = worker.shutdown().expect("worker terminates after typed error").exit;
     assert!(exit.success, "worker should stay alive after typed load error");
 }
 
