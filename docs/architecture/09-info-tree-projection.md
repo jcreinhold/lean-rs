@@ -60,9 +60,9 @@ worker's contribution is to make each per-file query's worst case predictable:
   `elaboration_micros` is 0.
 
 The remaining cross-query cost on a large scan is the *cold header re-import*: when the worker is recycled mid-scan by
-the RSS cap (`16-production-boundary.md`, memory cycling and restart policy), the replacement child must re-load the import
-closure from `.olean`, which for heavy closures can dominate a per-file query. That is RSS-policy behaviour, not a
-projection cost; mitigate it by building the project first or by capping the scan with the caller's `limit`, so the
+the RSS cap (`16-production-boundary.md`, memory cycling and restart policy), the replacement child must re-load the
+import closure from `.olean`, which for heavy closures can dominate a per-file query. That is RSS-policy behaviour, not
+a projection cost; mitigate it by building the project first or by capping the scan with the caller's `limit`, so the
 worker re-imports a closure once and answers many files against it before the next cycle.
 
 ## Proof-state locals rendering
@@ -98,10 +98,10 @@ candidate lands.
   source-text search when no enumerated tactic matches.
 - **`Entry`**: the goal state *before any tactic runs* — the pristine entry goal of the proof. It anchors on the first
   enumerated tactic's pre-state (so the declaration must have at least one elaborated tactic) and uses placement
-  `before`: the candidate is spliced *before* the first tactic, aligned to that tactic's column at the start of its line,
-  so a from-scratch tactic block elaborates against the untouched goal. The original tactics follow below the inserted
-  span; once the candidate closes the goal their "no goals" errors fall *outside* the candidate's body span and are
-  reported as downstream, not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after` (the
+  `before`: the candidate is spliced *before* the first tactic, aligned to that tactic's column at the start of its
+  line, so a from-scratch tactic block elaborates against the untouched goal. The original tactics follow below the
+  inserted span; once the candidate closes the goal their "no goals" errors fall *outside* the candidate's body span and
+  are reported as downstream, not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after` (the
   entry goal is unchanged, since nothing has run).
 
 This closes a trap at the `Default` position: `proof_state`'s `goals_before` shows the pristine entry goal, but a
@@ -118,8 +118,8 @@ signal is authoritative:
 
 1. **In-Lean structural screen (Layer A).** Before any renderer dereferences a captured proof state, a *total* predicate
    walks the goal's target and local-context types for metavariables and checks each against `MetavarContext.findDecl?`
-   (the `Option`-returning total query, never the pure-`panic!` `getDecl`). A goal that references a missing mvar renders
-   as `<goal unavailable: elaboration degraded under resource pressure>`, and `verificationFacts` skips the
+   (the `Option`-returning total query, never the pure-`panic!` `getDecl`). A goal that references a missing mvar
+   renders as `<goal unavailable: elaboration degraded under resource pressure>`, and `verificationFacts` skips the
    `unresolvedGoals` and `collectAxioms` walks, leaving `axioms_available = false`. The status router then maps a
    degraded target to `BudgetExceeded`. This prevents the common, directly-reachable abort with no respawn. It is
    best-effort, not a soundness boundary — a dangling mvar reachable only through delayed-assignment machinery can still

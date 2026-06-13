@@ -17,11 +17,9 @@ Run:
 cargo xtest
 ```
 
-`cargo xtest` is a workspace alias for `cargo nextest run --workspace`; use
-`cargo xtest-ci` for `cargo nextest run --workspace --profile ci`. Cargo
-configuration cannot replace the built-in `cargo test` subcommand, so the repo
-also rejects full-session host imports when they are started from a same-process
-libtest binary.
+`cargo xtest` is a workspace alias for `cargo nextest run --workspace`; use `cargo xtest-ci` for
+`cargo nextest run --workspace --profile ci`. Cargo configuration cannot replace the built-in `cargo test` subcommand,
+so the repo also rejects full-session host imports when they are started from a same-process libtest binary.
 
 Doctests are not picked up by nextest:
 
@@ -41,15 +39,12 @@ cargo check --profile profiling -p lean-rs-profiling --bins
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps
-concurrent test processes at **1**. The workspace's
-[`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`,
-`RUST_TEST_THREADS=1`, `LEAN_RS_NUM_THREADS=1`, and a default
-`LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
-defaults make normal `cargo nextest`, worker examples, and profiling examples
-use the local low-memory shape without manual shell exports. Focused
-same-process `cargo test` runs that open full host sessions now fail before
-Lean import unless the developer explicitly opts into that risk.
+The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **1**. The
+workspace's [`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
+`LEAN_RS_NUM_THREADS=1`, and a default `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
+defaults make normal `cargo nextest`, worker examples, and profiling examples use the local low-memory shape without
+manual shell exports. Focused same-process `cargo test` runs that open full host sessions now fail before Lean import
+unless the developer explicitly opts into that risk.
 
 | Knob                            | Effect                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
@@ -67,22 +62,17 @@ cargo test -p lean-rs-host session_leak_loop
 cargo test -p lean-rs-host --test session_leak_loop
 ```
 
-Those commands can execute multiple fresh full-session imports inside one Rust
-test harness process. The post-reduction fixture import still retains about
-1.95 GB of compacted `.olean` region data, and the second same-process fresh
-import can move RSS into multi-GiB territory. The host crate now rejects these
-same-process full-session imports with a typed resource-exhausted error before
-Lean import starts. Use
-`cargo nextest run -p lean-rs-host --test session_leak_loop` for process
-isolation, or set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1` only for one exact
-debug test with an explicit local memory budget.
+Those commands can execute multiple fresh full-session imports inside one Rust test harness process. The post-reduction
+fixture import still retains about 1.95 GB of compacted `.olean` region data, and the second same-process fresh import
+can move RSS into multi-GiB territory. The host crate now rejects these same-process full-session imports with a typed
+resource-exhausted error before Lean import starts. Use `cargo nextest run -p lean-rs-host --test session_leak_loop` for
+process isolation, or set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1` only for one exact debug test with an explicit local
+memory budget.
 
-Ignored import-heavy diagnostics add a second opt-in:
-`LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1`. This prevents accidental
-`--include-ignored` runs from executing long fresh-import loops in one test
-process. The ignored loops remain available for sanitizer or explicitly
-budgeted diagnostics; routine coverage comes from nextest-isolated small tests
-and worker/pool checks.
+Ignored import-heavy diagnostics add a second opt-in: `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1`. This prevents accidental
+`--include-ignored` runs from executing long fresh-import loops in one test process. The ignored loops remain available
+for sanitizer or explicitly budgeted diagnostics; routine coverage comes from nextest-isolated small tests and
+worker/pool checks.
 
 Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
 `LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
@@ -123,16 +113,13 @@ per-session refcounts but cannot reclaim what Lean's process-global tables hold.
 machine or CI runner with limited memory OOMs (observed: macOS `memorystatus` kills the process at ~30 GB compressed
 memory).
 
-`cargo nextest run` runs each test in its own process, so cumulative Lean state resets at every process boundary.
-The same memory fact applies outside tests: long-running applications should use the worker crates with restart/RSS
-policy, or a same-process `SessionPool` with a fresh-import memory policy, when they may open many distinct import
-sets.
+`cargo nextest run` runs each test in its own process, so cumulative Lean state resets at every process boundary. The
+same memory fact applies outside tests: long-running applications should use the worker crates with restart/RSS policy,
+or a same-process `SessionPool` with a fresh-import memory policy, when they may open many distinct import sets.
 
-The host-session guard is intentionally narrow: it only blocks
-`LeanCapabilities::session`, `session_with_profile`, and `profiling_session`
-from Cargo/libtest binaries. It does not affect normal `cargo run` profiling
-commands, worker child processes, bracketed no-extension queries, or nextest
-runs.
+The host-session guard is intentionally narrow: it only blocks `LeanCapabilities::session`, `session_with_profile`, and
+`profiling_session` from Cargo/libtest binaries. It does not affect normal `cargo run` profiling commands, worker child
+processes, bracketed no-extension queries, or nextest runs.
 
 ## Why not fix the cumulative growth instead
 

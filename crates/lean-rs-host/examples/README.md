@@ -6,8 +6,8 @@ consumer project to a working integration.
 
 For long-running production hosts, start with the worker-pool pattern in
 [`docs/production-hosting.md`](../../../docs/production-hosting.md): bounded workers, total and per-worker RSS budgets,
-memory-bounded child cycling, warm session reuse, and batched repeated work. The same-process examples remain useful
-for focused services and diagnostics, but they are not the safe default for unbounded import-heavy workloads.
+memory-bounded child cycling, warm session reuse, and batched repeated work. The same-process examples remain useful for
+focused services and diagnostics, but they are not the safe default for unbounded import-heavy workloads.
 
 Five focused examples, one end-to-end tour, and one RSS reproducer. Each focused example sticks to one verb so a reader
 can scan it in a minute and reach for the matching crate API by analogy.
@@ -215,15 +215,14 @@ LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session
 `session_reuse=...`, and `checkpoint=<stage> rss_kib=<u64>`.
 
 Defaults are bounded. Raise `LEAN_RS_LONG_SESSION_IMPORTS` only after the previous run's peak RSS is acceptable, and set
-`LEAN_RS_LONG_SESSION_MAX_RSS_KIB` to make the example refuse the next fresh import before crossing a local ceiling.
-The same workload is wrapped by `profiling/scripts/profile_memory.sh long-session` and
+`LEAN_RS_LONG_SESSION_MAX_RSS_KIB` to make the example refuse the next fresh import before crossing a local ceiling. The
+same workload is wrapped by `profiling/scripts/profile_memory.sh long-session` and
 `profiling/scripts/profile_with_samply.sh long-session`.
 
 This example is intentionally not a production soak test and not a Criterion bench. It answers a retained-memory
 question over minutes and lifetime boundaries; Criterion answers per-iteration latency questions. The production
 worker-pool pattern lives in [`docs/production-hosting.md`](../../../docs/production-hosting.md), and the measured model
-lives in
-[`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
+lives in [`docs/safety/long-session-memory.md`](../../../docs/safety/long-session-memory.md).
 
 ## Same-process callback interop
 

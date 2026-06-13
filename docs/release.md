@@ -126,8 +126,8 @@ the publish step is idempotent, so recovery does **not** burn a version:
 2. **If re-running the tag job is undesirable or unavailable** (the heavy `verify` matrix already passed and you want a
    light publish-only run, or the tag job's environment is wedged), run the `release-recover.yml` workflow (Actions →
    "Release recovery" → Run workflow) with the same `version` (e.g. `0.2.3`). It runs the same idempotent publish script
-   on a fresh checkout and ensures the GitHub Release exists. The workspace version on the checked-out ref must equal the
-   `version` input, since it uploads the crate contents on that ref. `dry_run: true` verify-builds without uploading
+   on a fresh checkout and ensures the GitHub Release exists. The workspace version on the checked-out ref must equal
+   the `version` input, since it uploads the crate contents on that ref. `dry_run: true` verify-builds without uploading
    (subject to the dry-run interdependency caveat above).
 
 Only when a crate's *contents* must change (a genuine build break, not a propagation race) do you bump the patch

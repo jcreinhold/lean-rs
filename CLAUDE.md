@@ -55,10 +55,10 @@ the rationale and the per-test debugging escape hatch.
 
 - **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
   signature in the active Lean header, extend the extern declarations in the appropriate
-  `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist in `crates/lean-rs-abi/src/symbols.rs`.
-  To extend the supported Lean toolchain window, follow `docs/bump-toolchain.md`: add a row to
-  `crates/lean-rs-abi/src/supported.rs` (`SUPPORTED_TOOLCHAINS`), a CI matrix cell, and (if layout shifted) the
-  `pub(crate) LeanObjectRepr` in `crates/lean-rs-sys/src/repr.rs`.
+  `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist in
+  `crates/lean-rs-abi/src/symbols.rs`. To extend the supported Lean toolchain window, follow `docs/bump-toolchain.md`:
+  add a row to `crates/lean-rs-abi/src/supported.rs` (`SUPPORTED_TOOLCHAINS`), a CI matrix cell, and (if layout shifted)
+  the `pub(crate) LeanObjectRepr` in `crates/lean-rs-sys/src/repr.rs`.
 - **`lean-rs-sys` is published with opaque public types.** Downstream users see `lean_object` as `[u8; 0] + PhantomData`
   and reach state only through `pub unsafe fn` helpers. Never expose `LeanObjectRepr` outside the crate; never add
   public `pub` fields to FFI types. Every `unsafe { ... }` block carries a `// SAFETY:` comment; every `pub unsafe fn`

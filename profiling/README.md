@@ -45,9 +45,12 @@ cargo run --profile profiling -p lean-rs-profiling --bin generate_report
 - `long-session-fresh`: same-process fresh imports with RSS/import guardrails.
 - `long-session-pooled`: same-process pooled reuse after one bounded warm import.
 - `long-session-steady`: same-process steady query/elaboration loop after one bounded import.
-- `long-session-matrix`: import-mode matrix for `exported-public`, `server`, `private`, explicit `full-private-compat`, and exported no-extension diagnostics.
-- `long-session-bracketed`: one-shot declaration metadata query under `loadExts := false` with `freeRegions` after the bracket.
-- `long-session-derived`: full-session query probes that report source-range, pretty-printing, proof-search, parser/elaborator, module-snapshot, and lazy discriminator initialization work.
+- `long-session-matrix`: import-mode matrix for `exported-public`, `server`, `private`, explicit `full-private-compat`,
+  and exported no-extension diagnostics.
+- `long-session-bracketed`: one-shot declaration metadata query under `loadExts := false` with `freeRegions` after the
+  bracket.
+- `long-session-derived`: full-session query probes that report source-range, pretty-printing, proof-search,
+  parser/elaborator, module-snapshot, and lazy discriminator initialization work.
 - `worker-cycling`: worker-child restart behavior under a small `max_imports` budget.
 - `pool-memory`: worker-pool admission, per-worker RSS policy, and reuse counters.
 - `mathlib-scale`: optional larger worker-pool workload; set `LEAN_RS_MATHLIB_ROOT` to use a real mathlib checkout.
@@ -101,8 +104,8 @@ LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
 ```
 
 Do not use same-process fresh-import loops as a production soak test. Long-running hosts should use worker children with
-`LeanWorkerRestartPolicy::memory_bounded` and `LeanWorkerPoolConfig` RSS ceilings.
-See [`docs/production-hosting.md`](../docs/production-hosting.md) for the caller-facing configuration and error-handling
+`LeanWorkerRestartPolicy::memory_bounded` and `LeanWorkerPoolConfig` RSS ceilings. See
+[`docs/production-hosting.md`](../docs/production-hosting.md) for the caller-facing configuration and error-handling
 pattern; use this README when changing or recapturing the measurements behind it.
 
 The worker rebaseline collector records those ceilings explicitly instead of relying on example defaults:
@@ -129,8 +132,8 @@ Pool workloads print `session_reuse=...` rows. The Markdown report renders them 
 hits, key misses, distinct keys, fresh imports avoided, and miss reasons. These rows are separate from admission rows:
 reuse rows explain whether an equivalent request used a warm session, while admission rows explain whether cold work was
 allowed. Session keys preserve Lean import order and include only session-safety facts such as canonical roots, import
-profile, metadata expectation, toolchain identity, and manifest identity where applicable; they are not downstream result
-cache keys.
+profile, metadata expectation, toolchain identity, and manifest identity where applicable; they are not downstream
+result cache keys.
 
 Worker and pool workloads also print `replacement=...` rows. The Markdown report renders them under **Worker
 Replacement** with synchronous replacement attempts, successes, failures, spawn/handshake time, capability-load time,
@@ -139,17 +142,17 @@ status. Prompt 24 keeps replacement synchronous and records `synchronous-no-over
 prewarming remain deferred until measurements show a latency need and total child RSS budget can admit temporary
 overlap.
 
-Pool workloads print `batch=...` rows for the warm proof-agent module-query batch path. The Markdown report renders
-them under **Warm Batch Workloads** with selector counts, request/import deltas, elapsed time, parent/child RSS, bounded
-item counts, item-level failures, truncation status, and worker frame count when available. Prompt 25 reuses the
-existing `process_module_query_batch` API through one warm pool lease; it reduces request/session churn and does not
-reclaim Lean memory, avoid cold import cost, or replace worker cycling. Worker frame counts currently report
-`unavailable` because the protocol layer does not expose frame counters.
+Pool workloads print `batch=...` rows for the warm proof-agent module-query batch path. The Markdown report renders them
+under **Warm Batch Workloads** with selector counts, request/import deltas, elapsed time, parent/child RSS, bounded item
+counts, item-level failures, truncation status, and worker frame count when available. Prompt 25 reuses the existing
+`process_module_query_batch` API through one warm pool lease; it reduces request/session churn and does not reclaim Lean
+memory, avoid cold import cost, or replace worker cycling. Worker frame counts currently report `unavailable` because
+the protocol layer does not expose frame counters.
 
-`collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker
-run stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate
-whose peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative
-and normally skips the two-import candidate on local machines. Historical 2026-06-08 data at a 2 GiB cap showed
+`collect_baseline_quick` first measures `max_imports=1`. It only measures `max_imports=2` when the one-import worker run
+stays at or below 70% of the configured 1.5 GiB budget, and the Markdown report recommends the largest candidate whose
+peak RSS stays within the budget. With the default 1,572,864 KiB cap, the 70% gate is intentionally conservative and
+normally skips the two-import candidate on local machines. Historical 2026-06-08 data at a 2 GiB cap showed
 `max_imports=1` peaking at 1,194,368 KiB and `max_imports=2` peaking at 3,236,416 KiB.
 
 The import matrix records narrower exported/server attempts, the selected default `private` profile, and explicit
@@ -159,11 +162,11 @@ environment shape and does not reclaim compacted regions.
 The bracketed lightweight workload is the exception by construction: it uses `loadExts := false`, returns only
 serialized Rust-owned data, and reports whether `freeRegions` ran before Rust receives the result.
 
-The derived-index workload stays on normal full sessions with `loadExts := true`. It does not reclaim compacted
-regions. It records whether a requested query phase touched derived work such as declaration-range lookup,
-notation-aware pretty printing, proof-search facts, parser/elaborator execution, module snapshot construction, or
-Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree` laziness is derived-index laziness
-over already imported module data; it is not lazy `.olean` loading and it does not make compacted regions unloadable.
+The derived-index workload stays on normal full sessions with `loadExts := true`. It does not reclaim compacted regions.
+It records whether a requested query phase touched derived work such as declaration-range lookup, notation-aware pretty
+printing, proof-search facts, parser/elaborator execution, module snapshot construction, or Lean's
+`lazy discriminator import initialization` profiler span. `LazyDiscrTree` laziness is derived-index laziness over
+already imported module data; it is not lazy `.olean` loading and it does not make compacted regions unloadable.
 
 `LEAN_RS_LEAN_MAX_MEMORY_KIB` can be set for worker/profiling runs as a Lean runtime fail-fast guardrail. It is not a
 cleanup mechanism and does not replace worker cycling; it only lets Lean's periodic memory checks throw before the OS
@@ -171,5 +174,5 @@ terminates the process.
 
 A local capped probe on macOS aarch64 with Lean 4.31.0-rc1, one `LeanRsFixture.Handles` import, reported
 `bracketed_after_lean_import_1=1010720 KiB`, `bracketed_after_query_before_free_1=1032032 KiB`,
-`bracketed_after_free_1=108048 KiB`, `imported_bytes=1955323616`, `compacted_regions=9033`, and
-`free_regions_ran=true`. Treat these as raw local measurements, not portable RSS targets.
+`bracketed_after_free_1=108048 KiB`, `imported_bytes=1955323616`, `compacted_regions=9033`, and `free_regions_ran=true`.
+Treat these as raw local measurements, not portable RSS targets.

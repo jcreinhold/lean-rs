@@ -36,8 +36,8 @@ Changing only one of them can reintroduce the failure mode the worker boundary i
 ## Why This Shape
 
 Rust cannot reclaim fully loaded Lean import state in-process. Full host sessions use `loadExts := true`; after that,
-Lean environment extensions may retain references into compacted `.olean` regions, so `Environment.freeRegions` is not
-a safe cleanup tool. The reset boundary for those sessions is process exit.
+Lean environment extensions may retain references into compacted `.olean` regions, so `Environment.freeRegions` is not a
+safe cleanup tool. The reset boundary for those sessions is process exit.
 
 Rust can still control the operational shape:
 
@@ -51,9 +51,9 @@ Rust can still control the operational shape:
 | Reporting | Surface `ResourceExhausted` facts instead of returning empty or misleading Lean results. |
 
 The checked-in local defaults use one worker, one fresh full-session import per child, and a 1,572,864 KiB child RSS
-budget. Treat those numbers as local operating defaults, not portable safety constants. Larger hosts should measure
-with their own cap and set `max_total_child_rss_kib = max_workers * per_worker_rss_ceiling_kib` when they intentionally
-allow multiple local children.
+budget. Treat those numbers as local operating defaults, not portable safety constants. Larger hosts should measure with
+their own cap and set `max_total_child_rss_kib = max_workers * per_worker_rss_ceiling_kib` when they intentionally allow
+multiple local children.
 
 ## Handling Resource Exhaustion
 
@@ -82,14 +82,14 @@ Treat `work_entered_child=false` as a hard admission refusal. Retry only after c
 equivalent warm session key, or cycling according to policy. Treat `work_entered_child=true` as interrupted or degraded
 work; module-query batches keep per-selector failures such as budget exhaustion in the returned batch facts.
 
-Same-process `SessionPool` refusals use `LeanDiagnosticCode::ResourceExhausted` and attach
-`ResourceExhaustedFacts` to the host failure. The same rule applies: do not convert resource exhaustion into
-`not_found`, an empty result, or a generic protocol error.
+Same-process `SessionPool` refusals use `LeanDiagnosticCode::ResourceExhausted` and attach `ResourceExhaustedFacts` to
+the host failure. The same rule applies: do not convert resource exhaustion into `not_found`, an empty result, or a
+generic protocol error.
 
 ## Diagnostic Same-Process Hosts
 
-Same-process host sessions remain useful for embedded tools, examples, and focused diagnostics. They are not the
-default pattern for unbounded long-running import-heavy services.
+Same-process host sessions remain useful for embedded tools, examples, and focused diagnostics. They are not the default
+pattern for unbounded long-running import-heavy services.
 
 Use `SessionPool` with `SessionPoolMemoryPolicy` when the host must stay in-process, and configure a fresh-import and
 RSS budget before cache misses can call `Lean.importModules`. `SessionPoolMemoryPolicy::disabled()` and
@@ -97,8 +97,8 @@ RSS budget before cache misses can call `Lean.importModules`. `SessionPoolMemory
 memory boundary.
 
 Bracketed lightweight queries are the only in-process path that can call `Environment.freeRegions`, and only because
-they import with `loadExts := false` and return fully Rust-owned serialized data before the bracket exits. They are
-not a replacement for normal full sessions.
+they import with `loadExts := false` and return fully Rust-owned serialized data before the bracket exits. They are not
+a replacement for normal full sessions.
 
 ## Profiling Commands
 

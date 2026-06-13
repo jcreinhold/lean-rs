@@ -269,7 +269,7 @@ object's header via a sys predicate (`lean_is_scalar`, `lean_is_ctor`, `lean_obj
 | `abi/except.rs` | 2 | per-block | `Obj::from_owned_raw` (×2) | invariant is "`c` is a `lean_obj_res` owning one refcount per Lake's contract"—established by the typed function-pointer cast in `LeanExported::call` |
 | `abi/structure.rs` | 24 | line 38 | `lean_alloc_ctor`, `lean_ctor_obj_cptr`, `lean_ctor_scalar_cptr`, `lean_ctor_num_objs`, `lean_ctor_get_uint8`, `lean_ctor_get_uint64`, `lean_object_data_byte_size`, `lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_unbox` | `ObjView` / `CtorView` perform borrow-only shape, tag, and scalar-tail reads with explicit bounds checks; `take_ctor_objects::<N>` reads field slots and pairs each `lean_inc` with the parent drop so returned `Obj`s own their refcounts |
 | `abi/traits.rs` | 1 | per-block line 162 | `Obj::from_owned_raw` | blanket `LeanAbi for Obj<'lean>` identity impl |
-| `abi/tests.rs` | 2 | per-block line 582 |—| borrowed-view pointer-equality assertion; no header deref |
+| `abi/tests.rs` | 2 | per-block line 582 |— | borrowed-view pointer-equality assertion; no header deref |
 
 ### Module—`crates/lean-rs/src/module/`
 

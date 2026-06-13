@@ -61,15 +61,14 @@ convention-agnostic.
 
 Raw `extern "C"` declarations for the curated subset of `lean.h` and the pure-Rust mirrors of `lean.h`'s `static inline`
 refcount helpers live in the published workspace crate `lean-rs-sys` (`crates/lean-rs-sys/`). Link-free ABI metadata,
-including the `REQUIRED_SYMBOLS` allowlist and supported-window table, lives in `lean-rs-abi`
-(`crates/lean-rs-abi/`). Publication matches every peer `*-sys` crate and gives advanced users a stable raw-FFI escape
-hatch without forcing metadata-only consumers to link Lean.
+including the `REQUIRED_SYMBOLS` allowlist and supported-window table, lives in `lean-rs-abi` (`crates/lean-rs-abi/`).
+Publication matches every peer `*-sys` crate and gives advanced users a stable raw-FFI escape hatch without forcing
+metadata-only consumers to link Lean.
 
 There is no external `lean-sys` dependency. The split between `lean-rs-abi`, `lean-rs-sys`, and `lean-toolchain`:
 
-- **`lean-rs-abi`** owns link-free ABI/toolchain metadata: the `REQUIRED_SYMBOLS` allowlist,
-  `SUPPORTED_TOOLCHAINS` window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, and
-  `LEAN_HEADER_DIGEST`.
+- **`lean-rs-abi`** owns link-free ABI/toolchain metadata: the `REQUIRED_SYMBOLS` allowlist, `SUPPORTED_TOOLCHAINS`
+  window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, and `LEAN_HEADER_DIGEST`.
 - **`lean-rs-sys`** owns runtime FFI: extern declarations split by category, the pure-Rust refcount mirrors, opaque
   public types, crate-private layout structs, and the `cargo:rustc-link-*` directives for dynamic/static Lean runtime
   linking. It re-exports `lean-rs-abi` metadata for compatibility.
@@ -83,13 +82,12 @@ See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the rationale behind `lea
 
 The probe lives in the crates that actually have a toolchain at build time, not in the static `lean-rs-abi`. The build
 scripts of `lean-rs-sys` (which links `libleanshared`) and `lean-toolchain` (the discovery crate) each compute a SHA-256
-over the discovered `lean.h` and look it up in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A miss against an *installed* toolchain fails the
-build with a bounded diagnostic naming the discovered digest and the full window; `lean-rs-sys` additionally emits
-`cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so per-version divergences can be `#[cfg]`-gated. Both bake the
-resolved version into `LEAN_RESOLVED_VERSION` for runtime inspection. `lean-toolchain` degrades to the latest supported
-window entry when no toolchain is present (so link-free downstream crates build without Lean); `lean-rs-sys`, which must
-link Lean, has no such fallback.
+over the discovered `lean.h` and look it up in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A
+miss against an *installed* toolchain fails the build with a bounded diagnostic naming the discovered digest and the
+full window; `lean-rs-sys` additionally emits `cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so per-version
+divergences can be `#[cfg]`-gated. Both bake the resolved version into `LEAN_RESOLVED_VERSION` for runtime inspection.
+`lean-toolchain` degrades to the latest supported window entry when no toolchain is present (so link-free downstream
+crates build without Lean); `lean-rs-sys`, which must link Lean, has no such fallback.
 
 The digest's two jobs: (1) refuse to compile the Rust refcount mirrors against a `lean.h` whose layout has not been
 audited; (2) refuse to silently link a consumer's binary against a different `libleanshared` than the one whose ABI the

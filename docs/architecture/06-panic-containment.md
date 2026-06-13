@@ -174,22 +174,21 @@ seconds on Linux runners with `apport`.
 
 ## Read-only resolution queries are inside this boundary too
 
-A read-only query (`verify_declaration`, `proof_state`, `find_references`, …) does not mutate any committed
-environment, so it is tempting to treat it as recoverable: surely *resolving a name* could never need to crash
-the child. It can. A resolution query still drives Lean elaboration and renders the resulting `MessageData`
-(`serializeMessages` → `MessageData.toString`), and any of those steps can hit a Lean `panic!` — for example
-`Lean.MetavarContext.getDecl`'s "unknown metavariable" assertion. Under the worker child's
-`LEAN_ABORT_ON_PANIC=1` that `panic!` is an `abort()`, not a catchable Lean exception: the `try`/`catch` blocks
-around projection rendering (e.g. `renderGoal` in `InfoTree.lean`) catch `Exception`, never a panic. The
-soundness argument above is the reason this cannot be relaxed query-by-query: disabling abort-on-panic would let
-the `panic!` return an `Inhabited` default `MetavarDecl`/`Declaration` instead, and a *defaulted* value rendered
-into a verdict is indistinguishable from a real one — a read-only query would then silently report fabricated
-candidates or a fabricated "verified" status. A visible child abort that the supervisor restarts and retries is
-strictly safer than a quiet wrong answer.
+A read-only query (`verify_declaration`, `proof_state`, `find_references`, …) does not mutate any committed environment,
+so it is tempting to treat it as recoverable: surely *resolving a name* could never need to crash the child. It can. A
+resolution query still drives Lean elaboration and renders the resulting `MessageData` (`serializeMessages` →
+`MessageData.toString`), and any of those steps can hit a Lean `panic!` — for example `Lean.MetavarContext.getDecl`'s
+"unknown metavariable" assertion. Under the worker child's `LEAN_ABORT_ON_PANIC=1` that `panic!` is an `abort()`, not a
+catchable Lean exception: the `try`/`catch` blocks around projection rendering (e.g. `renderGoal` in `InfoTree.lean`)
+catch `Exception`, never a panic. The soundness argument above is the reason this cannot be relaxed query-by-query:
+disabling abort-on-panic would let the `panic!` return an `Inhabited` default `MetavarDecl`/`Declaration` instead, and a
+*defaulted* value rendered into a verdict is indistinguishable from a real one — a read-only query would then silently
+report fabricated candidates or a fabricated "verified" status. A visible child abort that the supervisor restarts and
+retries is strictly safer than a quiet wrong answer.
 
-The ambiguity path does not reach this abort. Reproducing the candidate trigger deterministically on `v4.31.0-rc1` —
-two `open` namespaces exporting the same short name, a bare reference forcing Lean's "ambiguous, possible
-interpretations" error, the offending message rendered — does **not** abort the child:
+The ambiguity path does not reach this abort. Reproducing the candidate trigger deterministically on `v4.31.0-rc1` — two
+`open` namespaces exporting the same short name, a bare reference forcing Lean's "ambiguous, possible interpretations"
+error, the offending message rendered — does **not** abort the child:
 `crates/lean-rs-worker-child/tests/typed_session.rs::verify_declaration_ambiguous_open_reference_does_not_restart_child`
 asserts the verdict resolves with both candidates, the ambiguity diagnostic is rendered, and
 `worker.stats().restarts == 0`. An abort observed alongside an ambiguous reference is incidental metavar churn (for
@@ -200,16 +199,15 @@ case.
 
 ### A reachable abort: the proof-state walk under memory pressure
 
-A different, reproducible path does reach the same `Lean.MetavarContext.getDecl … unknown metavariable` abort:
-a `verify_declaration` / `proof_state` query whose captured proof state references a metavariable whose decl was
-**evicted under memory pressure**. Unlike the ambiguity case, this one is a real defect of the projection path — the
-proof-state walk (`renderGoal` / `Meta.ppGoal`, and locals collection via
-`instantiateMVars`) reaches the pure `getDecl` on a transitively-referenced dangling mvar. The dangling mvar lives in
-the InfoTree-captured `mctx`, not in the final environment constant, so a constant-only gate would neither catch nor
-explain it.
+A different, reproducible path does reach the same `Lean.MetavarContext.getDecl … unknown metavariable` abort: a
+`verify_declaration` / `proof_state` query whose captured proof state references a metavariable whose decl was **evicted
+under memory pressure**. Unlike the ambiguity case, this one is a real defect of the projection path — the proof-state
+walk (`renderGoal` / `Meta.ppGoal`, and locals collection via `instantiateMVars`) reaches the pure `getDecl` on a
+transitively-referenced dangling mvar. The dangling mvar lives in the InfoTree-captured `mctx`, not in the final
+environment constant, so a constant-only gate would neither catch nor explain it.
 
-Because the panic is uncatchable, the containment boundary is still the process — but a read-only query that aborts
-on resource pressure is a poor contract, so this case is addressed at three layers, each owning a different volatile
+Because the panic is uncatchable, the containment boundary is still the process — but a read-only query that aborts on
+resource pressure is a poor contract, so this case is addressed at three layers, each owning a different volatile
 decision (the layering and the degraded-verdict semantics are detailed in
 [`09-info-tree-projection.md`](09-info-tree-projection.md)):
 
@@ -220,14 +218,14 @@ decision (the layering and the degraded-verdict semantics are detailed in
 - **Supervisor verdict-on-abort.** `worker_verify_declaration` and `worker_process_module_query_batch` catch a
   `ChildPanicOrAbort` during the request and return a synthesized `BudgetExceeded` verdict (verify) or per-selector
   degraded batch outcome, recording a `ChildAbort` restart (`stable_cause = "child_abort"`). This is the authoritative
-  half: it always yields a verdict for any residual transitive-mvar abort the screen misses, and the next call is
-  served by a fresh child. It deliberately expands the panic-containment contract into `lean-rs-worker-parent`,
-  because an uncatchable `panic!` can only be made non-fatal at the process boundary.
+  half: it always yields a verdict for any residual transitive-mvar abort the screen misses, and the next call is served
+  by a fresh child. It deliberately expands the panic-containment contract into `lean-rs-worker-parent`, because an
+  uncatchable `panic!` can only be made non-fatal at the process boundary.
 - **Worker-child RSS taint** for the *silent* degradation (a bare `NotFound` with no abort and no diagnostic); see
   [`09-info-tree-projection.md`](09-info-tree-projection.md).
 
-This does not contradict the ambiguity finding above: the ambiguity path has no reachable panic and gets no guard;
-the proof-state-under-pressure path does, and gets the layered defence. Both conclusions are reached the same way —
+This does not contradict the ambiguity finding above: the ambiguity path has no reachable panic and gets no guard; the
+proof-state-under-pressure path does, and gets the layered defence. Both conclusions are reached the same way —
 reproduce, then guard only what is actually reachable.
 
 ## References

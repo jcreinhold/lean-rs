@@ -61,9 +61,8 @@ The default workload is bounded so it can be run on a developer machine without 
   short steady-state pause.
 
 The old crash-shaped workload remains opt-in: raise `LEAN_RS_LONG_SESSION_IMPORTS`, `LEAN_RS_LONG_SESSION_BULK`, and
-`LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Set
-`LEAN_RS_LONG_SESSION_MAX_RSS_KIB` to make the same-process pool refuse the next fresh import before crossing a local
-RSS ceiling.
+`LEAN_RS_LONG_SESSION_ELAB` only after the previous run's peak RSS is acceptable. Set `LEAN_RS_LONG_SESSION_MAX_RSS_KIB`
+to make the same-process pool refuse the next fresh import before crossing a local RSS ceiling.
 
 Environment overrides:
 
@@ -113,15 +112,15 @@ region.
 Profiling reports also show the gap between Lean-attributed compacted-region bytes and process RSS when RSS is
 available. That gap is not a leak proof or a safety proof. Allocator arenas, initialized environment extensions,
 interned names, task/runtime state, native module globals, Rust heap data, and ordinary Lean heap objects can all live
-outside compacted `.olean` regions. On unsupported or noisy platforms, RSS remains best-effort and should be reported
-as unavailable or approximate.
+outside compacted `.olean` regions. On unsupported or noisy platforms, RSS remains best-effort and should be reported as
+unavailable or approximate.
 
 Normal host sessions now default to the `Private` full-session profile: `importAll := false`, import level `.private`,
 and `loadExts := true`. This is a pre-1.0 behavior correction for unacceptable memory growth, not a
 compatibility-preservation exercise. `ExportedPublic` and `Server` are narrower on paper, but current fixture imports
 are non-`module` files and Lean rejects exported/server-level imports of them with
-`cannot import non-\`module\` ... from \`module\``. The old behavior remains available only as the explicit
-`FullPrivateCompat` profile: `importAll := true`, import level `.private`, and `loadExts := true`.
+`cannot import non-module ... from module`. The old behavior remains available only as the explicit
+` FullPrivateCompat ` profile: ` importAll := true `, import level `.private `, and ` loadExts := true`.
 
 The import-mode matrix compares the same fixture imports across:
 
@@ -148,22 +147,21 @@ Local capped matrix run on 2026-06-07, macOS aarch64, Lean 4.31.0-rc1, `LEAN_RS_
 | `private` | passed | 3809744 | `false` | `.private` | `true` | 2259 | 9033 | 1017 | 1955323616 | 203924 | 119 | 1732192 |
 | `full-private-compat` | passed, then RSS guard refused the next import | 5781488 | `true` | `.private` | `true` | 2259 | 9033 | 0 | 1955323616 | 203924 | 119 | 1732192 |
 
-`loadExts := true` remains required for full host-service semantics. It also means
-`Environment.freeRegions` is not a safe reclamation tool after import: persistent extension data may still reference
-objects in those compacted regions. This baseline records the environment shape that caused a RSS checkpoint; it does
-not reclaim regions.
+`loadExts := true` remains required for full host-service semantics. It also means `Environment.freeRegions` is not a
+safe reclamation tool after import: persistent extension data may still reference objects in those compacted regions.
+This baseline records the environment shape that caused a RSS checkpoint; it does not reclaim regions.
 
 ## Bracketed Lightweight Queries
 
-`LeanCapabilities::bracketed_import_query` is a separate experimental path for one-shot declaration metadata queries.
-It imports with `importAll := false`, import level `.private`, and `loadExts := false`, serializes declaration
-existence, declaration kind, module ownership, raw type text, and import stats, and then calls
-`Environment.freeRegions` before returning to Rust. The returned values are owned Rust data; no `Environment`, `Expr`,
-`ConstantInfo`, `Name`, extension state, or capability handle escapes the bracket.
+`LeanCapabilities::bracketed_import_query` is a separate experimental path for one-shot declaration metadata queries. It
+imports with `importAll := false`, import level `.private`, and `loadExts := false`, serializes declaration existence,
+declaration kind, module ownership, raw type text, and import stats, and then calls `Environment.freeRegions` before
+returning to Rust. The returned values are owned Rust data; no `Environment`, `Expr`, `ConstantInfo`, `Name`, extension
+state, or capability handle escapes the bracket.
 
-This path is deliberately not a `LeanSession` replacement. Elaboration, parser-backed source/range queries,
-proof-state queries, notation-aware pretty-printing, and capability workflows remain full-session operations because
-they require loaded environment extensions. The profiling workload `bracketed-lightweight` prints
+This path is deliberately not a `LeanSession` replacement. Elaboration, parser-backed source/range queries, proof-state
+queries, notation-aware pretty-printing, and capability workflows remain full-session operations because they require
+loaded environment extensions. The profiling workload `bracketed-lightweight` prints
 `bracketed_import_stats=... free_regions_ran=true` and RSS checkpoints for:
 
 - before import dispatch;
@@ -186,10 +184,10 @@ machines or operating systems.
 ## Derived Index Attribution
 
 Full sessions still import with `loadExts := true`, so they cannot use `Environment.freeRegions`. Derived-index
-attribution narrows a different cost: work derived from the already imported environment after a caller asks a query. The profiling workload
-`derived-indexes` prints `query_derived_work=...` rows for query phases such as cheap declaration inspection, raw and
-pretty statement rendering, opt-in proof-search facts, declaration search with and without source ranges, module
-proof-state queries, proof attempts, and declaration verification.
+attribution narrows a different cost: work derived from the already imported environment after a caller asks a query.
+The profiling workload `derived-indexes` prints `query_derived_work=...` rows for query phases such as cheap declaration
+inspection, raw and pretty statement rendering, opt-in proof-search facts, declaration search with and without source
+ranges, module proof-state queries, proof attempts, and declaration verification.
 
 Default declaration inspection no longer computes proof-search facts. A caller must explicitly request them with the
 inspection request's `proof_search` field. When the field is off, the returned proof-search facts say they were not
@@ -198,11 +196,11 @@ extension state by accident. Cheap attributes such as reducibility remain availa
 field; proof-search-derived attributes such as `simp`, `rw`, `instance`, and `class` are reported only when
 `proof_search` is requested.
 
-The derived-work rows distinguish source-range extension lookups, docstring lookups, raw type rendering,
-notation-aware pretty printing, proof-search fact collection, simp-extension lookup, parser/elaborator execution,
-module snapshot construction, and Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree`
-laziness is derived-index laziness over imported module data. It is not lazy `.olean` loading, does not reduce
-`env.header.regions`, and does not make compacted regions safe to free after `loadExts := true`.
+The derived-work rows distinguish source-range extension lookups, docstring lookups, raw type rendering, notation-aware
+pretty printing, proof-search fact collection, simp-extension lookup, parser/elaborator execution, module snapshot
+construction, and Lean's `lazy discriminator import initialization` profiler span. `LazyDiscrTree` laziness is
+derived-index laziness over imported module data. It is not lazy `.olean` loading, does not reduce `env.header.regions`,
+and does not make compacted regions safe to free after `loadExts := true`.
 
 Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LONG_SESSION_MODE=derived-indexes`,
 `LEAN_RS_LONG_SESSION_IMPORTS=1`, and `LEAN_RS_LONG_SESSION_MAX_RSS_KIB=2097152`:
@@ -221,10 +219,9 @@ Historical local capped probe on macOS aarch64 with Lean 4.31.0-rc1, `LEAN_RS_LO
 
 ## Measured Shape
 
-Post-reduction rebaseline on 2026-06-08, macOS aarch64, Lean 4.31.0-rc1, profiling profile,
-`LEAN_RS_NUM_THREADS=1`, and a local `2,097,152` KiB RSS budget. Current repo defaults are stricter:
-`test-threads=1`, `build.jobs=1`, `RUST_TEST_THREADS=1`, `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864`, and profiling RSS caps
-of 1,572,864 KiB.
+Post-reduction rebaseline on 2026-06-08, macOS aarch64, Lean 4.31.0-rc1, profiling profile, `LEAN_RS_NUM_THREADS=1`, and
+a local `2,097,152` KiB RSS budget. Current repo defaults are stricter: `test-threads=1`, `build.jobs=1`,
+`RUST_TEST_THREADS=1`, `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864`, and profiling RSS caps of 1,572,864 KiB.
 
 | Workload | Command/env shape | Status | Peak RSS KiB | Import profile | Imported bytes | Regions | Ext entries |
 | --- | --- | --- | ---: | --- | ---: | ---: | ---: |
@@ -344,9 +341,9 @@ those choices.
 
 Reuse imported environments. Keep a small `SessionPool` keyed by the canonical project root, ordered import set, and
 import profile, then run introspection, elaboration, kernel checks, and `MetaM` calls against pooled sessions. Import
-order is preserved deliberately; Lean imports are not sorted as a cache convenience. For same-process hosts that may see many distinct import
-sets, configure `SessionPoolMemoryPolicy` so cache-miss imports fail before the process crosses a fresh-import or RSS
-budget. Steady operations against a warm environment do not accumulate RSS.
+order is preserved deliberately; Lean imports are not sorted as a cache convenience. For same-process hosts that may see
+many distinct import sets, configure `SessionPoolMemoryPolicy` so cache-miss imports fail before the process crosses a
+fresh-import or RSS budget. Steady operations against a warm environment do not accumulate RSS.
 
 Avoid repeatedly creating fresh imported environments in one process. If a workload must sweep many distinct import
 sets, put a process boundary around the sweep: restart the worker after a bounded number of fresh imports. Sixty-four
@@ -360,13 +357,12 @@ import count or RSS ceiling.
 
 The worker crates provide that process-cycling policy. Their restart policy can cycle explicitly, before a configured
 request count, before a configured import-like request count, after an idle interval, or when a best-effort child RSS
-sample reaches a ceiling. Memory guardrail errors include the latest Lean import stats when a session has opened in
-that process, so an RSS refusal can be read next to the retained `.olean` region shape that preceded it.
+sample reaches a ceiling. Memory guardrail errors include the latest Lean import stats when a session has opened in that
+process, so an RSS refusal can be read next to the retained `.olean` region shape that preceded it.
 
-Worker children also accept `LEAN_RS_LEAN_MAX_MEMORY_KIB` as an opt-in Lean runtime memory limit. Lean checks this
-limit periodically and can throw before the OS kills the process. It is not reclamation: it does not free compacted
-regions, extension state, interned names, allocator arenas, or runtime globals, and process cycling remains the reset
-boundary.
+Worker children also accept `LEAN_RS_LEAN_MAX_MEMORY_KIB` as an opt-in Lean runtime memory limit. Lean checks this limit
+periodically and can throw before the OS kills the process. It is not reclamation: it does not free compacted regions,
+extension state, interned names, allocator arenas, or runtime globals, and process cycling remains the reset boundary.
 
 The worker memory reproducer is:
 
@@ -433,24 +429,22 @@ cargo run -p lean-rs-worker-child --example pool_memory_scheduling
 
 On the same run, the pool fixture used one worker, peaked at 419,616 KiB child RSS, and held the parent process around
 2,144 KiB to 3,456 KiB. Cold pool requests were roughly 215 ms; warm pool reuse was roughly 5-6 ms. The profiling rows
-named `admission=...` report cold-open attempts, admitted opens, typed refusals, observed concurrent cold opens, import-like
-requests, and RSS before/after admission. Use the pool knobs together to avoid multiplying Lean import RSS across many
-local children. They do not change the underlying reset rule: only process exit resets Lean process-global retained
-memory.
+named `admission=...` report cold-open attempts, admitted opens, typed refusals, observed concurrent cold opens,
+import-like requests, and RSS before/after admission. Use the pool knobs together to avoid multiplying Lean import RSS
+across many local children. They do not change the underlying reset rule: only process exit resets Lean process-global
+retained memory.
 
 The same profiling output also emits `session_reuse=...` rows. These rows report key hits, key misses, distinct keys,
 fresh imports avoided, and miss reasons such as `empty_pool`, `reuse_disabled`, and `no_matching_key`. They explain
 whether a fresh import was avoided by warm reuse; admission rows explain whether a cold open was allowed.
 
-The `replacement=...` rows for worker and pool workloads break the current synchronous
-replacement path into spawn/handshake, capability-load, session-open/import, first-command, warm-command, and total
-replacement timings, plus the restart reason and budget status. The current status is `synchronous-no-overlap`: the
-old child exits before the replacement starts, so no warm-spare process temporarily doubles child RSS. Background
-replacement or warm spares remain a future opt-in design that must be admitted by the total child RSS budget before
-spawn/import begins.
+The `replacement=...` rows for worker and pool workloads break the current synchronous replacement path into
+spawn/handshake, capability-load, session-open/import, first-command, warm-command, and total replacement timings, plus
+the restart reason and budget status. The current status is `synchronous-no-overlap`: the old child exits before the
+replacement starts, so no warm-spare process temporarily doubles child RSS. Background replacement or warm spares remain
+a future opt-in design that must be admitted by the total child RSS budget before spawn/import begins.
 
-The `batch=...` rows cover the warm `process_module_query_batch` proof-agent path. Their implementation reuses
-the existing bounded module-query batch API through one checked-out worker-pool lease; it does not add a new Lean shim
-or batch protocol. These rows are evidence about request/session churn on a warm child. They do not imply compacted
-regions were reclaimed, do not hide cold import cost, and do not replace worker cycling for full `loadExts := true`
-sessions.
+The `batch=...` rows cover the warm `process_module_query_batch` proof-agent path. Their implementation reuses the
+existing bounded module-query batch API through one checked-out worker-pool lease; it does not add a new Lean shim or
+batch protocol. These rows are evidence about request/session churn on a warm child. They do not imply compacted regions
+were reclaimed, do not hide cold import cost, and do not replace worker cycling for full `loadExts := true` sessions.

@@ -1,7 +1,7 @@
 # lean-rs-sys
 
-Raw FFI bindings for the Lean 4 C ABI. Sits above [`lean-rs-abi`](../lean-rs-abi/), which owns link-free
-ABI/toolchain metadata, and below the [`lean-rs`](../lean-rs/) safe front door.
+Raw FFI bindings for the Lean 4 C ABI. Sits above [`lean-rs-abi`](../lean-rs-abi/), which owns link-free ABI/toolchain
+metadata, and below the [`lean-rs`](../lean-rs/) safe front door.
 
 Lean's header layout is **not** part of this crate's public semver. The semver promise covers the opaque public types,
 the `pub unsafe fn` surface, and the supported-window metadata re-exported from `lean-rs-abi`. The `LeanObjectRepr`

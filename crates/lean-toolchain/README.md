@@ -5,8 +5,8 @@ above [`lean-rs-abi`](https://docs.rs/lean-rs-abi) (link-free ABI/toolchain meta
 [`lean-rs`](https://docs.rs/lean-rs).
 
 Owns the typed `ToolchainFingerprint`, the Lake fixture digest, layered link diagnostics, and reusable build-script
-helpers downstream embedders can call from their own `build.rs`. Its `build.rs` probes the active toolchain (degrading to
-the latest supported entry when none is installed) to bake the live `LEAN_VERSION`, `LEAN_HEADER_PATH`,
+helpers downstream embedders can call from their own `build.rs`. Its `build.rs` probes the active toolchain (degrading
+to the latest supported entry when none is installed) to bake the live `LEAN_VERSION`, `LEAN_HEADER_PATH`,
 `LEAN_HEADER_DIGEST`, and `LEAN_RESOLVED_VERSION`; it re-exports `REQUIRED_SYMBOLS` and the supported-window table from
 the purely static `lean-rs-abi` so metadata consumers depend on neither the raw FFI/link crate nor a probe in `abi`.
 
@@ -17,9 +17,9 @@ it to build import/session batches.
 
 Runtime application code usually does not depend on this crate directly: it shows up transitively through `lean-rs`.
 Downstream crates that ship Lean source commonly depend on it from `build.rs`, where `CargoLeanCapability` builds the
-Lake shared library and emits the compile-time path that runtime code opens through `lean-rs` or `lean-rs-worker-parent`.
-Same-process apps pair that path with `LeanCapability`; worker apps pair it with `LeanWorkerChild` and an app-owned
-worker-child binary. See
+Lake shared library and emits the compile-time path that runtime code opens through `lean-rs` or
+`lean-rs-worker-parent`. Same-process apps pair that path with `LeanCapability`; worker apps pair it with
+`LeanWorkerChild` and an app-owned worker-child binary. See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
 
 ## Quick start in a downstream `build.rs`

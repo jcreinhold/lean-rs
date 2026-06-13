@@ -238,5 +238,5 @@ LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
   cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 ```
 
-Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the
-worker crates' contract.
+Record the exact command, revisions, and output limits with any comparison. The comparison command is outside the worker
+crates' contract.

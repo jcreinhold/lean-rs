@@ -43,14 +43,14 @@ data_plane_size shape=large_rows_512 value_json=4154 raw_json=4154 binary_json_p
 
 Median throughput (mid-range estimate, sorted by small-row speed):
 
-| Format             | small_rows_8192 | large_rows_512 |
-| ------------------ | --------------: | -------------: |
-| binary_json_payload| 3.36 M rows/s   | 0.90 M rows/s  |
-| messagepack_typed  | 2.66 M rows/s   | 1.24 M rows/s  |
-| batched_raw_json_64| 2.30 M rows/s   | 0.62 M rows/s  |
-| raw_json (current) | 2.29 M rows/s   | 0.61 M rows/s  |
-| serde_json::Value  | 1.42 M rows/s   | 0.40 M rows/s  |
-| cbor_typed         | 1.37 M rows/s   | 0.87 M rows/s  |
+| Format | small_rows_8192 | large_rows_512 |
+| --- | ---: | ---: |
+| binary_json_payload | 3.36 M rows/s | 0.90 M rows/s |
+| messagepack_typed | 2.66 M rows/s | 1.24 M rows/s |
+| batched_raw_json_64 | 2.30 M rows/s | 0.62 M rows/s |
+| raw_json (current) | 2.29 M rows/s | 0.61 M rows/s |
+| serde_json::Value | 1.42 M rows/s | 0.40 M rows/s |
+| cbor_typed | 1.37 M rows/s | 0.87 M rows/s |
 
 End-to-end remeasurement of the current worker path:
 

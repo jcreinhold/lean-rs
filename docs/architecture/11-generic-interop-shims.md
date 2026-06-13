@@ -16,9 +16,9 @@ The two Lean payload copies are duplicated, not shared: the host crate must be s
 files **must be byte-identical**—the host payload is the canonical payload verbatim, never a host-trimmed subset (it
 carries `Callback.String` and `Worker.Stream` even though `lean-rs-host-shims` imports only `Callback.Tick`). The
 canonical directory is also a Rust crate, so its `Cargo.toml`, README, license texts, and `src/` scaffolding are
-intentionally not copied into
-`lean-rs-host`. The [`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces
-payload parity; edit the canonical payload and copy it over the host one, never one alone.
+intentionally not copied into `lean-rs-host`. The
+[`interop_shims_parity`](../../crates/lean-rs-host/tests/interop_shims_parity.rs) test enforces payload parity; edit the
+canonical payload and copy it over the host one, never one alone.
 
 Current modules:
 

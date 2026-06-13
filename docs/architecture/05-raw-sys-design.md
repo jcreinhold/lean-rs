@@ -163,8 +163,8 @@ The crate root enables `#![allow(non_camel_case_types)]` and `#![allow(non_snake
 
 ## 6. Why a `REQUIRED_SYMBOLS` allowlist plus a linkage test
 
-The `extern "C"` blocks across `src/*.rs` are the authoritative declarations; `pub const REQUIRED_SYMBOLS: &[&str]`
-in `lean-rs-abi` enumerates them as data for tooling:
+The `extern "C"` blocks across `src/*.rs` are the authoritative declarations; `pub const REQUIRED_SYMBOLS: &[&str]` in
+`lean-rs-abi` enumerates them as data for tooling:
 
 - `tests/linkage.rs` takes the address of each entry; if any symbol is missing in `libleanshared`, the binary fails to
   link and the test fails.

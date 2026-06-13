@@ -59,21 +59,30 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 
 `ImportStats.importedBytes` is retained as a compatibility alias for total compacted-region bytes. Newer shims also
 report `compactedRegionBytes`, `memoryMappedRegionBytes`, and `nonMemoryMappedRegionBytes`, all computed from
-`env.header.regions`.
-| `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` | `list_declarations(cancellation)` |
-| `lean_rs_host_env_list_declarations_filtered` | `(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` | `list_declarations_filtered(filter, cancellation, None)` |
-| `lean_rs_host_env_list_declarations_filtered_progress` | `(env : Environment) (filter : DeclarationFilter) (handle trampoline : USize) : IO (Except UInt8 (Array Name))` | `list_declarations_filtered(filter, cancellation, Some(progress))` |
-| `lean_rs_host_env_declaration_source_range` | `(env : Environment) (name : Name) (sourceRoots : Array String) : IO (Option SourceRange)` | `declaration_source_range(name, cancellation)` |
-| `lean_rs_host_env_declaration_type` | `(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` |
-| `lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` | `declaration_type_bulk(names, cancellation, None)` |
-| `lean_rs_host_env_declaration_type_bulk_progress` | `(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Expr)))` | `declaration_type_bulk(names, None, Some(progress))` |
-| `lean_rs_host_env_declaration_kind` | `(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` |
-| `lean_rs_host_env_declaration_kind_bulk` | `(env : Environment) (names : Array String) : IO (Array String)` | `declaration_kind_bulk(names, cancellation, None)` |
-| `lean_rs_host_env_declaration_kind_bulk_progress` | `(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_kind_bulk(names, None, Some(progress))` |
-| `lean_rs_host_env_declaration_name` | `(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` |
-| `lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` | `declaration_name_bulk(names, cancellation, None)` |
-| `lean_rs_host_env_declaration_name_bulk_progress` | `(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` | `declaration_name_bulk(names, None, Some(progress))` |
-| `lean_rs_host_env_expr_to_string_raw` | `(e : Expr) : String` | `expr_to_string_raw(expr, cancellation)` |
+`env.header.regions`. | `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` |
+`list_declarations(cancellation)` | | `lean_rs_host_env_list_declarations_filtered` |
+`(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` |
+`list_declarations_filtered(filter, cancellation, None)` | | `lean_rs_host_env_list_declarations_filtered_progress` |
+`(env : Environment) (filter : DeclarationFilter) (handle trampoline : USize) : IO (Except UInt8 (Array Name))` |
+`list_declarations_filtered(filter, cancellation, Some(progress))` | | `lean_rs_host_env_declaration_source_range` |
+`(env : Environment) (name : Name) (sourceRoots : Array String) : IO (Option SourceRange)` |
+`declaration_source_range(name, cancellation)` | | `lean_rs_host_env_declaration_type` |
+`(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` | |
+`lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` |
+`declaration_type_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_type_bulk_progress` |
+`(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Expr)))` |
+`declaration_type_bulk(names, None, Some(progress))` | | `lean_rs_host_env_declaration_kind` |
+`(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` | |
+`lean_rs_host_env_declaration_kind_bulk` | `(env : Environment) (names : Array String) : IO (Array String)` |
+`declaration_kind_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_kind_bulk_progress` |
+`(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` |
+`declaration_kind_bulk(names, None, Some(progress))` | | `lean_rs_host_env_declaration_name` |
+`(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` | |
+`lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` |
+`declaration_name_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_name_bulk_progress` |
+`(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` |
+`declaration_name_bulk(names, None, Some(progress))` | | `lean_rs_host_env_expr_to_string_raw` | `(e : Expr) : String` |
+`expr_to_string_raw(expr, cancellation)` |
 
 ### Elaboration, kernel check, evidence (7)
 
@@ -90,8 +99,7 @@ report `compactedRegionBytes`, `memoryMappedRegionBytes`, and `nonMemoryMappedRe
 Declaration inspection carries two attribution subrecords in its result: `proofSearch`, which reports whether
 proof-search facts were computed, and `derivedWork`, which reports source-range, docstring, raw rendering,
 pretty-printing, proof-search, parser/elaborator, module-snapshot, and lazy discriminator derived work. The inspection
-request's `fields.proofSearch` flag defaults off on the Rust side; `attributes` alone must not force proof-search
-facts.
+request's `fields.proofSearch` flag defaults off on the Rust side; `attributes` alone must not force proof-search facts.
 
 ## Optional contract (10 symbols)
 
