@@ -74,6 +74,36 @@ Named workloads back the scale claim:
 Numbers are machine-local. Any performance claim must name the workload, command, platform, row counts, throughput, RSS
 status, and caveats.
 
+## Runtime Model Release Validation
+
+Runtime-model releases must validate the model contract and the operating evidence together. Run the normal workspace
+gate, the lightweight formal model build, and the worker probes that exercise startup, shutdown, restart/cycle, pool
+admission, request dispatch, row streaming, and bounded backpressure:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo nextest run --workspace --profile ci
+cargo test --doc --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+mdbook build docs
+
+cd formal/RuntimeModel
+lake build
+lake env lean --stdin <<'EOF'
+import RuntimeModel
+#print axioms RuntimeModel.stale_generation_events_cannot_complete
+#print axioms RuntimeModel.terminal_outcome_unique
+#print axioms RuntimeModel.consumed_lease_not_reusable
+#print axioms RuntimeModel.released_lease_not_reusable
+#print axioms RuntimeModel.consumed_or_released_lease_not_reusable
+EOF
+```
+
+Performance validation should use the named worker probes in [`../performance.md`](../performance.md). Record the
+command, platform, row counts, throughput, parent/child RSS status, and whether the run used the deterministic fallback
+workload or a real `LEAN_RS_MATHLIB_ROOT`.
+
 ## Non-Goals
 
 Remote workers are future work. The local pool should avoid public APIs that would make a remote backend impossible, but
