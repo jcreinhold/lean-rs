@@ -46,6 +46,7 @@
 - [Downstream worker replacement fixture](architecture/27-lean-dup-readiness.md)
 - [Production-scale release](architecture/28-production-scale-release.md)
 - [Worker runtime semantics](architecture/30-worker-runtime-semantics.md)
+- [Runtime model proof home](architecture/31-runtime-model-proof-home.md)
 
 # Recipes
 

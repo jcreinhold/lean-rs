@@ -290,6 +290,8 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
   non-goals.
 - [`30-worker-runtime-semantics.md`](docs/architecture/30-worker-runtime-semantics.md): canonical worker runtime model,
   invariants, lifecycle semantics, and proof-status note.
+- [`31-runtime-model-proof-home.md`](docs/architecture/31-runtime-model-proof-home.md): approved lightweight Lean proof
+  package home for the runtime model.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later changes diff against
 those baselines.
