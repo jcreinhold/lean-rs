@@ -138,9 +138,10 @@ RestartExhausted
 ```
 
 `g in G`, `r in Req`, `b` is the finite sequence of rows and progress/diagnostic events already delivered for the
-current request, and `c` is an observed child exit or fatal condition. The current implementation stores the public
-lifecycle more coarsely as `Running`, `ShuttingDown`, and `Exited`, and stores generation and in-flight request facts
-separately. The states above are the abstract states later refactors should target.
+current request, and `c` is an observed child exit or fatal condition. The current implementation keeps process handles,
+stdio pipes, and stats as separate fields, but its private `WorkerSupervisorState` records the model-facing phases:
+idle, busy, streaming, stopping, killing, reaping, crashed, restart-exhausted, and exited. Spawn-time `Starting` remains
+inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor.
 
 The core transitions are:
 

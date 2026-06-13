@@ -1060,25 +1060,63 @@ fn worker_resource_facts(
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkerLifecycleState {
-    Running,
-    ShuttingDown,
-    Exited,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct InFlightRequest {
-    operation: &'static str,
-    generation: WorkerGeneration,
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct WorkerGeneration(u64);
 
 impl WorkerGeneration {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WorkerRequestId(u64);
+
+impl WorkerRequestId {
+    fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct InFlightRequest {
+    id: WorkerRequestId,
+    operation: &'static str,
+    generation: WorkerGeneration,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum WorkerSupervisorState {
+    Idle { generation: WorkerGeneration },
+    Busy { request: InFlightRequest },
+    Streaming { request: InFlightRequest },
+    Stopping { generation: WorkerGeneration },
+    Killing { generation: WorkerGeneration },
+    Reaping { generation: WorkerGeneration },
+    Crashed { generation: WorkerGeneration },
+    RestartExhausted { generation: WorkerGeneration },
+    Exited { generation: WorkerGeneration },
+}
+
+impl WorkerSupervisorState {
+    fn rejects_new_requests(&self) -> bool {
+        matches!(
+            self,
+            Self::Stopping { .. } | Self::Killing { .. } | Self::Reaping { .. } | Self::RestartExhausted { .. }
+        )
+    }
+
+    fn current_operation(&self) -> Option<&'static str> {
+        match self {
+            Self::Busy { request } | Self::Streaming { request } => Some(request.operation),
+            Self::Idle { .. }
+            | Self::Stopping { .. }
+            | Self::Killing { .. }
+            | Self::Reaping { .. }
+            | Self::Crashed { .. }
+            | Self::RestartExhausted { .. }
+            | Self::Exited { .. } => None,
+        }
     }
 }
 
@@ -1101,9 +1139,9 @@ pub struct LeanWorker {
     imports_since_restart: u64,
     last_activity: Instant,
     generation: WorkerGeneration,
+    next_request_id: WorkerRequestId,
     restart_window: VecDeque<Instant>,
-    lifecycle: WorkerLifecycleState,
-    in_flight: Option<InFlightRequest>,
+    state: WorkerSupervisorState,
 }
 
 #[allow(
@@ -1241,9 +1279,11 @@ impl LeanWorker {
             imports_since_restart: 0,
             last_activity: Instant::now(),
             generation: WorkerGeneration::default(),
+            next_request_id: WorkerRequestId::default(),
             restart_window: VecDeque::new(),
-            lifecycle: WorkerLifecycleState::Running,
-            in_flight: None,
+            state: WorkerSupervisorState::Idle {
+                generation: WorkerGeneration::default(),
+            },
         })
     }
 
@@ -1319,11 +1359,15 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
         if let Some(exit) = &self.last_exit {
-            self.lifecycle = WorkerLifecycleState::Exited;
+            self.state = WorkerSupervisorState::Exited {
+                generation: self.generation,
+            };
             return Ok(LeanWorkerStatus::Exited(exit.clone()));
         }
         let Some(child) = self.child.as_mut() else {
-            self.lifecycle = WorkerLifecycleState::Exited;
+            self.state = WorkerSupervisorState::Exited {
+                generation: self.generation,
+            };
             return Ok(LeanWorkerStatus::Exited(LeanWorkerExit {
                 success: false,
                 code: None,
@@ -1340,7 +1384,9 @@ impl LeanWorker {
                 self.stdin = None;
                 self.stdout = None;
                 self.stats.exits = self.stats.exits.saturating_add(1);
-                self.lifecycle = WorkerLifecycleState::Exited;
+                self.state = WorkerSupervisorState::Exited {
+                    generation: self.generation,
+                };
                 Ok(LeanWorkerStatus::Exited(exit))
             }
             None => Ok(LeanWorkerStatus::Running),
@@ -2319,15 +2365,39 @@ impl LeanWorker {
         })
     }
 
-    fn begin_in_flight(&mut self, operation: &'static str) {
-        self.in_flight = Some(InFlightRequest {
+    fn begin_in_flight(&mut self, operation: &'static str) -> InFlightRequest {
+        let request = InFlightRequest {
+            id: self.next_request_id,
             operation,
             generation: self.generation,
-        });
+        };
+        self.next_request_id = self.next_request_id.next();
+        self.state = WorkerSupervisorState::Busy {
+            request: request.clone(),
+        };
+        request
+    }
+
+    fn mark_current_request_streaming(&mut self) {
+        match &self.state {
+            WorkerSupervisorState::Busy { request } | WorkerSupervisorState::Streaming { request } => {
+                self.state = WorkerSupervisorState::Streaming {
+                    request: request.clone(),
+                };
+            }
+            _ => {}
+        }
     }
 
     fn finish_in_flight(&mut self) {
-        self.in_flight = None;
+        if matches!(
+            self.state,
+            WorkerSupervisorState::Busy { .. } | WorkerSupervisorState::Streaming { .. }
+        ) {
+            self.state = WorkerSupervisorState::Idle {
+                generation: self.generation,
+            };
+        }
     }
 
     fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
@@ -2460,6 +2530,7 @@ impl LeanWorker {
                 return Err(err);
             }
         };
+        let next_request_id = self.next_request_id;
         let spawn_handshake = next.stats.last_spawn_handshake_elapsed.unwrap_or_default();
         let mut stats = self.stats.clone();
         stats.replacement_successes = stats.replacement_successes.saturating_add(1);
@@ -2477,6 +2548,10 @@ impl LeanWorker {
         });
         next.stats = stats;
         next.generation = next_generation;
+        next.next_request_id = next_request_id;
+        next.state = WorkerSupervisorState::Idle {
+            generation: next_generation,
+        };
         next.restart_window.clone_from(&self.restart_window);
         next.last_activity = Instant::now();
         *self = next;
@@ -2494,7 +2569,9 @@ impl LeanWorker {
         }
         let restarts = u64::try_from(self.restart_window.len()).unwrap_or(u64::MAX);
         if restarts >= limit.max_restarts {
-            self.lifecycle = WorkerLifecycleState::ShuttingDown;
+            self.state = WorkerSupervisorState::RestartExhausted {
+                generation: self.generation,
+            };
             return Err(LeanWorkerError::RestartLimitExceeded {
                 restarts,
                 window: limit.window,
@@ -2744,27 +2821,22 @@ impl LeanWorker {
                     self.stdout = Some(stdout);
                     match message {
                         Message::Response(Response::Error { code, message }) => {
-                            if streaming {
-                                self.record_stream_failure(started, request_backpressure_waits);
-                            }
-                            self.finish_in_flight();
+                            self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                             drop(reader.join());
                             return Err(LeanWorkerError::Worker { code, message });
                         }
                         Message::Response(response) => {
-                            if streaming {
-                                if matches!(response, Response::StreamComplete { .. }) {
-                                    self.record_stream_success(started);
-                                } else {
-                                    self.record_stream_failure(started, request_backpressure_waits);
-                                }
-                            }
-                            self.finish_in_flight();
+                            let response = self.terminalize_request_response(
+                                response,
+                                streaming,
+                                started,
+                                request_backpressure_waits,
+                            );
                             drop(reader.join());
                             return Ok(response);
                         }
                         other => {
-                            self.finish_in_flight();
+                            self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                             drop(reader.join());
                             return Err(LeanWorkerError::Protocol {
                                 message: format!("worker sent unexpected {operation} message: {other:?}"),
@@ -2773,11 +2845,8 @@ impl LeanWorker {
                     }
                 }
                 RequestReaderEvent::ReadError { message, eof, .. } => {
-                    if streaming {
-                        self.record_stream_failure(started, request_backpressure_waits);
-                    }
-                    self.finish_in_flight();
                     drop(reader.join());
+                    self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                     return if eof {
                         Err(self.record_exit_error())
                     } else {
@@ -2788,13 +2857,11 @@ impl LeanWorker {
 
             match message {
                 Message::ProgressTick(tick) => {
+                    self.mark_current_request_streaming();
                     if let Err(err) =
                         report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))
                     {
-                        if streaming {
-                            self.record_stream_failure(started, request_backpressure_waits);
-                        }
-                        self.finish_in_flight();
+                        self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                         return Err(err);
                     }
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
@@ -2827,12 +2894,10 @@ impl LeanWorker {
                     }
                 }
                 Message::DataRow(row) => {
+                    self.mark_current_request_streaming();
                     let payload_bytes = row.payload.get().len() as u64;
                     if let Err(err) = report_parent_data_row(data, row) {
-                        if streaming {
-                            self.record_stream_failure(started, request_backpressure_waits);
-                        }
-                        self.finish_in_flight();
+                        self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                         return Err(err);
                     }
                     self.stats.data_rows_delivered = self.stats.data_rows_delivered.saturating_add(1);
@@ -2867,20 +2932,18 @@ impl LeanWorker {
                     }
                 }
                 Message::Diagnostic(diagnostic) => {
+                    self.mark_current_request_streaming();
                     if let Err(err) = report_parent_diagnostic(diagnostics, diagnostic.into()) {
-                        if streaming {
-                            self.record_stream_failure(started, request_backpressure_waits);
-                        }
-                        self.finish_in_flight();
+                        self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                         return Err(err);
                     }
                 }
                 Message::Response(response) => {
-                    self.finish_in_flight();
+                    self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                     return Err(unexpected_response(operation, &response));
                 }
                 other => {
-                    self.finish_in_flight();
+                    self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
                     });
@@ -2890,12 +2953,9 @@ impl LeanWorker {
     }
 
     fn ensure_running(&mut self) -> Result<(), LeanWorkerError> {
-        if self.lifecycle == WorkerLifecycleState::ShuttingDown {
+        if self.state.rejects_new_requests() {
             return Err(LeanWorkerError::ShutdownInProgress {
-                operation: self
-                    .in_flight
-                    .as_ref()
-                    .map_or("worker_request", |request| request.operation),
+                operation: self.state.current_operation().unwrap_or("worker_request"),
             });
         }
         match self.status()? {
@@ -2903,6 +2963,31 @@ impl LeanWorker {
             LeanWorkerStatus::Exited(exit) if exit.success => Err(LeanWorkerError::ChildExited { exit }),
             LeanWorkerStatus::Exited(exit) => Err(LeanWorkerError::ChildPanicOrAbort { exit }),
         }
+    }
+
+    fn terminalize_request_response(
+        &mut self,
+        response: Response,
+        streaming: bool,
+        started: Instant,
+        backpressure_waits: u64,
+    ) -> Response {
+        if streaming {
+            if matches!(response, Response::StreamComplete { .. }) {
+                self.record_stream_success(started);
+            } else {
+                self.record_stream_failure(started, backpressure_waits);
+            }
+        }
+        self.finish_in_flight();
+        response
+    }
+
+    fn terminalize_request_failure(&mut self, streaming: bool, started: Instant, backpressure_waits: u64) {
+        if streaming {
+            self.record_stream_failure(started, backpressure_waits);
+        }
+        self.finish_in_flight();
     }
 
     fn record_stream_success(&mut self, started: Instant) {
@@ -2922,6 +3007,9 @@ impl LeanWorker {
         let Some(child) = self.child.as_mut() else {
             return Err(self.dead_error());
         };
+        self.state = WorkerSupervisorState::Reaping {
+            generation: self.generation,
+        };
         let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
         Ok(self.finalize_child_exit(status))
     }
@@ -2935,6 +3023,9 @@ impl LeanWorker {
         loop {
             let Some(child) = self.child.as_mut() else {
                 return Err(self.dead_error());
+            };
+            self.state = WorkerSupervisorState::Reaping {
+                generation: self.generation,
             };
             match child.try_wait().map_err(|source| LeanWorkerError::Wait { source })? {
                 Some(status) => return Ok((self.finalize_child_exit(status), started.elapsed())),
@@ -2956,13 +3047,18 @@ impl LeanWorker {
         self.child = None;
         self.stdin = None;
         self.stdout = None;
-        self.lifecycle = WorkerLifecycleState::Exited;
         self.finish_in_flight();
+        self.state = WorkerSupervisorState::Exited {
+            generation: self.generation,
+        };
         self.stats.exits = self.stats.exits.saturating_add(1);
         exit
     }
 
     fn record_exit_error(&mut self) -> LeanWorkerError {
+        self.state = WorkerSupervisorState::Crashed {
+            generation: self.generation,
+        };
         match self.wait_for_exit() {
             Ok(exit) if exit.success => LeanWorkerError::ChildExited { exit },
             Ok(exit) => LeanWorkerError::ChildPanicOrAbort { exit },
@@ -2987,7 +3083,15 @@ impl LeanWorker {
             LeanWorkerStatus::Running => {}
         }
 
-        self.lifecycle = WorkerLifecycleState::ShuttingDown;
+        self.state = if intent == ShutdownIntent::Graceful {
+            WorkerSupervisorState::Stopping {
+                generation: self.generation,
+            }
+        } else {
+            WorkerSupervisorState::Killing {
+                generation: self.generation,
+            }
+        };
         self.finish_in_flight();
 
         if intent == ShutdownIntent::Graceful {
@@ -3141,6 +3245,9 @@ impl LeanWorker {
         outcome: LeanWorkerShutdownOutcome,
     ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         let kill_started = Instant::now();
+        self.state = WorkerSupervisorState::Killing {
+            generation: self.generation,
+        };
         if let Some(child) = self.child.as_mut() {
             child.kill().map_err(|source| LeanWorkerError::Kill { source })?;
         }
