@@ -1118,6 +1118,19 @@ impl WorkerSupervisorState {
             | Self::Exited { .. } => None,
         }
     }
+
+    fn current_request_id(&self) -> Option<WorkerRequestId> {
+        match self {
+            Self::Busy { request } | Self::Streaming { request } => Some(request.id),
+            Self::Idle { .. }
+            | Self::Stopping { .. }
+            | Self::Killing { .. }
+            | Self::Reaping { .. }
+            | Self::Crashed { .. }
+            | Self::RestartExhausted { .. }
+            | Self::Exited { .. } => None,
+        }
+    }
 }
 
 /// Supervisor for one `lean-rs-worker` child process.
@@ -1598,6 +1611,58 @@ impl LeanWorker {
             Response::RowsComplete { count } => Ok(count),
             other => Err(unexpected_response(OPERATION, &other)),
         }
+    }
+
+    #[doc(hidden)]
+    /// Emit synthetic data rows and then let the fake child exit without a terminal response.
+    ///
+    /// # Errors
+    ///
+    /// Returns the terminal worker failure observed after tentative row delivery.
+    pub fn __emit_test_rows_then_exit(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        data: Option<&dyn LeanWorkerDataSink>,
+    ) -> Result<(), LeanWorkerError> {
+        const OPERATION: &str = "emit_test_rows_then_exit";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::EmitTestRowsThenExit)?;
+        self.record_request(false);
+        let response = self.read_response_with_events(
+            OPERATION,
+            None,
+            cancellation,
+            data.map(LeanWorkerDataSinkTarget::Value),
+            None,
+        )?;
+        Err(unexpected_response(OPERATION, &response))
+    }
+
+    #[doc(hidden)]
+    /// Emit synthetic data rows and then abort the fake child before terminal success.
+    ///
+    /// # Errors
+    ///
+    /// Returns the terminal worker failure observed after tentative row delivery.
+    pub fn __emit_test_rows_then_panic(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        data: Option<&dyn LeanWorkerDataSink>,
+    ) -> Result<(), LeanWorkerError> {
+        const OPERATION: &str = "emit_test_rows_then_panic";
+        check_cancelled(OPERATION, cancellation)?;
+        self.prepare_request(false)?;
+        self.send_request(Request::EmitTestRowsThenPanic)?;
+        self.record_request(false);
+        let response = self.read_response_with_events(
+            OPERATION,
+            None,
+            cancellation,
+            data.map(LeanWorkerDataSinkTarget::Value),
+            None,
+        )?;
+        Err(unexpected_response(OPERATION, &response))
     }
 
     pub(crate) fn open_worker_session(
@@ -2666,10 +2731,12 @@ impl LeanWorker {
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
         let max_frame_bytes = self.config.max_frame_bytes;
-        let generation = self.generation;
+        let request = self.begin_in_flight(operation);
+        let generation = request.generation;
+        let request_id = Some(request.id);
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation));
-        self.begin_in_flight(operation);
+        let reader =
+            thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation, request_id));
 
         loop {
             if let Some((current_kib, limit_kib)) = self.hard_rss_limit_exceeded() {
@@ -2811,6 +2878,17 @@ impl LeanWorker {
                 self.finish_in_flight();
                 drop(reader.join());
                 return Err(stale_worker_output_error(operation, self.generation, actual_generation));
+            }
+            if let Some(actual_request_id) = event.request_id()
+                && self.state.current_request_id() != Some(actual_request_id)
+            {
+                self.finish_in_flight();
+                drop(reader.join());
+                return Err(stale_worker_request_output_error(
+                    operation,
+                    self.state.current_request_id(),
+                    actual_request_id,
+                ));
             }
             request_backpressure_waits = request_backpressure_waits.saturating_add(event.backpressure_waits());
             self.stats.backpressure_waits = self.stats.backpressure_waits.saturating_add(event.backpressure_waits());
@@ -2973,7 +3051,10 @@ impl LeanWorker {
         backpressure_waits: u64,
     ) -> Response {
         if streaming {
-            if matches!(response, Response::StreamComplete { .. }) {
+            if matches!(
+                response,
+                Response::StreamComplete { .. } | Response::RowsComplete { .. }
+            ) {
                 self.record_stream_success(started);
             } else {
                 self.record_stream_failure(started, backpressure_waits);
@@ -3121,7 +3202,7 @@ impl LeanWorker {
         let max_frame_bytes = self.config.max_frame_bytes;
         let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation));
+        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation, None));
 
         loop {
             if let Some(child) = self.child.as_mut()
@@ -3293,17 +3374,20 @@ impl LeanWorker {
 enum RequestReaderEvent {
     Message {
         generation: WorkerGeneration,
+        request_id: Option<WorkerRequestId>,
         message: Message,
         backpressure_waits: u64,
     },
     Terminal {
         generation: WorkerGeneration,
+        request_id: Option<WorkerRequestId>,
         message: Message,
         stdout: BufReader<ChildStdout>,
         backpressure_waits: u64,
     },
     ReadError {
         generation: WorkerGeneration,
+        request_id: Option<WorkerRequestId>,
         message: String,
         eof: bool,
         backpressure_waits: u64,
@@ -3333,6 +3417,14 @@ impl RequestReaderEvent {
         }
     }
 
+    fn request_id(&self) -> Option<WorkerRequestId> {
+        match self {
+            Self::Message { request_id, .. }
+            | Self::Terminal { request_id, .. }
+            | Self::ReadError { request_id, .. } => *request_id,
+        }
+    }
+
     fn add_backpressure_wait(&mut self) {
         match self {
             Self::Message { backpressure_waits, .. }
@@ -3353,6 +3445,7 @@ fn read_request_messages(
     sender: mpsc::SyncSender<RequestReaderEvent>,
     max_frame_bytes: u32,
     generation: WorkerGeneration,
+    request_id: Option<WorkerRequestId>,
 ) {
     loop {
         match read_frame(&mut stdout, max_frame_bytes) {
@@ -3361,6 +3454,7 @@ fn read_request_messages(
                     &sender,
                     RequestReaderEvent::Terminal {
                         generation,
+                        request_id,
                         message: frame.message,
                         stdout,
                         backpressure_waits: 0,
@@ -3373,6 +3467,7 @@ fn read_request_messages(
                     &sender,
                     RequestReaderEvent::Message {
                         generation,
+                        request_id,
                         message: frame.message,
                         backpressure_waits: 0,
                     },
@@ -3387,6 +3482,7 @@ fn read_request_messages(
                     &sender,
                     RequestReaderEvent::ReadError {
                         generation,
+                        request_id,
                         message: err.to_string(),
                         eof: err.is_eof(),
                         backpressure_waits: 0,
@@ -3588,6 +3684,20 @@ fn stale_worker_output_error(
     }
 }
 
+fn stale_worker_request_output_error(
+    operation: &'static str,
+    expected: Option<WorkerRequestId>,
+    actual: WorkerRequestId,
+) -> LeanWorkerError {
+    let expected = expected.map_or_else(|| "none".to_owned(), |request_id| request_id.0.to_string());
+    LeanWorkerError::Protocol {
+        message: format!(
+            "worker sent stale {operation} frame from request {}, current request is {expected}",
+            actual.0
+        ),
+    }
+}
+
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -3670,8 +3780,8 @@ mod tests {
         DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationFacts, LeanWorkerError,
         LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
         LeanWorkerModuleQuerySelector, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
-        MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, stale_worker_output_error,
-        truncate_for_display,
+        MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, WorkerRequestId,
+        stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
     };
     use std::path::PathBuf;
     use std::time::Duration;
@@ -3740,6 +3850,19 @@ mod tests {
                 assert!(message.contains("stale health frame"));
                 assert!(message.contains("generation 1"));
                 assert!(message.contains("current generation is 2"));
+            }
+            other => panic!("expected protocol error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conformance_stale_request_output_is_protocol_failure() {
+        let err = stale_worker_request_output_error("emit_test_rows", Some(WorkerRequestId(2)), WorkerRequestId(1));
+        match err {
+            LeanWorkerError::Protocol { message } => {
+                assert!(message.contains("stale emit_test_rows frame"));
+                assert!(message.contains("request 1"));
+                assert!(message.contains("current request is 2"));
             }
             other => panic!("expected protocol error, got {other:?}"),
         }

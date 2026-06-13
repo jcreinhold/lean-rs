@@ -227,7 +227,9 @@ impl TryFrom<DataRow> for LeanWorkerDataRow {
 /// Parent-side sink for downstream data rows produced by one worker request.
 ///
 /// A sink is borrowed for one request. It receives owned rows and may store
-/// them. If `report` panics, the supervisor catches the panic and returns
+/// them immediately, before the terminal stream response arrives. Those rows
+/// are tentative until the request returns terminal success. If `report`
+/// panics, the supervisor catches the panic and returns
 /// `LeanWorkerError::DataSinkPanic`.
 pub trait LeanWorkerDataSink: Send + Sync {
     fn report(&self, row: LeanWorkerDataRow);
@@ -428,8 +430,9 @@ pub struct LeanWorkerTypedDataRow<Row> {
 
 /// Parent-side sink for typed downstream data rows produced by one command.
 ///
-/// The sink remains request-local. A panic from `report` is contained by the
-/// worker supervisor and returned as `LeanWorkerError::DataSinkPanic`.
+/// The sink remains request-local. It sees rows immediately, before terminal
+/// success. A panic from `report` is contained by the worker supervisor and
+/// returned as `LeanWorkerError::DataSinkPanic`.
 pub trait LeanWorkerTypedDataSink<Row>: Send + Sync {
     fn report(&self, row: LeanWorkerTypedDataRow<Row>);
 }
@@ -866,7 +869,8 @@ impl LeanWorkerSession<'_> {
     /// The Lean export must have ABI
     /// `String -> USize -> USize -> IO UInt8`. The child supplies the
     /// callback handle and trampoline; the parent only sees validated
-    /// `LeanWorkerDataRow` values.
+    /// `LeanWorkerDataRow` values. Rows are delivered immediately and become
+    /// committed only if this method returns terminal success.
     ///
     /// # Errors
     ///
@@ -945,7 +949,9 @@ impl LeanWorkerSession<'_> {
     /// `String -> USize -> USize -> IO UInt8`. The request is serialized from
     /// `Req`; each row payload is decoded into `Row`; terminal metadata is
     /// decoded into `Summary` when present. Raw-row access remains available
-    /// through `run_data_stream`.
+    /// through `run_data_stream`. Rows are visible to `rows` immediately, but
+    /// downstream callers that need atomic effects should commit them only
+    /// after this method returns `Ok`.
     ///
     /// # Errors
     ///

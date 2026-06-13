@@ -140,6 +140,13 @@ currently always `0`; pool admission waits are synchronous and bounded by `queue
 mailbox. Snapshots intentionally do not expose child pids, worker ids, pipe handles, protocol frames, or scheduling
 internals.
 
+Streaming rows are reported to sinks immediately, before terminal success. A successful stream has a terminal summary
+with `total_rows` and per-stream counts; an empty successful stream is `Ok` with zero rows. If rows were delivered and
+the request later times out, is cancelled, exits, aborts, hits a decode or sink failure, or observes stale output, those
+rows are partial and tentative. Operators can distinguish that case by the returned `LeanWorkerError` together with
+`stream_failures`, `data_rows_delivered`, `data_row_payload_bytes`, and, when the bounded reader buffer filled,
+`backpressure_waits` / `backpressure_failures`.
+
 ## Matching on codes
 
 `LeanError`, `LeanElabFailure`, and `LeanMetaResponse` all project to the same taxonomy via `.code()`:

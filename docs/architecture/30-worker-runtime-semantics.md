@@ -89,6 +89,7 @@ refactors must preserve:
 | `RequestAdmitted { generation: g, request: r }` | `accept(g, r)` admission |
 | `RequestSent { generation: g, request: r }` | transition into `Busy(g, r)` |
 | `StreamRowObserved { generation: g, request: r, .. }` | `row(g, r, b)` before commit |
+| `BackpressureObserved { generation: g, request: r, waits }` | bounded parent event buffer applied backpressure before terminal outcome |
 | `TerminalOutcomeObserved { generation: g, request: r, outcome }` | `terminal(g, r, o)` and terminal outcome uniqueness |
 | `TimeoutObserved { generation: g, request: r }` | timeout failure before kill/reap |
 | `ChildCrashObserved { generation: g, request: r }` | `Crashed(g, c)` before terminalization |
@@ -112,6 +113,11 @@ Prompts 39 through 41 should preserve or extend these exact test names:
 
 - `conformance_terminal_success_has_one_terminal_outcome`;
 - `conformance_stream_rows_are_tentative_until_terminal_success`;
+- `conformance_stream_child_exit_after_rows_discards_tentative_rows`;
+- `conformance_stream_child_crash_after_rows_discards_tentative_rows`;
+- `conformance_stream_timeout_after_rows_discards_tentative_rows`;
+- `conformance_stream_cancellation_after_rows_discards_tentative_rows`;
+- `conformance_stream_backpressure_is_bounded_and_observable`;
 - `conformance_explicit_shutdown_gracefully_reaps_child`;
 - `conformance_dropped_idle_worker_reaps_child`;
 - `conformance_dropped_worker_escalates_kill_and_reaps_child`;
@@ -192,9 +198,11 @@ The pool never publishes child ids, pids, pipes, selected-entry identity, frame 
 `terminal(g, r, o)`. Terminal outcomes include terminal protocol responses and typed parent-side failures. A successful
 write to stdin is not a success acknowledgement; only a terminal success response is.
 
-**Generation separation.** A response or row observed from generation `g` may satisfy only a request admitted under
-generation `g`. If the parent-side reader reports generation `g' != g`, the event is stale protocol output and cannot
-complete the current request.
+**Request and generation separation.** A response or row observed from generation `g` may satisfy only a request
+admitted under generation `g`. The current serial protocol has no request id on the wire, so the parent tags reader
+events with the private in-flight request id before delivering progress, diagnostics, rows, or terminal responses. If
+the parent-side reader reports generation `g' != g` or a request id that is no longer current, the event is stale
+protocol output and cannot complete the current request.
 
 **Affine lease law.** A lease can be consumed, released, or dropped at most once. After release or invalidation, the old
 lease grants no authority over later generations or replacement children.
@@ -218,9 +226,10 @@ Tokio/Rust cleanup can run.
 restarts per 60 seconds; exhaustion returns `RestartLimitExceeded`, leaves the supervisor not accepting more work, and
 requires service-level policy to create a fresh worker or pool entry.
 
-**Streaming commit.** Rows delivered before terminal success are tentative. Cancellation, timeout, fatal exit, stale
-generation, row-decode failure, sink panic, or shutdown failure prevents the worker from claiming that those rows are
-committed. Downstream callers own commit, deduplication, and cache validity.
+**Streaming commit.** Rows are visible to the sink immediately. Rows delivered before terminal success are tentative.
+Cancellation, timeout, fatal exit, stale request or generation, row-decode failure, sink panic, or shutdown failure
+prevents the worker from claiming that those rows are committed. Downstream callers own commit, deduplication, and cache
+validity.
 
 **No stale rows after reset.** Rows from an old generation are not allowed to satisfy a request in a replacement
 generation. A replacement drops old pipes, joins the old reader path, and tags parent-side reader events by generation.

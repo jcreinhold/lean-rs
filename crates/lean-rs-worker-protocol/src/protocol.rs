@@ -401,7 +401,9 @@ impl ProgressTick {
 /// Construction goes through [`DataRowEmitter::next`] in the child runtime;
 /// direct struct-literal construction is permitted in tests and harnesses.
 /// This struct intentionally stays exhaustive: see the module-level note on
-/// additive evolution.
+/// additive evolution. Request and generation identity are not row fields in
+/// the current serial protocol; the parent supervisor attaches those facts to
+/// its private in-flight reader events before delivering rows.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataRow {
     /// Logical stream this row belongs to.

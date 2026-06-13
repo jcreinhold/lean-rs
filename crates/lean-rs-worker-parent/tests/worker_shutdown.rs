@@ -16,8 +16,9 @@ use std::time::Duration;
 use std::process::Command;
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink,
-    LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
+    LeanWorker, LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig,
+    LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig,
+    LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
 };
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
@@ -51,6 +52,26 @@ fn main() {
         (
             "conformance_stream_rows_are_tentative_until_terminal_success",
             conformance_stream_rows_are_tentative_until_terminal_success,
+        ),
+        (
+            "conformance_stream_child_exit_after_rows_discards_tentative_rows",
+            conformance_stream_child_exit_after_rows_discards_tentative_rows,
+        ),
+        (
+            "conformance_stream_child_crash_after_rows_discards_tentative_rows",
+            conformance_stream_child_crash_after_rows_discards_tentative_rows,
+        ),
+        (
+            "conformance_stream_timeout_after_rows_discards_tentative_rows",
+            conformance_stream_timeout_after_rows_discards_tentative_rows,
+        ),
+        (
+            "conformance_stream_cancellation_after_rows_discards_tentative_rows",
+            conformance_stream_cancellation_after_rows_discards_tentative_rows,
+        ),
+        (
+            "conformance_stream_backpressure_is_bounded_and_observable",
+            conformance_stream_backpressure_is_bounded_and_observable,
         ),
         (
             "conformance_explicit_shutdown_gracefully_reaps_child",
@@ -140,6 +161,17 @@ fn run_fake_child(mode: &str) {
                 write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
                     .expect("fake child writes health response");
             }
+            Request::EmitTestRows { streams } if mode == "rows_then_hang" => {
+                let mut emitter = DataRowEmitter::default();
+                for stream in streams {
+                    let payload = RawValue::from_string(format!(r#"{{"stream":"{stream}"}}"#))
+                        .expect("fake child builds JSON row payload");
+                    let row = emitter.next(stream, payload);
+                    write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES)
+                        .expect("fake child writes data row");
+                }
+                sleep_forever();
+            }
             Request::EmitTestRows { streams } => {
                 let mut emitter = DataRowEmitter::default();
                 for stream in streams {
@@ -155,6 +187,22 @@ fn run_fake_child(mode: &str) {
                     MAX_FRAME_BYTES,
                 )
                 .expect("fake child writes row terminal response");
+            }
+            Request::EmitTestRowsThenExit => {
+                let mut emitter = DataRowEmitter::default();
+                let payload = RawValue::from_string(r#"{"stream":"rows"}"#.to_owned())
+                    .expect("fake child builds JSON row payload");
+                let row = emitter.next("rows", payload);
+                write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES).expect("fake child writes data row");
+                return;
+            }
+            Request::EmitTestRowsThenPanic => {
+                let mut emitter = DataRowEmitter::default();
+                let payload = RawValue::from_string(r#"{"stream":"rows"}"#.to_owned())
+                    .expect("fake child builds JSON row payload");
+                let row = emitter.next("rows", payload);
+                write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES).expect("fake child writes data row");
+                std::process::abort();
             }
             Request::OpenHostSession {
                 imports,
@@ -242,6 +290,11 @@ enum RuntimeTraceEvent {
         request: &'static str,
         outcome: RuntimeTerminalOutcome,
     },
+    BackpressureObserved {
+        generation: u64,
+        request: &'static str,
+        waits: u64,
+    },
     TimeoutObserved {
         generation: u64,
         request: &'static str,
@@ -294,6 +347,8 @@ enum RuntimeTraceEvent {
 enum RuntimeTerminalOutcome {
     Response(&'static str),
     Timeout,
+    Cancelled,
+    ChildExited,
     ChildPanicOrAbort,
     RestartLimitExceeded,
     ShutdownInProgress,
@@ -414,6 +469,193 @@ fn conformance_stream_rows_are_tentative_until_terminal_success() -> Result<(), 
     assert_eq!(worker.stats().requests, 1);
     assert_eq!(worker.stats().data_rows_delivered, 3);
     assert_single_terminal(&trace, generation, "emit_test_rows")?;
+    drop(worker);
+    Ok(())
+}
+
+fn conformance_stream_child_exit_after_rows_discards_tentative_rows() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let sink = RecordingSink::default();
+    let mut trace = request_trace(generation, "emit_test_rows_then_exit");
+    let err = worker
+        .__emit_test_rows_then_exit(None, Some(&sink))
+        .expect_err("fake child should exit before terminal stream success");
+    match err {
+        LeanWorkerError::ChildExited { exit } => assert!(exit.success),
+        other => return Err(format!("expected child-exited stream failure, got {other:?}")),
+    }
+    let rows = sink.rows();
+    assert_eq!(rows.len(), 1);
+    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
+    trace.push(RuntimeTraceEvent::StreamRowObserved {
+        generation,
+        request: "emit_test_rows_then_exit",
+        stream: first_row.stream.clone(),
+        sequence: first_row.sequence,
+    });
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation,
+        request: "emit_test_rows_then_exit",
+        outcome: RuntimeTerminalOutcome::ChildExited,
+    });
+    let stats = worker.stats();
+    assert_eq!(stats.data_rows_delivered, 1);
+    assert_eq!(stats.stream_failures, 1);
+    assert_single_terminal(&trace, generation, "emit_test_rows_then_exit")?;
+    drop(worker);
+    Ok(())
+}
+
+fn conformance_stream_child_crash_after_rows_discards_tentative_rows() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let sink = RecordingSink::default();
+    let mut trace = request_trace(generation, "emit_test_rows_then_panic");
+    let err = worker
+        .__emit_test_rows_then_panic(None, Some(&sink))
+        .expect_err("fake child should abort before terminal stream success");
+    match err {
+        LeanWorkerError::ChildPanicOrAbort { exit } => assert!(!exit.success),
+        other => return Err(format!("expected child-panic stream failure, got {other:?}")),
+    }
+    let rows = sink.rows();
+    assert_eq!(rows.len(), 1);
+    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
+    trace.push(RuntimeTraceEvent::StreamRowObserved {
+        generation,
+        request: "emit_test_rows_then_panic",
+        stream: first_row.stream.clone(),
+        sequence: first_row.sequence,
+    });
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation,
+        request: "emit_test_rows_then_panic",
+        outcome: RuntimeTerminalOutcome::ChildPanicOrAbort,
+    });
+    let stats = worker.stats();
+    assert_eq!(stats.data_rows_delivered, 1);
+    assert_eq!(stats.stream_failures, 1);
+    assert_single_terminal(&trace, generation, "emit_test_rows_then_panic")?;
+    drop(worker);
+    Ok(())
+}
+
+fn conformance_stream_timeout_after_rows_discards_tentative_rows() -> Result<(), String> {
+    let mut worker = fake_worker("rows_then_hang").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let old_pid = worker
+        .__child_pid_for_test()
+        .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
+    let sink = RecordingSink::default();
+    let mut trace = request_trace(generation, "emit_test_rows");
+    let err = worker
+        .__emit_test_rows(vec!["rows".to_owned()], None, Some(&sink))
+        .expect_err("fake child should hang after tentative rows");
+    match err {
+        LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "emit_test_rows"),
+        other => return Err(format!("expected timeout after stream rows, got {other:?}")),
+    }
+    let rows = sink.rows();
+    assert_eq!(rows.len(), 1);
+    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
+    trace.push(RuntimeTraceEvent::StreamRowObserved {
+        generation,
+        request: "emit_test_rows",
+        stream: first_row.stream.clone(),
+        sequence: first_row.sequence,
+    });
+    trace.push(RuntimeTraceEvent::TimeoutObserved {
+        generation,
+        request: "emit_test_rows",
+    });
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation,
+        request: "emit_test_rows",
+        outcome: RuntimeTerminalOutcome::Timeout,
+    });
+    assert_reaped(old_pid)?;
+    let stats = worker.stats();
+    assert_eq!(stats.data_rows_delivered, 1);
+    assert_eq!(stats.stream_failures, 1);
+    assert_eq!(stats.timeout_restarts, 1);
+    assert_single_terminal(&trace, generation, "emit_test_rows")?;
+    drop(worker);
+    Ok(())
+}
+
+fn conformance_stream_cancellation_after_rows_discards_tentative_rows() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let old_pid = worker
+        .__child_pid_for_test()
+        .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
+    let cancellation = LeanWorkerCancellationToken::new();
+    let sink = CancellingSink::new(cancellation.clone());
+    let mut trace = request_trace(generation, "emit_test_rows");
+    let err = worker
+        .__emit_test_rows(
+            vec!["rows".to_owned(), "late".to_owned()],
+            Some(&cancellation),
+            Some(&sink),
+        )
+        .expect_err("sink cancellation should interrupt stream after the first row");
+    match err {
+        LeanWorkerError::Cancelled { operation, .. } => assert_eq!(operation, "emit_test_rows"),
+        other => return Err(format!("expected cancellation after stream row, got {other:?}")),
+    }
+    let rows = sink.rows();
+    assert_eq!(rows.len(), 1);
+    let first_row = rows.first().ok_or_else(|| "missing first stream row".to_owned())?;
+    trace.push(RuntimeTraceEvent::StreamRowObserved {
+        generation,
+        request: "emit_test_rows",
+        stream: first_row.stream.clone(),
+        sequence: first_row.sequence,
+    });
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation,
+        request: "emit_test_rows",
+        outcome: RuntimeTerminalOutcome::Cancelled,
+    });
+    assert_reaped(old_pid)?;
+    let stats = worker.stats();
+    assert_eq!(stats.data_rows_delivered, 1);
+    assert_eq!(stats.stream_failures, 1);
+    assert_eq!(stats.cancelled_restarts, 1);
+    assert_single_terminal(&trace, generation, "emit_test_rows")?;
+    drop(worker);
+    Ok(())
+}
+
+fn conformance_stream_backpressure_is_bounded_and_observable() -> Result<(), String> {
+    let mut worker = fake_worker_with_config("normal", |config| config.request_timeout(Duration::from_secs(15)))
+        .map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let sink = SlowSink::new(Duration::from_millis(1));
+    let streams = (0..5_000).map(|_| "rows".to_owned()).collect::<Vec<_>>();
+    let count = worker
+        .__emit_test_rows(streams, None, Some(&sink))
+        .map_err(|err| err.to_string())?;
+    assert_eq!(count, 5_000);
+    assert_eq!(sink.rows().len(), 5_000);
+    let stats = worker.stats();
+    let trace = [RuntimeTraceEvent::BackpressureObserved {
+        generation,
+        request: "emit_test_rows",
+        waits: stats.backpressure_waits,
+    }];
+    assert!(
+        stats.backpressure_waits > 0,
+        "slow sink should force the bounded reader buffer to report backpressure"
+    );
+    assert_eq!(stats.stream_successes, 1);
+    assert_eq!(stats.stream_failures, 0);
+    assert!(trace.contains(&RuntimeTraceEvent::BackpressureObserved {
+        generation,
+        request: "emit_test_rows",
+        waits: stats.backpressure_waits,
+    }));
     drop(worker);
     Ok(())
 }
@@ -939,6 +1181,61 @@ impl RecordingSink {
 impl LeanWorkerDataSink for RecordingSink {
     fn report(&self, row: LeanWorkerDataRow) {
         self.0.lock().expect("recording sink mutex is not poisoned").push(row);
+    }
+}
+
+struct CancellingSink {
+    rows: std::sync::Mutex<Vec<LeanWorkerDataRow>>,
+    cancellation: LeanWorkerCancellationToken,
+}
+
+impl CancellingSink {
+    fn new(cancellation: LeanWorkerCancellationToken) -> Self {
+        Self {
+            rows: std::sync::Mutex::new(Vec::new()),
+            cancellation,
+        }
+    }
+
+    fn rows(&self) -> Vec<LeanWorkerDataRow> {
+        self.rows.lock().expect("cancelling sink mutex is not poisoned").clone()
+    }
+}
+
+impl LeanWorkerDataSink for CancellingSink {
+    fn report(&self, row: LeanWorkerDataRow) {
+        {
+            self.rows
+                .lock()
+                .expect("cancelling sink mutex is not poisoned")
+                .push(row);
+        }
+        self.cancellation.cancel();
+    }
+}
+
+struct SlowSink {
+    rows: std::sync::Mutex<Vec<LeanWorkerDataRow>>,
+    delay: Duration,
+}
+
+impl SlowSink {
+    fn new(delay: Duration) -> Self {
+        Self {
+            rows: std::sync::Mutex::new(Vec::new()),
+            delay,
+        }
+    }
+
+    fn rows(&self) -> Vec<LeanWorkerDataRow> {
+        self.rows.lock().expect("slow sink mutex is not poisoned").clone()
+    }
+}
+
+impl LeanWorkerDataSink for SlowSink {
+    fn report(&self, row: LeanWorkerDataRow) {
+        thread::sleep(self.delay);
+        self.rows.lock().expect("slow sink mutex is not poisoned").push(row);
     }
 }
 
