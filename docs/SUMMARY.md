@@ -28,6 +28,7 @@
 
 - [Service-layer surface](architecture/03-host-stack.md)
 - [Capability contract](lean-rs-host-capability-contract.md)
+- [Same-process controls](same-process-controls.md)
 
 # Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)
 

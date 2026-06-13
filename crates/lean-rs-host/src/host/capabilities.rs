@@ -195,12 +195,14 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// Run a one-shot no-extension import query inside Lean's compacted-region
     /// bracket.
     ///
-    /// The bracketed path imports with `loadExts := false`, serializes only the
-    /// requested declaration metadata plus import stats, frees the imported
-    /// compacted regions, and returns Rust-owned data. It is deliberately not a
-    /// replacement for [`Self::session`]: parser, elaboration, proof-state,
-    /// pretty-printing, and capability workflows require full sessions with
-    /// loaded extensions.
+    /// The Lean shim uses `withImportModules`, which imports with
+    /// `loadExts := false`, serializes only the requested declaration metadata
+    /// plus import stats, frees the imported compacted regions, and then
+    /// returns Rust-owned data. It is deliberately not a replacement for
+    /// [`Self::session`]: parser, elaboration, proof-state, pretty-printing,
+    /// and capability workflows require full sessions with loaded extensions.
+    /// Extending this path to return Lean-owned objects would be unsound unless
+    /// their lifetime across `Environment.freeRegions` can be proven locally.
     ///
     /// # Errors
     ///

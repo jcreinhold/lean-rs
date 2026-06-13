@@ -16,9 +16,15 @@ use crate::host::progress::{LeanProgressSink, ProgressBridge};
 use crate::host::session::{LeanSession, with_session_import_lock};
 use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
 
-/// Closed request for the experimental bracketed import path.
+/// Closed request for the bracketed no-extension import path.
+///
+/// The request is intentionally limited to declaration metadata lookups by
+/// name. It does not admit parser, elaborator, pretty-printer, extension, or
+/// arbitrary callback work because the imported compacted regions are freed
+/// before Rust receives the result.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LeanBracketedImportRequest {
+    /// Fully-qualified declaration names to inspect inside the bracket.
     pub declaration_names: Vec<String>,
 }
 
@@ -54,11 +60,21 @@ impl<'lean> LeanAbi<'lean> for LeanBracketedImportRequest {
 }
 
 /// Result of one bracketed no-extension import query.
+///
+/// Every field is Rust-owned data decoded from the Lean shim's serialized
+/// payload. No Lean-owned `Environment`, `Expr`, `Name`, `ConstantInfo`, or
+/// extension state escapes the `loadExts := false` / `freeRegions` bracket.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanBracketedImportResult {
+    /// Import attribution captured before the compacted regions are freed.
     pub import_stats: crate::host::session::LeanImportStats,
+    /// Per-request declaration metadata serialized inside the bracket.
     pub declarations: Vec<LeanBracketedDeclarationInfo>,
+    /// Operations this path deliberately refuses because they require a normal
+    /// full session with loaded environment extensions.
     pub rejected_operations: Vec<LeanBracketedRejectedOperation>,
+    /// Whether the Lean shim reached the `Environment.freeRegions` cleanup
+    /// point before returning the serialized result to Rust.
     pub free_regions_ran: bool,
 }
 

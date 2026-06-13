@@ -128,6 +128,10 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_se
 pub struct lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 pub lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::per_field_bytes: u32
 pub lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::total_bytes: u32
+impl lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::new() -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::per_field_bytes(self, u32) -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::total_bytes(self, u32) -> Self
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
@@ -1620,6 +1624,10 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::Modul
 pub struct lean_rs_host::host::process::ModuleQueryOutputBudgets
 pub lean_rs_host::host::process::ModuleQueryOutputBudgets::per_field_bytes: u32
 pub lean_rs_host::host::process::ModuleQueryOutputBudgets::total_bytes: u32
+impl lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::new() -> Self
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::per_field_bytes(self, u32) -> Self
+pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::total_bytes(self, u32) -> Self
 impl core::clone::Clone for lean_rs_host::host::process::ModuleQueryOutputBudgets
 pub fn lean_rs_host::host::process::ModuleQueryOutputBudgets::clone(&self) -> lean_rs_host::host::process::ModuleQueryOutputBudgets
 impl core::cmp::Eq for lean_rs_host::host::process::ModuleQueryOutputBudgets
@@ -2301,6 +2309,10 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_se
 pub struct lean_rs_host::host::DeclarationInspectionBudgets
 pub lean_rs_host::host::DeclarationInspectionBudgets::per_field_bytes: u32
 pub lean_rs_host::host::DeclarationInspectionBudgets::total_bytes: u32
+impl lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::new() -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::per_field_bytes(self, u32) -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::total_bytes(self, u32) -> Self
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
@@ -3818,6 +3830,10 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_se
 pub struct lean_rs_host::DeclarationInspectionBudgets
 pub lean_rs_host::DeclarationInspectionBudgets::per_field_bytes: u32
 pub lean_rs_host::DeclarationInspectionBudgets::total_bytes: u32
+impl lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::new() -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::per_field_bytes(self, u32) -> Self
+pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::total_bytes(self, u32) -> Self
 impl core::clone::Clone for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 pub fn lean_rs_host::host::declaration_search::DeclarationInspectionBudgets::clone(&self) -> lean_rs_host::host::declaration_search::DeclarationInspectionBudgets
 impl core::cmp::Eq for lean_rs_host::host::declaration_search::DeclarationInspectionBudgets

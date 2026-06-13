@@ -9,6 +9,7 @@ use lean_rs::abi::nat;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use lean_rs::{LeanRuntime, Obj};
+use lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX;
 
 use crate::host::elaboration::LeanElabFailure;
 
@@ -39,9 +40,16 @@ pub enum ModuleQuery {
 }
 
 /// Explicit byte budgets for a batched module query.
+///
+/// The default is 8 KiB per rendered field and 64 KiB for the combined
+/// selector payload. Setters and ABI encoding clamp oversized values at
+/// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`], so direct struct literals cannot send an
+/// unbounded render request into Lean.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModuleQueryOutputBudgets {
+    /// Maximum UTF-8 bytes for one rendered field.
     pub per_field_bytes: u32,
+    /// Maximum estimated UTF-8 bytes for all selector results in the batch.
     pub total_bytes: u32,
 }
 
@@ -52,6 +60,42 @@ impl Default for ModuleQueryOutputBudgets {
             total_bytes: 64 * 1024,
         }
     }
+}
+
+impl ModuleQueryOutputBudgets {
+    /// Construct the default output budget bundle.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replace the per-field byte budget, saturating at
+    /// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`].
+    #[must_use]
+    pub fn per_field_bytes(mut self, bytes: u32) -> Self {
+        self.per_field_bytes = clamp_output_budget(bytes);
+        self
+    }
+
+    /// Replace the total batch byte budget, saturating at
+    /// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`].
+    #[must_use]
+    pub fn total_bytes(mut self, bytes: u32) -> Self {
+        self.total_bytes = clamp_output_budget(bytes);
+        self
+    }
+
+    fn normalized(self) -> Self {
+        Self {
+            per_field_bytes: clamp_output_budget(self.per_field_bytes),
+            total_bytes: clamp_output_budget(self.total_bytes),
+        }
+    }
+}
+
+fn clamp_output_budget(bytes: u32) -> u32 {
+    let max = u32::try_from(LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX).unwrap_or(u32::MAX);
+    bytes.min(max)
 }
 
 /// Intent selector for one proof position inside a declaration.
@@ -303,12 +347,13 @@ impl<'lean> IntoLean<'lean> for ModuleQuery {
 
 impl<'lean> IntoLean<'lean> for ModuleQueryOutputBudgets {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        let normalized = self.normalized();
         alloc_ctor_with_objects(
             runtime,
             0,
             [
-                self.per_field_bytes.into_lean(runtime),
-                self.total_bytes.into_lean(runtime),
+                normalized.per_field_bytes.into_lean(runtime),
+                normalized.total_bytes.into_lean(runtime),
             ],
         )
     }
@@ -1611,4 +1656,38 @@ fn bool_tail(obj: &Obj<'_>, offset: u32, label: &str) -> lean_rs::LeanResult<boo
 
 fn sum_tag(obj: &Obj<'_>) -> lean_rs::LeanResult<u8> {
     view(obj).sum_tag()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_query_output_budget_defaults_match_policy() {
+        let budgets = ModuleQueryOutputBudgets::new();
+        assert_eq!(budgets.per_field_bytes, 8 * 1024);
+        assert_eq!(budgets.total_bytes, 64 * 1024);
+    }
+
+    #[test]
+    fn module_query_output_budget_setters_saturate() {
+        let budgets = ModuleQueryOutputBudgets::new()
+            .per_field_bytes(u32::MAX)
+            .total_bytes(u32::MAX);
+        let max = clamp_output_budget(u32::MAX);
+        assert_eq!(budgets.per_field_bytes, max);
+        assert_eq!(budgets.total_bytes, max);
+    }
+
+    #[test]
+    fn module_query_output_budget_normalization_clamps_struct_literals() {
+        let budgets = ModuleQueryOutputBudgets {
+            per_field_bytes: u32::MAX,
+            total_bytes: u32::MAX,
+        }
+        .normalized();
+        let max = clamp_output_budget(u32::MAX);
+        assert_eq!(budgets.per_field_bytes, max);
+        assert_eq!(budgets.total_bytes, max);
+    }
 }

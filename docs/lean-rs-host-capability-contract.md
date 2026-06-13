@@ -118,7 +118,7 @@ module-query methods return their `Unsupported` outcome for bounded module proje
 | `lean_rs_host_process_module_query` | `(env) (src : String) (query : ModuleQuery) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryOutcome` | `process_module_query(source, query, options, cancellation)` |
 | `lean_rs_host_process_module_query_batch` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryBatchOutcome` | `process_module_query_batch(source, selectors, budgets, options, cancellation)` |
 | `lean_rs_host_process_module_query_batch_cached` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) (policy : String) : IO ModuleQueryBatchCachedOutcome` | `process_module_query_batch_cached(source, selectors, budgets, options, policy, cancellation)` |
-| `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache(cancellation)` |
+| `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache()` |
 
 ## Forking the shim package
 

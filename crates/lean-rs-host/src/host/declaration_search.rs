@@ -8,6 +8,7 @@ use lean_rs::abi::nat;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
 use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
 use lean_rs::{LeanRuntime, Obj};
+use lean_toolchain::LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX;
 
 use crate::host::session::{LeanDeclarationFilter, LeanSourceRange};
 
@@ -171,7 +172,9 @@ impl Default for DeclarationInspectionFields {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeclarationInspectionBudgets {
+    /// Maximum UTF-8 bytes for one rendered field.
     pub per_field_bytes: u32,
+    /// Maximum UTF-8 bytes for all rendered fields in the inspection.
     pub total_bytes: u32,
 }
 
@@ -182,6 +185,42 @@ impl Default for DeclarationInspectionBudgets {
             total_bytes: 64 * 1024,
         }
     }
+}
+
+impl DeclarationInspectionBudgets {
+    /// Construct the default inspection budget bundle.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replace the per-field byte budget, saturating at
+    /// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`].
+    #[must_use]
+    pub fn per_field_bytes(mut self, bytes: u32) -> Self {
+        self.per_field_bytes = clamp_output_budget(bytes);
+        self
+    }
+
+    /// Replace the total inspection byte budget, saturating at
+    /// [`LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX`].
+    #[must_use]
+    pub fn total_bytes(mut self, bytes: u32) -> Self {
+        self.total_bytes = clamp_output_budget(bytes);
+        self
+    }
+
+    fn normalized(self) -> Self {
+        Self {
+            per_field_bytes: clamp_output_budget(self.per_field_bytes),
+            total_bytes: clamp_output_budget(self.total_bytes),
+        }
+    }
+}
+
+fn clamp_output_budget(bytes: u32) -> u32 {
+    let max = u32::try_from(LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX).unwrap_or(u32::MAX);
+    bytes.min(max)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -328,12 +367,13 @@ impl<'lean> IntoLean<'lean> for DeclarationInspectionFields {
 
 impl<'lean> IntoLean<'lean> for DeclarationInspectionBudgets {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        let normalized = self.normalized();
         alloc_ctor_with_objects(
             runtime,
             0,
             [
-                nat::from_usize(runtime, self.per_field_bytes as usize),
-                nat::from_usize(runtime, self.total_bytes as usize),
+                nat::from_usize(runtime, normalized.per_field_bytes as usize),
+                nat::from_usize(runtime, normalized.total_bytes as usize),
             ],
         )
     }
@@ -640,5 +680,39 @@ impl<'lean> TryFromLean<'lean> for DeclarationInspectionResult {
                 "expected Lean DeclarationInspectionResult ctor (tag 0..=2), found tag {other}"
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn declaration_inspection_budget_defaults_match_policy() {
+        let budgets = DeclarationInspectionBudgets::new();
+        assert_eq!(budgets.per_field_bytes, 8 * 1024);
+        assert_eq!(budgets.total_bytes, 64 * 1024);
+    }
+
+    #[test]
+    fn declaration_inspection_budget_setters_saturate() {
+        let budgets = DeclarationInspectionBudgets::new()
+            .per_field_bytes(u32::MAX)
+            .total_bytes(u32::MAX);
+        let max = clamp_output_budget(u32::MAX);
+        assert_eq!(budgets.per_field_bytes, max);
+        assert_eq!(budgets.total_bytes, max);
+    }
+
+    #[test]
+    fn declaration_inspection_budget_normalization_clamps_struct_literals() {
+        let budgets = DeclarationInspectionBudgets {
+            per_field_bytes: u32::MAX,
+            total_bytes: u32::MAX,
+        }
+        .normalized();
+        let max = clamp_output_budget(u32::MAX);
+        assert_eq!(budgets.per_field_bytes, max);
+        assert_eq!(budgets.total_bytes, max);
     }
 }

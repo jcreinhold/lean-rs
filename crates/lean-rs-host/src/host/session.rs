@@ -315,18 +315,23 @@ impl LeanImportLevel {
 ///
 /// Profiles intentionally expose names tied to host semantics rather than raw
 /// Lean import knobs. All full-session profiles keep `loadExts := true`; the
-/// no-extension variant remains a profiling-only diagnostic path.
+/// no-extension variant remains a profiling-only diagnostic path and never
+/// produces a normal [`LeanSession`]. Because full sessions load environment
+/// extensions, they are not eligible for `Environment.freeRegions` cleanup; use
+/// a worker process boundary to reset Lean import state.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum LeanSessionImportProfile {
-    /// Public exported declarations only.
+    /// Public exported declarations only, with environment extensions loaded.
     ExportedPublic,
-    /// Server-level import data without `import all`.
+    /// Server-level import data without `import all`, with environment
+    /// extensions loaded.
     Server,
-    /// Private-level import data without `import all`.
+    /// Private-level import data without `import all`, with environment
+    /// extensions loaded.
     #[default]
     Private,
-    /// Legacy compatibility import shape: `import all`, private level,
-    /// extensions loaded.
+    /// Legacy compatibility import shape: `import all`, private level, with
+    /// environment extensions loaded.
     FullPrivateCompat,
 }
 
@@ -1831,6 +1836,10 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
 
     /// Clear the shim-owned module snapshot cache when the loaded capability
     /// supports it.
+    ///
+    /// This releases only cached module snapshots built by the bundled
+    /// info-tree shim. It does not reset Lean's runtime, unload imported
+    /// modules, or make full-session compacted regions safe to free.
     ///
     /// # Errors
     ///
