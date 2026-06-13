@@ -288,6 +288,8 @@ curated reading order, is published at <https://jcreinhold.github.io/lean-rs/>.
 - [`27-lean-dup-readiness.md`](docs/architecture/27-lean-dup-readiness.md): downstream worker replacement fixture.
 - [`28-production-scale-release.md`](docs/architecture/28-production-scale-release.md): local pool scale contract and
   non-goals.
+- [`30-worker-runtime-semantics.md`](docs/architecture/30-worker-runtime-semantics.md): canonical worker runtime model,
+  invariants, lifecycle semantics, and proof-status note.
 
 Frozen public surfaces for each crate live under [`docs/api-review/`](docs/api-review/); later changes diff against
 those baselines.

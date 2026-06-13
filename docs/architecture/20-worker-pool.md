@@ -64,9 +64,9 @@ Pool-level observability and bounded row-delivery backpressure also live at this
 Snapshots are operational summaries, not protocol traces. They do not expose worker ids, child pids, pipe handles,
 protocol frames, or which warm worker was selected.
 
-The pool is actor-like in the narrow sense that it hides child state, transport, restart sequencing, and backpressure
-behind a lease API. It is not a formal actor runtime: there is no public mailbox, no cloneable actor address, no
-published scheduler, no fairness claim, and no global FIFO order. The current runtime contract is stated in
+The pool hides child state, transport, restart sequencing, and backpressure behind a lease API, but it is not a formal
+actor runtime: there is no public mailbox, no cloneable actor address, no published scheduler, no fairness claim, and
+no global FIFO order. The current runtime contract is stated in
 [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md).
 
 ## Designs Considered

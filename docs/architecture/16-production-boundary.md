@@ -8,9 +8,9 @@ The production boundary is a worker process. The worker crates own child process
 fatal-exit diagnostics, request timeouts, live row streaming, typed command facades, and memory cycling. `lean-rs-host`
 remains the in-process API that the worker uses inside the child.
 
-This boundary is actor-like but not a formal actor runtime. A worker child is a supervised serial process, and the pool
-is a synchronous lease manager over local children. There is no public mailbox, scheduler, fairness guarantee, or
-checked Lean transition-system model. The operational semantics are stated in
+This boundary is not a formal actor runtime. A worker child is a supervised serial process, and the pool is a
+synchronous lease manager over local children. There is no public mailbox, scheduler, fairness guarantee, or
+actor-address delivery policy. The canonical runtime model is stated in
 [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md).
 
 ## Chosen Boundary
