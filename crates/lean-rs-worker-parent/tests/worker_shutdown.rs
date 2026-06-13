@@ -15,14 +15,27 @@ use std::time::Duration;
 use std::process::Command;
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
+    LeanWorker, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError, LeanWorkerRestartPolicy,
+    LeanWorkerShutdownOutcome,
 };
 use lean_rs_worker_protocol::protocol::{
-    MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
+    DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
+use serde_json::value::RawValue;
 
 const FAKE_CHILD_ENV: &str = "LEAN_RS_WORKER_PARENT_FAKE_CHILD";
 
+// Import-light conformance harness foundation for the worker-parent runtime model.
+//
+// The test binary re-enters itself as a fake worker child through `FAKE_CHILD_ENV`, speaks
+// deterministic worker-protocol frames, and never opens a Lean session or fixture capability.
+// Later model-conformance tests should prefer this harness when they need child startup,
+// generation counters, terminal success/failure, shutdown/drop cleanup, timeout replacement,
+// restart exhaustion, or synthetic row streaming. Real Lean integration still belongs in the
+// worker-child tests. Exact command:
+//
+//   cargo nextest run -p lean-rs-worker-parent --profile ci
+//
 fn main() {
     if let Ok(mode) = env::var(FAKE_CHILD_ENV) {
         run_fake_child(&mode);
@@ -30,6 +43,14 @@ fn main() {
     }
 
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
+        (
+            "terminal_success_harness_observes_generation_and_request",
+            terminal_success_harness_observes_generation_and_request,
+        ),
+        (
+            "streaming_rows_then_terminal_success_are_observable",
+            streaming_rows_then_terminal_success_are_observable,
+        ),
         ("explicit_shutdown_reaps_child", explicit_shutdown_reaps_child),
         ("dropped_idle_worker_reaps_child", dropped_idle_worker_reaps_child),
         (
@@ -96,6 +117,22 @@ fn run_fake_child(mode: &str) {
                 write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
                     .expect("fake child writes health response");
             }
+            Request::EmitTestRows { streams } => {
+                let mut emitter = DataRowEmitter::default();
+                for stream in streams {
+                    let payload = RawValue::from_string(format!(r#"{{"stream":"{stream}"}}"#))
+                        .expect("fake child builds JSON row payload");
+                    let row = emitter.next(stream, payload);
+                    write_frame(&mut stdout, Message::DataRow(row), MAX_FRAME_BYTES)
+                        .expect("fake child writes data row");
+                }
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::RowsComplete { count: emitter.count() }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child writes row terminal response");
+            }
             Request::Terminate if mode == "terminate_hang" => sleep_forever(),
             Request::Terminate => {
                 write_frame(&mut stdout, Message::Response(Response::Terminating), MAX_FRAME_BYTES)
@@ -142,6 +179,51 @@ fn fake_worker_with_config(
         .request_timeout(Duration::from_millis(80))
         .shutdown_timeout(Duration::from_millis(80));
     LeanWorker::spawn(&configure(config))
+}
+
+fn terminal_success_harness_observes_generation_and_request() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let before = worker.lifecycle_snapshot();
+    let before_stats = worker.stats();
+    assert_eq!(before.worker_generation, 0);
+    assert_eq!(before_stats.requests, 0);
+
+    worker.health().map_err(|err| err.to_string())?;
+
+    let after = worker.lifecycle_snapshot();
+    assert_eq!(
+        after.worker_generation, before.worker_generation,
+        "terminal success must not replace the child generation"
+    );
+    assert_eq!(worker.stats().requests, 1, "one health request should be counted");
+    assert_eq!(worker.stats().restarts, 0, "success must not restart the child");
+    let report = worker.shutdown().map_err(|err| err.to_string())?;
+    assert_eq!(report.outcome, LeanWorkerShutdownOutcome::Graceful);
+    Ok(())
+}
+
+fn streaming_rows_then_terminal_success_are_observable() -> Result<(), String> {
+    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let sink = RecordingSink::default();
+    let count = worker
+        .__emit_test_rows(
+            vec!["left".to_owned(), "right".to_owned(), "left".to_owned()],
+            None,
+            Some(&sink),
+        )
+        .map_err(|err| err.to_string())?;
+    assert_eq!(count, 3);
+
+    let rows = sink.rows();
+    let observed: Vec<(String, u64)> = rows.into_iter().map(|row| (row.stream, row.sequence)).collect();
+    assert_eq!(
+        observed,
+        vec![("left".to_owned(), 0), ("right".to_owned(), 0), ("left".to_owned(), 1),]
+    );
+    assert_eq!(worker.stats().requests, 1);
+    assert_eq!(worker.stats().data_rows_delivered, 3);
+    drop(worker);
+    Ok(())
 }
 
 fn restart_limited_fake_worker(mode: &str, max_restarts: u64) -> Result<LeanWorker, LeanWorkerError> {
@@ -275,6 +357,21 @@ fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
         Some("restart_limit_exceeded")
     );
     Ok(())
+}
+
+#[derive(Default)]
+struct RecordingSink(std::sync::Mutex<Vec<LeanWorkerDataRow>>);
+
+impl RecordingSink {
+    fn rows(&self) -> Vec<LeanWorkerDataRow> {
+        self.0.lock().expect("recording sink mutex is not poisoned").clone()
+    }
+}
+
+impl LeanWorkerDataSink for RecordingSink {
+    fn report(&self, row: LeanWorkerDataRow) {
+        self.0.lock().expect("recording sink mutex is not poisoned").push(row);
+    }
 }
 
 fn assert_reaped(pid: u32) -> Result<(), String> {
