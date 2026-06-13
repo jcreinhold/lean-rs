@@ -9,6 +9,17 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-12
+
+### `lean-toolchain` stamps capability manifests from the selected build toolchain
+
+`CargoLeanCapability` now records the Lean identity of the toolchain used to build the capability dylib, including when
+callers pass an explicit sysroot. Previously the manifest fingerprint came from the `lean-toolchain` Rust crate's own
+build-time environment, so a downstream crate could build a capability under one header-identical Lean release while
+stamping the manifest with another ambient release. Loader preflight now treats the manifest header digest as the
+compatibility authority and uses the exact resolved version only for legacy manifests without a digest. No public API
+change.
+
 ### `lean-rs-worker-parent` documents that worker-child provisioning is the caller's job
 
 `LeanWorkerChild`'s docs now state explicitly that the locator only *finds* a worker child and never installs one, and

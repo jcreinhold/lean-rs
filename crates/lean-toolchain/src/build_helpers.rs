@@ -976,7 +976,7 @@ fn write_capability_manifest(
     let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
     let mut dependencies = capability_dependencies(project_root, target_name)?;
     dependencies.extend(explicit_dependencies.iter().map(lean_library_dependency_to_json));
-    let fingerprint = ToolchainFingerprint::current();
+    let fingerprint = manifest_toolchain_fingerprint(project_root, target_name, selected_toolchain)?;
     let search_dirs = capability_search_dirs(project_root, dylib_path);
     let build_toolchain = selected_toolchain.map(|info| {
         serde_json::json!({
@@ -1000,8 +1000,8 @@ fn write_capability_manifest(
             "lean_version": &fingerprint.lean_version,
             "resolved_version": &fingerprint.resolved_version,
             "header_sha256": &fingerprint.header_sha256,
-            "fixture_sha256": &fingerprint.fixture_sha256,
-            "host_triple": &fingerprint.host_triple,
+            "fixture_sha256": fingerprint.fixture_sha256,
+            "host_triple": fingerprint.host_triple,
         },
         "build_toolchain": build_toolchain,
         "search_dirs": search_dirs
@@ -1035,6 +1035,77 @@ fn write_capability_manifest(
         ),
     })?;
     Ok(manifest_path)
+}
+
+struct ManifestToolchainFingerprint {
+    lean_version: String,
+    resolved_version: String,
+    header_sha256: String,
+    fixture_sha256: &'static str,
+    host_triple: &'static str,
+}
+
+fn manifest_toolchain_fingerprint(
+    project_root: &Path,
+    target_name: &str,
+    selected_toolchain: Option<&ToolchainInfo>,
+) -> Result<ManifestToolchainFingerprint, LinkDiagnostics> {
+    let Some(info) = selected_toolchain else {
+        let current = ToolchainFingerprint::current();
+        return Ok(ManifestToolchainFingerprint {
+            lean_version: current.lean_version.to_owned(),
+            resolved_version: current.resolved_version.to_owned(),
+            header_sha256: current.header_sha256.to_owned(),
+            fixture_sha256: current.fixture_sha256,
+            host_triple: current.host_triple,
+        });
+    };
+    let header_sha256 = sha256_manifest_input(project_root, target_name, &info.header_path)?;
+    let Some(entry) = lean_rs_abi::supported_by_digest(&header_sha256) else {
+        return Err(LinkDiagnostics::UnsupportedToolchain {
+            active: info.version.clone(),
+            supported_window: supported_window(),
+        });
+    };
+    let resolved_version = if entry.versions.contains(&info.version.as_str()) {
+        info.version.clone()
+    } else {
+        entry.versions.first().copied().unwrap_or("unknown").to_owned()
+    };
+    Ok(ManifestToolchainFingerprint {
+        lean_version: info.version.clone(),
+        resolved_version,
+        header_sha256,
+        fixture_sha256: ToolchainFingerprint::current().fixture_sha256,
+        host_triple: ToolchainFingerprint::current().host_triple,
+    })
+}
+
+fn sha256_manifest_input(project_root: &Path, target_name: &str, path: &Path) -> Result<String, LinkDiagnostics> {
+    let bytes = fs::read(path).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("could not read selected Lean header {} ({err})", path.display()),
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hex(&hasher.finalize()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+fn supported_window() -> String {
+    lean_rs_abi::SUPPORTED_TOOLCHAINS
+        .iter()
+        .map(|toolchain| format!("{:?}", toolchain.versions))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -1448,10 +1519,28 @@ mod tests {
     }
 
     fn make_fake_sysroot(name: &str) -> PathBuf {
+        make_fake_sysroot_with_version(name, crate::LEAN_VERSION)
+    }
+
+    fn make_fake_sysroot_with_version(name: &str, version: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("lean-toolchain-sysroot-{}-{name}", std::process::id()));
         drop(fs::remove_dir_all(&root));
-        write_file(&root.join("include").join("lean").join("lean.h"), "/* fake lean.h */\n");
+        let include = root.join("include").join("lean");
+        fs::create_dir_all(&include).expect("create fake include dir");
+        fs::copy(crate::LEAN_HEADER_PATH, include.join("lean.h")).expect("copy supported lean.h");
+        write_file(
+            &include.join("version.h"),
+            &format!("#define LEAN_VERSION_STRING \"{version}\"\n"),
+        );
         root
+    }
+
+    fn header_identical_alias() -> Option<&'static str> {
+        match crate::LEAN_VERSION {
+            "4.31.0-rc1" => Some("4.31.0-rc2"),
+            "4.31.0-rc2" => Some("4.31.0-rc1"),
+            _ => None,
+        }
     }
 
     #[test]
@@ -1881,6 +1970,43 @@ mod tests {
         assert_eq!(
             build_toolchain.get("sysroot").and_then(serde_json::Value::as_str),
             Some(sysroot.to_str().expect("test sysroot is UTF-8"))
+        );
+    }
+
+    #[test]
+    fn cargo_capability_manifest_uses_selected_sysroot_fingerprint() {
+        let Some(alias) = header_identical_alias() else {
+            return;
+        };
+        let root = make_project("cargo-capability-explicit-sysroot-fingerprint", "MyCapability");
+        let sysroot = make_fake_sysroot_with_version("cargo-capability-fingerprint", alias);
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+
+        let built = CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .lean_sysroot(&sysroot)
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("cargo helper build");
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
+                .expect("manifest is valid JSON");
+        let fingerprint = manifest
+            .get("toolchain_fingerprint")
+            .and_then(serde_json::Value::as_object)
+            .expect("manifest records toolchain fingerprint");
+        assert_eq!(
+            fingerprint.get("lean_version").and_then(serde_json::Value::as_str),
+            Some(alias)
+        );
+        assert_eq!(
+            fingerprint.get("resolved_version").and_then(serde_json::Value::as_str),
+            Some(alias)
+        );
+        assert_eq!(
+            fingerprint.get("header_sha256").and_then(serde_json::Value::as_str),
+            Some(crate::LEAN_HEADER_DIGEST)
         );
     }
 

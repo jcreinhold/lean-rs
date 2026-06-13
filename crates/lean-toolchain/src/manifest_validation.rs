@@ -130,28 +130,28 @@ pub fn check_static(manifest_path: &Path) -> LeanLoaderReport {
 
 /// Validate the toolchain fingerprint against this `lean-toolchain` build.
 pub fn check_fingerprint(manifest: &CapabilityManifest, checks: &mut Vec<LeanLoaderCheck>) {
+    if let Some(digest) = manifest.lean_header_sha256.as_deref() {
+        if digest != crate::LEAN_HEADER_DIGEST {
+            checks.push(LeanLoaderCheck::error(
+                LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
+                digest,
+                format!(
+                    "manifest Lean header digest {digest} does not match this process digest {}",
+                    crate::LEAN_HEADER_DIGEST
+                ),
+                "rebuild the Lean capability with the same Lean ABI used by this Rust binary",
+            ));
+        }
+        return;
+    }
     if let Some(version) = manifest.lean_version.as_deref()
         && lean_rs_abi::supported_for(version).is_none()
     {
         checks.push(LeanLoaderCheck::error(
             LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
             version,
-            format!("manifest was built with unsupported Lean toolchain {version}"),
-            "rebuild the Lean capability with a Lean version supported by this lean-rs release",
-        ));
-        return;
-    }
-    if let Some(digest) = manifest.lean_header_sha256.as_deref()
-        && digest != crate::LEAN_HEADER_DIGEST
-    {
-        checks.push(LeanLoaderCheck::error(
-            LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
-            digest,
-            format!(
-                "manifest Lean header digest {digest} does not match this process digest {}",
-                crate::LEAN_HEADER_DIGEST
-            ),
-            "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
+            format!("legacy manifest was built with unsupported Lean toolchain {version}"),
+            "rebuild the Lean capability so the manifest records a Lean header digest",
         ));
         return;
     }
@@ -162,10 +162,10 @@ pub fn check_fingerprint(manifest: &CapabilityManifest, checks: &mut Vec<LeanLoa
             LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint,
             resolved,
             format!(
-                "manifest resolved Lean version {resolved} does not match this process resolved version {}",
+                "legacy manifest resolved Lean version {resolved} does not match this process resolved version {}",
                 crate::LEAN_RESOLVED_VERSION
             ),
-            "rebuild the Lean capability with the same Lean toolchain used by this Rust binary",
+            "rebuild the Lean capability so the manifest records a Lean header digest",
         ));
     }
 }
@@ -497,7 +497,7 @@ fn required_u64(value: &serde_json::Value, field: &str, path: &Path) -> Result<u
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::CapabilityManifest;
+    use super::{CapabilityManifest, check_fingerprint};
     use crate::{
         CAPABILITY_MANIFEST_SCHEMA_VERSION, LeanExportAbiRepr, LeanExportArgAbi, LeanExportOwnership,
         LeanExportResultConvention, LeanExportReturnAbi, LeanExportSignature, LeanExportSymbolKind,
@@ -540,6 +540,69 @@ mod tests {
         assert_eq!(err.code(), LeanLoaderDiagnosticCode::UnsupportedManifestSchema);
     }
 
+    #[test]
+    fn fingerprint_accepts_header_identical_resolved_alias() {
+        let Some(alias) = header_identical_alias() else {
+            return;
+        };
+        let manifest = manifest_with_fingerprint(alias, alias, Some(crate::LEAN_HEADER_DIGEST.to_owned()));
+        let mut checks = Vec::new();
+
+        check_fingerprint(&manifest, &mut checks);
+
+        assert!(
+            checks.is_empty(),
+            "header-identical version aliases should pass: {checks:?}"
+        );
+    }
+
+    #[test]
+    fn fingerprint_rejects_mismatched_header_digest() {
+        let manifest = manifest_with_fingerprint(
+            crate::LEAN_VERSION,
+            crate::LEAN_RESOLVED_VERSION,
+            Some("0000000000000000000000000000000000000000000000000000000000000000".to_owned()),
+        );
+        let mut checks = Vec::new();
+
+        check_fingerprint(&manifest, &mut checks);
+
+        assert_eq!(
+            checks.first().map(crate::LeanLoaderCheck::code),
+            Some(LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint)
+        );
+    }
+
+    #[test]
+    fn fingerprint_with_digest_treats_version_as_metadata() {
+        let manifest = manifest_with_fingerprint(
+            "4.31.0-local-dev",
+            "4.31.0-other-alias",
+            Some(crate::LEAN_HEADER_DIGEST.to_owned()),
+        );
+        let mut checks = Vec::new();
+
+        check_fingerprint(&manifest, &mut checks);
+
+        assert!(checks.is_empty(), "matching digest should be authoritative: {checks:?}");
+    }
+
+    #[test]
+    fn legacy_fingerprint_without_digest_checks_resolved_version() {
+        let Some(alias) = header_identical_alias() else {
+            return;
+        };
+        let manifest = manifest_with_fingerprint(alias, alias, None);
+        let mut checks = Vec::new();
+
+        check_fingerprint(&manifest, &mut checks);
+
+        assert_eq!(
+            checks.first().map(crate::LeanLoaderCheck::code),
+            Some(LeanLoaderDiagnosticCode::UnsupportedToolchainFingerprint)
+        );
+    }
+
     fn temp_manifest_path(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("lean-toolchain-manifest-{}-{name}", std::process::id()));
         drop(std::fs::remove_dir_all(&dir));
@@ -558,5 +621,30 @@ mod tests {
             "exports": exports,
         });
         std::fs::write(path, serde_json::to_vec_pretty(&manifest).expect("encode manifest")).expect("write manifest");
+    }
+
+    fn manifest_with_fingerprint(
+        lean_version: &str,
+        resolved_lean_version: &str,
+        lean_header_sha256: Option<String>,
+    ) -> CapabilityManifest {
+        CapabilityManifest {
+            primary_dylib: PathBuf::from("/tmp/libcap.so"),
+            package: "pkg".to_owned(),
+            module: "Cap".to_owned(),
+            dependencies: Vec::new(),
+            lean_version: Some(lean_version.to_owned()),
+            resolved_lean_version: Some(resolved_lean_version.to_owned()),
+            lean_header_sha256,
+            exports: Vec::new(),
+        }
+    }
+
+    fn header_identical_alias() -> Option<&'static str> {
+        match crate::LEAN_VERSION {
+            "4.31.0-rc1" => Some("4.31.0-rc2"),
+            "4.31.0-rc2" => Some("4.31.0-rc1"),
+            _ => None,
+        }
     }
 }
