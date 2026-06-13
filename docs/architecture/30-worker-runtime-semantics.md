@@ -76,6 +76,50 @@ Implementation traces refine this model by hiding child pids, OS pipe handles, s
 in typed errors, tracing spans, metrics-only counters, exact thread scheduling, and the private frame order of
 handshake/configuration setup.
 
+## Conformance Trace Harness
+
+Prompt 38 adds a narrow implementation-level conformance harness in
+`crates/lean-rs-worker-parent/tests/worker_shutdown.rs`. Its `RuntimeTraceEvent` enum is test-only vocabulary, not a
+public tracing API and not an IPC message. The enum names the parent-observable events that later supervisor and pool
+refactors must preserve:
+
+| Test trace event | Model event or invariant |
+| --- | --- |
+| `GenerationStarted(g)` | worker generation `g` exists after spawn |
+| `RequestAdmitted { generation: g, request: r }` | `accept(g, r)` admission |
+| `RequestSent { generation: g, request: r }` | transition into `Busy(g, r)` |
+| `StreamRowObserved { generation: g, request: r, .. }` | `row(g, r, b)` before commit |
+| `TerminalOutcomeObserved { generation: g, request: r, outcome }` | `terminal(g, r, o)` and terminal outcome uniqueness |
+| `TimeoutObserved { generation: g, request: r }` | timeout failure before kill/reap |
+| `ChildCrashObserved { generation: g, request: r }` | `Crashed(g, c)` before terminalization |
+| `RestartObserved { from: g, to: g' }` | `restart_admitted(g, g')` and generation separation |
+| `RestartLimitExhausted { generation: g }` | `restart_refused(g, restart_limit_exceeded)` |
+| `ShutdownStarted { generation: g }` | `shutdown_start(g)` |
+| `GracefulStopAttempted { generation: g }` | `terminate_sent(g)` |
+| `KillEscalated { generation: g }` | `kill_sent(g)` |
+| `ChildReaped { generation: g }` | `reaped(g, exit)` |
+| `LeaseGranted { .. }` | `lease_granted(c, l)` via public pool snapshots |
+| `LeaseDropped { .. }` | `lease_dropped(l)` via public pool snapshots |
+| `AdmissionRefused { reason }` | `admission_refused(c, reason)` |
+
+The conformance tests are import-light. The test binary re-enters itself as a deterministic fake worker child, and the
+pool tests use a valid minimal manifest plus an executable wrapper rather than adding a generic child environment
+passthrough. Real Lean import behavior remains covered by worker-child and isolated nextest suites.
+
+Prompts 39 through 41 should preserve or extend these exact test names:
+
+- `conformance_terminal_success_has_one_terminal_outcome`;
+- `conformance_stream_rows_are_tentative_until_terminal_success`;
+- `conformance_explicit_shutdown_gracefully_reaps_child`;
+- `conformance_dropped_idle_worker_reaps_child`;
+- `conformance_dropped_worker_escalates_kill_and_reaps_child`;
+- `conformance_timeout_kill_reap_restarts_next_generation`;
+- `conformance_child_crash_terminalizes_in_flight_request`;
+- `conformance_restart_limit_exhaustion_is_typed_terminal_outcome`;
+- `conformance_pool_lease_drop_releases_capacity_once`;
+- `conformance_pool_admission_refusal_is_explicit`;
+- `conformance_stale_generation_output_is_protocol_failure`.
+
 ## Worker Transition System
 
 A worker state has one of these forms:

@@ -3626,7 +3626,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_worker_output_error_names_expected_and_actual_generation() {
+    fn conformance_stale_generation_output_is_protocol_failure() {
         let err = stale_worker_output_error("health", WorkerGeneration(2), WorkerGeneration(1));
         match err {
             LeanWorkerError::Protocol { message } => {

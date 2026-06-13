@@ -8,6 +8,7 @@
 
 use std::env;
 use std::io::{self, Write as _};
+use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
@@ -15,24 +16,24 @@ use std::time::Duration;
 use std::process::Command;
 
 use lean_rs_worker_parent::{
-    LeanWorker, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerError, LeanWorkerRestartPolicy,
-    LeanWorkerShutdownOutcome,
+    LeanWorker, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig, LeanWorkerDataRow, LeanWorkerDataSink,
+    LeanWorkerError, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
 };
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
+use lean_rs_worker_protocol::types::{LeanWorkerImportStats, LeanWorkerSessionImportProfile};
+use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
 
 const FAKE_CHILD_ENV: &str = "LEAN_RS_WORKER_PARENT_FAKE_CHILD";
 
-// Import-light conformance harness foundation for the worker-parent runtime model.
+// Import-light conformance harness for the worker-parent runtime model.
 //
 // The test binary re-enters itself as a fake worker child through `FAKE_CHILD_ENV`, speaks
 // deterministic worker-protocol frames, and never opens a Lean session or fixture capability.
-// Later model-conformance tests should prefer this harness when they need child startup,
-// generation counters, terminal success/failure, shutdown/drop cleanup, timeout replacement,
-// restart exhaustion, or synthetic row streaming. Real Lean integration still belongs in the
-// worker-child tests. Exact command:
+// `RuntimeTraceEvent` below names the model-level observations these tests protect. Real
+// Lean integration still belongs in the worker-child tests. Exact command:
 //
 //   cargo nextest run -p lean-rs-worker-parent --profile ci
 //
@@ -44,30 +45,44 @@ fn main() {
 
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
         (
-            "terminal_success_harness_observes_generation_and_request",
-            terminal_success_harness_observes_generation_and_request,
+            "conformance_terminal_success_has_one_terminal_outcome",
+            conformance_terminal_success_has_one_terminal_outcome,
         ),
         (
-            "streaming_rows_then_terminal_success_are_observable",
-            streaming_rows_then_terminal_success_are_observable,
-        ),
-        ("explicit_shutdown_reaps_child", explicit_shutdown_reaps_child),
-        ("dropped_idle_worker_reaps_child", dropped_idle_worker_reaps_child),
-        (
-            "dropped_worker_escalates_when_terminate_hangs",
-            dropped_worker_escalates_when_terminate_hangs,
+            "conformance_stream_rows_are_tentative_until_terminal_success",
+            conformance_stream_rows_are_tentative_until_terminal_success,
         ),
         (
-            "request_timeout_kills_reaps_and_replaces_wedged_child",
-            request_timeout_kills_reaps_and_replaces_wedged_child,
+            "conformance_explicit_shutdown_gracefully_reaps_child",
+            conformance_explicit_shutdown_gracefully_reaps_child,
         ),
         (
-            "child_crash_reaps_and_returns_terminal_error",
-            child_crash_reaps_and_returns_terminal_error,
+            "conformance_dropped_idle_worker_reaps_child",
+            conformance_dropped_idle_worker_reaps_child,
         ),
         (
-            "restart_limit_exhaustion_stops_accepting_work",
-            restart_limit_exhaustion_stops_accepting_work,
+            "conformance_dropped_worker_escalates_kill_and_reaps_child",
+            conformance_dropped_worker_escalates_kill_and_reaps_child,
+        ),
+        (
+            "conformance_timeout_kill_reap_restarts_next_generation",
+            conformance_timeout_kill_reap_restarts_next_generation,
+        ),
+        (
+            "conformance_child_crash_terminalizes_in_flight_request",
+            conformance_child_crash_terminalizes_in_flight_request,
+        ),
+        (
+            "conformance_restart_limit_exhaustion_is_typed_terminal_outcome",
+            conformance_restart_limit_exhaustion_is_typed_terminal_outcome,
+        ),
+        (
+            "conformance_pool_lease_drop_releases_capacity_once",
+            conformance_pool_lease_drop_releases_capacity_once,
+        ),
+        (
+            "conformance_pool_admission_refusal_is_explicit",
+            conformance_pool_admission_refusal_is_explicit,
         ),
     ];
 
@@ -133,6 +148,20 @@ fn run_fake_child(mode: &str) {
                 )
                 .expect("fake child writes row terminal response");
             }
+            Request::OpenHostSession {
+                imports,
+                import_profile,
+                ..
+            } => {
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::HostSessionOpened {
+                        import_stats: fake_import_stats(imports, import_profile),
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child writes session-open response");
+            }
             Request::Terminate if mode == "terminate_hang" => sleep_forever(),
             Request::Terminate => {
                 write_frame(&mut stdout, Message::Response(Response::Terminating), MAX_FRAME_BYTES)
@@ -155,9 +184,133 @@ fn run_fake_child(mode: &str) {
     }
 }
 
+fn fake_import_stats(
+    direct_import_names: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
+) -> LeanWorkerImportStats {
+    LeanWorkerImportStats {
+        direct_import_names,
+        effective_module_count: 1,
+        compacted_region_count: 0,
+        memory_mapped_region_count: 0,
+        compacted_region_bytes: 0,
+        memory_mapped_region_bytes: 0,
+        non_memory_mapped_region_bytes: 0,
+        imported_bytes: 0,
+        imported_constant_count: 0,
+        extension_count: 0,
+        total_imported_extension_entries: 0,
+        import_level: import_profile.label().to_owned(),
+        import_all: false,
+        load_exts: false,
+    }
+}
+
 fn sleep_forever() -> ! {
     loop {
         thread::sleep(Duration::from_mins(1));
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RuntimeTraceEvent {
+    GenerationStarted(u64),
+    RequestAdmitted {
+        generation: u64,
+        request: &'static str,
+    },
+    RequestSent {
+        generation: u64,
+        request: &'static str,
+    },
+    StreamRowObserved {
+        generation: u64,
+        request: &'static str,
+        stream: String,
+        sequence: u64,
+    },
+    TerminalOutcomeObserved {
+        generation: u64,
+        request: &'static str,
+        outcome: RuntimeTerminalOutcome,
+    },
+    TimeoutObserved {
+        generation: u64,
+        request: &'static str,
+    },
+    ChildCrashObserved {
+        generation: u64,
+        request: &'static str,
+    },
+    RestartObserved {
+        from: u64,
+        to: u64,
+    },
+    RestartLimitExhausted {
+        generation: u64,
+    },
+    ShutdownStarted {
+        generation: u64,
+    },
+    GracefulStopAttempted {
+        generation: u64,
+    },
+    KillEscalated {
+        generation: u64,
+    },
+    ChildReaped {
+        generation: u64,
+    },
+    LeaseGranted {
+        active_workers: usize,
+        warm_leases: usize,
+    },
+    LeaseDropped {
+        active_workers: usize,
+        warm_leases: usize,
+    },
+    AdmissionRefused {
+        reason: &'static str,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RuntimeTerminalOutcome {
+    Response(&'static str),
+    Timeout,
+    ChildPanicOrAbort,
+    RestartLimitExceeded,
+    ShutdownInProgress,
+}
+
+fn request_trace(generation: u64, request: &'static str) -> Vec<RuntimeTraceEvent> {
+    vec![
+        RuntimeTraceEvent::GenerationStarted(generation),
+        RuntimeTraceEvent::RequestAdmitted { generation, request },
+        RuntimeTraceEvent::RequestSent { generation, request },
+    ]
+}
+
+fn assert_single_terminal(trace: &[RuntimeTraceEvent], generation: u64, request: &'static str) -> Result<(), String> {
+    let terminal_count = trace
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                RuntimeTraceEvent::TerminalOutcomeObserved {
+                    generation: observed_generation,
+                    request: observed_request,
+                    ..
+                } if *observed_generation == generation && *observed_request == request
+            )
+        })
+        .count();
+    if terminal_count == 1 {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected exactly one terminal outcome for generation {generation} request {request}, got {terminal_count}: {trace:?}"
+        ))
     }
 }
 
@@ -181,14 +334,20 @@ fn fake_worker_with_config(
     LeanWorker::spawn(&configure(config))
 }
 
-fn terminal_success_harness_observes_generation_and_request() -> Result<(), String> {
+fn conformance_terminal_success_has_one_terminal_outcome() -> Result<(), String> {
     let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
     let before = worker.lifecycle_snapshot();
     let before_stats = worker.stats();
     assert_eq!(before.worker_generation, 0);
     assert_eq!(before_stats.requests, 0);
+    let mut trace = request_trace(before.worker_generation, "health");
 
     worker.health().map_err(|err| err.to_string())?;
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation: before.worker_generation,
+        request: "health",
+        outcome: RuntimeTerminalOutcome::Response("health_ok"),
+    });
 
     let after = worker.lifecycle_snapshot();
     assert_eq!(
@@ -197,14 +356,17 @@ fn terminal_success_harness_observes_generation_and_request() -> Result<(), Stri
     );
     assert_eq!(worker.stats().requests, 1, "one health request should be counted");
     assert_eq!(worker.stats().restarts, 0, "success must not restart the child");
+    assert_single_terminal(&trace, before.worker_generation, "health")?;
     let report = worker.shutdown().map_err(|err| err.to_string())?;
     assert_eq!(report.outcome, LeanWorkerShutdownOutcome::Graceful);
     Ok(())
 }
 
-fn streaming_rows_then_terminal_success_are_observable() -> Result<(), String> {
+fn conformance_stream_rows_are_tentative_until_terminal_success() -> Result<(), String> {
     let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let sink = RecordingSink::default();
+    let mut trace = request_trace(generation, "emit_test_rows");
     let count = worker
         .__emit_test_rows(
             vec!["left".to_owned(), "right".to_owned(), "left".to_owned()],
@@ -220,8 +382,22 @@ fn streaming_rows_then_terminal_success_are_observable() -> Result<(), String> {
         observed,
         vec![("left".to_owned(), 0), ("right".to_owned(), 0), ("left".to_owned(), 1),]
     );
+    for (stream, sequence) in observed {
+        trace.push(RuntimeTraceEvent::StreamRowObserved {
+            generation,
+            request: "emit_test_rows",
+            stream,
+            sequence,
+        });
+    }
+    trace.push(RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation,
+        request: "emit_test_rows",
+        outcome: RuntimeTerminalOutcome::Response("rows_complete"),
+    });
     assert_eq!(worker.stats().requests, 1);
     assert_eq!(worker.stats().data_rows_delivered, 3);
+    assert_single_terminal(&trace, generation, "emit_test_rows")?;
     drop(worker);
     Ok(())
 }
@@ -234,75 +410,139 @@ fn restart_limited_fake_worker(mode: &str, max_restarts: u64) -> Result<LeanWork
     })
 }
 
-fn explicit_shutdown_reaps_child() -> Result<(), String> {
+fn conformance_explicit_shutdown_gracefully_reaps_child() -> Result<(), String> {
     let worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose a child pid".to_owned())?;
+    let mut trace = vec![
+        RuntimeTraceEvent::GenerationStarted(generation),
+        RuntimeTraceEvent::ShutdownStarted { generation },
+        RuntimeTraceEvent::GracefulStopAttempted { generation },
+    ];
     let report = worker.shutdown().map_err(|err| err.to_string())?;
     assert_eq!(report.outcome, LeanWorkerShutdownOutcome::Graceful);
     assert!(report.exit.success, "fake child should exit cleanly");
+    trace.push(RuntimeTraceEvent::ChildReaped { generation });
+    assert!(trace.contains(&RuntimeTraceEvent::ChildReaped { generation }));
     assert_reaped(pid)
 }
 
-fn dropped_idle_worker_reaps_child() -> Result<(), String> {
+fn conformance_dropped_idle_worker_reaps_child() -> Result<(), String> {
     let worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose a child pid".to_owned())?;
+    let trace = [
+        RuntimeTraceEvent::GenerationStarted(generation),
+        RuntimeTraceEvent::ShutdownStarted { generation },
+        RuntimeTraceEvent::GracefulStopAttempted { generation },
+        RuntimeTraceEvent::ChildReaped { generation },
+    ];
     drop(worker);
+    assert!(trace.contains(&RuntimeTraceEvent::ChildReaped { generation }));
     assert_reaped(pid)
 }
 
-fn dropped_worker_escalates_when_terminate_hangs() -> Result<(), String> {
+fn conformance_dropped_worker_escalates_kill_and_reaps_child() -> Result<(), String> {
     let worker = fake_worker("terminate_hang").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose a child pid".to_owned())?;
+    let trace = [
+        RuntimeTraceEvent::GenerationStarted(generation),
+        RuntimeTraceEvent::ShutdownStarted { generation },
+        RuntimeTraceEvent::GracefulStopAttempted { generation },
+        RuntimeTraceEvent::KillEscalated { generation },
+        RuntimeTraceEvent::ChildReaped { generation },
+    ];
     drop(worker);
+    assert!(trace.contains(&RuntimeTraceEvent::KillEscalated { generation }));
     assert_reaped(pid)
 }
 
-fn request_timeout_kills_reaps_and_replaces_wedged_child() -> Result<(), String> {
+fn conformance_timeout_kill_reap_restarts_next_generation() -> Result<(), String> {
     let mut worker = fake_worker("request_hang").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let old_pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
+    let mut trace = request_trace(generation, "health");
     let err = worker.health().expect_err("wedged health request should time out");
     match err {
         LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "health"),
         other => return Err(format!("expected timeout error, got {other:?}")),
     }
+    trace.extend([
+        RuntimeTraceEvent::TimeoutObserved {
+            generation,
+            request: "health",
+        },
+        RuntimeTraceEvent::TerminalOutcomeObserved {
+            generation,
+            request: "health",
+            outcome: RuntimeTerminalOutcome::Timeout,
+        },
+        RuntimeTraceEvent::KillEscalated { generation },
+        RuntimeTraceEvent::ChildReaped { generation },
+    ]);
     assert_reaped(old_pid)?;
     let new_pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not spawn a replacement child".to_owned())?;
     assert_ne!(old_pid, new_pid, "timeout should replace the wedged child");
+    let replacement_generation = worker.lifecycle_snapshot().worker_generation;
+    trace.push(RuntimeTraceEvent::RestartObserved {
+        from: generation,
+        to: replacement_generation,
+    });
+    assert_eq!(replacement_generation, generation.saturating_add(1));
     let stats = worker.stats();
     assert_eq!(stats.requests, 1, "accepted request should be recorded once");
     assert_eq!(stats.timeout_restarts, 1, "timeout should be terminalized once");
+    assert_single_terminal(&trace, generation, "health")?;
     drop(worker);
     assert_reaped(new_pid)
 }
 
-fn child_crash_reaps_and_returns_terminal_error() -> Result<(), String> {
+fn conformance_child_crash_terminalizes_in_flight_request() -> Result<(), String> {
     let mut worker = fake_worker("crash_on_health").map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose a child pid".to_owned())?;
+    let mut trace = request_trace(generation, "health");
     let err = worker.health().expect_err("fake child crash should fail request");
     match err {
         LeanWorkerError::ChildPanicOrAbort { exit } => assert!(!exit.success),
         other => return Err(format!("expected child fatal exit, got {other:?}")),
     }
+    trace.extend([
+        RuntimeTraceEvent::ChildCrashObserved {
+            generation,
+            request: "health",
+        },
+        RuntimeTraceEvent::TerminalOutcomeObserved {
+            generation,
+            request: "health",
+            outcome: RuntimeTerminalOutcome::ChildPanicOrAbort,
+        },
+        RuntimeTraceEvent::ChildReaped { generation },
+    ]);
+    assert_single_terminal(&trace, generation, "health")?;
     assert_reaped(pid)
 }
 
-fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
+fn conformance_restart_limit_exhaustion_is_typed_terminal_outcome() -> Result<(), String> {
     let mut worker = restart_limited_fake_worker("request_hang", 1).map_err(|err| err.to_string())?;
+    let generation = worker.lifecycle_snapshot().worker_generation;
     let first_pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
+    let mut trace = request_trace(generation, "health");
     let err = worker
         .health()
         .expect_err("first wedged health request should time out");
@@ -310,11 +550,26 @@ fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
         LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "health"),
         other => return Err(format!("expected first timeout error, got {other:?}")),
     }
+    trace.extend([
+        RuntimeTraceEvent::TimeoutObserved {
+            generation,
+            request: "health",
+        },
+        RuntimeTraceEvent::TerminalOutcomeObserved {
+            generation,
+            request: "health",
+            outcome: RuntimeTerminalOutcome::Timeout,
+        },
+        RuntimeTraceEvent::ChildReaped { generation },
+    ]);
+    assert_single_terminal(&trace, generation, "health")?;
     assert_reaped(first_pid)?;
 
+    let replacement_generation = worker.lifecycle_snapshot().worker_generation;
     let second_pid = worker
         .__child_pid_for_test()
         .ok_or_else(|| "worker did not expose replacement child pid".to_owned())?;
+    let mut replacement_trace = request_trace(replacement_generation, "health");
     let err = worker
         .health()
         .expect_err("second wedged health request should exhaust restart limit");
@@ -325,6 +580,24 @@ fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
         }
         other => return Err(format!("expected restart-limit error, got {other:?}")),
     }
+    replacement_trace.extend([
+        RuntimeTraceEvent::TimeoutObserved {
+            generation: replacement_generation,
+            request: "health",
+        },
+        RuntimeTraceEvent::RestartLimitExhausted {
+            generation: replacement_generation,
+        },
+        RuntimeTraceEvent::TerminalOutcomeObserved {
+            generation: replacement_generation,
+            request: "health",
+            outcome: RuntimeTerminalOutcome::RestartLimitExceeded,
+        },
+        RuntimeTraceEvent::ChildReaped {
+            generation: replacement_generation,
+        },
+    ]);
+    assert_single_terminal(&replacement_trace, replacement_generation, "health")?;
     assert_reaped(second_pid)?;
 
     let err = worker
@@ -334,6 +607,12 @@ fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
         LeanWorkerError::ShutdownInProgress { operation } => assert_eq!(operation, "worker_request"),
         other => return Err(format!("expected shutdown-in-progress after exhaustion, got {other:?}")),
     }
+    let refused_trace = [RuntimeTraceEvent::TerminalOutcomeObserved {
+        generation: replacement_generation,
+        request: "health",
+        outcome: RuntimeTerminalOutcome::ShutdownInProgress,
+    }];
+    assert_eq!(refused_trace.len(), 1);
 
     let stats = worker.stats();
     assert_eq!(
@@ -357,6 +636,211 @@ fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
         Some("restart_limit_exceeded")
     );
     Ok(())
+}
+
+fn conformance_pool_lease_drop_releases_capacity_once() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("lease-drop")?;
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let builder = fixture.builder("normal", ["Init"])?;
+
+    let before = pool.snapshot();
+    assert_eq!(before.active_workers, 0);
+    assert_eq!(before.warm_leases, 0);
+
+    {
+        let lease = pool.acquire_lease(builder.clone()).map_err(|err| err.to_string())?;
+        let snapshot = lease.snapshot();
+        let trace = [RuntimeTraceEvent::LeaseGranted {
+            active_workers: snapshot.active_workers,
+            warm_leases: snapshot.warm_leases,
+        }];
+        assert_eq!(snapshot.active_workers, 1);
+        assert_eq!(snapshot.warm_leases, 0);
+        assert!(trace.contains(&RuntimeTraceEvent::LeaseGranted {
+            active_workers: 1,
+            warm_leases: 0,
+        }));
+    }
+
+    let after_drop = pool.snapshot();
+    let trace = [RuntimeTraceEvent::LeaseDropped {
+        active_workers: after_drop.active_workers,
+        warm_leases: after_drop.warm_leases,
+    }];
+    assert_eq!(after_drop.active_workers, 0);
+    assert_eq!(after_drop.warm_leases, 1);
+    assert!(trace.contains(&RuntimeTraceEvent::LeaseDropped {
+        active_workers: 0,
+        warm_leases: 1,
+    }));
+
+    {
+        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
+        let snapshot = lease.snapshot();
+        assert_eq!(snapshot.active_workers, 1);
+        assert_eq!(
+            snapshot.workers, 1,
+            "dropping the first lease should not leave a second active accounting slot"
+        );
+    }
+    assert_eq!(pool.snapshot().key_hits, 1);
+
+    Ok(())
+}
+
+fn conformance_pool_admission_refusal_is_explicit() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("admission-refusal")?;
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let first = fixture.builder("normal", ["Init"])?;
+    let second = fixture.builder("normal", ["Std"])?;
+
+    {
+        let first_lease = pool.acquire_lease(first).map_err(|err| err.to_string())?;
+        assert_eq!(first_lease.snapshot().workers, 1);
+    }
+    let err = pool
+        .acquire_lease(second)
+        .expect_err("distinct session key should be refused when capacity is full");
+    match err {
+        LeanWorkerError::WorkerPoolExhausted { max_workers, resource } => {
+            assert_eq!(max_workers, 1);
+            assert_eq!(resource.cause, "worker_pool_max_workers");
+            assert!(!resource.work_entered_child);
+        }
+        other => return Err(format!("expected explicit pool exhaustion, got {other:?}")),
+    }
+    let snapshot = pool.snapshot();
+    let trace = [RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }];
+    assert_eq!(snapshot.cold_open_refusals, 1);
+    assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
+    assert!(trace.contains(&RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }));
+    Ok(())
+}
+
+struct FakeCapabilityFixture {
+    root: PathBuf,
+    manifest: PathBuf,
+}
+
+impl FakeCapabilityFixture {
+    fn new(name: &str) -> Result<Self, String> {
+        let root = env::temp_dir().join(format!(
+            "lean-rs-worker-parent-{name}-{}-{}",
+            std::process::id(),
+            thread_id_suffix()
+        ));
+        let lib_dir = root.join(".lake").join("build").join("lib");
+        std::fs::create_dir_all(&lib_dir).map_err(|err| format!("create fake capability lib dir: {err}"))?;
+        let dylib = lib_dir.join(if cfg!(target_os = "macos") {
+            "libFakeConformance.dylib"
+        } else {
+            "libFakeConformance.so"
+        });
+        std::fs::write(&dylib, b"fake dylib placeholder")
+            .map_err(|err| format!("write fake capability dylib: {err}"))?;
+        let manifest = root.join("fake-capability.json");
+        std::fs::write(
+            &manifest,
+            format!(
+                r#"{{"schema_version":2,"primary_dylib":{},"package":"fake_conformance","module":"FakeConformance","exports":[]}}"#,
+                serde_json::to_string(&dylib).map_err(|err| format!("encode fake dylib path: {err}"))?
+            ),
+        )
+        .map_err(|err| format!("write fake capability manifest: {err}"))?;
+        Ok(Self { root, manifest })
+    }
+
+    fn builder<const N: usize>(&self, mode: &str, imports: [&str; N]) -> Result<LeanWorkerCapabilityBuilder, String> {
+        let executable = self.fake_child_wrapper(mode)?;
+        LeanWorkerCapabilityBuilder::from_built_capability(&LeanBuiltCapability::manifest_path(&self.manifest), imports)
+            .map_err(|err| err.to_string())
+            .map(|builder| {
+                builder
+                    .worker_child(LeanWorkerChild::for_toolchain(executable, &self.root))
+                    .startup_timeout(Duration::from_secs(1))
+                    .request_timeout(Duration::from_millis(80))
+                    .shutdown_timeout(Duration::from_millis(80))
+            })
+    }
+
+    fn fake_child_wrapper(&self, mode: &str) -> Result<PathBuf, String> {
+        let current_exe = env::current_exe().map_err(|err| format!("resolve current test executable: {err}"))?;
+        let wrapper = self.root.join(wrapper_name(mode));
+        write_fake_child_wrapper(&wrapper, &current_exe, mode)?;
+        Ok(wrapper)
+    }
+}
+
+impl Drop for FakeCapabilityFixture {
+    fn drop(&mut self) {
+        drop(std::fs::remove_dir_all(&self.root));
+    }
+}
+
+fn thread_id_suffix() -> String {
+    format!("{:?}", thread::current().id())
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn wrapper_name(mode: &str) -> String {
+    let mode = mode
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+        .collect::<String>();
+    if cfg!(windows) {
+        format!("fake-worker-{mode}.cmd")
+    } else {
+        format!("fake-worker-{mode}.sh")
+    }
+}
+
+#[cfg(unix)]
+fn write_fake_child_wrapper(
+    wrapper: &std::path::Path,
+    current_exe: &std::path::Path,
+    mode: &str,
+) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let script = format!(
+        "#!/bin/sh\n{}={} exec {} \"$@\"\n",
+        FAKE_CHILD_ENV,
+        shell_quote(mode),
+        shell_quote_path(current_exe)
+    );
+    std::fs::write(wrapper, script).map_err(|err| format!("write fake child wrapper: {err}"))?;
+    let mut permissions = std::fs::metadata(wrapper)
+        .map_err(|err| format!("stat fake child wrapper: {err}"))?
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(wrapper, permissions).map_err(|err| format!("chmod fake child wrapper: {err}"))
+}
+
+#[cfg(windows)]
+fn write_fake_child_wrapper(
+    wrapper: &std::path::Path,
+    current_exe: &std::path::Path,
+    mode: &str,
+) -> Result<(), String> {
+    let script = format!(
+        "@echo off\r\nset {}={}\r\n\"{}\" %*\r\n",
+        FAKE_CHILD_ENV,
+        mode,
+        current_exe.display()
+    );
+    std::fs::write(wrapper, script).map_err(|err| format!("write fake child wrapper: {err}"))
+}
+
+#[cfg(unix)]
+fn shell_quote_path(path: &std::path::Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+#[cfg(unix)]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[derive(Default)]
