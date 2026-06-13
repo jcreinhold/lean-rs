@@ -691,6 +691,9 @@ pub enum LeanWorkerModuleQuerySelector {
         line: u32,
         column: u32,
     },
+    DeclarationOutline {
+        id: String,
+    },
 }
 
 impl LeanWorkerModuleQuerySelector {
@@ -705,6 +708,7 @@ impl LeanWorkerModuleQuerySelector {
             | Self::References { id, .. }
             | Self::DeclarationTarget { id, .. }
             | Self::SurroundingDeclaration { id, .. } => id,
+            Self::DeclarationOutline { id } => id,
         }
     }
 }
@@ -1040,6 +1044,13 @@ pub enum LeanWorkerDeclarationTargetResult {
     },
 }
 
+/// Result for `LeanWorkerModuleQuerySelector::DeclarationOutline`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerDeclarationOutlineResult {
+    pub declarations: Vec<LeanWorkerDeclarationTargetInfo>,
+    pub truncated: bool,
+}
+
 /// Proof-state payload for one cursor.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerProofStateInfo {
@@ -1112,6 +1123,7 @@ pub enum LeanWorkerModuleQueryBatchResult {
     References(LeanWorkerReferencesResult),
     DeclarationTarget(LeanWorkerDeclarationTargetResult),
     SurroundingDeclaration(LeanWorkerSurroundingDeclarationResult),
+    DeclarationOutline(LeanWorkerDeclarationOutlineResult),
 }
 
 /// One selector result in a batched module query.

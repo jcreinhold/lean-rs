@@ -672,22 +672,23 @@ mod tests {
     use crate::types::{
         LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection,
         LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
-        LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationProofSearchFacts,
-        LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
-        LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
-        LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
-        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
-        LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
-        LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerElabFailure,
-        LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
-        LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
-        LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
-        LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
-        LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
-        LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
-        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
-        LeanWorkerProofPositionSummary, LeanWorkerProofStateResult, LeanWorkerRenderedInfo, LeanWorkerRendering,
-        LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+        LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
+        LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias,
+        LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
+        LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
+        LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationVerificationFacts,
+        LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
+        LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
+        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery,
+        LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+        LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
+        LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
+        LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope,
+        LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
+        LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
+        LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary, LeanWorkerProofStateResult,
+        LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy,
+        LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -1161,6 +1162,110 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("module query batch response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("module query batch response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn declaration_outline_selector_and_result_round_trip() {
+        let outline = LeanWorkerDeclarationOutlineResult {
+            declarations: vec![
+                declaration_target_info_fixture("A.first"),
+                declaration_target_info_fixture("A.second"),
+            ],
+            truncated: true,
+        };
+        let request = Message::Request(Request::ProcessModuleQueryBatch {
+            source: "namespace A\ntheorem first : True := by trivial\ntheorem second : True := by trivial\nend A\n"
+                .to_owned(),
+            selectors: vec![LeanWorkerModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            budgets: LeanWorkerOutputBudgets {
+                per_field_bytes: 1024,
+                total_bytes: 2048,
+            },
+            options: LeanWorkerElabOptions::default(),
+        });
+        assert_frame_round_trips(&request);
+
+        let response = Message::Response(Response::ProcessModuleQueryBatch {
+            outcome: LeanWorkerModuleQueryBatchOutcome::Ok {
+                imports: Vec::new(),
+                result: LeanWorkerModuleQueryBatchEnvelope {
+                    items: vec![LeanWorkerModuleQueryBatchItem::Ok {
+                        id: "outline".to_owned(),
+                        result: Box::new(LeanWorkerModuleQueryBatchResult::DeclarationOutline(outline.clone())),
+                    }],
+                    total_truncated: false,
+                },
+                facts: LeanWorkerModuleQueryCacheFacts {
+                    cache_status: LeanWorkerModuleCacheStatus::Miss,
+                    timings: LeanWorkerModuleQueryTimings::zero(),
+                    output_bytes: 0,
+                    cache_entry_count: None,
+                    cache_approx_bytes: None,
+                    resource: None,
+                },
+            },
+        });
+        assert_frame_round_trips(&response);
+
+        let json = serde_json::to_value(outline).expect("outline serializes");
+        assert_eq!(
+            json,
+            json!({
+                "declarations": [
+                    {
+                        "short_name": "first",
+                        "declaration_name": "A.first",
+                        "namespace_name": "A",
+                        "declaration_kind": "theorem",
+                        "declaration_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        },
+                        "name_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        },
+                        "body_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        }
+                    },
+                    {
+                        "short_name": "second",
+                        "declaration_name": "A.second",
+                        "namespace_name": "A",
+                        "declaration_kind": "theorem",
+                        "declaration_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        },
+                        "name_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        },
+                        "body_span": {
+                            "start_line": 1,
+                            "start_column": 1,
+                            "end_line": 1,
+                            "end_column": 10
+                        }
+                    }
+                ],
+                "truncated": true
+            })
+        );
     }
 
     #[test]

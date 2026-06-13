@@ -1886,6 +1886,198 @@ fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
 }
 
 #[test]
+fn declaration_outline_returns_source_order_namespace_private_and_body_spans() {
+    use crate::host::process::{
+        DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+        ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let source = "\
+namespace Outer
+theorem first : True := by
+  trivial
+private theorem hidden : True := by
+  trivial
+def withBody (n : Nat) : Nat :=
+  n + 1
+end Outer
+";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[ModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+
+    let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
+        panic!("expected Ok declaration-outline outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only input should have no imports");
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok outline item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::DeclarationOutline(DeclarationOutlineResult {
+        declarations,
+        truncated,
+    }) = result.as_ref()
+    else {
+        panic!("expected declaration-outline result, got {result:?}");
+    };
+    assert!(!truncated, "default budget should not truncate small outline");
+    let short_names: Vec<&str> = declarations
+        .iter()
+        .map(|declaration| declaration.short_name.as_str())
+        .collect();
+    assert_eq!(short_names, ["first", "hidden", "withBody"]);
+    let [first, hidden, with_body] = declarations.as_slice() else {
+        panic!("expected three declaration-outline rows, got {declarations:?}");
+    };
+    assert_eq!(first.declaration_name, "Outer.first");
+    assert_eq!(first.namespace_name, "Outer");
+    assert!(
+        hidden.declaration_name.contains("hidden"),
+        "private declaration should be returned with Lean's resolved name, got {hidden:?}",
+    );
+    assert_ne!(
+        with_body.name_span, with_body.body_span,
+        "definition body span should be distinct from the name span"
+    );
+    assert!(
+        first.declaration_span.start_line < with_body.declaration_span.start_line,
+        "outline rows should preserve source order: {declarations:?}",
+    );
+}
+
+#[test]
+fn declaration_outline_returns_rows_alongside_diagnostics() {
+    use crate::host::process::{
+        DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+        ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "theorem ok : True := by\n  trivial\n#check missingName\n",
+            &[
+                ModuleQuerySelector::Diagnostics {
+                    id: "diagnostics".to_owned(),
+                },
+                ModuleQuerySelector::DeclarationOutline {
+                    id: "outline".to_owned(),
+                },
+            ],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok declaration-outline outcome, got {outcome:?}");
+    };
+    let diagnostics = result
+        .items
+        .iter()
+        .find(|item| item.id() == "diagnostics")
+        .expect("diagnostics item present");
+    match diagnostics {
+        ModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            ModuleQueryBatchResult::Diagnostics(failure) => assert!(
+                failure
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity() == crate::LeanSeverity::Error),
+                "expected diagnostic error for missingName, got {failure:?}",
+            ),
+            other => panic!("expected diagnostics result, got {other:?}"),
+        },
+        other => panic!("expected Ok diagnostics item, got {other:?}"),
+    }
+    let outline = result
+        .items
+        .iter()
+        .find(|item| item.id() == "outline")
+        .expect("outline item present");
+    match outline {
+        ModuleQueryBatchItem::Ok { result, .. } => match result.as_ref() {
+            ModuleQueryBatchResult::DeclarationOutline(DeclarationOutlineResult {
+                declarations,
+                truncated,
+            }) => {
+                assert!(!truncated);
+                assert_eq!(declarations.len(), 1);
+                let declaration = declarations.first().expect("outline row present");
+                assert_eq!(declaration.declaration_name, "ok");
+            }
+            other => panic!("expected declaration-outline result, got {other:?}"),
+        },
+        other => panic!("expected Ok outline item, got {other:?}"),
+    }
+}
+
+#[test]
+fn declaration_outline_truncates_by_complete_rows_under_small_budget() {
+    use crate::host::process::{
+        DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+        ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+
+    let outcome = session
+        .process_module_query_batch(
+            "theorem a : True := by\n  trivial\ntheorem b : True := by\n  trivial\n",
+            &[ModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets {
+                per_field_bytes: 128,
+                total_bytes: 200,
+            },
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok declaration-outline outcome, got {outcome:?}");
+    };
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok outline item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::DeclarationOutline(DeclarationOutlineResult {
+        declarations,
+        truncated,
+    }) = result.as_ref()
+    else {
+        panic!("expected declaration-outline result, got {result:?}");
+    };
+    assert_eq!(declarations.len(), 1);
+    let declaration = declarations.first().expect("outline row present");
+    assert_eq!(declaration.declaration_name, "a");
+    assert!(*truncated, "second row should be omitted as a complete row");
+}
+
+#[test]
 fn session_process_module_query_references_returns_name_locations_only() {
     use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 

@@ -313,6 +313,9 @@ pub enum ModuleQuerySelector {
         line: u32,
         column: u32,
     },
+    DeclarationOutline {
+        id: String,
+    },
 }
 
 impl ModuleQuerySelector {
@@ -326,6 +329,7 @@ impl ModuleQuerySelector {
             | Self::References { id, .. }
             | Self::DeclarationTarget { id, .. }
             | Self::SurroundingDeclaration { id, .. } => id,
+            Self::DeclarationOutline { id } => id,
         }
     }
 }
@@ -450,6 +454,7 @@ impl<'lean> IntoLean<'lean> for ModuleQuerySelector {
                     u32::from(locals_raw).into_lean(runtime),
                 ],
             ),
+            Self::DeclarationOutline { id } => alloc_ctor_with_objects(runtime, 7, [id.into_lean(runtime)]),
         }
     }
 }
@@ -901,6 +906,24 @@ impl<'lean> TryFromLean<'lean> for DeclarationTargetResult {
     }
 }
 
+/// Result for [`ModuleQuerySelector::DeclarationOutline`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarationOutlineResult {
+    pub declarations: Vec<DeclarationTargetInfo>,
+    pub truncated: bool,
+}
+
+impl<'lean> TryFromLean<'lean> for DeclarationOutlineResult {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let truncated = bool_tail(&obj, 0, "DeclarationOutlineResult.truncated")?;
+        let [declarations] = take_ctor_objects::<1>(obj, 0, "DeclarationOutlineResult")?;
+        Ok(Self {
+            declarations: Vec::<DeclarationTargetInfo>::try_from_lean(declarations)?,
+            truncated,
+        })
+    }
+}
+
 impl<'lean> TryFromLean<'lean> for ProofAttemptStatus {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         Self::from_scalar(sum_tag(&obj)?)
@@ -1247,6 +1270,7 @@ pub enum ModuleQueryBatchResult {
     References(ReferencesResult),
     DeclarationTarget(DeclarationTargetResult),
     SurroundingDeclaration(SurroundingDeclarationResult),
+    DeclarationOutline(DeclarationOutlineResult),
 }
 
 impl<'lean> TryFromLean<'lean> for ModuleQueryBatchResult {
@@ -1278,8 +1302,14 @@ impl<'lean> TryFromLean<'lean> for ModuleQueryBatchResult {
                     SurroundingDeclarationResult::try_from_lean(result)?,
                 ))
             }
+            6 => {
+                let [result] = take_ctor_objects::<1>(obj, 6, "ModuleQueryBatchResult::declarationOutline")?;
+                Ok(Self::DeclarationOutline(DeclarationOutlineResult::try_from_lean(
+                    result,
+                )?))
+            }
             other => Err(conversion_error(format!(
-                "expected Lean ModuleQueryBatchResult ctor (tag 0..=5), found tag {other}"
+                "expected Lean ModuleQueryBatchResult ctor (tag 0..=6), found tag {other}"
             ))),
         }
     }

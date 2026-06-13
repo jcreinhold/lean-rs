@@ -23,7 +23,13 @@ use lean_rs_worker_parent::{
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
-use lean_rs_worker_protocol::types::{LeanWorkerImportStats, LeanWorkerSessionImportProfile};
+use lean_rs_worker_protocol::types::{
+    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationTargetInfo, LeanWorkerElabOptions, LeanWorkerImportStats,
+    LeanWorkerModuleCacheStatus, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
+    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets,
+    LeanWorkerSessionImportProfile,
+};
 use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
 
@@ -112,6 +118,10 @@ fn main() {
         (
             "conformance_pool_admission_refusal_is_explicit",
             conformance_pool_admission_refusal_is_explicit,
+        ),
+        (
+            "declaration_outline_batch_selector_reaches_parent_session_path",
+            declaration_outline_batch_selector_reaches_parent_session_path,
         ),
     ];
 
@@ -218,6 +228,47 @@ fn run_fake_child(mode: &str) {
                 )
                 .expect("fake child writes session-open response");
             }
+            Request::ProcessModuleQueryBatch { selectors, .. } => {
+                let items = selectors
+                    .into_iter()
+                    .map(|selector| match selector {
+                        LeanWorkerModuleQuerySelector::DeclarationOutline { id } => {
+                            LeanWorkerModuleQueryBatchItem::Ok {
+                                id,
+                                result: Box::new(LeanWorkerModuleQueryBatchResult::DeclarationOutline(
+                                    fake_declaration_outline(),
+                                )),
+                            }
+                        }
+                        other => LeanWorkerModuleQueryBatchItem::Unavailable {
+                            id: other.id().to_owned(),
+                            message: "fake child only implements declaration outline".to_owned(),
+                        },
+                    })
+                    .collect();
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::ProcessModuleQueryBatch {
+                        outcome: LeanWorkerModuleQueryBatchOutcome::Ok {
+                            result: LeanWorkerModuleQueryBatchEnvelope {
+                                items,
+                                total_truncated: false,
+                            },
+                            imports: Vec::new(),
+                            facts: LeanWorkerModuleQueryCacheFacts {
+                                cache_status: LeanWorkerModuleCacheStatus::Miss,
+                                timings: LeanWorkerModuleQueryTimings::zero(),
+                                output_bytes: 0,
+                                cache_entry_count: None,
+                                cache_approx_bytes: None,
+                                resource: None,
+                            },
+                        },
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake child writes module query batch response");
+            }
             Request::Terminate if mode == "terminate_hang" => sleep_forever(),
             Request::Terminate => {
                 write_frame(&mut stdout, Message::Response(Response::Terminating), MAX_FRAME_BYTES)
@@ -259,6 +310,27 @@ fn fake_import_stats(
         import_level: import_profile.label().to_owned(),
         import_all: false,
         load_exts: false,
+    }
+}
+
+fn fake_declaration_outline() -> LeanWorkerDeclarationOutlineResult {
+    let span = LeanWorkerModuleSourceSpan {
+        start_line: 1,
+        start_column: 1,
+        end_line: 1,
+        end_column: 20,
+    };
+    LeanWorkerDeclarationOutlineResult {
+        declarations: vec![LeanWorkerDeclarationTargetInfo {
+            short_name: "outlined".to_owned(),
+            declaration_name: "Fake.outlined".to_owned(),
+            namespace_name: "Fake".to_owned(),
+            declaration_kind: "theorem".to_owned(),
+            declaration_span: span.clone(),
+            name_span: span.clone(),
+            body_span: span,
+        }],
+        truncated: false,
     }
 }
 
@@ -1040,6 +1112,49 @@ fn conformance_pool_admission_refusal_is_explicit() -> Result<(), String> {
     assert_eq!(snapshot.cold_open_refusals, 1);
     assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
     assert!(trace.contains(&RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }));
+    Ok(())
+}
+
+fn declaration_outline_batch_selector_reaches_parent_session_path() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("declaration-outline")?;
+    let mut capability = fixture
+        .builder("normal", ["Init"])?
+        .open()
+        .map_err(|err| err.to_string())?;
+    let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+
+    let outcome = session
+        .process_module_query_batch(
+            "theorem outlined : True := by\n  trivial\n",
+            &[LeanWorkerModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &LeanWorkerElabOptions::default(),
+            None,
+            None,
+        )
+        .map_err(|err| err.to_string())?;
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        return Err(format!("expected Ok declaration-outline outcome, got {outcome:?}"));
+    };
+    let [LeanWorkerModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        return Err(format!(
+            "expected one Ok declaration-outline item, got {:?}",
+            result.items
+        ));
+    };
+    let LeanWorkerModuleQueryBatchResult::DeclarationOutline(outline) = result.as_ref() else {
+        return Err(format!("expected declaration-outline result, got {result:?}"));
+    };
+    assert_eq!(outline.declarations.len(), 1);
+    let declaration = outline
+        .declarations
+        .first()
+        .ok_or_else(|| "missing declaration-outline row".to_owned())?;
+    assert_eq!(declaration.declaration_name, "Fake.outlined");
+    assert!(!outline.truncated);
     Ok(())
 }
 

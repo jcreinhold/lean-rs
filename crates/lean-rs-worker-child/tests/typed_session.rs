@@ -1052,6 +1052,59 @@ fn process_module_query_batch_returns_diagnostics_and_proof_state_through_worker
 }
 
 #[test]
+fn declaration_outline_batch_selector_returns_source_order_rows_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let source = "\
+namespace WorkerOutline
+theorem first : True := by
+  trivial
+def second (n : Nat) : Nat :=
+  n + 1
+end WorkerOutline
+";
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[LeanWorkerModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query_batch dispatch succeeds");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, imports, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    assert!(imports.is_empty(), "body-only source should not report imports");
+    let [LeanWorkerModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok outline item, got {:?}", result.items);
+    };
+    let LeanWorkerModuleQueryBatchResult::DeclarationOutline(outline) = result.as_ref() else {
+        panic!("expected declaration-outline result, got {result:?}");
+    };
+    assert!(!outline.truncated);
+    let names: Vec<&str> = outline
+        .declarations
+        .iter()
+        .map(|declaration| declaration.declaration_name.as_str())
+        .collect();
+    assert_eq!(names, ["WorkerOutline.first", "WorkerOutline.second"]);
+    assert_ne!(
+        outline.declarations[1].name_span, outline.declarations[1].body_span,
+        "definition body span should stay distinct from name span"
+    );
+}
+
+#[test]
 fn proof_state_in_declaration_renders_locals_pretty_by_default_and_raw_on_opt_out() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();

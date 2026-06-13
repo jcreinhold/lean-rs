@@ -12,14 +12,15 @@ use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
 use lean_rs_host::host::process::{
-    DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationFacts, DeclarationVerificationOutcome,
-    DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, GoalAtResult,
-    LocalInfo, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
-    ModuleQueryBatchResult, ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
-    ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
-    ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope, ProofAttemptOutcome,
-    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofStateInfo,
-    ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult, TypeAtResult,
+    DeclarationOutlineResult, DeclarationTargetInfo, DeclarationTargetResult, DeclarationVerificationFacts,
+    DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
+    DeclarationVerificationTarget, GoalAtResult, LocalInfo, ModuleQuery, ModuleQueryBatchCachedOutcome,
+    ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryCacheFacts,
+    ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult,
+    ModuleQuerySelector, ModuleQueryTimings, ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode,
+    ProofAttemptEnvelope, ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus,
+    ProofCandidate, ProofEditTarget, ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy,
+    SurroundingDeclarationResult, TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -41,12 +42,12 @@ use lean_rs_worker_protocol::protocol::{
 use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags,
     LeanWorkerDeclarationInspection, LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
-    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationProofSearchFacts,
-    LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias,
-    LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult,
-    LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings,
-    LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType,
-    LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
+    LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
+    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
+    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus,
     LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts, LeanWorkerDiagnostic, LeanWorkerDoctorReport,
     LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerImportStats,
@@ -2110,6 +2111,7 @@ fn module_query_selector_host(selector: LeanWorkerModuleQuerySelector) -> LeanRe
         LeanWorkerModuleQuerySelector::SurroundingDeclaration { id, line, column } => {
             ModuleQuerySelector::SurroundingDeclaration { id, line, column }
         }
+        LeanWorkerModuleQuerySelector::DeclarationOutline { id } => ModuleQuerySelector::DeclarationOutline { id },
         _ => return Err(host_internal("unsupported module query selector variant")),
     })
 }
@@ -2402,6 +2404,17 @@ fn declaration_target_result_wire(result: DeclarationTargetResult) -> LeanWorker
     }
 }
 
+fn declaration_outline_result_wire(result: DeclarationOutlineResult) -> LeanWorkerDeclarationOutlineResult {
+    LeanWorkerDeclarationOutlineResult {
+        declarations: result
+            .declarations
+            .into_iter()
+            .map(declaration_target_info_wire)
+            .collect(),
+        truncated: result.truncated,
+    }
+}
+
 fn proof_attempt_status_wire(status: ProofAttemptStatus) -> LeanWorkerProofAttemptStatus {
     match status {
         ProofAttemptStatus::Closed => LeanWorkerProofAttemptStatus::Closed,
@@ -2656,6 +2669,9 @@ fn module_query_batch_result_wire(result: ModuleQueryBatchResult) -> LeanWorkerM
         }
         ModuleQueryBatchResult::SurroundingDeclaration(result) => {
             LeanWorkerModuleQueryBatchResult::SurroundingDeclaration(surrounding_declaration_result_wire(result))
+        }
+        ModuleQueryBatchResult::DeclarationOutline(result) => {
+            LeanWorkerModuleQueryBatchResult::DeclarationOutline(declaration_outline_result_wire(result))
         }
     }
 }

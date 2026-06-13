@@ -3990,6 +3990,41 @@ mod tests {
     }
 
     #[test]
+    fn declaration_outline_degraded_query_batch_outcome_uses_selector_id() {
+        let selectors = vec![LeanWorkerModuleQuerySelector::DeclarationOutline {
+            id: "outline".to_owned(),
+        }];
+        let resource = super::resource_facts(
+            "worker_child_abort",
+            true,
+            Some("worker_process_module_query_batch"),
+            None,
+            None,
+            Some(1),
+            Some(2),
+            Some("child_abort".to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let LeanWorkerModuleQueryBatchOutcome::Ok { result, facts, .. } =
+            super::degraded_query_batch_outcome(&selectors, resource.clone())
+        else {
+            panic!("degraded outcome should be Ok with per-selector items");
+        };
+        assert_eq!(facts.resource.as_deref(), Some(&resource));
+        assert!(matches!(
+            result.items.as_slice(),
+            [LeanWorkerModuleQueryBatchItem::BudgetExceeded { id, .. }] if id == "outline"
+        ));
+    }
+
+    #[test]
     fn unavailable_verification_facts_report_axioms_uncomputed() {
         let facts = LeanWorkerDeclarationVerificationFacts::unavailable();
         assert!(

@@ -45,6 +45,7 @@ inductive ModuleQuerySelector where
   | declarationTarget (id : String) (name? : Option String) (line? column? : Option Nat)
   | surroundingDeclaration (id : String) (line : Nat) (column : Nat)
   | proofStateInDeclaration (id declaration : String) (position : ProofPositionSelector) (localsRaw : Nat)
+  | declarationOutline (id : String)
   deriving Inhabited
 
 /-- Explicit byte budgets for batch projections. `perFieldBytes` caps individual
@@ -128,6 +129,11 @@ inductive DeclarationTargetResult where
   | ambiguous (candidates : Array DeclarationTargetInfo)
   deriving Inhabited
 
+structure DeclarationOutlineResult where
+  declarations : Array DeclarationTargetInfo
+  truncated : Bool
+  deriving Inhabited
+
 structure ProofStateInfo where
   declarationName : Option String
   namespaceName : String
@@ -178,6 +184,7 @@ inductive ModuleQueryBatchResult where
   | references (result : ReferencesResult)
   | declarationTarget (result : DeclarationTargetResult)
   | surroundingDeclaration (result : SurroundingDeclarationResult)
+  | declarationOutline (result : DeclarationOutlineResult)
   deriving Inhabited
 
 inductive ModuleQueryBatchItem where
@@ -836,34 +843,60 @@ private structure DeclarationCandidate where
 private def fullDeclarationName (namespaceName shortName : Name) : Name :=
   if namespaceName.isAnonymous then shortName else namespaceName ++ shortName
 
+private def declarationRangeMatchesSpan (range : DeclarationRange) (span : ModuleSourceSpan) : Bool :=
+  range.pos.line == span.startLine &&
+    range.pos.column == span.startColumn &&
+    range.endPos.line == span.endLine &&
+    range.endPos.column == span.endColumn
+
+private def resolvedDeclarationName? (ctx : ContextInfo) (nameSpan : ModuleSourceSpan) : Option Name := do
+  let commandEnv ← ctx.cmdEnv?
+  Id.run do
+    let mut matched : Array Name := #[]
+    for (name, _) in commandEnv.constants.map₂ do
+      if !ctx.env.contains name then
+        let ranges? :=
+          declRangeExt.find? (level := .exported) commandEnv name <|>
+            declRangeExt.find? (level := .server) commandEnv name
+        match ranges? with
+        | some ranges =>
+          if declarationRangeMatchesSpan ranges.selectionRange nameSpan then
+            matched := matched.push name
+        | none => pure ()
+    match matched with
+    | #[name] => some name
+    | _ => none
+
 private def commandDeclaration? (doc : SourceDocument) (ctx : ContextInfo) (stx : Syntax) :
-    Option DeclarationCandidate := do
-  let declStx ← catalogDeclarationSyntax? stx
+    IO (Option DeclarationCandidate) := do
+  let some declStx := catalogDeclarationSyntax? stx | return none
   let nameStx := declIdNameStx declStx
-  guard nameStx.isIdent
-  let bodyStx ← declarationBodySyntax? declStx
-  let declarationSpanBody ← doc.syntaxSpan? declStx
-  let nameSpanBody ← doc.syntaxSpan? nameStx
-  let bodySpanBody ← doc.syntaxSpan? bodyStx
+  if !nameStx.isIdent then
+    return none
+  let some bodyStx := declarationBodySyntax? declStx | return none
+  let some declarationSpanBody := doc.syntaxSpan? declStx | return none
+  let some nameSpanBody := doc.syntaxSpan? nameStx | return none
+  let some bodySpanBody := doc.syntaxSpan? bodyStx | return none
   let shortName := nameStx.getId
   let namespaceName := ctx.currNamespace
-  let fullName := fullDeclarationName namespaceName shortName
+  let nameSpan := doc.bodySpanToFile nameSpanBody
+  let fullName := (resolvedDeclarationName? ctx nameSpan).getD (fullDeclarationName namespaceName shortName)
   let info : DeclarationTargetInfo := {
     shortName := shortName.toString
     declarationName := fullName.toString
     namespaceName := namespaceName.toString
     declarationKind := declarationKeyword declStx
     declarationSpan := doc.bodySpanToFile declarationSpanBody
-    nameSpan := doc.bodySpanToFile nameSpanBody
+    nameSpan
     bodySpan := doc.bodySpanToFile bodySpanBody
   }
-  some { info, bodySpanBodyCoords := bodySpanBody, declarationSpanBodyCoords := declarationSpanBody }
+  return some { info, bodySpanBodyCoords := bodySpanBody, declarationSpanBodyCoords := declarationSpanBody }
 
 private def collectDeclarations (doc : SourceDocument) (ctx : ContextInfo) (info : Info)
     (acc : Array DeclarationCandidate) : IO (Array DeclarationCandidate) := do
   match info with
   | .ofCommandInfo ci =>
-    match commandDeclaration? doc ctx ci.stx with
+    match ← commandDeclaration? doc ctx ci.stx with
     | some candidate => pure (acc.push candidate)
     | none => pure acc
   | _ => pure acc
@@ -1277,6 +1310,7 @@ private def selectorId : ModuleQuerySelector → String
   | .declarationTarget id .. => id
   | .surroundingDeclaration id .. => id
   | .proofStateInDeclaration id .. => id
+  | .declarationOutline id => id
 
 private def renderedBytes (info : RenderedInfo) : Nat :=
   info.value.utf8ByteSize
@@ -1342,6 +1376,10 @@ private def declarationTargetBytes : DeclarationTargetResult → Nat
   | .ambiguous candidates =>
     candidates.foldl (init := 0) fun bytes candidate => bytes + declarationTargetInfoBytes candidate
 
+private def declarationOutlineBytes (result : DeclarationOutlineResult) : Nat :=
+  result.declarations.foldl (init := 0) fun bytes declaration =>
+    bytes + declarationTargetInfoBytes declaration
+
 private def surroundingDeclarationBytes : SurroundingDeclarationResult → Nat
   | .none => 0
   | .declaration info => declarationTargetInfoBytes info
@@ -1353,6 +1391,23 @@ private def batchResultBytes : ModuleQueryBatchResult → Nat
   | .references result => referencesBytes result
   | .declarationTarget result => declarationTargetBytes result
   | .surroundingDeclaration result => surroundingDeclarationBytes result
+  | .declarationOutline result => declarationOutlineBytes result
+
+private def selectorDeclarationOutline (candidates : Array DeclarationCandidate)
+    (budgets : ModuleQueryOutputBudgets) : DeclarationOutlineResult := Id.run do
+  let candidates := dedupByDeclarationName candidates
+  let mut declarations : Array DeclarationTargetInfo := #[]
+  let mut spent : Nat := 0
+  let mut truncated := false
+  for candidate in candidates do
+    if !truncated then
+      let bytes := declarationTargetInfoBytes candidate.info
+      if spent + bytes > budgets.totalBytes then
+        truncated := true
+      else
+        declarations := declarations.push candidate.info
+        spent := spent + bytes
+  pure { declarations, truncated }
 
 private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocument) (messages : MessageLog)
     (trees : PersistentArray InfoTree) (candidates : Array DeclarationCandidate)
@@ -1379,6 +1434,8 @@ private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocumen
       | some candidate => .declaration candidate.info
       | none => .none
     pure <| .surroundingDeclaration result
+  | .declarationOutline _ =>
+    pure <| .declarationOutline (selectorDeclarationOutline candidates budgets)
 
 private def emptyBatchResultFor (selector : ModuleQuerySelector) : ModuleQueryBatchResult :=
   match selector with
@@ -1389,6 +1446,7 @@ private def emptyBatchResultFor (selector : ModuleQuerySelector) : ModuleQueryBa
   | .references _ .. => .references { references := #[], truncated := false }
   | .declarationTarget _ .. => .declarationTarget .notFound
   | .surroundingDeclaration _ .. => .surroundingDeclaration .none
+  | .declarationOutline _ => .declarationOutline { declarations := #[], truncated := false }
 
 private def batchEnvelopeFromFailure (selectors : Array ModuleQuerySelector)
     (failure : LeanRsFixture.Elaboration.ElabFailure) : ModuleQueryBatchEnvelope :=
