@@ -385,6 +385,26 @@ pub struct LeanWorkerPool {
     refusal_reason: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PoolAdmissionDecision {
+    ReuseWarmEntry { index: usize },
+    OpenColdEntry,
+}
+
+fn grant_lease<'pool>(entry: &'pool mut PoolEntry, config: &LeanWorkerPoolConfig) -> LeanWorkerSessionLease<'pool> {
+    let admitted_generation = entry.capability.lifecycle_snapshot().worker_generation;
+    entry.active_leases = entry.active_leases.saturating_add(1);
+    LeanWorkerSessionLease {
+        entry,
+        config: config.clone(),
+        valid: true,
+        invalidation_reason: None,
+        request_timeout_override: None,
+        admitted_generation,
+        released: false,
+    }
+}
+
 impl LeanWorkerPool {
     /// Create an empty local worker pool.
     #[must_use]
@@ -429,39 +449,18 @@ impl LeanWorkerPool {
         builder: LeanWorkerCapabilityBuilder,
     ) -> Result<LeanWorkerSessionLease<'_>, LeanWorkerError> {
         let key = builder.session_key();
-        self.remember_seen_key(&key);
-        if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
-            self.record_key_hit();
-            self.ensure_entry_running(index)?;
-            self.enforce_entry_policy_before_assignment(index)?;
-            let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
-                message: "worker pool entry disappeared during lease acquisition".to_owned(),
-            })?;
-            entry.active_leases = entry.active_leases.saturating_add(1);
-            return Ok(LeanWorkerSessionLease {
-                entry,
-                config: self.config.clone(),
-                valid: true,
-                invalidation_reason: None,
-                request_timeout_override: None,
-            });
+        match self.admit_lease(&key)? {
+            PoolAdmissionDecision::ReuseWarmEntry { index } => {
+                self.ensure_entry_running(index)?;
+                self.enforce_entry_policy_before_assignment(index)?;
+                let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
+                    message: "worker pool entry disappeared during lease acquisition".to_owned(),
+                })?;
+                return Ok(grant_lease(entry, &self.config));
+            }
+            PoolAdmissionDecision::OpenColdEntry => {}
         }
 
-        let miss_reason = if self.entries.is_empty() {
-            "empty_pool"
-        } else {
-            "no_matching_key"
-        };
-        self.record_key_miss(miss_reason);
-        self.record_cold_open_attempt();
-        let rss_before_admission = self.refresh_total_child_rss();
-        self.rss_before_admission_kib = rss_before_admission.available_total();
-        if self.entries.len() >= self.config.max_workers {
-            return self.pool_full_error();
-        }
-        self.ensure_spawn_within_total_rss_budget(rss_before_admission)?;
-
-        self.record_cold_open_admitted();
         let capability = match builder.clone().open() {
             Ok(capability) => capability,
             Err(err) => {
@@ -499,14 +498,32 @@ impl LeanWorkerPool {
         let entry = self.entries.get_mut(index).ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker pool failed to retain newly opened entry".to_owned(),
         })?;
-        entry.active_leases = entry.active_leases.saturating_add(1);
-        Ok(LeanWorkerSessionLease {
-            entry,
-            config: self.config.clone(),
-            valid: true,
-            invalidation_reason: None,
-            request_timeout_override: None,
-        })
+        Ok(grant_lease(entry, &self.config))
+    }
+
+    fn admit_lease(&mut self, key: &LeanWorkerSessionKey) -> Result<PoolAdmissionDecision, LeanWorkerError> {
+        self.remember_seen_key(key);
+        if let Some(index) = self.entries.iter().position(|entry| &entry.key == key) {
+            self.record_key_hit();
+            return Ok(PoolAdmissionDecision::ReuseWarmEntry { index });
+        }
+
+        let miss_reason = if self.entries.is_empty() {
+            "empty_pool"
+        } else {
+            "no_matching_key"
+        };
+        self.record_key_miss(miss_reason);
+        self.record_cold_open_attempt();
+        let rss_before_admission = self.refresh_total_child_rss();
+        self.rss_before_admission_kib = rss_before_admission.available_total();
+        if self.entries.len() >= self.config.max_workers {
+            return self.pool_full_error();
+        }
+        self.ensure_spawn_within_total_rss_budget(rss_before_admission)?;
+
+        self.record_cold_open_admitted();
+        Ok(PoolAdmissionDecision::OpenColdEntry)
     }
 
     /// Return a public snapshot of pool state.
@@ -1011,6 +1028,8 @@ pub struct LeanWorkerSessionLease<'pool> {
     valid: bool,
     invalidation_reason: Option<String>,
     request_timeout_override: Option<Duration>,
+    admitted_generation: u64,
+    released: bool,
 }
 
 impl LeanWorkerSessionLease<'_> {
@@ -1030,6 +1049,14 @@ impl LeanWorkerSessionLease<'_> {
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.valid
+    }
+
+    /// Explicitly release this lease back to the pool.
+    ///
+    /// Dropping the lease performs the same release. This method exists for
+    /// hosts that want the release point to be visible in their control flow.
+    pub fn release(mut self) {
+        self.release_once();
     }
 
     /// Return an operational snapshot for the worker entry behind this lease.
@@ -1193,16 +1220,21 @@ impl LeanWorkerSessionLease<'_> {
     }
 
     fn ensure_valid(&self) -> Result<(), LeanWorkerError> {
-        if self.valid {
-            Ok(())
-        } else {
-            Err(LeanWorkerError::LeaseInvalidated {
-                reason: self
-                    .invalidation_reason
-                    .clone()
-                    .unwrap_or_else(|| "lease was invalidated by a worker lifecycle transition".to_owned()),
-            })
+        if !self.valid {
+            return Err(LeanWorkerError::LeaseInvalidated {
+                reason: self.invalid_lease_reason(),
+            });
         }
+        let current_generation = self.entry.capability.lifecycle_snapshot().worker_generation;
+        if current_generation != self.admitted_generation {
+            return Err(LeanWorkerError::LeaseInvalidated {
+                reason: format!(
+                    "worker generation changed from {} to {current_generation}",
+                    self.admitted_generation
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn enforce_policy_before_request(&mut self) -> Result<(), LeanWorkerError> {
@@ -1238,11 +1270,24 @@ impl LeanWorkerSessionLease<'_> {
         self.valid = false;
         self.invalidation_reason = Some(reason.into());
     }
+
+    fn invalid_lease_reason(&self) -> String {
+        self.invalidation_reason
+            .clone()
+            .unwrap_or_else(|| "lease was invalidated by a worker lifecycle transition".to_owned())
+    }
+
+    fn release_once(&mut self) {
+        if !self.released {
+            self.entry.active_leases = self.entry.active_leases.saturating_sub(1);
+            self.released = true;
+        }
+    }
 }
 
 impl Drop for LeanWorkerSessionLease<'_> {
     fn drop(&mut self) {
-        self.entry.active_leases = self.entry.active_leases.saturating_sub(1);
+        self.release_once();
     }
 }
 

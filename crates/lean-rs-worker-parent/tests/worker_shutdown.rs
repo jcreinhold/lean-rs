@@ -81,6 +81,14 @@ fn main() {
             conformance_pool_lease_drop_releases_capacity_once,
         ),
         (
+            "conformance_pool_explicit_release_decrements_capacity_once",
+            conformance_pool_explicit_release_decrements_capacity_once,
+        ),
+        (
+            "conformance_pool_idle_replacement_preserves_capacity_accounting",
+            conformance_pool_idle_replacement_preserves_capacity_accounting,
+        ),
+        (
             "conformance_pool_admission_refusal_is_explicit",
             conformance_pool_admission_refusal_is_explicit,
         ),
@@ -268,6 +276,14 @@ enum RuntimeTraceEvent {
     LeaseDropped {
         active_workers: usize,
         warm_leases: usize,
+    },
+    LeaseReleased {
+        active_workers: usize,
+        warm_leases: usize,
+    },
+    IdleReplacementObserved {
+        policy_restarts: u64,
+        worker_restarts: u64,
     },
     AdmissionRefused {
         reason: &'static str,
@@ -685,6 +701,74 @@ fn conformance_pool_lease_drop_releases_capacity_once() -> Result<(), String> {
     }
     assert_eq!(pool.snapshot().key_hits, 1);
 
+    Ok(())
+}
+
+fn conformance_pool_explicit_release_decrements_capacity_once() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("lease-release")?;
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    let builder = fixture.builder("normal", ["Init"])?;
+
+    {
+        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
+        let snapshot = lease.snapshot();
+        assert_eq!(snapshot.active_workers, 1);
+        assert_eq!(snapshot.warm_leases, 0);
+        lease.release();
+    }
+
+    let after_release = pool.snapshot();
+    let trace = [RuntimeTraceEvent::LeaseReleased {
+        active_workers: after_release.active_workers,
+        warm_leases: after_release.warm_leases,
+    }];
+    assert_eq!(after_release.active_workers, 0);
+    assert_eq!(after_release.warm_leases, 1);
+    assert!(trace.contains(&RuntimeTraceEvent::LeaseReleased {
+        active_workers: 0,
+        warm_leases: 1,
+    }));
+    Ok(())
+}
+
+fn conformance_pool_idle_replacement_preserves_capacity_accounting() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("idle-replacement")?;
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1).idle_cycle_after(Duration::ZERO));
+    let builder = fixture.builder("normal", ["Init"])?;
+
+    {
+        let lease = pool.acquire_lease(builder.clone()).map_err(|err| err.to_string())?;
+        let snapshot = lease.snapshot();
+        assert_eq!(snapshot.active_workers, 1);
+        assert_eq!(snapshot.worker_restarts, 0);
+    }
+
+    let warm_snapshot = pool.snapshot();
+    assert_eq!(warm_snapshot.active_workers, 0);
+    assert_eq!(warm_snapshot.warm_leases, 1);
+
+    {
+        let lease = pool.acquire_lease(builder).map_err(|err| err.to_string())?;
+        let snapshot = lease.snapshot();
+        assert_eq!(snapshot.active_workers, 1);
+        assert_eq!(snapshot.workers, 1);
+        assert_eq!(snapshot.policy_restarts, 1);
+        assert_eq!(snapshot.worker_restarts, 1);
+        assert_eq!(snapshot.idle_restarts, 1);
+        let trace = [RuntimeTraceEvent::IdleReplacementObserved {
+            policy_restarts: snapshot.policy_restarts,
+            worker_restarts: snapshot.worker_restarts,
+        }];
+        assert!(trace.contains(&RuntimeTraceEvent::IdleReplacementObserved {
+            policy_restarts: 1,
+            worker_restarts: 1,
+        }));
+    }
+
+    let after_drop = pool.snapshot();
+    assert_eq!(after_drop.active_workers, 0);
+    assert_eq!(after_drop.warm_leases, 1);
+    assert_eq!(after_drop.policy_restarts, 1);
     Ok(())
 }
 

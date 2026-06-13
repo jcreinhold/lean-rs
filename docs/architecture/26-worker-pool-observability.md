@@ -22,8 +22,9 @@ the selected warm worker. Those are supervisor and pool mechanics. Callers can s
 log it, or use it to choose their own cancellation policy without learning how the child process is wired.
 
 The runtime-model conformance tests use a private `RuntimeTraceEvent` enum in the worker-parent test harness to map
-snapshot facts such as lease grant, lease drop, and admission refusal back to the formal model. That enum is not a
-production tracing surface. Public observability remains this snapshot API plus structured worker errors.
+snapshot facts such as lease grant, explicit release, drop release, idle replacement, and admission refusal back to the
+formal model. That enum is not a production tracing surface. Public observability remains this snapshot API plus
+structured worker errors.
 
 The current pool does not implement a mailbox queue. `queue_depth` is always `0`; it remains in the snapshot as a stable
 operational field. `queue_wait_timeout` measures bounded synchronous admission waiting for a full pool, not time spent
@@ -31,8 +32,9 @@ in a reserved queue slot. See [`30-worker-runtime-semantics.md`](30-worker-runti
 runtime contract.
 
 `LeanWorkerSessionLease::snapshot` provides the same aggregate shape for the leased worker while the lease is active. It
-is a sampling hook, not an identity handle. A stale lease remains stale after timeout, cancellation, crash, explicit
-cycle, memory policy restart, or metadata mismatch.
+is a sampling hook, not an identity handle. `LeanWorkerSessionLease::release` and drop share the same at-most-once
+capacity return path. A stale lease remains stale after timeout, cancellation, crash, explicit cycle, generation
+replacement, memory policy restart, or metadata mismatch.
 
 ## Backpressure
 

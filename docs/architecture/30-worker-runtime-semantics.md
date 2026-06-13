@@ -99,7 +99,9 @@ refactors must preserve:
 | `KillEscalated { generation: g }` | `kill_sent(g)` |
 | `ChildReaped { generation: g }` | `reaped(g, exit)` |
 | `LeaseGranted { .. }` | `lease_granted(c, l)` via public pool snapshots |
+| `LeaseReleased { .. }` | `lease_released(l)` via public pool snapshots |
 | `LeaseDropped { .. }` | `lease_dropped(l)` via public pool snapshots |
+| `IdleReplacementObserved { .. }` | idle policy replacement preserves one live generation and one accounting slot |
 | `AdmissionRefused { reason }` | `admission_refused(c, reason)` |
 
 The conformance tests are import-light. The test binary re-enters itself as a deterministic fake worker child, and the
@@ -117,6 +119,8 @@ Prompts 39 through 41 should preserve or extend these exact test names:
 - `conformance_child_crash_terminalizes_in_flight_request`;
 - `conformance_restart_limit_exhaustion_is_typed_terminal_outcome`;
 - `conformance_pool_lease_drop_releases_capacity_once`;
+- `conformance_pool_explicit_release_decrements_capacity_once`;
+- `conformance_pool_idle_replacement_preserves_capacity_accounting`;
 - `conformance_pool_admission_refusal_is_explicit`;
 - `conformance_stale_generation_output_is_protocol_failure`.
 

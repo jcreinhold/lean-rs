@@ -31,11 +31,13 @@ The public surface is a lease-first API:
 - `LeanWorkerPoolConfig` exposes a fixed `max_workers` limit;
 - `LeanWorkerSessionKey` records the worker reuse facts;
 - `LeanWorkerSessionLease` runs typed JSON and streaming commands without exposing `LeanWorkerSession` as the primary
-  pool API.
+  pool API, and `LeanWorkerSessionLease::release` makes an intentional lease release point visible when callers do not
+  want to rely only on drop.
 
 A lease becomes invalid after timeout, cancellation, child fatal exit, explicit cycle, or capability metadata mismatch.
-The caller acquires a fresh lease for follow-up work. That rule keeps session invalidation explicit without making
-callers learn which child process or warm worker was selected.
+The caller acquires a fresh lease for follow-up work. A lease is also tied to the worker generation admitted for it, so a
+stale lease cannot keep issuing commands after an idle or memory policy replacement. That rule keeps session
+invalidation explicit without making callers learn which child process or warm worker was selected.
 
 The same pool boundary carries local memory-aware scheduling:
 
@@ -60,6 +62,9 @@ Pool-level observability and bounded row-delivery backpressure also live at this
 - row delivery uses a bounded internal event buffer, so a slow sink blocks the request path instead of growing memory
   without bound;
 - rows are never dropped for committed streams, and delivered rows remain tentative until terminal success.
+
+Lease accounting is affine: admission grants one capacity slot, and explicit release or drop returns that slot at most
+once. Replacement and refusal stay typed pool outcomes rather than hidden host policy decisions.
 
 Snapshots are operational summaries, not protocol traces. They do not expose worker ids, child pids, pipe handles,
 protocol frames, or which warm worker was selected.
