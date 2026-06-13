@@ -14,7 +14,9 @@ use std::time::Duration;
 #[cfg(all(unix, not(target_os = "linux")))]
 use std::process::Command;
 
-use lean_rs_worker_parent::{LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerShutdownOutcome};
+use lean_rs_worker_parent::{
+    LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome,
+};
 use lean_rs_worker_protocol::protocol::{
     MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
 };
@@ -41,6 +43,10 @@ fn main() {
         (
             "child_crash_reaps_and_returns_terminal_error",
             child_crash_reaps_and_returns_terminal_error,
+        ),
+        (
+            "restart_limit_exhaustion_stops_accepting_work",
+            restart_limit_exhaustion_stops_accepting_work,
         ),
     ];
 
@@ -119,17 +125,31 @@ fn sleep_forever() -> ! {
 }
 
 fn fake_worker(mode: &str) -> Result<LeanWorker, LeanWorkerError> {
+    fake_worker_with_config(mode, |config| config)
+}
+
+fn fake_worker_with_config(
+    mode: &str,
+    configure: impl FnOnce(LeanWorkerConfig) -> LeanWorkerConfig,
+) -> Result<LeanWorker, LeanWorkerError> {
     let executable = env::current_exe().map_err(|source| LeanWorkerError::Spawn {
         executable: "<current test executable>".into(),
         source,
     })?;
-    LeanWorker::spawn(
-        &LeanWorkerConfig::new(executable)
-            .env(FAKE_CHILD_ENV, mode)
-            .startup_timeout(Duration::from_secs(1))
-            .request_timeout(Duration::from_millis(80))
-            .shutdown_timeout(Duration::from_millis(80)),
-    )
+    let config = LeanWorkerConfig::new(executable)
+        .env(FAKE_CHILD_ENV, mode)
+        .startup_timeout(Duration::from_secs(1))
+        .request_timeout(Duration::from_millis(80))
+        .shutdown_timeout(Duration::from_millis(80));
+    LeanWorker::spawn(&configure(config))
+}
+
+fn restart_limited_fake_worker(mode: &str, max_restarts: u64) -> Result<LeanWorker, LeanWorkerError> {
+    fake_worker_with_config(mode, |config| {
+        config.restart_policy(
+            LeanWorkerRestartPolicy::default().max_restarts_per_window(max_restarts, Duration::from_mins(1)),
+        )
+    })
 }
 
 fn explicit_shutdown_reaps_child() -> Result<(), String> {
@@ -194,6 +214,67 @@ fn child_crash_reaps_and_returns_terminal_error() -> Result<(), String> {
         other => return Err(format!("expected child fatal exit, got {other:?}")),
     }
     assert_reaped(pid)
+}
+
+fn restart_limit_exhaustion_stops_accepting_work() -> Result<(), String> {
+    let mut worker = restart_limited_fake_worker("request_hang", 1).map_err(|err| err.to_string())?;
+    let first_pid = worker
+        .__child_pid_for_test()
+        .ok_or_else(|| "worker did not expose an initial child pid".to_owned())?;
+    let err = worker
+        .health()
+        .expect_err("first wedged health request should time out");
+    match err {
+        LeanWorkerError::Timeout { operation, .. } => assert_eq!(operation, "health"),
+        other => return Err(format!("expected first timeout error, got {other:?}")),
+    }
+    assert_reaped(first_pid)?;
+
+    let second_pid = worker
+        .__child_pid_for_test()
+        .ok_or_else(|| "worker did not expose replacement child pid".to_owned())?;
+    let err = worker
+        .health()
+        .expect_err("second wedged health request should exhaust restart limit");
+    match err {
+        LeanWorkerError::RestartLimitExceeded { restarts, window } => {
+            assert_eq!(restarts, 1);
+            assert_eq!(window, Duration::from_mins(1));
+        }
+        other => return Err(format!("expected restart-limit error, got {other:?}")),
+    }
+    assert_reaped(second_pid)?;
+
+    let err = worker
+        .health()
+        .expect_err("restart-exhausted worker should stop accepting work");
+    match err {
+        LeanWorkerError::ShutdownInProgress { operation } => assert_eq!(operation, "worker_request"),
+        other => return Err(format!("expected shutdown-in-progress after exhaustion, got {other:?}")),
+    }
+
+    let stats = worker.stats();
+    assert_eq!(
+        stats.restarts, 1,
+        "only the admitted replacement should bump generation"
+    );
+    assert_eq!(
+        stats.timeout_restarts, 1,
+        "only the admitted timeout replacement is counted"
+    );
+    assert_eq!(
+        stats.replacement_attempts, 2,
+        "both timeout replacements were attempted"
+    );
+    assert_eq!(stats.replacement_successes, 1);
+    assert_eq!(stats.replacement_failures, 1);
+    assert_eq!(stats.replacement_budget_admitted, 1);
+    assert_eq!(stats.replacement_budget_skipped, 1);
+    assert_eq!(
+        stats.last_replacement_skipped_reason.as_deref(),
+        Some("restart_limit_exceeded")
+    );
+    Ok(())
 }
 
 fn assert_reaped(pid: u32) -> Result<(), String> {

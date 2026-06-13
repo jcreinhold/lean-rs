@@ -1251,6 +1251,7 @@ fn invalidates_lease(err: &LeanWorkerError) -> bool {
         err,
         LeanWorkerError::Cancelled { .. }
             | LeanWorkerError::Timeout { .. }
+            | LeanWorkerError::RestartLimitExceeded { .. }
             | LeanWorkerError::ChildExited { .. }
             | LeanWorkerError::ChildPanicOrAbort { .. }
             | LeanWorkerError::CapabilityMetadataMismatch { .. }
@@ -1262,6 +1263,8 @@ fn invalidation_reason(err: &LeanWorkerError) -> String {
         format!("cancelled during {operation}")
     } else if let LeanWorkerError::Timeout { operation, .. } = err {
         format!("timed out during {operation}")
+    } else if matches!(err, LeanWorkerError::RestartLimitExceeded { .. }) {
+        "worker restart limit exceeded".to_owned()
     } else if matches!(err, LeanWorkerError::ChildExited { .. }) {
         "worker child exited".to_owned()
     } else if matches!(err, LeanWorkerError::ChildPanicOrAbort { .. }) {

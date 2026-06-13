@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{BufReader, BufWriter, Read as _};
@@ -37,6 +38,8 @@ use crate::session::{
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKER_EVENT_BUFFER_CAPACITY: usize = 64;
+const DEFAULT_RESTART_INTENSITY_LIMIT: u64 = 16;
+const DEFAULT_RESTART_INTENSITY_WINDOW: Duration = Duration::from_mins(1);
 
 /// Default deadline for one worker request after startup.
 pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -219,6 +222,22 @@ pub struct LeanWorkerRestartPolicy {
     max_imports: Option<u64>,
     max_rss_kib: Option<u64>,
     idle_restart_after: Option<Duration>,
+    restart_intensity: RestartIntensityLimit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RestartIntensityLimit {
+    max_restarts: u64,
+    window: Duration,
+}
+
+impl Default for RestartIntensityLimit {
+    fn default() -> Self {
+        Self {
+            max_restarts: DEFAULT_RESTART_INTENSITY_LIMIT,
+            window: DEFAULT_RESTART_INTENSITY_WINDOW,
+        }
+    }
 }
 
 impl LeanWorkerRestartPolicy {
@@ -281,6 +300,22 @@ impl LeanWorkerRestartPolicy {
     #[must_use]
     pub fn idle_restart_after(mut self, duration: Duration) -> Self {
         self.idle_restart_after = Some(duration);
+        self
+    }
+
+    /// Refuse replacement after this many restarts in one moving time window.
+    ///
+    /// The limit is enforced after the old child reaches a terminal state and
+    /// before a replacement is spawned. Exhaustion returns
+    /// [`LeanWorkerError::RestartLimitExceeded`] and leaves the supervisor
+    /// without an accepted child; create a new worker or pool entry to apply a
+    /// fresh restart window.
+    #[must_use]
+    pub fn max_restarts_per_window(mut self, max_restarts: u64, window: Duration) -> Self {
+        self.restart_intensity = RestartIntensityLimit {
+            max_restarts: max_restarts.max(1),
+            window: window.max(Duration::from_millis(1)),
+        };
         self
     }
 }
@@ -1035,6 +1070,16 @@ enum WorkerLifecycleState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct InFlightRequest {
     operation: &'static str,
+    generation: WorkerGeneration,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WorkerGeneration(u64);
+
+impl WorkerGeneration {
+    fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
 }
 
 /// Supervisor for one `lean-rs-worker` child process.
@@ -1055,6 +1100,8 @@ pub struct LeanWorker {
     requests_since_restart: u64,
     imports_since_restart: u64,
     last_activity: Instant,
+    generation: WorkerGeneration,
+    restart_window: VecDeque<Instant>,
     lifecycle: WorkerLifecycleState,
     in_flight: Option<InFlightRequest>,
 }
@@ -1193,6 +1240,8 @@ impl LeanWorker {
             requests_since_restart: 0,
             imports_since_restart: 0,
             last_activity: Instant::now(),
+            generation: WorkerGeneration::default(),
+            restart_window: VecDeque::new(),
             lifecycle: WorkerLifecycleState::Running,
             in_flight: None,
         })
@@ -2271,7 +2320,10 @@ impl LeanWorker {
     }
 
     fn begin_in_flight(&mut self, operation: &'static str) {
-        self.in_flight = Some(InFlightRequest { operation });
+        self.in_flight = Some(InFlightRequest {
+            operation,
+            generation: self.generation,
+        });
     }
 
     fn finish_in_flight(&mut self) {
@@ -2366,7 +2418,6 @@ impl LeanWorker {
         let config = self.config.clone();
         let replacement_started = Instant::now();
         self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
-        self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
         let stop_intent = if matches!(
             &reason,
             LeanWorkerRestartReason::Explicit
@@ -2385,6 +2436,14 @@ impl LeanWorker {
             return Err(err);
         }
         before_spawn();
+        if let Err(err) = self.admit_restart(replacement_started) {
+            self.stats.replacement_budget_skipped = self.stats.replacement_budget_skipped.saturating_add(1);
+            self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
+            self.stats.last_replacement_skipped_reason = Some("restart_limit_exceeded".to_owned());
+            return Err(err);
+        }
+        self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
+        let next_generation = self.generation.next();
         self.stats.record_restart(reason);
         self.requests_since_restart = 0;
         self.imports_since_restart = 0;
@@ -2417,8 +2476,31 @@ impl LeanWorker {
             replacement_budget_status: "synchronous-no-overlap".to_owned(),
         });
         next.stats = stats;
+        next.generation = next_generation;
+        next.restart_window.clone_from(&self.restart_window);
         next.last_activity = Instant::now();
         *self = next;
+        Ok(())
+    }
+
+    fn admit_restart(&mut self, now: Instant) -> Result<(), LeanWorkerError> {
+        let limit = self.config.restart_policy.restart_intensity;
+        while self
+            .restart_window
+            .front()
+            .is_some_and(|instant| now.saturating_duration_since(*instant) >= limit.window)
+        {
+            let _ = self.restart_window.pop_front();
+        }
+        let restarts = u64::try_from(self.restart_window.len()).unwrap_or(u64::MAX);
+        if restarts >= limit.max_restarts {
+            self.lifecycle = WorkerLifecycleState::ShuttingDown;
+            return Err(LeanWorkerError::RestartLimitExceeded {
+                restarts,
+                window: limit.window,
+            });
+        }
+        self.restart_window.push_back(now);
         Ok(())
     }
 
@@ -2507,8 +2589,9 @@ impl LeanWorker {
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
         let max_frame_bytes = self.config.max_frame_bytes;
+        let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
+        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation));
         self.begin_in_flight(operation);
 
         loop {
@@ -2517,7 +2600,7 @@ impl LeanWorker {
                     self.record_stream_failure(started, request_backpressure_waits);
                 }
                 let last_import_stats = self.stats.last_import_stats.clone();
-                self.restart_with_reason_before_spawn(
+                if let Err(err) = self.restart_with_reason_before_spawn(
                     LeanWorkerRestartReason::RssHardLimit {
                         operation,
                         current_kib,
@@ -2528,7 +2611,10 @@ impl LeanWorker {
                         drop(receiver);
                         drop(reader.join());
                     },
-                )?;
+                ) {
+                    self.finish_in_flight();
+                    return Err(err);
+                }
                 self.finish_in_flight();
                 return Err(LeanWorkerError::RssHardLimitExceeded {
                     operation,
@@ -2551,7 +2637,7 @@ impl LeanWorker {
                     if streaming {
                         self.record_stream_failure(started, request_backpressure_waits);
                     }
-                    self.restart_with_reason_before_spawn(
+                    if let Err(err) = self.restart_with_reason_before_spawn(
                         LeanWorkerRestartReason::RequestTimeout {
                             operation,
                             duration: timeout,
@@ -2560,7 +2646,10 @@ impl LeanWorker {
                             drop(receiver);
                             drop(reader.join());
                         },
-                    )?;
+                    ) {
+                        self.finish_in_flight();
+                        return Err(err);
+                    }
                     self.finish_in_flight();
                     return Err(LeanWorkerError::Timeout {
                         operation,
@@ -2592,7 +2681,7 @@ impl LeanWorker {
                             if streaming {
                                 self.record_stream_failure(started, request_backpressure_waits);
                             }
-                            self.restart_with_reason_before_spawn(
+                            if let Err(err) = self.restart_with_reason_before_spawn(
                                 LeanWorkerRestartReason::RequestTimeout {
                                     operation,
                                     duration: timeout,
@@ -2601,7 +2690,10 @@ impl LeanWorker {
                                     drop(receiver);
                                     drop(reader.join());
                                 },
-                            )?;
+                            ) {
+                                self.finish_in_flight();
+                                return Err(err);
+                            }
                             self.finish_in_flight();
                             return Err(LeanWorkerError::Timeout {
                                 operation,
@@ -2637,6 +2729,12 @@ impl LeanWorker {
                     }
                 },
             };
+            if event.generation() != self.generation {
+                let actual_generation = event.generation();
+                self.finish_in_flight();
+                drop(reader.join());
+                return Err(stale_worker_output_error(operation, self.generation, actual_generation));
+            }
             request_backpressure_waits = request_backpressure_waits.saturating_add(event.backpressure_waits());
             self.stats.backpressure_waits = self.stats.backpressure_waits.saturating_add(event.backpressure_waits());
 
@@ -2703,13 +2801,16 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        self.restart_with_reason_before_spawn(
+                        if let Err(err) = self.restart_with_reason_before_spawn(
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
                                 drop(reader.join());
                             },
-                        )?;
+                        ) {
+                            self.finish_in_flight();
+                            return Err(err);
+                        }
                         self.finish_in_flight();
                         return Err(LeanWorkerError::Cancelled {
                             operation,
@@ -2740,13 +2841,16 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        self.restart_with_reason_before_spawn(
+                        if let Err(err) = self.restart_with_reason_before_spawn(
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
                                 drop(reader.join());
                             },
-                        )?;
+                        ) {
+                            self.finish_in_flight();
+                            return Err(err);
+                        }
                         self.finish_in_flight();
                         return Err(LeanWorkerError::Cancelled {
                             operation,
@@ -2911,8 +3015,9 @@ impl LeanWorker {
         let grace_started = Instant::now();
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
         let max_frame_bytes = self.config.max_frame_bytes;
+        let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
-        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes));
+        let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation));
 
         loop {
             if let Some(child) = self.child.as_mut()
@@ -3080,15 +3185,18 @@ impl LeanWorker {
 
 enum RequestReaderEvent {
     Message {
+        generation: WorkerGeneration,
         message: Message,
         backpressure_waits: u64,
     },
     Terminal {
+        generation: WorkerGeneration,
         message: Message,
         stdout: BufReader<ChildStdout>,
         backpressure_waits: u64,
     },
     ReadError {
+        generation: WorkerGeneration,
         message: String,
         eof: bool,
         backpressure_waits: u64,
@@ -3102,6 +3210,14 @@ enum ShutdownIntent {
 }
 
 impl RequestReaderEvent {
+    fn generation(&self) -> WorkerGeneration {
+        match self {
+            Self::Message { generation, .. }
+            | Self::Terminal { generation, .. }
+            | Self::ReadError { generation, .. } => *generation,
+        }
+    }
+
     fn backpressure_waits(&self) -> u64 {
         match self {
             Self::Message { backpressure_waits, .. }
@@ -3129,6 +3245,7 @@ fn read_request_messages(
     mut stdout: BufReader<ChildStdout>,
     sender: mpsc::SyncSender<RequestReaderEvent>,
     max_frame_bytes: u32,
+    generation: WorkerGeneration,
 ) {
     loop {
         match read_frame(&mut stdout, max_frame_bytes) {
@@ -3136,6 +3253,7 @@ fn read_request_messages(
                 let _ = send_reader_event(
                     &sender,
                     RequestReaderEvent::Terminal {
+                        generation,
                         message: frame.message,
                         stdout,
                         backpressure_waits: 0,
@@ -3147,6 +3265,7 @@ fn read_request_messages(
                 if send_reader_event(
                     &sender,
                     RequestReaderEvent::Message {
+                        generation,
                         message: frame.message,
                         backpressure_waits: 0,
                     },
@@ -3160,6 +3279,7 @@ fn read_request_messages(
                 let _ = send_reader_event(
                     &sender,
                     RequestReaderEvent::ReadError {
+                        generation,
                         message: err.to_string(),
                         eof: err.is_eof(),
                         backpressure_waits: 0,
@@ -3348,6 +3468,19 @@ fn unexpected_response(operation: &'static str, response: &Response) -> LeanWork
     }
 }
 
+fn stale_worker_output_error(
+    operation: &'static str,
+    expected: WorkerGeneration,
+    actual: WorkerGeneration,
+) -> LeanWorkerError {
+    LeanWorkerError::Protocol {
+        message: format!(
+            "worker sent stale {operation} frame from generation {}, current generation is {}",
+            actual.0, expected.0
+        ),
+    }
+}
+
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -3424,13 +3557,14 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
+#[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::{
         DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationFacts, LeanWorkerError,
         LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-        LeanWorkerModuleQuerySelector, LeanWorkerRestartReason, LeanWorkerStats, MAX_FRAME_BYTES,
-        MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, truncate_for_display,
+        LeanWorkerModuleQuerySelector, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
+        MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, stale_worker_output_error,
+        truncate_for_display,
     };
     use std::path::PathBuf;
     use std::time::Duration;
@@ -3482,6 +3616,26 @@ mod tests {
         let config = dummy_config().rss_hard_limit(0, Duration::ZERO);
         assert_eq!(config.rss_hard_limit_kib, Some(1));
         assert_eq!(config.rss_sample_interval, Duration::from_millis(1));
+    }
+
+    #[test]
+    fn restart_intensity_policy_clamps_to_nonzero_window() {
+        let policy = LeanWorkerRestartPolicy::default().max_restarts_per_window(0, Duration::ZERO);
+        assert_eq!(policy.restart_intensity.max_restarts, 1);
+        assert_eq!(policy.restart_intensity.window, Duration::from_millis(1));
+    }
+
+    #[test]
+    fn stale_worker_output_error_names_expected_and_actual_generation() {
+        let err = stale_worker_output_error("health", WorkerGeneration(2), WorkerGeneration(1));
+        match err {
+            LeanWorkerError::Protocol { message } => {
+                assert!(message.contains("stale health frame"));
+                assert!(message.contains("generation 1"));
+                assert!(message.contains("current generation is 2"));
+            }
+            other => panic!("expected protocol error, got {other:?}"),
+        }
     }
 
     #[test]
