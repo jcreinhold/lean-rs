@@ -44,6 +44,7 @@
 - [Worker pool observability](architecture/26-worker-pool-observability.md)
 - [Downstream worker replacement fixture](architecture/27-lean-dup-readiness.md)
 - [Production-scale release](architecture/28-production-scale-release.md)
+- [Worker runtime semantics](architecture/30-worker-runtime-semantics.md)
 
 # Recipes
 

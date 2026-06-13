@@ -107,9 +107,10 @@ actually measured: planning, pool leases, session reuse, row throughput, cancell
 cycling, and RSS sampling availability.
 
 The same probe records pool snapshots and bounded row-delivery backpressure. The `single_worker`, `pool_max_2`, and
-`post_cycle` lines print active workers, warm leases, queue depth, stream request outcomes, delivered rows, payload
-bytes, stream elapsed time, and backpressure counters. The `slow_sink` line runs a deliberately slow row sink and
-records parent RSS before/after, child RSS, delivered row count, payload bytes, and backpressure waits/failures:
+`post_cycle` lines print active workers, warm leases, the stable queue-depth field, stream request outcomes, delivered
+rows, payload bytes, stream elapsed time, and backpressure counters. The queue-depth field is currently always `0`
+because pool admission is synchronous rather than mailbox-backed. The `slow_sink` line runs a deliberately slow row sink
+and records parent RSS before/after, child RSS, delivered row count, payload bytes, and backpressure waits/failures:
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
@@ -176,23 +177,21 @@ LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
 This is deliberately not a Criterion bench. Criterion answers per-iteration latency questions; this workload answers
 whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. See
 [`docs/safety/long-session-memory.md`](safety/long-session-memory.md) for the measured `LEAN_RESOLVED_VERSION` result
-and consumer guidance.
-Use `long-session-derived` when the question is whether a query phase initialized source-range, pretty-printer,
-proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import.
-Use the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig`
-guidance. Their `admission=...` rows distinguish cold worker/session attempts, typed refusals, import-like requests,
-and RSS before/after admission. Their `session_reuse=...` rows distinguish equivalent warm reuse from fragmented keys.
-Their `replacement=...` rows break synchronous worker replacement into spawn/handshake, capability-load,
-session-open/import, first-command, warm-command, and total replacement timings. Prewarming is not enabled by default
-or implemented in this baseline; overlap must be admitted by RSS-budget evidence before adding that lifecycle behavior.
-Their `batch=...` rows cover the warm `process_module_query_batch` proof-agent workload through one pool lease. These
-rows report selector counts, request/import deltas, elapsed time, parent/child RSS, bounded item counts, item-level
-failures, truncation, and `worker_frames=unavailable` until protocol frame counters exist. Batching here reduces
-request/session churn on warm sessions; it is not Lean memory reclamation and does not replace worker cycling.
-The repo defaults now use a 1,572,864 KiB local cap and one worker/import job at a time.
-On the 2026-06-08 local rebaseline, full-session worker cycling stayed within the older 2 GiB cap only at
-`max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one child under about 421 MiB. These are local
-KiB, not portable limits.
+and consumer guidance. Use `long-session-derived` when the question is whether a query phase initialized source-range,
+pretty-printer, proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import. Use
+the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig` guidance.
+Their `admission=...` rows distinguish cold worker/session attempts, typed refusals, import-like requests, and RSS
+before/after admission. Their `session_reuse=...` rows distinguish equivalent warm reuse from fragmented keys. Their
+`replacement=...` rows break synchronous worker replacement into spawn/handshake, capability-load, session-open/import,
+first-command, warm-command, and total replacement timings. Prewarming is not enabled by default or implemented in this
+baseline; overlap must be admitted by RSS-budget evidence before adding that lifecycle behavior. Their `batch=...` rows
+cover the warm `process_module_query_batch` proof-agent workload through one pool lease. These rows report selector
+counts, request/import deltas, elapsed time, parent/child RSS, bounded item counts, item-level failures, truncation, and
+`worker_frames=unavailable` until protocol frame counters exist. Batching here reduces request/session churn on warm
+sessions; it is not Lean memory reclamation and does not replace worker cycling. The repo defaults now use a 1,572,864
+KiB local cap and one worker/import job at a time. On the 2026-06-08 local rebaseline, full-session worker cycling
+stayed within the older 2 GiB cap only at `max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one
+child under about 421 MiB. These are local KiB, not portable limits.
 
 ## Detect a regression
 

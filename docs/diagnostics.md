@@ -134,9 +134,11 @@ request timeout, cancellation-triggered cycle, stale lease use, row sink panic, 
 decode failure are worker outcomes, not `LeanDiagnosticCode` values from the in-process service layer.
 
 For large local runs, use `LeanWorkerPoolSnapshot` and `LeanWorkerSessionLease::snapshot()` for operational state.
-Snapshots summarize queue depth, active workers, warm leases, restart reasons, best-effort child RSS, stream outcomes,
-delivered row counts, payload bytes, elapsed stream time, and backpressure counters. They intentionally do not expose
-child pids, worker ids, pipe handles, protocol frames, or scheduling internals.
+Snapshots summarize active workers, warm leases, the stable queue-depth field, restart reasons, best-effort child RSS,
+stream outcomes, delivered row counts, payload bytes, elapsed stream time, and backpressure counters. `queue_depth` is
+currently always `0`; pool admission waits are synchronous and bounded by `queue_wait_timeout`, not backed by a request
+mailbox. Snapshots intentionally do not expose child pids, worker ids, pipe handles, protocol frames, or scheduling
+internals.
 
 ## Matching on codes
 

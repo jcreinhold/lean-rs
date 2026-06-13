@@ -13,9 +13,9 @@ LeanWorkerImportPlanner -> LeanWorkerPool -> LeanWorkerSessionLease
   -> typed command -> live rows -> terminal summary -> pool stats
 ```
 
-The pool owns local scheduling, session leases, memory-aware admission, restart policy, backpressure, observability, and
-failure isolation. Callers do not choose child pids, worker ids, pipes, protocol frames, restart sequencing, or
-row-buffering mechanics.
+The pool owns local admission, session leases, memory-aware assignment, restart policy, backpressure, observability, and
+failure isolation. Callers do not choose child pids, worker ids, pipes, protocol frames, restart sequencing,
+row-buffering mechanics, or a queue position.
 
 The pool sits above `LeanWorkerCapabilityBuilder`. The builder knows how to open one capability-backed worker session.
 The pool decides when compatible work can reuse a warm session, when a new local child may be spawned, and when policy

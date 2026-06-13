@@ -6,14 +6,14 @@ failure isolation across more than one child process.
 
 The pool boundary keeps that operational machinery inside the worker crates. Downstream callers submit capability work
 keyed by session requirements. The pool decides whether to reuse a warm worker, start a new child, cycle a stale child,
-or delay work until policy permits it.
+or refuse cold work after a bounded synchronous admission wait.
 
 ## Chosen Boundary
 
 `LeanWorkerPool` is the local multi-worker orchestration boundary. It owns:
 
 - worker child lifecycle;
-- work queueing and admission;
+- work admission and bounded wait policy;
 - session leases and session-key matching;
 - worker restart and session invalidation sequencing;
 - memory-aware scheduling and RSS sampling policy;
@@ -44,7 +44,8 @@ The same pool boundary carries local memory-aware scheduling:
 - `per_worker_rss_ceiling_kib` cycles a warm worker before assigning more work when its sampled RSS reaches the
   configured ceiling;
 - `idle_cycle_after` cycles an idle worker before stale leased work continues;
-- `queue_wait_timeout` bounds synchronous admission waits for a full pool.
+- `queue_wait_timeout` bounds synchronous admission waits for a full pool. It is not a mailbox and does not reserve a
+  queued work item.
 
 RSS sampling is best effort and platform-specific. Unsupported samples are recorded as unavailable; the pool does not
 claim a budget decision from missing RSS data. Memory-driven cycles are reported as policy restarts and invalidate stale
@@ -52,8 +53,9 @@ leases before downstream command execution.
 
 Pool-level observability and bounded row-delivery backpressure also live at this boundary:
 
-- `LeanWorkerPoolSnapshot` summarizes worker counts, warm leases, queue depth, restart reasons, child RSS samples,
-  stream request outcomes, delivered row counts, payload bytes, stream elapsed time, and backpressure counters;
+- `LeanWorkerPoolSnapshot` summarizes worker counts, warm leases, the stable queue-depth field, restart reasons, child
+  RSS samples, stream request outcomes, delivered row counts, payload bytes, stream elapsed time, and backpressure
+  counters;
 - `LeanWorkerSessionLease::snapshot` samples the leased worker without exposing child identity;
 - row delivery uses a bounded internal event buffer, so a slow sink blocks the request path instead of growing memory
   without bound;
@@ -62,15 +64,20 @@ Pool-level observability and bounded row-delivery backpressure also live at this
 Snapshots are operational summaries, not protocol traces. They do not expose worker ids, child pids, pipe handles,
 protocol frames, or which warm worker was selected.
 
+The pool is actor-like in the narrow sense that it hides child state, transport, restart sequencing, and backpressure
+behind a lease API. It is not a formal actor runtime: there is no public mailbox, no cloneable actor address, no
+published scheduler, no fairness claim, and no global FIFO order. The current runtime contract is stated in
+[`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md).
+
 ## Designs Considered
 
 **Single worker only.** Rejected as the scale foundation. It preserves a clean process boundary, but it serializes
 independent module groups. A downstream tool that wants to use available cores would have to build its own worker
-fanout, queueing, and restart policy.
+fanout, admission waits, and restart policy.
 
 **Caller-managed worker fanout.** Rejected. It would push child counts, restart timing, session reuse, memory ceilings,
-lease invalidation, and failure classification into every downstream tool. That duplicates the same production rules
-that the worker crates already owns for one worker.
+lease invalidation, admission waits, and failure classification into every downstream tool. That duplicates the same
+production rules that the worker crates already owns for one worker.
 
 **`LeanWorkerPool`.** Chosen. The pool is a deeper module because it hides orchestration decisions that every local
 production consumer would otherwise reimplement. The public surface should describe capability work and policy intent,
@@ -119,7 +126,7 @@ Callers should not learn:
 - worker ids or child pids;
 - stdin/stdout pipes or frame order;
 - child spawn and handshake sequencing;
-- queue internals;
+- admission wait internals;
 - stderr parsing or fatal-exit classification;
 - restart timing;
 - RSS sampling details;
@@ -167,3 +174,5 @@ budgets, but they do not poll child RSS, inspect child pids, or decide which chi
 - [`26-worker-pool-observability.md`](26-worker-pool-observability.md)—pool observability.
 - [`27-lean-dup-readiness.md`](27-lean-dup-readiness.md)—downstream worker replacement fixture.
 - [`28-production-scale-release.md`](28-production-scale-release.md)—production-scale contract.
+- [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md)—request, admission, ordering, cancellation, and
+  restart semantics.

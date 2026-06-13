@@ -8,7 +8,7 @@ backpressure without exposing worker internals.
 `LeanWorkerPoolSnapshot` is the public summary type. It reports aggregate pool state:
 
 - configured and active worker counts;
-- warm lease count and queue depth;
+- warm lease count and queue-depth field;
 - request/import counters;
 - restart reasons;
 - best-effort child RSS samples;
@@ -20,6 +20,11 @@ backpressure without exposing worker internals.
 A snapshot intentionally does not expose child pids, local worker ids, pipe handles, protocol frames, child stderr, or
 the selected warm worker. Those are supervisor and pool mechanics. Callers can sample the snapshot during a large run,
 log it, or use it to choose their own cancellation policy without learning how the child process is wired.
+
+The current pool does not implement a mailbox queue. `queue_depth` is always `0`; it remains in the snapshot as a stable
+operational field. `queue_wait_timeout` measures bounded synchronous admission waiting for a full pool, not time spent
+in a reserved queue slot. See [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md) for the full worker
+runtime contract.
 
 `LeanWorkerSessionLease::snapshot` provides the same aggregate shape for the leased worker while the lease is active. It
 is a sampling hook, not an identity handle. A stale lease remains stale after timeout, cancellation, crash, explicit
@@ -73,4 +78,3 @@ success ambiguous for downstream schemas.
 
 **Metrics framework integration.** Rejected for this layer. The pool exposes a cheap snapshot. Applications adapt it to
 logs, tracing, Prometheus, or another metrics backend outside the worker crates.
-
