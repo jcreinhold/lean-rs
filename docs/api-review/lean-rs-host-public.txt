@@ -928,6 +928,30 @@ impl core::marker::Unpin for lean_rs_host::host::process::DeclarationTargetResul
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::DeclarationTargetResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::DeclarationTargetResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationTargetResult
+pub enum lean_rs_host::host::process::DeclarationVerificationBatchOutcome
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::HeaderParseFailed
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::MissingImports
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::MissingImports::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::Ok
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::Ok::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::host::process::DeclarationVerificationBatchOutcome::Unsupported
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::clone(&self) -> lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
 pub enum lean_rs_host::host::process::DeclarationVerificationOutcome
 pub lean_rs_host::host::process::DeclarationVerificationOutcome::HeaderParseFailed
 pub lean_rs_host::host::process::DeclarationVerificationOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
@@ -996,6 +1020,8 @@ pub fn lean_rs_host::DeclarationVerificationTarget::fmt(&self, &mut core::fmt::F
 impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationTarget
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationTarget
 pub fn lean_rs_host::DeclarationVerificationTarget::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationTarget
+pub fn lean_rs_host::DeclarationVerificationTarget::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Send for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Sync for lean_rs_host::DeclarationVerificationTarget
@@ -1137,6 +1163,7 @@ impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryBatch
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryBatchOutcome
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryBatchOutcome
 pub enum lean_rs_host::host::process::ModuleQueryBatchResult
+pub lean_rs_host::host::process::ModuleQueryBatchResult::DeclarationOutline(lean_rs_host::host::process::DeclarationOutlineResult)
 pub lean_rs_host::host::process::ModuleQueryBatchResult::DeclarationTarget(lean_rs_host::host::process::DeclarationTargetResult)
 pub lean_rs_host::host::process::ModuleQueryBatchResult::Diagnostics(lean_rs_host::LeanElabFailure)
 pub lean_rs_host::host::process::ModuleQueryBatchResult::ProofState(lean_rs_host::host::process::ProofStateResult)
@@ -1222,6 +1249,8 @@ impl core::marker::UnsafeUnpin for lean_rs_host::host::process::ModuleQueryResul
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::ModuleQueryResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::ModuleQueryResult
 pub enum lean_rs_host::host::process::ModuleQuerySelector
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationOutline
+pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationOutline::id: alloc::string::String
 pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget
 pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::column: core::option::Option<u32>
 pub lean_rs_host::host::process::ModuleQuerySelector::DeclarationTarget::id: alloc::string::String
@@ -1301,6 +1330,7 @@ pub enum lean_rs_host::host::process::ProofAttemptStatus
 pub lean_rs_host::host::process::ProofAttemptStatus::BudgetExceeded
 pub lean_rs_host::host::process::ProofAttemptStatus::Closed
 pub lean_rs_host::host::process::ProofAttemptStatus::Failed
+pub lean_rs_host::host::process::ProofAttemptStatus::NotAttempted
 pub lean_rs_host::host::process::ProofAttemptStatus::Progressed
 pub lean_rs_host::host::process::ProofAttemptStatus::Timeout
 pub lean_rs_host::host::process::ProofAttemptStatus::Unsupported
@@ -1378,6 +1408,8 @@ pub lean_rs_host::host::process::ProofStateResult::NeedsBuild::missing: alloc::v
 pub lean_rs_host::host::process::ProofStateResult::State(alloc::boxed::Box<lean_rs_host::host::process::ProofStateInfo>)
 pub lean_rs_host::host::process::ProofStateResult::Unavailable
 pub lean_rs_host::host::process::ProofStateResult::Unavailable::message: alloc::string::String
+pub lean_rs_host::host::process::ProofStateResult::Unavailable::proof_boundaries: alloc::vec::Vec<lean_rs_host::host::ProofBoundaryCandidate>
+pub lean_rs_host::host::process::ProofStateResult::Unavailable::proof_boundaries_truncated: bool
 impl core::clone::Clone for lean_rs_host::host::process::ProofStateResult
 pub fn lean_rs_host::host::process::ProofStateResult::clone(&self) -> lean_rs_host::host::process::ProofStateResult
 impl core::cmp::Eq for lean_rs_host::host::process::ProofStateResult
@@ -1460,6 +1492,26 @@ impl core::marker::Unpin for lean_rs_host::host::process::TypeAtResult
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::TypeAtResult
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::TypeAtResult
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::TypeAtResult
+pub struct lean_rs_host::host::process::DeclarationOutlineResult
+pub lean_rs_host::host::process::DeclarationOutlineResult::declarations: alloc::vec::Vec<lean_rs_host::host::process::DeclarationTargetInfo>
+pub lean_rs_host::host::process::DeclarationOutlineResult::truncated: bool
+impl core::clone::Clone for lean_rs_host::host::process::DeclarationOutlineResult
+pub fn lean_rs_host::host::process::DeclarationOutlineResult::clone(&self) -> lean_rs_host::host::process::DeclarationOutlineResult
+impl core::cmp::Eq for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::cmp::PartialEq for lean_rs_host::host::process::DeclarationOutlineResult
+pub fn lean_rs_host::host::process::DeclarationOutlineResult::eq(&self, &lean_rs_host::host::process::DeclarationOutlineResult) -> bool
+impl core::fmt::Debug for lean_rs_host::host::process::DeclarationOutlineResult
+pub fn lean_rs_host::host::process::DeclarationOutlineResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::process::DeclarationOutlineResult
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::process::DeclarationOutlineResult
+pub fn lean_rs_host::host::process::DeclarationOutlineResult::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::marker::Send for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::marker::Sync for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::marker::Unpin for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::marker::UnsafeUnpin for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::DeclarationOutlineResult
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationOutlineResult
 pub struct lean_rs_host::host::process::DeclarationTargetInfo
 pub lean_rs_host::host::process::DeclarationTargetInfo::body_span: lean_rs_host::host::process::ModuleSourceSpan
 pub lean_rs_host::host::process::DeclarationTargetInfo::declaration_kind: alloc::string::String
@@ -1485,6 +1537,73 @@ impl core::marker::Unpin for lean_rs_host::host::process::DeclarationTargetInfo
 impl core::marker::UnsafeUnpin for lean_rs_host::host::process::DeclarationTargetInfo
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::process::DeclarationTargetInfo
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::process::DeclarationTargetInfo
+pub struct lean_rs_host::host::process::DeclarationVerificationBatchItem
+pub lean_rs_host::host::process::DeclarationVerificationBatchItem::id: alloc::string::String
+pub lean_rs_host::host::process::DeclarationVerificationBatchItem::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::clone(&self) -> lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::eq(&self, &lean_rs_host::DeclarationVerificationBatchItem) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchItem
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+pub struct lean_rs_host::host::process::DeclarationVerificationBatchRequest
+pub lean_rs_host::host::process::DeclarationVerificationBatchRequest::budgets: lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub lean_rs_host::host::process::DeclarationVerificationBatchRequest::report_axioms: bool
+pub lean_rs_host::host::process::DeclarationVerificationBatchRequest::sorry_policy: lean_rs_host::host::process::SorryPolicy
+pub lean_rs_host::host::process::DeclarationVerificationBatchRequest::source: alloc::string::String
+pub lean_rs_host::host::process::DeclarationVerificationBatchRequest::targets: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchItem>
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::eq(&self, &lean_rs_host::DeclarationVerificationBatchRequest) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for &lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::DeclarationVerificationBatchRequest
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::DeclarationVerificationBatchRequest
+pub type &lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub type lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+pub struct lean_rs_host::host::process::DeclarationVerificationBatchRow
+pub lean_rs_host::host::process::DeclarationVerificationBatchRow::facts: alloc::boxed::Box<lean_rs_host::DeclarationVerificationFacts>
+pub lean_rs_host::host::process::DeclarationVerificationBatchRow::id: alloc::string::String
+pub lean_rs_host::host::process::DeclarationVerificationBatchRow::status: lean_rs_host::DeclarationVerificationStatus
+pub lean_rs_host::host::process::DeclarationVerificationBatchRow::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRow
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
 pub struct lean_rs_host::host::process::DeclarationVerificationFacts
 pub lean_rs_host::host::process::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_host::host::process::DeclarationVerificationFacts::axioms_available: bool
@@ -1811,6 +1930,28 @@ impl core::marker::Unpin for lean_rs_host::ProofAttemptRow
 impl core::marker::UnsafeUnpin for lean_rs_host::ProofAttemptRow
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofAttemptRow
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofAttemptRow
+pub struct lean_rs_host::host::process::ProofBoundaryCandidate
+pub lean_rs_host::host::process::ProofBoundaryCandidate::excerpt: lean_rs_host::host::process::RenderedInfo
+pub lean_rs_host::host::process::ProofBoundaryCandidate::index: u32
+pub lean_rs_host::host::process::ProofBoundaryCandidate::kind: alloc::string::String
+pub lean_rs_host::host::process::ProofBoundaryCandidate::source: lean_rs_host::host::process::ModuleSourceSpan
+impl core::clone::Clone for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::clone(&self) -> lean_rs_host::host::ProofBoundaryCandidate
+impl core::cmp::Eq for lean_rs_host::host::ProofBoundaryCandidate
+impl core::cmp::PartialEq for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::eq(&self, &lean_rs_host::host::ProofBoundaryCandidate) -> bool
+impl core::fmt::Debug for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::ProofBoundaryCandidate
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Send for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Sync for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Unpin for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::UnsafeUnpin for lean_rs_host::host::ProofBoundaryCandidate
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::ProofBoundaryCandidate
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::ProofBoundaryCandidate
 pub struct lean_rs_host::host::process::ProofCandidate
 pub lean_rs_host::host::process::ProofCandidate::id: alloc::string::String
 pub lean_rs_host::host::process::ProofCandidate::text: alloc::string::String
@@ -1858,6 +1999,8 @@ pub lean_rs_host::host::process::ProofStateInfo::goals_after: alloc::vec::Vec<al
 pub lean_rs_host::host::process::ProofStateInfo::goals_before: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_host::host::process::ProofStateInfo::locals: alloc::vec::Vec<lean_rs_host::host::process::LocalInfo>
 pub lean_rs_host::host::process::ProofStateInfo::namespace_name: alloc::string::String
+pub lean_rs_host::host::process::ProofStateInfo::proof_boundaries: alloc::vec::Vec<lean_rs_host::host::ProofBoundaryCandidate>
+pub lean_rs_host::host::process::ProofStateInfo::proof_boundaries_truncated: bool
 pub lean_rs_host::host::process::ProofStateInfo::safe_edit: core::option::Option<lean_rs_host::host::process::DeclarationTargetInfo>
 pub lean_rs_host::host::process::ProofStateInfo::span: lean_rs_host::host::process::ModuleSourceSpan
 pub lean_rs_host::host::process::ProofStateInfo::truncated: bool
@@ -1985,6 +2128,30 @@ impl core::marker::Unpin for lean_rs_host::host::declaration_search::Declaration
 impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::DeclarationSearchScope
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchScope
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchScope
+pub enum lean_rs_host::host::DeclarationVerificationBatchOutcome
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::HeaderParseFailed
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::MissingImports
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::MissingImports::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::Ok
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::Ok::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::host::DeclarationVerificationBatchOutcome::Unsupported
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::clone(&self) -> lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
 pub enum lean_rs_host::host::DeclarationVerificationOutcome
 pub lean_rs_host::host::DeclarationVerificationOutcome::HeaderParseFailed
 pub lean_rs_host::host::DeclarationVerificationOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
@@ -2053,6 +2220,8 @@ pub fn lean_rs_host::DeclarationVerificationTarget::fmt(&self, &mut core::fmt::F
 impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationTarget
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationTarget
 pub fn lean_rs_host::DeclarationVerificationTarget::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationTarget
+pub fn lean_rs_host::DeclarationVerificationTarget::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Send for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Sync for lean_rs_host::DeclarationVerificationTarget
@@ -2162,6 +2331,7 @@ pub enum lean_rs_host::host::ProofAttemptStatus
 pub lean_rs_host::host::ProofAttemptStatus::BudgetExceeded
 pub lean_rs_host::host::ProofAttemptStatus::Closed
 pub lean_rs_host::host::ProofAttemptStatus::Failed
+pub lean_rs_host::host::ProofAttemptStatus::NotAttempted
 pub lean_rs_host::host::ProofAttemptStatus::Progressed
 pub lean_rs_host::host::ProofAttemptStatus::Timeout
 pub lean_rs_host::host::ProofAttemptStatus::Unsupported
@@ -2616,6 +2786,73 @@ impl core::marker::Unpin for lean_rs_host::host::declaration_search::Declaration
 impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
+pub struct lean_rs_host::host::DeclarationVerificationBatchItem
+pub lean_rs_host::host::DeclarationVerificationBatchItem::id: alloc::string::String
+pub lean_rs_host::host::DeclarationVerificationBatchItem::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::clone(&self) -> lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::eq(&self, &lean_rs_host::DeclarationVerificationBatchItem) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchItem
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+pub struct lean_rs_host::host::DeclarationVerificationBatchRequest
+pub lean_rs_host::host::DeclarationVerificationBatchRequest::budgets: lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub lean_rs_host::host::DeclarationVerificationBatchRequest::report_axioms: bool
+pub lean_rs_host::host::DeclarationVerificationBatchRequest::sorry_policy: lean_rs_host::host::process::SorryPolicy
+pub lean_rs_host::host::DeclarationVerificationBatchRequest::source: alloc::string::String
+pub lean_rs_host::host::DeclarationVerificationBatchRequest::targets: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchItem>
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::eq(&self, &lean_rs_host::DeclarationVerificationBatchRequest) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for &lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::DeclarationVerificationBatchRequest
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::DeclarationVerificationBatchRequest
+pub type &lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub type lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+pub struct lean_rs_host::host::DeclarationVerificationBatchRow
+pub lean_rs_host::host::DeclarationVerificationBatchRow::facts: alloc::boxed::Box<lean_rs_host::DeclarationVerificationFacts>
+pub lean_rs_host::host::DeclarationVerificationBatchRow::id: alloc::string::String
+pub lean_rs_host::host::DeclarationVerificationBatchRow::status: lean_rs_host::DeclarationVerificationStatus
+pub lean_rs_host::host::DeclarationVerificationBatchRow::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRow
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
 pub struct lean_rs_host::host::DeclarationVerificationFacts
 pub lean_rs_host::host::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_host::host::DeclarationVerificationFacts::axioms_available: bool
@@ -2984,6 +3221,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::search_declarations(&mut self, &lea
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::verify_declaration(&mut self, &lean_rs_host::DeclarationVerificationRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::DeclarationVerificationOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::verify_declaration_batch(&mut self, &lean_rs_host::DeclarationVerificationBatchRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::DeclarationVerificationBatchOutcome>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Send for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Sync for lean_rs_host::LeanSession<'lean, 'c>
@@ -3136,6 +3374,28 @@ impl core::marker::Unpin for lean_rs_host::ProofAttemptRow
 impl core::marker::UnsafeUnpin for lean_rs_host::ProofAttemptRow
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::ProofAttemptRow
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::ProofAttemptRow
+pub struct lean_rs_host::host::ProofBoundaryCandidate
+pub lean_rs_host::host::ProofBoundaryCandidate::excerpt: lean_rs_host::host::process::RenderedInfo
+pub lean_rs_host::host::ProofBoundaryCandidate::index: u32
+pub lean_rs_host::host::ProofBoundaryCandidate::kind: alloc::string::String
+pub lean_rs_host::host::ProofBoundaryCandidate::source: lean_rs_host::host::process::ModuleSourceSpan
+impl core::clone::Clone for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::clone(&self) -> lean_rs_host::host::ProofBoundaryCandidate
+impl core::cmp::Eq for lean_rs_host::host::ProofBoundaryCandidate
+impl core::cmp::PartialEq for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::eq(&self, &lean_rs_host::host::ProofBoundaryCandidate) -> bool
+impl core::fmt::Debug for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::host::ProofBoundaryCandidate
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::host::ProofBoundaryCandidate
+pub fn lean_rs_host::host::ProofBoundaryCandidate::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Send for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Sync for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::Unpin for lean_rs_host::host::ProofBoundaryCandidate
+impl core::marker::UnsafeUnpin for lean_rs_host::host::ProofBoundaryCandidate
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::ProofBoundaryCandidate
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::ProofBoundaryCandidate
 pub struct lean_rs_host::host::ProofCandidate
 pub lean_rs_host::host::ProofCandidate::id: alloc::string::String
 pub lean_rs_host::host::ProofCandidate::text: alloc::string::String
@@ -3445,6 +3705,30 @@ impl core::marker::Unpin for lean_rs_host::host::declaration_search::Declaration
 impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::DeclarationSearchScope
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchScope
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchScope
+pub enum lean_rs_host::DeclarationVerificationBatchOutcome
+pub lean_rs_host::DeclarationVerificationBatchOutcome::HeaderParseFailed
+pub lean_rs_host::DeclarationVerificationBatchOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
+pub lean_rs_host::DeclarationVerificationBatchOutcome::MissingImports
+pub lean_rs_host::DeclarationVerificationBatchOutcome::MissingImports::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::DeclarationVerificationBatchOutcome::MissingImports::missing: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::DeclarationVerificationBatchOutcome::MissingImports::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::DeclarationVerificationBatchOutcome::Ok
+pub lean_rs_host::DeclarationVerificationBatchOutcome::Ok::imports: alloc::vec::Vec<alloc::string::String>
+pub lean_rs_host::DeclarationVerificationBatchOutcome::Ok::results: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchRow>
+pub lean_rs_host::DeclarationVerificationBatchOutcome::Unsupported
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::clone(&self) -> lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchOutcome
+pub fn lean_rs_host::DeclarationVerificationBatchOutcome::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchOutcome
 pub enum lean_rs_host::DeclarationVerificationOutcome
 pub lean_rs_host::DeclarationVerificationOutcome::HeaderParseFailed
 pub lean_rs_host::DeclarationVerificationOutcome::HeaderParseFailed::diagnostics: lean_rs_host::LeanElabFailure
@@ -3513,6 +3797,8 @@ pub fn lean_rs_host::DeclarationVerificationTarget::fmt(&self, &mut core::fmt::F
 impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationTarget
 impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationTarget
 pub fn lean_rs_host::DeclarationVerificationTarget::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationTarget
+pub fn lean_rs_host::DeclarationVerificationTarget::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
 impl core::marker::Freeze for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Send for lean_rs_host::DeclarationVerificationTarget
 impl core::marker::Sync for lean_rs_host::DeclarationVerificationTarget
@@ -3683,6 +3969,7 @@ pub enum lean_rs_host::ProofAttemptStatus
 pub lean_rs_host::ProofAttemptStatus::BudgetExceeded
 pub lean_rs_host::ProofAttemptStatus::Closed
 pub lean_rs_host::ProofAttemptStatus::Failed
+pub lean_rs_host::ProofAttemptStatus::NotAttempted
 pub lean_rs_host::ProofAttemptStatus::Progressed
 pub lean_rs_host::ProofAttemptStatus::Timeout
 pub lean_rs_host::ProofAttemptStatus::Unsupported
@@ -4137,6 +4424,73 @@ impl core::marker::Unpin for lean_rs_host::host::declaration_search::Declaration
 impl core::marker::UnsafeUnpin for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::declaration_search::DeclarationSearchTimings
+pub struct lean_rs_host::DeclarationVerificationBatchItem
+pub lean_rs_host::DeclarationVerificationBatchItem::id: alloc::string::String
+pub lean_rs_host::DeclarationVerificationBatchItem::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::clone(&self) -> lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchItem
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::eq(&self, &lean_rs_host::DeclarationVerificationBatchItem) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchItem
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchItem
+pub fn lean_rs_host::DeclarationVerificationBatchItem::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchItem
+pub struct lean_rs_host::DeclarationVerificationBatchRequest
+pub lean_rs_host::DeclarationVerificationBatchRequest::budgets: lean_rs_host::host::process::ModuleQueryOutputBudgets
+pub lean_rs_host::DeclarationVerificationBatchRequest::report_axioms: bool
+pub lean_rs_host::DeclarationVerificationBatchRequest::sorry_policy: lean_rs_host::host::process::SorryPolicy
+pub lean_rs_host::DeclarationVerificationBatchRequest::source: alloc::string::String
+pub lean_rs_host::DeclarationVerificationBatchRequest::targets: alloc::vec::Vec<lean_rs_host::DeclarationVerificationBatchItem>
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::Eq for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::cmp::PartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::eq(&self, &lean_rs_host::DeclarationVerificationBatchRequest) -> bool
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for &lean_rs_host::DeclarationVerificationBatchRequest
+impl lean_rs::abi::traits::sealed::SealedAbi for lean_rs_host::DeclarationVerificationBatchRequest
+impl<'lean> lean_rs::abi::traits::IntoLean<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub fn lean_rs_host::DeclarationVerificationBatchRequest::into_lean(self, &'lean lean_rs::runtime::init::LeanRuntime) -> lean_rs::runtime::obj::Obj<'lean>
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for &lean_rs_host::DeclarationVerificationBatchRequest
+pub type &lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl<'lean> lean_rs::abi::traits::LeanAbi<'lean> for lean_rs_host::DeclarationVerificationBatchRequest
+pub type lean_rs_host::DeclarationVerificationBatchRequest::CRepr = <lean_rs::runtime::obj::Obj<'lean> as lean_rs::abi::traits::LeanAbi<'lean>>::CRepr
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRequest
+pub struct lean_rs_host::DeclarationVerificationBatchRow
+pub lean_rs_host::DeclarationVerificationBatchRow::facts: alloc::boxed::Box<lean_rs_host::DeclarationVerificationFacts>
+pub lean_rs_host::DeclarationVerificationBatchRow::id: alloc::string::String
+pub lean_rs_host::DeclarationVerificationBatchRow::status: lean_rs_host::DeclarationVerificationStatus
+pub lean_rs_host::DeclarationVerificationBatchRow::target: lean_rs_host::DeclarationVerificationTarget
+impl core::clone::Clone for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::clone(&self) -> lean_rs_host::DeclarationVerificationBatchRow
+impl core::fmt::Debug for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'lean> lean_rs::abi::traits::TryFromLean<'lean> for lean_rs_host::DeclarationVerificationBatchRow
+pub fn lean_rs_host::DeclarationVerificationBatchRow::try_from_lean(lean_rs::runtime::obj::Obj<'lean>) -> lean_rs::error::LeanResult<Self>
+impl core::marker::Freeze for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Send for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Sync for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::Unpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationBatchRow
 pub struct lean_rs_host::DeclarationVerificationFacts
 pub lean_rs_host::DeclarationVerificationFacts::axioms: alloc::vec::Vec<alloc::string::String>
 pub lean_rs_host::DeclarationVerificationFacts::axioms_available: bool
@@ -4606,6 +4960,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::search_declarations(&mut self, &lea
 pub fn lean_rs_host::LeanSession<'lean, 'c>::stats(&self) -> lean_rs_host::SessionStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::summarize_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofSummary>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::verify_declaration(&mut self, &lean_rs_host::DeclarationVerificationRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::DeclarationVerificationOutcome>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::verify_declaration_batch(&mut self, &lean_rs_host::DeclarationVerificationBatchRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::DeclarationVerificationBatchOutcome>
 impl<'lean, 'c> !core::marker::Freeze for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Send for lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> !core::marker::Sync for lean_rs_host::LeanSession<'lean, 'c>
