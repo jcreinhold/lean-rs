@@ -294,6 +294,7 @@ inductive ProofAttemptStatus where
   | failed
   | timeout
   | budgetExceeded
+  | notAttempted
   | unsupported
   deriving Inhabited
 
@@ -1808,7 +1809,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let elapsed ← elapsedMicrosSince headerStart
     return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
 
-private def proofCandidateLimit : Nat := 8
+private def proofCandidateLimit : Nat := 16
 
 private def oneShotPolicy (source fileLabel : String) : ModuleQueryCachePolicy :=
   {
@@ -2157,7 +2158,7 @@ private def attemptEnvelope
       if spent ≥ request.budgets.totalBytes then
         rows := rows.push {
           id := candidate.id,
-          status := .budgetExceeded,
+          status := .notAttempted,
           candidateText := renderStringBoundedWith request.budgets.perFieldBytes candidate.text,
           diagnostics := emptyFailure,
           downstreamDiagnostics := emptyFailure,
@@ -2173,6 +2174,7 @@ private def attemptEnvelope
         let bytes := attemptRowBytes row
         if spent + bytes > request.budgets.totalBytes then
           rows := rows.push { row with status := .budgetExceeded, outputTruncated := true }
+          spent := request.budgets.totalBytes
         else
           rows := rows.push row
           spent := spent + bytes

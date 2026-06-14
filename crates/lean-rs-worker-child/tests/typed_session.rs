@@ -1826,7 +1826,7 @@ fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
     let mut session = worker
         .open_session(&elaboration_session_config(), None, None)
         .expect("worker session opens");
-    let candidates = (0..10)
+    let candidates = (0..18)
         .map(|idx| LeanWorkerProofCandidate {
             id: format!("c{idx}"),
             text: "trivial".to_owned(),
@@ -1848,11 +1848,104 @@ fn attempt_proof_candidate_list_is_capped_and_does_not_write_files() {
     let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
         panic!("expected Ok proof attempt, got {result:?}");
     };
-    assert_eq!(result.candidate_limit, 8);
-    assert!(result.candidates.len() <= 8);
+    assert_eq!(result.candidate_limit, 16);
+    assert_eq!(result.candidates.len(), 16);
+    assert!(result.candidates_truncated);
 
     let after = fs::read_to_string(&fixture).expect("fixture reads after proof attempt");
     assert_eq!(before, after, "proof attempts must not mutate source files");
+}
+
+#[test]
+fn attempt_proof_ten_candidates_returns_ordered_rows() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/ten.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let candidates = (0..10)
+        .map(|idx| LeanWorkerProofCandidate {
+            id: format!("c{idx}"),
+            text: if idx % 2 == 0 {
+                "trivial".to_owned()
+            } else {
+                "exact definitely_missing_identifier".to_owned()
+            },
+        })
+        .collect();
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by\n  skip\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
+        candidates,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("ten-candidate attempt succeeds");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidate_limit, 16);
+    assert!(!result.candidates_truncated);
+    assert_eq!(result.candidates.len(), 10);
+    for (idx, row) in result.candidates.iter().enumerate() {
+        assert_eq!(row.id, format!("c{idx}"));
+        let expected = if idx % 2 == 0 {
+            LeanWorkerProofAttemptStatus::Closed
+        } else {
+            LeanWorkerProofAttemptStatus::Failed
+        };
+        assert_eq!(row.status, expected, "candidate order and status should be preserved");
+    }
+}
+
+#[test]
+fn attempt_proof_global_output_budget_returns_partial_not_attempted_rows() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/budget.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "theorem t : True := by\n  skip\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::default(),
+        },
+        candidates: (0..3)
+            .map(|idx| LeanWorkerProofCandidate {
+                id: format!("c{idx}"),
+                text: "trivial".to_owned(),
+            })
+            .collect(),
+        budgets: LeanWorkerOutputBudgets {
+            per_field_bytes: 16,
+            total_bytes: 1,
+        },
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("budgeted proof attempt returns partial rows");
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidates.len(), 3);
+    assert_eq!(result.candidates[0].id, "c0");
+    assert_eq!(
+        result.candidates[0].status,
+        LeanWorkerProofAttemptStatus::BudgetExceeded
+    );
+    assert_eq!(result.candidates[1].id, "c1");
+    assert_eq!(result.candidates[1].status, LeanWorkerProofAttemptStatus::NotAttempted);
+    assert_eq!(result.candidates[2].id, "c2");
+    assert_eq!(result.candidates[2].status, LeanWorkerProofAttemptStatus::NotAttempted);
 }
 
 #[test]

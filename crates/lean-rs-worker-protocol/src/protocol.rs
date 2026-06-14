@@ -1371,41 +1371,63 @@ mod tests {
             result: LeanWorkerProofAttemptResult::Ok {
                 imports: Vec::new(),
                 result: LeanWorkerProofAttemptEnvelope {
-                    candidates: vec![LeanWorkerProofAttemptRow {
-                        id: "rfl".to_owned(),
-                        status: LeanWorkerProofAttemptStatus::Closed,
-                        candidate_text: LeanWorkerRenderedInfo {
-                            value: "rfl".to_owned(),
-                            truncated: false,
-                        },
-                        diagnostics: LeanWorkerElabFailure {
-                            diagnostics: Vec::new(),
-                            truncated: false,
-                        },
-                        downstream_diagnostics: LeanWorkerElabFailure {
-                            diagnostics: Vec::new(),
-                            truncated: false,
-                        },
-                        goals: Vec::new(),
-                        declaration: Some(LeanWorkerDeclarationTargetInfo {
-                            short_name: "t".to_owned(),
-                            declaration_name: "t".to_owned(),
-                            namespace_name: String::new(),
-                            declaration_kind: "theorem".to_owned(),
-                            declaration_span: span.clone(),
-                            name_span: span.clone(),
-                            body_span: span,
-                        }),
-                        proof_position: Some(LeanWorkerProofPositionSummary {
-                            index: 0,
-                            tactic: LeanWorkerRenderedInfo {
-                                value: "trivial".to_owned(),
+                    candidates: vec![
+                        LeanWorkerProofAttemptRow {
+                            id: "rfl".to_owned(),
+                            status: LeanWorkerProofAttemptStatus::Closed,
+                            candidate_text: LeanWorkerRenderedInfo {
+                                value: "rfl".to_owned(),
                                 truncated: false,
                             },
-                        }),
-                        output_truncated: false,
-                    }],
-                    candidate_limit: 8,
+                            diagnostics: LeanWorkerElabFailure {
+                                diagnostics: Vec::new(),
+                                truncated: false,
+                            },
+                            downstream_diagnostics: LeanWorkerElabFailure {
+                                diagnostics: Vec::new(),
+                                truncated: false,
+                            },
+                            goals: Vec::new(),
+                            declaration: Some(LeanWorkerDeclarationTargetInfo {
+                                short_name: "t".to_owned(),
+                                declaration_name: "t".to_owned(),
+                                namespace_name: String::new(),
+                                declaration_kind: "theorem".to_owned(),
+                                declaration_span: span.clone(),
+                                name_span: span.clone(),
+                                body_span: span,
+                            }),
+                            proof_position: Some(LeanWorkerProofPositionSummary {
+                                index: 0,
+                                tactic: LeanWorkerRenderedInfo {
+                                    value: "trivial".to_owned(),
+                                    truncated: false,
+                                },
+                            }),
+                            output_truncated: false,
+                        },
+                        LeanWorkerProofAttemptRow {
+                            id: "skipped".to_owned(),
+                            status: LeanWorkerProofAttemptStatus::NotAttempted,
+                            candidate_text: LeanWorkerRenderedInfo {
+                                value: "simp".to_owned(),
+                                truncated: false,
+                            },
+                            diagnostics: LeanWorkerElabFailure {
+                                diagnostics: Vec::new(),
+                                truncated: false,
+                            },
+                            downstream_diagnostics: LeanWorkerElabFailure {
+                                diagnostics: Vec::new(),
+                                truncated: false,
+                            },
+                            goals: Vec::new(),
+                            declaration: None,
+                            proof_position: None,
+                            output_truncated: true,
+                        },
+                    ],
+                    candidate_limit: 16,
                     candidates_truncated: false,
                 },
             },

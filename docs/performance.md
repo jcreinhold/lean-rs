@@ -125,13 +125,15 @@ For runtime-model release validation, run these three worker probes together:
 ```sh
 cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 cargo run --release -p lean-rs-worker-child --example row_perf_probe
+cargo run --release -p lean-rs-worker-child --example proof_candidate_probe
 cargo run -p lean-rs-worker-child --example mathlib_scale_probe
 ```
 
 Together they cover cold worker startup, first import, request dispatch, graceful shutdown, cancellation latency,
-fatal-exit recovery, explicit cycling, pool admission/reuse, row throughput, parent/child RSS status, and slow-sink
-backpressure. Treat them as operating checks, not portable benchmark baselines; compare before/after on the same
-machine when a change is expected to move hot request dispatch or row streaming.
+fatal-exit recovery, explicit cycling, pool admission/reuse, row throughput, proof-candidate batch latency and partial
+outcomes, parent/child RSS status, and slow-sink backpressure. Treat them as operating checks, not portable benchmark
+baselines; compare before/after on the same machine when a change is expected to move hot request dispatch, row
+streaming, or proof-candidate evaluation.
 
 The `lean-dup`-class readiness fixture exercises the full path end to end:
 

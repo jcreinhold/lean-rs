@@ -2204,7 +2204,6 @@ fn proof_attempt_request_host(request: &LeanWorkerProofAttemptRequest) -> LeanRe
         candidates: request
             .candidates
             .iter()
-            .take(8)
             .map(|candidate| ProofCandidate {
                 id: candidate.id.clone(),
                 text: candidate.text.clone(),
@@ -2485,6 +2484,7 @@ fn proof_attempt_status_wire(status: ProofAttemptStatus) -> LeanWorkerProofAttem
         ProofAttemptStatus::Failed => LeanWorkerProofAttemptStatus::Failed,
         ProofAttemptStatus::Timeout => LeanWorkerProofAttemptStatus::Timeout,
         ProofAttemptStatus::BudgetExceeded => LeanWorkerProofAttemptStatus::BudgetExceeded,
+        ProofAttemptStatus::NotAttempted => LeanWorkerProofAttemptStatus::NotAttempted,
         ProofAttemptStatus::Unsupported => LeanWorkerProofAttemptStatus::Unsupported,
     }
 }

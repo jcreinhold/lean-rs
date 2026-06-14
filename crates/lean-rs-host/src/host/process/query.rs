@@ -147,6 +147,7 @@ pub enum ProofAttemptStatus {
     Failed,
     Timeout,
     BudgetExceeded,
+    NotAttempted,
     Unsupported,
 }
 
@@ -1067,9 +1068,10 @@ impl ProofAttemptStatus {
             2 => Ok(Self::Failed),
             3 => Ok(Self::Timeout),
             4 => Ok(Self::BudgetExceeded),
-            5 => Ok(Self::Unsupported),
+            5 => Ok(Self::NotAttempted),
+            6 => Ok(Self::Unsupported),
             other => Err(conversion_error(format!(
-                "expected Lean ProofAttemptStatus ctor (tag 0..=5), found tag {other}"
+                "expected Lean ProofAttemptStatus ctor (tag 0..=6), found tag {other}"
             ))),
         }
     }

@@ -86,6 +86,35 @@ as a proof-candidate overlay. In that case the flat line and column fields are u
 file positions, and `original_range` is absent. Missing metadata decodes as `unknown` for compatibility with older
 frames.
 
+## Proof Candidate Batches
+
+`LeanWorkerSession::attempt_proof` evaluates proof candidates in request order against one source/edit target and
+returns an ordered row list. The worker child opens one host session request, the Lean shim builds the base source
+snapshot once, resolves the proof position once, and then elaborates each candidate in an isolated in-memory overlay.
+Candidate overlays are not written to disk and a failed candidate does not poison later candidates or the session.
+
+Rows use these statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `closed` | The candidate closed the selected goal. |
+| `progressed` | The candidate elaborated and left goals. |
+| `failed` | Candidate-local Lean diagnostics include an error. |
+| `timeout` | Lean reported heartbeat exhaustion for that candidate. |
+| `budget_exceeded` | The candidate was attempted, but its projected row would exceed the batch output budget. |
+| `not_attempted` | The candidate was inside the candidate-count cap but skipped because an earlier row exhausted the batch output budget. |
+| `unsupported` | The loaded shim does not provide proof attempts. |
+
+The candidate count is capped by the shim (`candidate_limit` reports the cap). Inputs beyond that cap are omitted and
+`candidates_truncated = true`; callers should resubmit a smaller batch if they need outcomes for omitted candidates.
+Within the cap, partial output is explicit: completed rows remain ordered, and later skipped candidates use
+`not_attempted` rather than disappearing.
+
+`ModuleQueryOutputBudgets` bounds rendered fields and the total projected candidate payload. `LeanElabOptions`
+heartbeats apply to each candidate elaboration. Parent-side request timeout and cancellation remain worker-supervisor
+controls: if they fire, the request returns `LeanWorkerError`, the current child generation is discarded according to
+worker lifecycle policy, and pre-timeout candidate rows are not a committed `ProofAttemptResult`.
+
 ## Worker bootstrap checks
 
 Packaged worker applications can check deployment state before running a real command:

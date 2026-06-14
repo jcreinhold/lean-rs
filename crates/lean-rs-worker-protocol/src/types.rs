@@ -812,6 +812,7 @@ pub enum LeanWorkerProofAttemptStatus {
     Failed,
     Timeout,
     BudgetExceeded,
+    NotAttempted,
     Unsupported,
 }
 
