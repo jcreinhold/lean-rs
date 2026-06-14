@@ -15,6 +15,8 @@ open Lean Elab Meta
 
 private def renderByteLimit : Nat := 64 * 1024
 private def referenceLimit : Nat := 1000
+private def proofBoundaryCandidateLimit : Nat := 32
+private def proofBoundaryExcerptLimit : Nat := 256
 
 /-- Query shape for one module-processing request. -/
 inductive ModuleQuery where
@@ -134,6 +136,13 @@ structure DeclarationOutlineResult where
   truncated : Bool
   deriving Inhabited
 
+structure ProofBoundaryCandidate where
+  index : Nat
+  kind : String
+  source : ModuleSourceSpan
+  excerpt : RenderedInfo
+  deriving Inhabited
+
 structure ProofStateInfo where
   declarationName : Option String
   namespaceName : String
@@ -144,11 +153,14 @@ structure ProofStateInfo where
   locals : Array LocalInfo
   expectedType : Option RenderedInfo
   truncated : Bool
+  proofBoundaries : Array ProofBoundaryCandidate
+  proofBoundariesTruncated : Bool
   deriving Inhabited
 
 inductive ProofStateResult where
   | state (info : ProofStateInfo)
-  | unavailable (message : String)
+  | unavailable (message : String) (proofBoundaries : Array ProofBoundaryCandidate)
+      (proofBoundariesTruncated : Bool)
   | ambiguous (candidates : Array DeclarationTargetInfo)
   | needsBuild (missing : Array String)
   deriving Inhabited
@@ -1058,6 +1070,31 @@ private def collectTacticsInDeclaration (doc : SourceDocument) (decl : Declarati
   pure <| minimal.mapIdx fun idx tactic =>
     { index := idx, tactic, summary := tacticSummary doc idx tactic.span }
 
+private def boundaryExcerptLimit (budgets : ModuleQueryOutputBudgets) : Nat :=
+  min proofBoundaryExcerptLimit budgets.perFieldBytes
+
+private def proofBoundaryCandidate (doc : SourceDocument) (kind : String) (pos : ProofPosition)
+    (budgets : ModuleQueryOutputBudgets) : ProofBoundaryCandidate :=
+  {
+    index := pos.index,
+    kind,
+    source := doc.bodySpanToFile pos.tactic.span,
+    excerpt := renderStringBoundedWith (boundaryExcerptLimit budgets) pos.summary.tactic.value
+  }
+
+private def proofBoundaryCandidates (doc : SourceDocument) (positions : Array ProofPosition)
+    (budgets : ModuleQueryOutputBudgets) : Array ProofBoundaryCandidate × Bool := Id.run do
+  let mut out : Array ProofBoundaryCandidate := #[]
+  let mut truncated := false
+  if let some first := positions[0]? then
+    out := out.push (proofBoundaryCandidate doc "entry" first budgets)
+  for pos in positions do
+    if out.size < proofBoundaryCandidateLimit then
+      out := out.push (proofBoundaryCandidate doc "after_tactic" pos budgets)
+    else
+      truncated := true
+  pure (out, truncated)
+
 /-- Where a `try_proof_step` candidate is spliced relative to the resolved
     tactic. Every selector except `entry` resolves to a tactic state and splices
     `after` it; `entry` anchors on the first tactic's pre-state and splices
@@ -1182,11 +1219,19 @@ private def findTacticCandidate (doc : SourceDocument) (trees : PersistentArray 
 private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTree)
     (candidates : Array DeclarationCandidate) (line column : Nat) (budgets : ModuleQueryOutputBudgets)
     (localsMode : LocalsRendering) : IO ProofStateResult := do
-  let safeEdit := (declarationAt? doc candidates line column).map (·.info)
+  let safeEditCandidate? := declarationAt? doc candidates line column
+  let safeEdit := safeEditCandidate?.map (·.info)
+  let (proofBoundaries, proofBoundariesTruncated) ←
+    match safeEditCandidate? with
+    | some decl => do
+      let positions ← collectTacticsInDeclaration doc decl trees
+      pure (proofBoundaryCandidates doc positions budgets)
+    | none => pure (#[], false)
   match ← findTacticCandidate doc trees line column with
   | some candidate =>
     if tacticCandidateDegraded candidate then
-      return .unavailable "proof state unavailable: elaboration degraded under resource pressure"
+      return (ProofStateResult.unavailable "proof state unavailable: elaboration degraded under resource pressure"
+        proofBoundaries proofBoundariesTruncated)
     let (before, bytesAfterBefore, truncBefore) ←
       renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
     let (after, _, truncAfter) ←
@@ -1203,6 +1248,8 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
       locals
       expectedType := none
       truncated := truncBefore || truncAfter
+      proofBoundaries
+      proofBoundariesTruncated
     }
   | none =>
     let (bodyCursorLine, bodyCursorColumn) := doc.bodyCursor line column
@@ -1210,7 +1257,8 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
     for tree in trees do
       termAcc ← tree.foldInfoM (init := termAcc) (collectTypeAt doc.bodyFileMap)
     match termAcc.best? with
-    | none => pure <| .unavailable "no tactic or term context covers the requested cursor"
+    | none => pure <| (ProofStateResult.unavailable "no tactic or term context covers the requested cursor"
+        proofBoundaries proofBoundariesTruncated)
     | some candidate =>
       let expectedType ← candidate.ctx.runMetaM candidate.lctx do
         try
@@ -1233,14 +1281,18 @@ private def runProofState (doc : SourceDocument) (trees : PersistentArray InfoTr
         locals
         expectedType
         truncated := expectedType.any (·.truncated)
+        proofBoundaries
+        proofBoundariesTruncated
       }
 
 private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCandidate)
     (pos : ProofPosition) (placement : TacticPlacement) (budgets : ModuleQueryOutputBudgets)
-    (localsMode : LocalsRendering) : IO ProofStateResult := do
+    (localsMode : LocalsRendering) (proofBoundaries : Array ProofBoundaryCandidate)
+    (proofBoundariesTruncated : Bool) : IO ProofStateResult := do
   let candidate := pos.tactic
   if tacticCandidateDegraded candidate then
-    return .unavailable "proof state unavailable: elaboration degraded under resource pressure"
+    return (ProofStateResult.unavailable "proof state unavailable: elaboration degraded under resource pressure"
+      proofBoundaries proofBoundariesTruncated)
   let (before, bytesAfterBefore, truncBefore) ←
     renderGoals candidate.ctx candidate.mctxBefore candidate.goalsBefore budgets.perFieldBytes.toUSize 0
   -- At the pristine entry (`before`) no tactic has run, so the "after" state is
@@ -1262,6 +1314,8 @@ private def proofStateFromPosition (doc : SourceDocument) (decl : DeclarationCan
     locals
     expectedType := none
     truncated := truncBefore || truncAfter
+    proofBoundaries
+    proofBoundariesTruncated
   }
 
 private def runProofStateInDeclaration (doc : SourceDocument) (trees : PersistentArray InfoTree)
@@ -1271,17 +1325,22 @@ private def runProofStateInDeclaration (doc : SourceDocument) (trees : Persisten
   match declarationTargetByName candidates name with
   | .target info =>
     let some decl := candidates.find? (fun candidate => candidate.info.declarationName == info.declarationName)
-      | pure <| .unavailable "resolved declaration is not available in the module snapshot"
+      | pure <| ProofStateResult.unavailable "resolved declaration is not available in the module snapshot" #[] false
     let positions ← collectTacticsInDeclaration doc decl trees
+    let (proofBoundaries, proofBoundariesTruncated) := proofBoundaryCandidates doc positions budgets
     match selectProofPosition doc positions selector with
-    | some pos => proofStateFromPosition doc decl pos (selectorPlacement selector) budgets localsMode
-    | none => pure <| .unavailable "declaration has no proof position matching the selector"
+    | some pos =>
+      proofStateFromPosition doc decl pos (selectorPlacement selector) budgets localsMode
+        proofBoundaries proofBoundariesTruncated
+    | none =>
+      pure <| (ProofStateResult.unavailable "declaration has no proof position matching the selector"
+        proofBoundaries proofBoundariesTruncated)
   -- The name did not resolve against this overlay. Distinguish a genuine
   -- not-found (the open environment is complete) from an incomplete
   -- environment whose missing imports may define the name elsewhere.
   | .notFound =>
     if missing.isEmpty then
-      pure <| .unavailable "declaration was not found in the module"
+      pure <| ProofStateResult.unavailable "declaration was not found in the module" #[] false
     else
       pure <| .needsBuild missing
   | .ambiguous candidates => pure <| .ambiguous candidates
@@ -1364,6 +1423,9 @@ private def declarationTargetInfoBytes (info : DeclarationTargetInfo) : Nat :=
   info.shortName.utf8ByteSize + info.declarationName.utf8ByteSize + info.namespaceName.utf8ByteSize +
     info.declarationKind.utf8ByteSize + spanBytes info.declarationSpan + spanBytes info.nameSpan + spanBytes info.bodySpan
 
+private def proofBoundaryCandidateBytes (candidate : ProofBoundaryCandidate) : Nat :=
+  8 + candidate.kind.utf8ByteSize + spanBytes candidate.source + renderedBytes candidate.excerpt
+
 private def typeAtBytes : TypeAtResult → Nat
   | .noTerm => 0
   | .term span expr typeStr expectedType =>
@@ -1383,7 +1445,9 @@ private def referencesBytes (result : ReferencesResult) : Nat :=
     bytes + node.name.utf8ByteSize + 32
 
 private def proofStateBytes : ProofStateResult → Nat
-  | .unavailable message => message.utf8ByteSize
+  | .unavailable message proofBoundaries _ =>
+    message.utf8ByteSize +
+      proofBoundaries.foldl (init := 0) (fun bytes candidate => bytes + proofBoundaryCandidateBytes candidate)
   | .ambiguous candidates =>
     candidates.foldl (init := 0) fun bytes candidate => bytes + declarationTargetInfoBytes candidate
   | .needsBuild missing =>
@@ -1396,7 +1460,8 @@ private def proofStateBytes : ProofStateResult → Nat
       info.goalsBefore.foldl (init := 0) (· + ·.utf8ByteSize) +
       info.goalsAfter.foldl (init := 0) (· + ·.utf8ByteSize) +
       info.locals.foldl (init := 0) (fun bytes localInfo => bytes + localInfoBytes localInfo) +
-      (match info.expectedType with | some expected => renderedBytes expected | none => 0)
+      (match info.expectedType with | some expected => renderedBytes expected | none => 0) +
+      info.proofBoundaries.foldl (init := 0) (fun bytes candidate => bytes + proofBoundaryCandidateBytes candidate)
 
 private def declarationTargetBytes : DeclarationTargetResult → Nat
   | .target info => declarationTargetInfoBytes info
@@ -1468,8 +1533,10 @@ private def batchResultFor (selector : ModuleQuerySelector) (doc : SourceDocumen
 private def emptyBatchResultFor (selector : ModuleQuerySelector) : ModuleQueryBatchResult :=
   match selector with
   | .diagnostics _ => .diagnostics emptyFailure
-  | .proofState _ .. => .proofState (.unavailable "module processing did not reach the requested context")
-  | .proofStateInDeclaration _ .. => .proofState (.unavailable "module processing did not reach the requested declaration")
+  | .proofState _ .. =>
+    .proofState (ProofStateResult.unavailable "module processing did not reach the requested context" #[] false)
+  | .proofStateInDeclaration _ .. =>
+    .proofState (ProofStateResult.unavailable "module processing did not reach the requested declaration" #[] false)
   | .typeAt _ .. => .typeAt .noTerm
   | .references _ .. => .references { references := #[], truncated := false }
   | .declarationTarget _ .. => .declarationTarget .notFound
@@ -1985,7 +2052,7 @@ private def proofStateGoalsAfter (result : ProofStateResult) (limit : Nat) : Arr
   match result with
   | .state info =>
     (renderedGoalInfos info.goalsAfter limit, info.truncated)
-  | .unavailable _ | .ambiguous _ | .needsBuild _ => (#[], false)
+  | .unavailable .. | .ambiguous _ | .needsBuild _ => (#[], false)
 
 private def attemptRowBytes (row : ProofAttemptRow) : Nat :=
   row.id.utf8ByteSize + renderedBytes row.candidateText +

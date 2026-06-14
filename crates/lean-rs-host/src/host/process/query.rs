@@ -171,6 +171,15 @@ pub struct ProofPositionSummary {
     pub tactic: RenderedInfo,
 }
 
+/// Valid proof-state boundary a selector can target.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProofBoundaryCandidate {
+    pub index: u32,
+    pub kind: String,
+    pub source: ModuleSourceSpan,
+    pub excerpt: RenderedInfo,
+}
+
 /// Envelope for a bounded proof attempt.
 #[derive(Clone, Debug)]
 pub struct ProofAttemptEnvelope {
@@ -1076,6 +1085,18 @@ impl<'lean> TryFromLean<'lean> for ProofPositionSummary {
     }
 }
 
+impl<'lean> TryFromLean<'lean> for ProofBoundaryCandidate {
+    fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
+        let [index, kind, source, excerpt] = take_ctor_objects::<4>(obj, 0, "ProofBoundaryCandidate")?;
+        Ok(Self {
+            index: u32::try_from_lean(index)?,
+            kind: String::try_from_lean(kind)?,
+            source: ModuleSourceSpan::try_from_lean(source)?,
+            excerpt: RenderedInfo::try_from_lean(excerpt)?,
+        })
+    }
+}
+
 impl<'lean> TryFromLean<'lean> for ProofAttemptRow {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         let ctor = view(&obj).ctor_shape(0, 7, "ProofAttemptRow")?;
@@ -1303,11 +1324,14 @@ pub struct ProofStateInfo {
     pub locals: Vec<LocalInfo>,
     pub expected_type: Option<RenderedInfo>,
     pub truncated: bool,
+    pub proof_boundaries: Vec<ProofBoundaryCandidate>,
+    pub proof_boundaries_truncated: bool,
 }
 
 impl<'lean> TryFromLean<'lean> for ProofStateInfo {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         let truncated = bool_tail(&obj, 0, "ProofStateInfo.truncated")?;
+        let proof_boundaries_truncated = bool_tail(&obj, 1, "ProofStateInfo.proofBoundariesTruncated")?;
         let [
             declaration_name,
             namespace_name,
@@ -1317,7 +1341,8 @@ impl<'lean> TryFromLean<'lean> for ProofStateInfo {
             goals_after,
             locals,
             expected_type,
-        ] = take_ctor_objects::<8>(obj, 0, "ProofStateInfo")?;
+            proof_boundaries,
+        ] = take_ctor_objects::<9>(obj, 0, "ProofStateInfo")?;
         Ok(Self {
             declaration_name: Option::<String>::try_from_lean(declaration_name)?,
             namespace_name: String::try_from_lean(namespace_name)?,
@@ -1328,6 +1353,8 @@ impl<'lean> TryFromLean<'lean> for ProofStateInfo {
             locals: Vec::<LocalInfo>::try_from_lean(locals)?,
             expected_type: Option::<RenderedInfo>::try_from_lean(expected_type)?,
             truncated,
+            proof_boundaries: Vec::<ProofBoundaryCandidate>::try_from_lean(proof_boundaries)?,
+            proof_boundaries_truncated,
         })
     }
 }
@@ -1336,9 +1363,17 @@ impl<'lean> TryFromLean<'lean> for ProofStateInfo {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProofStateResult {
     State(Box<ProofStateInfo>),
-    Unavailable { message: String },
-    Ambiguous { candidates: Vec<DeclarationTargetInfo> },
-    NeedsBuild { missing: Vec<String> },
+    Unavailable {
+        message: String,
+        proof_boundaries: Vec<ProofBoundaryCandidate>,
+        proof_boundaries_truncated: bool,
+    },
+    Ambiguous {
+        candidates: Vec<DeclarationTargetInfo>,
+    },
+    NeedsBuild {
+        missing: Vec<String>,
+    },
 }
 
 impl<'lean> TryFromLean<'lean> for ProofStateResult {
@@ -1349,9 +1384,14 @@ impl<'lean> TryFromLean<'lean> for ProofStateResult {
                 Ok(Self::State(Box::new(ProofStateInfo::try_from_lean(info)?)))
             }
             1 => {
-                let [message] = take_ctor_objects::<1>(obj, 1, "ProofStateResult::unavailable")?;
+                let proof_boundaries_truncated = view(&obj)
+                    .ctor_shape(1, 2, "ProofStateResult::unavailable")?
+                    .bool(0, "ProofStateResult::unavailable.proofBoundariesTruncated")?;
+                let [message, proof_boundaries] = take_ctor_objects::<2>(obj, 1, "ProofStateResult::unavailable")?;
                 Ok(Self::Unavailable {
                     message: String::try_from_lean(message)?,
+                    proof_boundaries: Vec::<ProofBoundaryCandidate>::try_from_lean(proof_boundaries)?,
+                    proof_boundaries_truncated,
                 })
             }
             2 => {

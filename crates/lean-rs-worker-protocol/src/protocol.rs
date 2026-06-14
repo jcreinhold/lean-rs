@@ -690,15 +690,16 @@ mod tests {
         LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
         LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
-        LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery,
-        LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
-        LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome,
-        LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
-        LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope,
-        LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
-        LeanWorkerProofAttemptStatus, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
-        LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary, LeanWorkerProofStateResult,
-        LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy,
+        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus,
+        LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
+        LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
+        LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector,
+        LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets,
+        LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
+        LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus, LeanWorkerProofBoundaryCandidate,
+        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
+        LeanWorkerProofPositionSummary, LeanWorkerProofStateResult, LeanWorkerRenderedInfo, LeanWorkerRendering,
+        LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy, LeanWorkerSourceCoordinateSpace,
         LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
@@ -1608,6 +1609,102 @@ mod tests {
             },
         });
         assert_frame_round_trips(&needs_build);
+    }
+
+    #[test]
+    fn proof_state_unavailable_carries_boundary_candidates() {
+        let boundary = LeanWorkerProofBoundaryCandidate {
+            index: 0,
+            kind: "after_tactic".to_owned(),
+            source: LeanWorkerModuleSourceSpan {
+                start_line: 2,
+                start_column: 3,
+                end_line: 2,
+                end_column: 10,
+            },
+            excerpt: LeanWorkerRenderedInfo {
+                value: "intro h".to_owned(),
+                truncated: false,
+            },
+        };
+        let result = LeanWorkerProofStateResult::Unavailable {
+            message: "declaration has no proof position matching the selector".to_owned(),
+            proof_boundaries: vec![boundary],
+            proof_boundaries_truncated: true,
+        };
+        let json = serde_json::to_value(&result).expect("proof-state unavailable serializes");
+        assert_eq!(
+            json,
+            json!({
+                "status": "unavailable",
+                "message": "declaration has no proof position matching the selector",
+                "proof_boundaries": [{
+                    "index": 0,
+                    "kind": "after_tactic",
+                    "source": {
+                        "start_line": 2,
+                        "start_column": 3,
+                        "end_line": 2,
+                        "end_column": 10
+                    },
+                    "excerpt": {
+                        "value": "intro h",
+                        "truncated": false
+                    }
+                }],
+                "proof_boundaries_truncated": true
+            })
+        );
+        let round_trip: LeanWorkerProofStateResult =
+            serde_json::from_value(json).expect("proof-state unavailable deserializes");
+        assert_eq!(round_trip, result);
+    }
+
+    #[test]
+    fn diagnostic_coordinate_metadata_is_additive() {
+        let old_json = json!({
+            "severity": "error",
+            "message": "unknown identifier",
+            "file_label": "Example.lean",
+            "line": 3,
+            "column": 7,
+            "end_line": null,
+            "end_column": null
+        });
+        let old_diagnostic: LeanWorkerDiagnostic =
+            serde_json::from_value(old_json).expect("old diagnostic JSON deserializes");
+        assert_eq!(
+            old_diagnostic.coordinate_space,
+            LeanWorkerSourceCoordinateSpace::Unknown
+        );
+        assert!(old_diagnostic.original_range.is_none());
+
+        let diagnostic = LeanWorkerDiagnostic {
+            severity: "error".to_owned(),
+            message: "unknown identifier".to_owned(),
+            file_label: "Example.lean".to_owned(),
+            line: Some(3),
+            column: Some(7),
+            end_line: Some(3),
+            end_column: Some(14),
+            coordinate_space: LeanWorkerSourceCoordinateSpace::OriginalSource,
+            original_range: Some(LeanWorkerSourceRange {
+                file: "Example.lean".to_owned(),
+                start_line: 3,
+                start_column: 7,
+                end_line: 3,
+                end_column: 14,
+            }),
+        };
+        let json = serde_json::to_value(&diagnostic).expect("diagnostic serializes");
+        assert_eq!(
+            json.get("coordinate_space"),
+            Some(&serde_json::Value::String("original_source".to_owned()))
+        );
+        assert_eq!(
+            json.get("original_range").and_then(|range| range.get("file")),
+            Some(&serde_json::Value::String("Example.lean".to_owned()))
+        );
     }
 
     #[test]

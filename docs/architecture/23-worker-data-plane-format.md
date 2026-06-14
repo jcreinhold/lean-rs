@@ -19,6 +19,42 @@ Callback payload expansion is deliberately unrelated. Same-process callbacks rem
 Worker row throughput is a worker IPC question and should be solved with worker framing, scheduling, chunking, and
 measured encoding changes.
 
+## Source coordinates and proof boundaries
+
+Worker diagnostics report their source coordinate space explicitly. Diagnostics from ordinary source elaboration use
+`original_source` and, when Lean supplied a position, also carry an `original_range`. Diagnostics produced while checking
+a proof candidate against an overlay use `synthetic_buffer`; their flat line and column fields are relative to that
+generated buffer and must not be treated as editable positions in the caller's original file. Older peers that do not
+send the field decode as `unknown`.
+
+Proof-state results also carry bounded proof-boundary candidates. These are recovery points in source order, suitable
+for retrying a selector when a requested `after_text` or default position cannot be resolved. They are proof-state
+metadata, not a general source map, and are capped independently of diagnostic output.
+
+```json
+{
+  "diagnostics": [
+    {
+      "severity": "error",
+      "message": "unknown identifier 'missingIdentifier'",
+      "line": 2,
+      "column": 9,
+      "coordinate_space": "synthetic_buffer",
+      "original_range": null
+    }
+  ],
+  "proof_boundaries": [
+    {
+      "index": 0,
+      "kind": "entry",
+      "source": { "start_line": 2, "start_column": 3, "end_line": 2, "end_column": 10 },
+      "excerpt": { "value": "exact h", "truncated": false }
+    }
+  ],
+  "proof_boundaries_truncated": false
+}
+```
+
 ## Measurement
 
 The benchmark command was:

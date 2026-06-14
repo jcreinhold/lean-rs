@@ -215,6 +215,10 @@ pub struct LeanWorkerDiagnostic {
     pub column: Option<u32>,
     pub end_line: Option<u32>,
     pub end_column: Option<u32>,
+    #[serde(default)]
+    pub coordinate_space: LeanWorkerSourceCoordinateSpace,
+    #[serde(default)]
+    pub original_range: Option<LeanWorkerSourceRange>,
 }
 
 /// Diagnostic payload returned alongside meta and elaboration failures.
@@ -319,6 +323,17 @@ pub struct LeanWorkerSourceRange {
     pub start_column: u32,
     pub end_line: u32,
     pub end_column: u32,
+}
+
+/// Coordinate space a diagnostic position was reported in.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum LeanWorkerSourceCoordinateSpace {
+    OriginalSource,
+    SyntheticBuffer,
+    #[default]
+    Unknown,
 }
 
 /// One declaration row returned by `LeanWorkerSession::describe` or
@@ -822,6 +837,15 @@ pub struct LeanWorkerProofPositionSummary {
     pub tactic: LeanWorkerRenderedInfo,
 }
 
+/// Valid proof-state boundary a selector can target.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerProofBoundaryCandidate {
+    pub index: u32,
+    pub kind: String,
+    pub source: LeanWorkerModuleSourceSpan,
+    pub excerpt: LeanWorkerRenderedInfo,
+}
+
 /// Envelope for a bounded proof attempt.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerProofAttemptEnvelope {
@@ -1110,6 +1134,10 @@ pub struct LeanWorkerProofStateInfo {
     pub locals: Vec<LeanWorkerLocalInfo>,
     pub expected_type: Option<LeanWorkerRenderedInfo>,
     pub truncated: bool,
+    #[serde(default)]
+    pub proof_boundaries: Vec<LeanWorkerProofBoundaryCandidate>,
+    #[serde(default)]
+    pub proof_boundaries_truncated: bool,
 }
 
 /// Result for `LeanWorkerModuleQuerySelector::ProofState`.
@@ -1130,6 +1158,10 @@ pub enum LeanWorkerProofStateResult {
     },
     Unavailable {
         message: String,
+        #[serde(default)]
+        proof_boundaries: Vec<LeanWorkerProofBoundaryCandidate>,
+        #[serde(default)]
+        proof_boundaries_truncated: bool,
     },
     Ambiguous {
         candidates: Vec<LeanWorkerDeclarationTargetInfo>,

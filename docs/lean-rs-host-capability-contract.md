@@ -120,6 +120,11 @@ module-query methods return their `Unsupported` outcome for bounded module proje
 | `lean_rs_host_process_module_query_batch_cached` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) (policy : String) : IO ModuleQueryBatchCachedOutcome` | `process_module_query_batch_cached(source, selectors, budgets, options, policy, cancellation)` |
 | `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache()` |
 
+The proof-state payload returned by the module-query symbols includes bounded `proofBoundaries` and
+`proofBoundariesTruncated` fields on both the successful proof-state case and the unavailable selector-failure case.
+The candidates are source-ordered recovery points for proof-position selection. They are part of the host shim contract
+because Rust decodes the Lean structure layout directly.
+
 ## Forking the shim package
 
 The shim package is small (~700 LOC across four files). A fork that customises behaviour (e.g., different heartbeat

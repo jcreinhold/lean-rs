@@ -32,6 +32,7 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings,
     LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets, LeanWorkerSessionImportProfile,
+    LeanWorkerSourceCoordinateSpace, LeanWorkerSourceRange,
 };
 use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
@@ -384,6 +385,14 @@ fn fake_command_message_diagnostics() -> LeanWorkerElabFailure {
             column: Some(1),
             end_line: None,
             end_column: None,
+            coordinate_space: LeanWorkerSourceCoordinateSpace::OriginalSource,
+            original_range: Some(LeanWorkerSourceRange {
+                file: "/fake-command-message.lean".to_owned(),
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 1,
+            }),
         }],
         truncated: false,
     }

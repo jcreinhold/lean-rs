@@ -77,6 +77,15 @@ repair hint.
 Normal users should not repair shipped apps by setting `LD_LIBRARY_PATH` or `DYLD_*`. A missing search path in the
 canonical flow is a packaging or artifact-manifest problem, not a caller-managed loader-flag problem.
 
+## Diagnostic coordinate spaces
+
+Worker diagnostics include additive coordinate metadata. `coordinate_space = "original_source"` means the diagnostic
+came from the caller-supplied source buffer; when Lean supplied a position, `original_range` repeats that editable source
+range with the file label. `coordinate_space = "synthetic_buffer"` means the diagnostic came from generated source, such
+as a proof-candidate overlay. In that case the flat line and column fields are useful for display but are not original
+file positions, and `original_range` is absent. Missing metadata decodes as `unknown` for compatibility with older
+frames.
+
 ## Worker bootstrap checks
 
 Packaged worker applications can check deployment state before running a real command:

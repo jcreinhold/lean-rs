@@ -20,8 +20,9 @@ use lean_rs_host::host::process::{
     ModuleQueryCacheFacts, ModuleQueryCachePolicy, ModuleQueryCacheStatus, ModuleQueryOutcome,
     ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, ModuleQueryTimings,
     ModuleSnapshotCacheClearResult, ModuleSourceSpan, NameRefNode, ProofAttemptEnvelope, ProofAttemptOutcome,
-    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofStateInfo,
-    ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult, TypeAtResult,
+    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofBoundaryCandidate, ProofCandidate, ProofEditTarget,
+    ProofStateInfo, ProofStateResult, ReferencesResult, RenderedInfo, SorryPolicy, SurroundingDeclarationResult,
+    TypeAtResult,
 };
 use lean_rs_host::meta::{self, LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency};
 use lean_rs_host::{
@@ -62,10 +63,11 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
     LeanWorkerModuleSourceSpan, LeanWorkerNameRef, LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope,
     LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow,
-    LeanWorkerProofAttemptStatus, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
-    LeanWorkerProofPositionSummary, LeanWorkerProofStateInfo, LeanWorkerProofStateResult, LeanWorkerReferencesResult,
-    LeanWorkerRendered, LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerSessionImportProfile,
-    LeanWorkerSorryPolicy, LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
+    LeanWorkerProofAttemptStatus, LeanWorkerProofBoundaryCandidate, LeanWorkerProofEditTarget,
+    LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary, LeanWorkerProofStateInfo,
+    LeanWorkerProofStateResult, LeanWorkerReferencesResult, LeanWorkerRendered, LeanWorkerRenderedInfo,
+    LeanWorkerRendering, LeanWorkerSessionImportProfile, LeanWorkerSorryPolicy, LeanWorkerSourceCoordinateSpace,
+    LeanWorkerSourceRange, LeanWorkerSurroundingDeclarationResult, LeanWorkerTypeAtResult,
 };
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
@@ -1857,10 +1859,7 @@ fn meta_transparency_to_host(value: LeanWorkerMetaTransparency) -> LeanMetaTrans
 }
 
 fn elab_failure_wire(failure: &LeanElabFailure) -> LeanWorkerElabFailure {
-    LeanWorkerElabFailure {
-        diagnostics: diagnostics(failure),
-        truncated: failure.truncated(),
-    }
+    elab_failure_wire_with_space(failure, LeanWorkerSourceCoordinateSpace::OriginalSource)
 }
 
 fn meta_failure_from_elab<T>(failure: &LeanElabFailure) -> LeanWorkerMetaResult<T> {
@@ -2495,8 +2494,11 @@ fn proof_attempt_row_wire(row: ProofAttemptRow) -> LeanWorkerProofAttemptRow {
         id: row.id,
         status: proof_attempt_status_wire(row.status),
         candidate_text: rendered_info_wire(row.candidate_text),
-        diagnostics: elab_failure_wire(&row.diagnostics),
-        downstream_diagnostics: elab_failure_wire(&row.downstream_diagnostics),
+        diagnostics: elab_failure_wire_with_space(&row.diagnostics, LeanWorkerSourceCoordinateSpace::SyntheticBuffer),
+        downstream_diagnostics: elab_failure_wire_with_space(
+            &row.downstream_diagnostics,
+            LeanWorkerSourceCoordinateSpace::SyntheticBuffer,
+        ),
         goals: row.goals.into_iter().map(rendered_info_wire).collect(),
         declaration: row.declaration.map(declaration_target_info_wire),
         proof_position: row.proof_position.map(proof_position_summary_wire),
@@ -2508,6 +2510,15 @@ fn proof_position_summary_wire(summary: lean_rs_host::ProofPositionSummary) -> L
     LeanWorkerProofPositionSummary {
         index: summary.index,
         tactic: rendered_info_wire(summary.tactic),
+    }
+}
+
+fn proof_boundary_candidate_wire(candidate: ProofBoundaryCandidate) -> LeanWorkerProofBoundaryCandidate {
+    LeanWorkerProofBoundaryCandidate {
+        index: candidate.index,
+        kind: candidate.kind,
+        source: module_source_span_wire(&candidate.source),
+        excerpt: rendered_info_wire(candidate.excerpt),
     }
 }
 
@@ -2772,6 +2783,12 @@ fn proof_state_info_wire(info: ProofStateInfo) -> LeanWorkerProofStateInfo {
         locals: info.locals.into_iter().map(local_info_wire).collect(),
         expected_type: info.expected_type.map(rendered_info_wire),
         truncated: info.truncated,
+        proof_boundaries: info
+            .proof_boundaries
+            .into_iter()
+            .map(proof_boundary_candidate_wire)
+            .collect(),
+        proof_boundaries_truncated: info.proof_boundaries_truncated,
     }
 }
 
@@ -2780,7 +2797,18 @@ fn proof_state_result_wire(result: ProofStateResult) -> LeanWorkerProofStateResu
         ProofStateResult::State(info) => LeanWorkerProofStateResult::State {
             info: Box::new(proof_state_info_wire(*info)),
         },
-        ProofStateResult::Unavailable { message } => LeanWorkerProofStateResult::Unavailable { message },
+        ProofStateResult::Unavailable {
+            message,
+            proof_boundaries,
+            proof_boundaries_truncated,
+        } => LeanWorkerProofStateResult::Unavailable {
+            message,
+            proof_boundaries: proof_boundaries
+                .into_iter()
+                .map(proof_boundary_candidate_wire)
+                .collect(),
+            proof_boundaries_truncated,
+        },
         ProofStateResult::Ambiguous { candidates } => LeanWorkerProofStateResult::Ambiguous {
             candidates: candidates.into_iter().map(declaration_target_info_wire).collect(),
         },
@@ -2953,6 +2981,23 @@ fn kernel_failure_outcome(status: LeanWorkerKernelStatus, failure: &LeanElabFail
 }
 
 fn diagnostics(failure: &LeanElabFailure) -> Vec<LeanWorkerDiagnostic> {
+    diagnostics_with_space(failure, LeanWorkerSourceCoordinateSpace::OriginalSource)
+}
+
+fn elab_failure_wire_with_space(
+    failure: &LeanElabFailure,
+    coordinate_space: LeanWorkerSourceCoordinateSpace,
+) -> LeanWorkerElabFailure {
+    LeanWorkerElabFailure {
+        diagnostics: diagnostics_with_space(failure, coordinate_space),
+        truncated: failure.truncated(),
+    }
+}
+
+fn diagnostics_with_space(
+    failure: &LeanElabFailure,
+    coordinate_space: LeanWorkerSourceCoordinateSpace,
+) -> Vec<LeanWorkerDiagnostic> {
     failure
         .diagnostics()
         .iter()
@@ -2966,6 +3011,20 @@ fn diagnostics(failure: &LeanElabFailure) -> Vec<LeanWorkerDiagnostic> {
                         position.end_column(),
                     )
                 });
+            let original_range = match coordinate_space {
+                LeanWorkerSourceCoordinateSpace::OriginalSource => {
+                    line.zip(column)
+                        .map(|(start_line, start_column)| LeanWorkerSourceRange {
+                            file: diagnostic.file_label().to_owned(),
+                            start_line,
+                            start_column,
+                            end_line: end_line.unwrap_or(start_line),
+                            end_column: end_column.unwrap_or(start_column),
+                        })
+                }
+                LeanWorkerSourceCoordinateSpace::SyntheticBuffer | LeanWorkerSourceCoordinateSpace::Unknown => None,
+                _ => None,
+            };
             LeanWorkerDiagnostic {
                 severity: match diagnostic.severity() {
                     LeanSeverity::Info => "info",
@@ -2979,6 +3038,8 @@ fn diagnostics(failure: &LeanElabFailure) -> Vec<LeanWorkerDiagnostic> {
                 column,
                 end_line,
                 end_column,
+                coordinate_space,
+                original_range,
             }
         })
         .collect()

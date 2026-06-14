@@ -88,8 +88,8 @@ pub use self::process::{
     DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
     DeclarationVerificationBatchRow, DeclarationVerificationFacts, DeclarationVerificationOutcome,
     DeclarationVerificationRequest, DeclarationVerificationStatus, DeclarationVerificationTarget, ProofAttemptEnvelope,
-    ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
-    ProofPositionSelector, ProofPositionSummary,
+    ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofBoundaryCandidate,
+    ProofCandidate, ProofEditTarget, ProofPositionSelector, ProofPositionSummary,
 };
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
 pub use self::session::{

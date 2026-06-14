@@ -11,6 +11,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,7 +31,7 @@ use lean_rs_worker_parent::{
     LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
     LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerProofAttemptStatus,
     LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector, LeanWorkerProofStateResult,
-    LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy,
+    LeanWorkerRendering, LeanWorkerSessionConfig, LeanWorkerSorryPolicy, LeanWorkerSourceCoordinateSpace,
 };
 
 fn worker_binary() -> PathBuf {
@@ -855,6 +856,50 @@ fn process_module_query_returns_diagnostics_through_worker() {
 }
 
 #[test]
+fn process_module_query_diagnostics_keep_original_source_coordinates() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/diagnostics/original.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let outcome = session
+        .process_module_query(
+            "theorem bad : True := by\n  exact missingIdentifier\n",
+            LeanWorkerModuleQuery::Diagnostics,
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query dispatch succeeds");
+
+    let LeanWorkerModuleQueryOutcome::Ok {
+        result: LeanWorkerModuleQueryResult::Diagnostics(diagnostics),
+        ..
+    } = outcome
+    else {
+        panic!("expected Ok diagnostics outcome, got {outcome:?}");
+    };
+    let diagnostic = diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("missingIdentifier"))
+        .expect("missing identifier diagnostic present");
+    assert_eq!(
+        diagnostic.coordinate_space,
+        LeanWorkerSourceCoordinateSpace::OriginalSource
+    );
+    let original_range = diagnostic
+        .original_range
+        .as_ref()
+        .expect("original-source diagnostics should include their original range");
+    assert_eq!(original_range.file, "/diagnostics/original.lean");
+    assert_eq!(Some(original_range.start_line), diagnostic.line);
+    assert_eq!(Some(original_range.start_column), diagnostic.column);
+}
+
+#[test]
 fn process_module_query_returns_cursor_type_and_goal_through_worker() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new();
@@ -1045,6 +1090,32 @@ fn process_module_query_batch_returns_diagnostics_and_proof_state_through_worker
                     info.safe_edit.is_some(),
                     "proof state should include a safe edit declaration span"
                 );
+                assert!(
+                    !info.proof_boundaries.is_empty(),
+                    "proof state should include bounded proof boundary candidates"
+                );
+                assert_eq!(info.proof_boundaries[0].index, 0);
+                assert_eq!(info.proof_boundaries[0].kind, "entry");
+                assert!(
+                    info.proof_boundaries.iter().any(
+                        |candidate| candidate.kind == "after_tactic" && candidate.excerpt.value.contains("exact h")
+                    ),
+                    "boundary candidates should include a recovery point after `exact h`, got {:?}",
+                    info.proof_boundaries,
+                );
+                let mut previous = 0;
+                for candidate in &info.proof_boundaries {
+                    assert!(
+                        candidate.index >= previous,
+                        "boundary candidates should be in source order: {:?}",
+                        info.proof_boundaries,
+                    );
+                    previous = candidate.index;
+                }
+                assert!(
+                    !info.proof_boundaries_truncated,
+                    "small proof should not truncate boundary candidates"
+                );
             }
             other => panic!("expected proof-state result, got {other:?}"),
         },
@@ -1174,6 +1245,130 @@ fn proof_state_in_declaration_renders_locals_pretty_by_default_and_raw_on_opt_ou
     assert_ne!(
         pretty, raw,
         "raw and pretty renderings should differ for this hypothesis"
+    );
+}
+
+#[test]
+fn proof_state_unresolved_after_text_returns_boundary_candidates_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let outcome = session
+        .process_module_query_batch(
+            "theorem t : True := by\n  trivial\n",
+            &[LeanWorkerModuleQuerySelector::ProofStateInDeclaration {
+                id: "state".to_owned(),
+                declaration: "t".to_owned(),
+                position: LeanWorkerProofPositionSelector::AfterText {
+                    text: "missing tactic".to_owned(),
+                    occurrence: None,
+                },
+                locals_raw: false,
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query_batch dispatch succeeds");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    let [LeanWorkerModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok proof-state item, got {:?}", result.items);
+    };
+    let LeanWorkerModuleQueryBatchResult::ProofState(LeanWorkerProofStateResult::Unavailable {
+        message,
+        proof_boundaries,
+        proof_boundaries_truncated,
+    }) = result.as_ref()
+    else {
+        panic!("expected unavailable proof-state result, got {result:?}");
+    };
+
+    assert!(
+        message.contains("proof position") || message.contains("after_text"),
+        "unavailable message should explain selector failure, got {message:?}",
+    );
+    assert!(!proof_boundaries.is_empty());
+    assert_eq!(proof_boundaries[0].kind, "entry");
+    assert!(
+        proof_boundaries
+            .iter()
+            .any(|candidate| candidate.kind == "after_tactic" && candidate.excerpt.value.contains("trivial")),
+        "unavailable selector should return nearby boundary candidates, got {proof_boundaries:?}",
+    );
+    assert!(
+        !proof_boundaries_truncated,
+        "single-tactic proof should not truncate boundary candidates"
+    );
+}
+
+#[test]
+fn proof_state_boundary_candidates_report_truncation_through_worker() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new();
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+
+    let mut source = String::from("theorem many : True := by\n");
+    for index in 0..40 {
+        writeln!(source, "  have h{index} : True := by trivial").expect("writing to a String cannot fail");
+    }
+    source.push_str("  trivial\n");
+
+    let outcome = session
+        .process_module_query_batch(
+            &source,
+            &[LeanWorkerModuleQuerySelector::ProofStateInDeclaration {
+                id: "state".to_owned(),
+                declaration: "many".to_owned(),
+                position: LeanWorkerProofPositionSelector::AfterText {
+                    text: "missing tactic".to_owned(),
+                    occurrence: None,
+                },
+                locals_raw: false,
+            }],
+            &LeanWorkerOutputBudgets::default(),
+            &opts,
+            None,
+            None,
+        )
+        .expect("worker process_module_query_batch dispatch succeeds");
+
+    let LeanWorkerModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    let [LeanWorkerModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok proof-state item, got {:?}", result.items);
+    };
+    let LeanWorkerModuleQueryBatchResult::ProofState(LeanWorkerProofStateResult::Unavailable {
+        proof_boundaries,
+        proof_boundaries_truncated,
+        ..
+    }) = result.as_ref()
+    else {
+        panic!("expected unavailable proof-state result, got {result:?}");
+    };
+
+    assert!(
+        *proof_boundaries_truncated,
+        "long proof should report truncated boundary candidates"
+    );
+    assert_eq!(proof_boundaries.len(), 32, "boundary candidate list should be capped");
+    assert_eq!(proof_boundaries[0].kind, "entry");
+    assert!(
+        proof_boundaries
+            .iter()
+            .any(|candidate| candidate.source.start_line == 2 && candidate.excerpt.value == "have"),
+        "truncated list should still contain early source-ordered candidates, got {proof_boundaries:?}",
     );
 }
 
@@ -1371,6 +1566,20 @@ fn attempt_proof_bad_candidate_returns_diagnostics_and_session_survives() {
             .any(|diagnostic| diagnostic.severity == "error" && diagnostic.message.contains("missingIdentifier")),
         "bad proof should return error diagnostics: {:?}",
         result.candidates[0].diagnostics,
+    );
+    let candidate_diagnostic = result.candidates[0]
+        .diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("missingIdentifier"))
+        .expect("candidate-local missing identifier diagnostic present");
+    assert_eq!(
+        candidate_diagnostic.coordinate_space,
+        LeanWorkerSourceCoordinateSpace::SyntheticBuffer
+    );
+    assert!(
+        candidate_diagnostic.original_range.is_none(),
+        "synthetic-buffer diagnostics should not pretend their range is original source"
     );
 
     let later = session
