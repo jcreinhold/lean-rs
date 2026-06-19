@@ -751,9 +751,9 @@ pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::clone(&self) -> 
 impl<T: core::cmp::Eq> core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T: core::cmp::PartialEq> core::cmp::PartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::eq(&self, &lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>) -> bool
+impl<T: core::cmp::PartialEq> core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T: core::fmt::Debug> core::fmt::Debug for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<T> core::marker::StructuralPartialEq for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>
 impl<T> serde_core::ser::Serialize for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: serde_core::ser::Serialize
 pub fn lean_rs_worker_protocol::types::LeanWorkerMetaResult<T>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<T> core::marker::Freeze for lean_rs_worker_protocol::types::LeanWorkerMetaResult<T> where T: core::marker::Freeze

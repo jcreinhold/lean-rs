@@ -438,17 +438,20 @@ run_gate "Package tarball docs.rs simulation" \
 	python3 "$REPO_ROOT/scripts/check_package_docsrs.py" --allow-dirty
 
 if [[ "$RUN_PUBLIC_API" == 1 ]]; then
-	# The CI gate pins cargo-public-api to PUBLIC_API_PIN so the diff is
-	# reproducible: newer releases render generic `StructuralPartialEq` impls
-	# with a `T: PartialEq` bound and would report spurious drift against the
-	# committed baselines. Mirror that pin locally; warn (don't fail) on a
-	# mismatch so a stray version can't be misread as a real API change.
+	# The CI gate pins both cargo-public-api (PUBLIC_API_PIN) and the nightly
+	# rustdoc toolchain (PUBLIC_API_NIGHTLY) so the diff is reproducible: the
+	# auto-derived `StructuralPartialEq` bound on generic types is rendered
+	# differently across nightlies / tool versions and would report spurious
+	# drift against the committed baselines. Mirror both pins locally; warn
+	# (don't fail) on a tool mismatch so a stray version isn't misread as a
+	# real API change. Keep these in lockstep with ci.yml / release.yml.
 	PUBLIC_API_PIN="0.52.0"
+	PUBLIC_API_NIGHTLY="nightly-2026-06-18"
 	if ! command -v cargo-public-api >/dev/null 2>&1; then
 		log_warn "cargo-public-api not installed; skipping (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
 		SKIPPED+=("public-API baseline diff")
-	elif ! rustup toolchain list | grep -q '^nightly'; then
-		log_warn "rustup nightly toolchain not installed; skipping public-API diff (install: rustup toolchain install nightly)"
+	elif ! rustup toolchain list | grep -q "^${PUBLIC_API_NIGHTLY}"; then
+		log_warn "pinned ${PUBLIC_API_NIGHTLY} not installed; skipping public-API diff (install: rustup toolchain install ${PUBLIC_API_NIGHTLY} --profile minimal)"
 		SKIPPED+=("public-API baseline diff")
 	else
 		if [[ "$(cargo public-api --version 2>/dev/null | awk '{print $2}')" != "$PUBLIC_API_PIN" ]]; then
@@ -466,7 +469,7 @@ if [[ "$RUN_PUBLIC_API" == 1 ]]; then
 				fi
 				local actual
 				actual="$(mktemp)"
-				cargo public-api --simplified -p "$crate" >"$actual"
+				cargo "+${PUBLIC_API_NIGHTLY}" public-api --simplified -p "$crate" >"$actual"
 				if ! diff -u "$baseline" "$actual"; then
 					log_err "Public-API drift for $crate. Regenerate $baseline before tagging."
 					fail=1

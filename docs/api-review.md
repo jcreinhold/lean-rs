@@ -9,7 +9,7 @@ surface against these files on every PR; intentional changes regenerate the matc
 for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs \
          lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent \
          lean-rs-worker-child; do
-  cargo public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
+  cargo +nightly-2026-06-18 public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
 done
 ```
 
@@ -17,12 +17,13 @@ The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a bu
 otherwise land in the baseline file and trip the next diff. The prerelease script's internal regeneration drops stderr
 the same way.
 
-**Use the pinned `cargo-public-api` version.** The CI gate (`ci.yml`, `release.yml`) and `prerelease.sh` pin
-`cargo-public-api@0.52.0`. Its rendering is part of the baseline: newer releases emit the auto-derived
-`StructuralPartialEq` impl on generic types with a `T: PartialEq` bound (via nightly rustdoc), which diffs against these
-files on toolchain churn alone. Regenerate with the pinned version (`cargo install cargo-public-api@0.52.0 --locked`).
-Bumping the pin is a deliberate change: update the version in all three places and regenerate every baseline in the same
-commit.
+**Use the pinned toolchain.** The CI gate (`ci.yml`, `release.yml`) and `prerelease.sh` pin **both**
+`cargo-public-api@0.52.0` **and** the nightly rustdoc toolchain (`nightly-2026-06-18`), invoked explicitly as
+`cargo +nightly-2026-06-18 public-api`. Both are part of the baseline: nightly rustdoc renders the auto-derived
+`StructuralPartialEq` impl on generic types with a `T: PartialEq` bound that shifts across nightlies and tool versions,
+so an unpinned gate diffs on toolchain churn alone. Regenerate with the pinned pair (`cargo install
+cargo-public-api@0.52.0 --locked`; `rustup toolchain install nightly-2026-06-18 --profile minimal`). Bumping either pin
+is a deliberate change: update it in all three places and regenerate every baseline in the same commit.
 
 ## Red-flag checklist (review before regenerating)
 

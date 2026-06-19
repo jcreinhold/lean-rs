@@ -1313,9 +1313,9 @@ pub fn lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>::clone(&self) -> lean_
 impl<Row: core::cmp::Eq> core::cmp::Eq for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>
 impl<Row: core::cmp::PartialEq> core::cmp::PartialEq for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>
 pub fn lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>::eq(&self, &lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>) -> bool
+impl<Row: core::cmp::PartialEq> core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>
 impl<Row: core::fmt::Debug> core::fmt::Debug for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>
 pub fn lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<Row> core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row>
 impl<Row> core::marker::Freeze for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row> where Row: core::marker::Freeze
 impl<Row> core::marker::Send for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row> where Row: core::marker::Send
 impl<Row> core::marker::Sync for lean_rs_worker_parent::LeanWorkerTypedDataRow<Row> where Row: core::marker::Sync
@@ -1333,9 +1333,9 @@ pub fn lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>::clone(&self
 impl<Summary: core::cmp::Eq> core::cmp::Eq for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>
 impl<Summary: core::cmp::PartialEq> core::cmp::PartialEq for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>
 pub fn lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>::eq(&self, &lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>) -> bool
+impl<Summary: core::cmp::PartialEq> core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>
 impl<Summary: core::fmt::Debug> core::fmt::Debug for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>
 pub fn lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<Summary> core::marker::StructuralPartialEq for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary>
 impl<Summary> core::marker::Freeze for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary> where Summary: core::marker::Freeze
 impl<Summary> core::marker::Send for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary> where Summary: core::marker::Send
 impl<Summary> core::marker::Sync for lean_rs_worker_parent::LeanWorkerTypedStreamSummary<Summary> where Summary: core::marker::Sync

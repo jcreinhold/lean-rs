@@ -203,13 +203,15 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # `cargo public-api` invokes `cargo +nightly rustdoc` internally
-      # to emit the structured JSON form of the public surface.
-      # Without nightly installed it bails before reaching the
-      # `-p <crate>` filter and confusingly reports "Cargo.toml is a
-      # virtual manifest". Install nightly explicitly here.
+      # `cargo public-api` renders nightly rustdoc to emit the structured JSON
+      # form of the public surface. The nightly is date-pinned and invoked
+      # explicitly (`cargo +nightly-2026-06-18 public-api`) so the diff is
+      # reproducible: the auto-derived `StructuralPartialEq` bound on generic
+      # types changes across nightlies, and the committed baselines are
+      # generated with this exact nightly (+ cargo-public-api@0.52.0). Keep in
+      # lockstep with ci.yml and scripts/prerelease.sh. See docs/api-review.md.
       - name: Install Rust nightly (for cargo-public-api)
-        uses: dtolnay/rust-toolchain@nightly
+        run: rustup toolchain install nightly-2026-06-18 --profile minimal
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -284,7 +286,7 @@ jobs:
               continue
             fi
             actual=$(mktemp)
-            cargo public-api --simplified -p "$crate" > "$actual"
+            cargo +nightly-2026-06-18 public-api --simplified -p "$crate" > "$actual"
             if ! diff -u "$baseline" "$actual"; then
               echo "::error::Public-API drift for $crate. Regenerate $baseline in the same commit that bumps the version."
               fail=1

@@ -198,7 +198,13 @@ jobs:
 
       - name: Install Rust nightly (for cargo-public-api)
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.32.0-rc1'
-        run: rustup toolchain install nightly --profile minimal
+        # Pinned date: the public-API diff renders nightly rustdoc, and the
+        # auto-derived `StructuralPartialEq` bound on generic types changes
+        # across nightlies. The baselines below are generated with this exact
+        # nightly (+ cargo-public-api@0.52.0); bumping it means regenerating
+        # every baseline in the same commit. Keep in lockstep with release.yml
+        # and scripts/prerelease.sh. See docs/api-review.md.
+        run: rustup toolchain install nightly-2026-06-18 --profile minimal
 
       - name: Public-API diff vs committed baselines
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.32.0-rc1'
@@ -214,7 +220,7 @@ jobs:
               continue
             fi
             actual=$(mktemp)
-            cargo public-api --simplified -p "$crate" > "$actual"
+            cargo +nightly-2026-06-18 public-api --simplified -p "$crate" > "$actual"
             if ! diff -u "$baseline" "$actual"; then
               echo "::error::Public-API drift for $crate. Regenerate $baseline in the same commit that changes public API."
               fail=1
