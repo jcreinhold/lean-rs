@@ -541,6 +541,18 @@ fn fake_worker_with_config(
     LeanWorker::spawn(&configure(config))
 }
 
+/// A fake worker whose request timeout is a generous backstop rather than the
+/// tight 80ms default. Tests that observe a *child death* (panic/abort, clean
+/// exit, crash-on-request) race that backstop against the child's
+/// spawn+emit+die+reap sequence; 80ms is enough on a fast host but a loaded CI
+/// runner can exceed it, firing a spurious `Timeout` instead of the expected
+/// child-death outcome. The hang/timeout conformance tests keep the short
+/// default because they assert the timeout fires against a 60s hang, where
+/// 80ms is deterministic.
+fn fake_worker_observing_child_death(mode: &str) -> Result<LeanWorker, LeanWorkerError> {
+    fake_worker_with_config(mode, |config| config.request_timeout(Duration::from_secs(5)))
+}
+
 fn conformance_terminal_success_has_one_terminal_outcome() -> Result<(), String> {
     let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
     let before = worker.lifecycle_snapshot();
@@ -610,7 +622,7 @@ fn conformance_stream_rows_are_tentative_until_terminal_success() -> Result<(), 
 }
 
 fn conformance_stream_child_exit_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let mut worker = fake_worker_observing_child_death("normal").map_err(|err| err.to_string())?;
     let generation = worker.lifecycle_snapshot().worker_generation;
     let sink = RecordingSink::default();
     let mut trace = request_trace(generation, "emit_test_rows_then_exit");
@@ -644,7 +656,7 @@ fn conformance_stream_child_exit_after_rows_discards_tentative_rows() -> Result<
 }
 
 fn conformance_stream_child_crash_after_rows_discards_tentative_rows() -> Result<(), String> {
-    let mut worker = fake_worker("normal").map_err(|err| err.to_string())?;
+    let mut worker = fake_worker_observing_child_death("normal").map_err(|err| err.to_string())?;
     let generation = worker.lifecycle_snapshot().worker_generation;
     let sink = RecordingSink::default();
     let mut trace = request_trace(generation, "emit_test_rows_then_panic");
@@ -903,7 +915,7 @@ fn conformance_timeout_kill_reap_restarts_next_generation() -> Result<(), String
 }
 
 fn conformance_child_crash_terminalizes_in_flight_request() -> Result<(), String> {
-    let mut worker = fake_worker("crash_on_health").map_err(|err| err.to_string())?;
+    let mut worker = fake_worker_observing_child_death("crash_on_health").map_err(|err| err.to_string())?;
     let generation = worker.lifecycle_snapshot().worker_generation;
     let pid = worker
         .__child_pid_for_test()
