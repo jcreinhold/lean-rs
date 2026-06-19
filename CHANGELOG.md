@@ -7,7 +7,7 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.3.0] - 2026-06-19
 
 ### Batch declaration verification across the host and worker stacks
 
@@ -65,8 +65,6 @@ The final Lean 4.31.0 release ships a different `lean.h` than its 4.31.0-rc1/-rc
 same layout-probe + symbol-probe gate and becomes the new head of the supported window (now 4.26.0 through 4.32.0-rc1).
 The relevant `repr.rs` struct block is byte-identical across both new headers and all 88 `REQUIRED_SYMBOLS` resolve in
 each, so the entries carry an empty `missing_symbols` list. No public API change.
-
-## [0.2.5] - 2026-06-12
 
 ### `lean-toolchain` stamps capability manifests from the selected build toolchain
 

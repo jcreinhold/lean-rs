@@ -356,7 +356,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lean-rs"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "dhat",
@@ -372,11 +372,11 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.2.5"
+version = "0.3.0"
 
 [[package]]
 name = "lean-rs-host"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "lean-rs",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-interop-shims"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "lean-toolchain",
  "sha2",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-profiling"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "lean-rs-abi",
  "sha2",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-child"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "ciborium",
  "criterion",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "fs4",
  "lean-rs-abi",
