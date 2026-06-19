@@ -76,7 +76,10 @@ jobs:
       - name: Install cargo-nextest + cargo-public-api
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-public-api
+          # Pinned for a reproducible API gate; newer releases render generic
+          # `StructuralPartialEq` impls differently from the committed
+          # docs/api-review baselines. See ci.yml / docs/api-review.md.
+          tool: cargo-nextest,cargo-public-api@0.52.0
 
       - name: Install actionlint
         if: matrix.os == 'ubuntu-latest'
@@ -215,7 +218,8 @@ jobs:
       - name: Install cargo-public-api
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-public-api
+          # Pinned: see the verify job's install step and docs/api-review.md.
+          tool: cargo-public-api@0.52.0
 
       - name: Install elan + Lean ${{ env.LEAN_VERSION_HEAD }}
         run: |

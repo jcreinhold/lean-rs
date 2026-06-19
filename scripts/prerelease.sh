@@ -438,13 +438,22 @@ run_gate "Package tarball docs.rs simulation" \
 	python3 "$REPO_ROOT/scripts/check_package_docsrs.py" --allow-dirty
 
 if [[ "$RUN_PUBLIC_API" == 1 ]]; then
+	# The CI gate pins cargo-public-api to PUBLIC_API_PIN so the diff is
+	# reproducible: newer releases render generic `StructuralPartialEq` impls
+	# with a `T: PartialEq` bound and would report spurious drift against the
+	# committed baselines. Mirror that pin locally; warn (don't fail) on a
+	# mismatch so a stray version can't be misread as a real API change.
+	PUBLIC_API_PIN="0.52.0"
 	if ! command -v cargo-public-api >/dev/null 2>&1; then
-		log_warn "cargo-public-api not installed; skipping (install: cargo install cargo-public-api --locked)"
+		log_warn "cargo-public-api not installed; skipping (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
 		SKIPPED+=("public-API baseline diff")
 	elif ! rustup toolchain list | grep -q '^nightly'; then
 		log_warn "rustup nightly toolchain not installed; skipping public-API diff (install: rustup toolchain install nightly)"
 		SKIPPED+=("public-API baseline diff")
 	else
+		if [[ "$(cargo public-api --version 2>/dev/null | awk '{print $2}')" != "$PUBLIC_API_PIN" ]]; then
+			log_warn "cargo-public-api version differs from the CI pin ${PUBLIC_API_PIN}; a drift here may be tooling noise (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
+		fi
 		run_public_api_diff() {
 			local fail=0
 			for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host \

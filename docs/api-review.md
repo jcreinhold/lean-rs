@@ -17,6 +17,13 @@ The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a bu
 otherwise land in the baseline file and trip the next diff. The prerelease script's internal regeneration drops stderr
 the same way.
 
+**Use the pinned `cargo-public-api` version.** The CI gate (`ci.yml`, `release.yml`) and `prerelease.sh` pin
+`cargo-public-api@0.52.0`. Its rendering is part of the baseline: newer releases emit the auto-derived
+`StructuralPartialEq` impl on generic types with a `T: PartialEq` bound (via nightly rustdoc), which diffs against these
+files on toolchain churn alone. Regenerate with the pinned version (`cargo install cargo-public-api@0.52.0 --locked`).
+Bumping the pin is a deliberate change: update the version in all three places and regenerate every baseline in the same
+commit.
+
 ## Red-flag checklist (review before regenerating)
 
 Walk the diff with these questions. Any "yes" is a stop-and-discuss signal, not necessarily a block.

@@ -85,7 +85,13 @@ jobs:
       - name: Install cargo-nextest + cargo-public-api
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest,cargo-public-api
+          # cargo-public-api is version-pinned for a reproducible API gate.
+          # Newer releases render the auto-derived `StructuralPartialEq` impl on
+          # generic types with a `T: PartialEq` bound (via nightly rustdoc),
+          # diverging from the committed docs/api-review baselines on toolchain
+          # churn alone. Bumping the pin means regenerating the baselines in the
+          # same commit (see docs/api-review.md).
+          tool: cargo-nextest,cargo-public-api@0.52.0
 
       - name: Install actionlint
         if: matrix.os == 'ubuntu-latest' && matrix.lean_version == '4.32.0-rc1'
