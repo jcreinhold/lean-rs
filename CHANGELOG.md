@@ -9,6 +9,63 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Batch declaration verification across the host and worker stacks
+
+`lean-rs-host` gains `LeanSession::verify_declaration_batch`, which verifies several declarations against one source
+snapshot in a single elaboration pass instead of one round trip per declaration. The request
+(`DeclarationVerificationBatchRequest`) carries the shared `source`, an ordered list of
+`DeclarationVerificationBatchItem { id, target }`, a `SorryPolicy`, a `report_axioms` flag, and output budgets; the
+header-aware `DeclarationVerificationBatchOutcome` returns `Ok` / `MissingImports` (each with the per-declaration
+`DeclarationVerificationBatchRow`s elaborated so far), `HeaderParseFailed`, or `Unsupported`, so a bad import header or
+a partial batch still surfaces the rows that did resolve rather than collapsing to one opaque error.
+
+The same shape crosses the process boundary. `lean-rs-worker-protocol` adds the wire types
+(`LeanWorkerDeclarationVerificationBatch{Request,Item,Result,Row}`) and the `Request::VerifyDeclarationBatch` /
+`Response::DeclarationVerificationBatch` variants, and `lean-rs-worker-parent` exposes
+`LeanWorkerSession::verify_declaration_batch` and `LeanWorkerHostHandle::verify_declaration_batch_with_imports`, both
+accepting a cancellation token and an optional progress sink for streamed per-row outcomes. The new protocol variants
+land on the `#[non_exhaustive]` `Request`/`Response` enums (source-compatible for downstream matchers), but the worker
+wire protocol is still version-coupled: rebuild the parent and child from the same `0.x` line.
+
+### Worker shutdown contract
+
+`lean-rs-worker-parent` gains an explicit, observable shutdown path. `LeanWorker`, `LeanWorkerCapability`, and
+`LeanWorkerHostHandle` now expose `shutdown(self)`, returning a `LeanWorkerShutdownReport` that records how the child
+reached a terminal state (`LeanWorkerShutdownOutcome`: `AlreadyExited`, `Graceful`, `GracefulTimedOutKilled`,
+`GracefulProtocolFailedKilled`, or `KillOnly`), the final exit, and the graceful / kill / wait timings. The graceful
+deadline is configurable through `shutdown_timeout(...)` on the config, host-handle, and capability builders, with
+`LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT` and `LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT` as the defaults;
+`LeanWorkerRestartPolicy::max_restarts_per_window` bounds restart storms and `LeanWorkerSessionLease::release` lets a
+caller return a lease explicitly. Internally the child now exits on parent loss and restart-generation loops are
+bounded.
+
+**Breaking:** `LeanWorkerError` (which is not `#[non_exhaustive]`) gains `Kill`, `ShutdownInProgress`, and `WaitTimeout`
+variants, so exhaustive matches on it must add arms.
+
+### Proof-boundary and diagnostic coordinate metadata
+
+Diagnostics now carry the coordinate space they were reported in. `lean-rs-worker-protocol` adds
+`LeanWorkerSourceCoordinateSpace` (`OriginalSource`, `SyntheticBuffer`, `Unknown`) and the original source range to
+`LeanWorkerDiagnostic`, so a caller can tell a position in the user's text apart from one in a synthetic elaboration
+buffer. Proof-state information gains proof-boundary candidates — the valid proof-state boundaries a selector can target
+— exposed as `ProofBoundaryCandidate` in `lean-rs-host` and `LeanWorkerProofBoundaryCandidate` on the wire.
+
+### Module declaration outline selector
+
+`lean-rs-host` adds a declaration-outline query: `ModuleQuerySelector::DeclarationOutline` returns a bounded
+`DeclarationOutlineResult { declarations, truncated }` listing a module's declarations without elaborating each one,
+with `LeanWorkerDeclarationOutlineResult` as the wire mirror. Output is bounded by `DeclarationInspectionBudgets` and
+`ModuleQueryOutputBudgets`, whose `new` / `per_field_bytes` / `total_bytes` builders cap per-field and total response
+bytes.
+
+### Supported Lean toolchain window: add 4.31.0 and 4.32.0-rc1
+
+The final Lean 4.31.0 release ships a different `lean.h` than its 4.31.0-rc1/-rc2 release candidates, so it joins
+`SUPPORTED_TOOLCHAINS` as its own ABI-equivalence entry rather than the rc entry. Lean 4.32.0-rc1 is added under the
+same layout-probe + symbol-probe gate and becomes the new head of the supported window (now 4.26.0 through 4.32.0-rc1).
+The relevant `repr.rs` struct block is byte-identical across both new headers and all 88 `REQUIRED_SYMBOLS` resolve in
+each, so the entries carry an empty `missing_symbols` list. No public API change.
+
 ## [0.2.5] - 2026-06-12
 
 ### `lean-toolchain` stamps capability manifests from the selected build toolchain

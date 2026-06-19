@@ -22,10 +22,10 @@ process-global runtime and import state.
 
 ## Boundary Rules
 
-Full `LeanSession` imports use `loadExts := true`. That is required for parser, elaborator, proof-state,
-pretty-printer, source-range, and capability workflows. After extensions are loaded, `Environment.freeRegions` is not a
-safe cleanup tool because extension state may retain references into compacted `.olean` regions. Drop and cache clearing
-do not change that.
+Full `LeanSession` imports use `loadExts := true`. That is required for parser, elaborator, proof-state, pretty-printer,
+source-range, and capability workflows. After extensions are loaded, `Environment.freeRegions` is not a safe cleanup
+tool because extension state may retain references into compacted `.olean` regions. Drop and cache clearing do not
+change that.
 
 `LeanCapabilities::bracketed_import_query` is the only same-process path that may free compacted import regions. The
 Lean shim uses `withImportModules`, which imports with `loadExts := false`, runs a closed declaration-metadata query,

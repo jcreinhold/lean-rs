@@ -9,7 +9,7 @@ even if they happen to compile.
 
 ## Lean toolchain window
 
-Supported window: Lean 4.26.0–4.31.0-rc2 (eight entries; 4.31.0-rc1 and 4.31.0-rc2 ship a byte-identical `lean.h` and
+Supported window: Lean 4.26.0–4.32.0-rc1 (ten entries; 4.31.0-rc1 and 4.31.0-rc2 ship a byte-identical `lean.h` and
 share one entry). Authoritative list, including `lean.h` SHA-256 digests, lives in
 [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs). Releases that ship a byte-identical
 `lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is

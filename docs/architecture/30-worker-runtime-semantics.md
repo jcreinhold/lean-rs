@@ -1,8 +1,8 @@
 # Worker Runtime Semantics
 
-This is the canonical model for `lean-rs-worker-protocol`, `lean-rs-worker-parent`, and
-`lean-rs-worker-child`. The worker runtime is a resource-bounded supervised process service with affine leases,
-generation-indexed requests, parent-owned cleanup, restart intensity limits, and bounded streaming buffers.
+This is the canonical model for `lean-rs-worker-protocol`, `lean-rs-worker-parent`, and `lean-rs-worker-child`. The
+worker runtime is a resource-bounded supervised process service with affine leases, generation-indexed requests,
+parent-owned cleanup, restart intensity limits, and bounded streaming buffers.
 
 The model is prose mathematics for implementers. It is not a mechanized proof, and later implementation prompts should
 cite the stable labels in this document when they change worker, pool, session, or protocol behavior.
@@ -32,9 +32,9 @@ rows but does not define downstream row semantics.
 ## Not An Actor Model
 
 The worker runtime deliberately omits actor-model obligations. There are no public actor identities, cloneable actor
-addresses, mailboxes, behavior-update rules, delivery policy, scheduler theorem, or fairness guarantee. A pool
-admission wait is a bounded synchronous wait at a call site, not a reserved mailbox slot. `LeanWorkerPoolSnapshot` has a
-stable `queue_depth` field, but that field is currently `0` and is not evidence of a request queue.
+addresses, mailboxes, behavior-update rules, delivery policy, scheduler theorem, or fairness guarantee. A pool admission
+wait is a bounded synchronous wait at a call site, not a reserved mailbox slot. `LeanWorkerPoolSnapshot` has a stable
+`queue_depth` field, but that field is currently `0` and is not evidence of a request queue.
 
 The public contract is instead a serial request/response process supervisor and a local affine lease pool. Actor
 terminology should appear in this repository only as this negative comparison unless the implementation grows the
@@ -50,8 +50,8 @@ Let:
 - `Resp` be terminal protocol responses.
 - `Row` be stream rows `(stream, sequence, payload)`.
 - `Diag` and `Prog` be worker diagnostics and progress events.
-- `Fail` be parent-visible failures: protocol error, child exit, child panic or abort, timeout, cancellation,
-  RSS hard-limit kill, sink panic, restart-limit exhaustion, pool admission refusal, wait failure, kill failure, and
+- `Fail` be parent-visible failures: protocol error, child exit, child panic or abort, timeout, cancellation, RSS
+  hard-limit kill, sink panic, restart-limit exhaustion, pool admission refusal, wait failure, kill failure, and
   shutdown-in-progress.
 - `Res` be resource facts: worker capacity, known child RSS, per-frame byte cap, event-buffer capacity, request timeout,
   shutdown timeout, kill-wait timeout, restart window, import-like request counters, and cancellation state.
@@ -72,8 +72,8 @@ lease_dropped(l)          admission_refused(c, reason)
 
 where `o in Resp + Fail` and `b` ranges over finite row buffers.
 
-Implementation traces refine this model by hiding child pids, OS pipe handles, stderr fragments that are not surfaced
-in typed errors, tracing spans, metrics-only counters, exact thread scheduling, and the private frame order of
+Implementation traces refine this model by hiding child pids, OS pipe handles, stderr fragments that are not surfaced in
+typed errors, tracing spans, metrics-only counters, exact thread scheduling, and the private frame order of
 handshake/configuration setup.
 
 ## Conformance Trace Harness
@@ -160,12 +160,12 @@ The core transitions are:
 - `Busy(g, r) -> Streaming(g, r, b)` when the child emits a non-terminal row, diagnostic, or progress event.
 - `Streaming(g, r, b) -> Streaming(g, r, b ++ [e])` for additional non-terminal events.
 - `Busy(g, r)` or `Streaming(g, r, b) -> Idle(g)` when a terminal success response is accepted.
-- `Busy(g, r)` or `Streaming(g, r, b) -> Killing(g) -> Reaping(g)` on timeout, in-flight RSS hard limit, or
-  cancellation observed after dispatch.
-- `Idle(g) -> Stopping(g) -> Reaping(g)` on explicit shutdown, graceful policy cycle, request-count cycle,
-  import-count cycle, idle cycle, or RSS-ceiling cycle.
-- Any state with a live child may move to `Crashed(g, c) -> Reaping(g)` when the child exits or the protocol stream
-  ends unexpectedly.
+- `Busy(g, r)` or `Streaming(g, r, b) -> Killing(g) -> Reaping(g)` on timeout, in-flight RSS hard limit, or cancellation
+  observed after dispatch.
+- `Idle(g) -> Stopping(g) -> Reaping(g)` on explicit shutdown, graceful policy cycle, request-count cycle, import-count
+  cycle, idle cycle, or RSS-ceiling cycle.
+- Any state with a live child may move to `Crashed(g, c) -> Reaping(g)` when the child exits or the protocol stream ends
+  unexpectedly.
 - `Reaping(g) -> Starting -> Idle(g + 1)` only when restart admission succeeds.
 - `Reaping(g) -> RestartExhausted` when restart intensity refuses a replacement.
 
@@ -180,9 +180,9 @@ A pool state is a tuple:
 `capacity` is `LeanWorkerPoolConfig::max_workers`. `entries` is the finite set of local worker entries keyed by
 `LeanWorkerSessionKey`. `leases` maps live lease tokens to entries. `waiting` is either empty or a caller currently
 blocked in synchronous admission; it is not a durable queue. `shutting_down` records whether the pool is being dropped
-or no longer admits work. `restart_budget` is the per-worker restart-intensity window. `memory_facts` contains known
-RSS samples and configured total/per-worker RSS ceilings, with an explicit unavailable state on platforms where RSS
-cannot be sampled.
+or no longer admits work. `restart_budget` is the per-worker restart-intensity window. `memory_facts` contains known RSS
+samples and configured total/per-worker RSS ceilings, with an explicit unavailable state on platforms where RSS cannot
+be sampled.
 
 Pool admission has three outcomes:
 
@@ -237,8 +237,8 @@ generation. A replacement drops old pipes, joins the old reader path, and tags p
 ## Lifecycle Semantics
 
 **Request lifecycle.** A request begins only after policy checks and successful parent-side admission. The child
-processes framed requests serially from stdin. A terminal response, EOF/fatal child exit, timeout, cancellation,
-RSS hard-limit kill, protocol error, sink panic, or shutdown path ends the request at the parent boundary.
+processes framed requests serially from stdin. A terminal response, EOF/fatal child exit, timeout, cancellation, RSS
+hard-limit kill, protocol error, sink panic, or shutdown path ends the request at the parent boundary.
 
 **Shutdown semantics.** `LeanWorker::shutdown` is the structured public shutdown path. It sends `Request::Terminate`,
 waits up to `LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT` by default, escalates to `kill`, then waits up to
@@ -256,8 +256,8 @@ checks the `fork/exec` race where it has already been reparented. There is no cr
 process-group contract; hosts that need stronger behavior must use an OS process manager.
 
 **Restart semantics.** Crash, timeout, cancellation after dispatch, shutdown, explicit cycle, memory cycling, and
-restart-limit exhaustion all end the current generation. Only a successfully admitted replacement can create
-generation `g + 1`, and future work must be explicitly admitted in that generation.
+restart-limit exhaustion all end the current generation. Only a successfully admitted replacement can create generation
+`g + 1`, and future work must be explicitly admitted in that generation.
 
 ## Controls Are Not Containment
 
@@ -280,8 +280,8 @@ replacement, restart intensity, and stale-session invalidation remain in `lean-r
 
 ## Operational Assumptions
 
-- OS process signaling, pipe EOF, broken-pipe behavior, and RSS sampling follow the platform contracts available to
-  Rust and libc on the target system.
+- OS process signaling, pipe EOF, broken-pipe behavior, and RSS sampling follow the platform contracts available to Rust
+  and libc on the target system.
 - Tokio and standard Rust synchronization eventually schedule parent cleanup tasks while the parent process remains
   alive.
 - Parent `Drop` runs only during ordinary Rust destruction; abrupt parent process death may skip it.
@@ -312,10 +312,10 @@ There is no unconditional fairness or eventual-admission theorem.
   affine sink/lease behavior exposed through worker sessions.
 - `pool.rs` must implement `Pool transition system`, `Affine lease law`, bounded admission, memory-policy refusal, and
   lease invalidation after lifecycle transitions.
-- `lean-rs-worker-child` must implement the serial child request loop, terminal protocol responses, portable
-  pipe-loss exit, and platform-specific parent-death hardening where available.
-- `lean-rs-worker-protocol` must keep request, response, diagnostic, progress, row, stream-summary, and fatal-exit
-  types compatible with the serial request model unless a future prompt first extends this document.
+- `lean-rs-worker-child` must implement the serial child request loop, terminal protocol responses, portable pipe-loss
+  exit, and platform-specific parent-death hardening where available.
+- `lean-rs-worker-protocol` must keep request, response, diagnostic, progress, row, stream-summary, and fatal-exit types
+  compatible with the serial request model unless a future prompt first extends this document.
 
 ## Runtime Controls And Cleanup Audit
 

@@ -121,8 +121,8 @@ module-query methods return their `Unsupported` outcome for bounded module proje
 | `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache()` |
 
 The proof-state payload returned by the module-query symbols includes bounded `proofBoundaries` and
-`proofBoundariesTruncated` fields on both the successful proof-state case and the unavailable selector-failure case.
-The candidates are source-ordered recovery points for proof-position selection. They are part of the host shim contract
+`proofBoundariesTruncated` fields on both the successful proof-state case and the unavailable selector-failure case. The
+candidates are source-ordered recovery points for proof-position selection. They are part of the host shim contract
 because Rust decodes the Lean structure layout directly.
 
 ## Forking the shim package

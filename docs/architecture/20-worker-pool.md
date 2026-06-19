@@ -35,8 +35,8 @@ The public surface is a lease-first API:
   want to rely only on drop.
 
 A lease becomes invalid after timeout, cancellation, child fatal exit, explicit cycle, or capability metadata mismatch.
-The caller acquires a fresh lease for follow-up work. A lease is also tied to the worker generation admitted for it, so a
-stale lease cannot keep issuing commands after an idle or memory policy replacement. That rule keeps session
+The caller acquires a fresh lease for follow-up work. A lease is also tied to the worker generation admitted for it, so
+a stale lease cannot keep issuing commands after an idle or memory policy replacement. That rule keeps session
 invalidation explicit without making callers learn which child process or warm worker was selected.
 
 The same pool boundary carries local memory-aware scheduling:
@@ -70,8 +70,8 @@ Snapshots are operational summaries, not protocol traces. They do not expose wor
 protocol frames, or which warm worker was selected.
 
 The pool hides child state, transport, restart sequencing, and backpressure behind a lease API, but it is not a formal
-actor runtime: there is no public mailbox, no cloneable actor address, no published scheduler, no fairness claim, and
-no global FIFO order. The current runtime contract is stated in
+actor runtime: there is no public mailbox, no cloneable actor address, no published scheduler, no fairness claim, and no
+global FIFO order. The current runtime contract is stated in
 [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md).
 
 ## Designs Considered

@@ -22,10 +22,10 @@ measured encoding changes.
 ## Source coordinates and proof boundaries
 
 Worker diagnostics report their source coordinate space explicitly. Diagnostics from ordinary source elaboration use
-`original_source` and, when Lean supplied a position, also carry an `original_range`. Diagnostics produced while checking
-a proof candidate against an overlay use `synthetic_buffer`; their flat line and column fields are relative to that
-generated buffer and must not be treated as editable positions in the caller's original file. Older peers that do not
-send the field decode as `unknown`.
+`original_source` and, when Lean supplied a position, also carry an `original_range`. Diagnostics produced while
+checking a proof candidate against an overlay use `synthetic_buffer`; their flat line and column fields are relative to
+that generated buffer and must not be treated as editable positions in the caller's original file. Older peers that do
+not send the field decode as `unknown`.
 
 Proof-state results also carry bounded proof-boundary candidates. These are recovery points in source order, suitable
 for retrying a selector when a requested `after_text` or default position cannot be resolved. They are proof-state

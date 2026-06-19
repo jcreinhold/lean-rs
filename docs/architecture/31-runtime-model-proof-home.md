@@ -1,13 +1,11 @@
 # Runtime Model Proof Home
 
-This document decides where checked Lean proofs for
-[`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md) belong. The decision is architectural: this prompt
-does not add Lean files or a Lake package.
+This document decides where checked Lean proofs for [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md)
+belong. The decision is architectural: this prompt does not add Lean files or a Lake package.
 
 ## Decision
 
-`lean-rs` should carry a durable, lightweight proof package for the worker runtime model under
-`formal/RuntimeModel/`.
+`lean-rs` should carry a durable, lightweight proof package for the worker runtime model under `formal/RuntimeModel/`.
 
 The package is not a fixture, not a worker child, and not a runtime integration test. It is a small Lean development for
 the abstract transition systems and invariants named in the canonical runtime model. Prompt 36 created this package
@@ -73,16 +71,16 @@ The initial proof package should target the stable model labels from
 - `shutdown_eventually_reaches_terminal_state_under_assumptions`
 - `implementation_trace_refines_model_trace`
 
-The first package does not need to prove every theorem. It should define the vocabulary and enough statements for
-later Rust refactors to cite. Every proof theorem must avoid `sorry`, `admit`, and project axioms before it is treated
-as checked evidence.
+The first package does not need to prove every theorem. It should define the vocabulary and enough statements for later
+Rust refactors to cite. Every proof theorem must avoid `sorry`, `admit`, and project axioms before it is treated as
+checked evidence.
 
 ## Ownership
 
-The proof package belongs to the worker runtime architecture, not to downstream hosts. Changes to
-`supervisor.rs`, `session.rs`, `pool.rs`, `lean-rs-worker-child`, or `lean-rs-worker-protocol` that change a model
-clause must update both the prose model and the proof package once the package exists.
+The proof package belongs to the worker runtime architecture, not to downstream hosts. Changes to `supervisor.rs`,
+`session.rs`, `pool.rs`, `lean-rs-worker-child`, or `lean-rs-worker-protocol` that change a model clause must update
+both the prose model and the proof package once the package exists.
 
-Proof files should follow mathlib-style discipline: narrow imports, meaningful theorem names, explicit statements,
-small helper lemmas with real mathematical content, and build-clean files. Performance-sensitive proofs should be
-profiled before increasing heartbeat budgets.
+Proof files should follow mathlib-style discipline: narrow imports, meaningful theorem names, explicit statements, small
+helper lemmas with real mathematical content, and build-clean files. Performance-sensitive proofs should be profiled
+before increasing heartbeat budgets.
