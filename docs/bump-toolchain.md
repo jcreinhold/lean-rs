@@ -74,6 +74,15 @@ the new highest version, also update the head version in
 `if: … matrix.lean_version == '<old head>'` steps in `ci.yml` (actionlint, public-API diff, nightly install) to the new
 head.
 
+**When `X.Y.Z` is the new head, also bump the committed `lean-toolchain` pins to it** (root `lean-toolchain`, the three
+`crates/**/shims/**/lean-toolchain`, `fixtures/lean`, `fixtures/interop-shims`, `templates/shipped-lean-crate/lean`, and
+`formal/RuntimeModel`). `ci.yml` and `release.yml` repin per run, but `sanitizer.yml` and `compile-fail.yml` have **no
+repin step** — they build against the committed pin, while their `LEAN_VERSION_HEAD` install + `LEAN_SYSROOT` point at
+the new head. A stale pin splits the toolchain: `lean-rs-sys` validates `LEAN_SYSROOT` and falls back to the pinned
+version, but `lean-rs-worker-child`'s build script trusts `LEAN_SYSROOT` unverified and bakes an rpath to the
+(uninstalled) head prefix, so the loader fails with `libleanshared.so: cannot open shared object file`. Keep the
+committed pins equal to the head.
+
 ### 6. Run the local sweep
 
 ```sh
