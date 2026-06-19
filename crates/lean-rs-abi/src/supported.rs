@@ -89,6 +89,16 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "99ef35d69709e38caf836cf9ebbdf94d4474801e04157b8a72622dbdc653ec87",
         missing_symbols: &[],
     },
+    SupportedToolchain {
+        versions: &["4.31.0"],
+        header_digest: "486fe204404c0fdfb753b7e089c1c0d38fbdb396206030497696165e31218992",
+        missing_symbols: &[],
+    },
+    SupportedToolchain {
+        versions: &["4.32.0-rc1"],
+        header_digest: "22eed50aa703c4403010fabc12a7231ffa34dc979bd59ca1bfbac13c29a1dad2",
+        missing_symbols: &[],
+    },
 ];
 
 /// Return the [`SupportedToolchain`] entry that includes `version`, if any.
@@ -118,6 +128,22 @@ pub fn symbol_present_in_window(symbol: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// `SemVer` precedence key for a Lean version string: numeric release
+    /// core (e.g. `4.31.0`) first, then a flag that ranks a final release
+    /// *after* its pre-releases (`false` for `-rcN`, `true` for a final),
+    /// then the pre-release identifier. Tuple `Ord` composes these in the
+    /// right priority. The naive `&str` comparison gets the rc/final pair
+    /// backwards—`"4.31.0" < "4.31.0-rc1"` lexically—so the ordering
+    /// invariant compares these keys instead (`SemVer` §11).
+    fn precedence_key(version: &str) -> (Vec<u64>, bool, &str) {
+        let (core, pre) = match version.split_once('-') {
+            Some((core, pre)) => (core, pre),
+            None => (version, ""),
+        };
+        let core_nums = core.split('.').map(|n| n.parse().unwrap_or(0)).collect();
+        (core_nums, pre.is_empty(), pre)
+    }
+
     #[test]
     fn window_is_non_empty_and_ordered_by_first_version() {
         assert!(!SUPPORTED_TOOLCHAINS.is_empty());
@@ -129,7 +155,7 @@ mod tests {
                 continue;
             };
             assert!(
-                a < b,
+                precedence_key(a) < precedence_key(b),
                 "SUPPORTED_TOOLCHAINS must be sorted ascending by first version: {a} >= {b}",
             );
         }

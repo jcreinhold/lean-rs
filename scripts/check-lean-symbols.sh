@@ -36,7 +36,7 @@ PRESENT=$(mktemp)
 trap 'rm -f "$REQUIRED" "$PRESENT"' EXIT
 
 awk '/^pub const REQUIRED_SYMBOLS/,/^];/' \
-	"$REPO_ROOT/crates/lean-rs-sys/src/lib.rs" |
+	"$REPO_ROOT/crates/lean-rs-abi/src/symbols.rs" |
 	grep -oE '"lean_[a-z0-9_]+"' | tr -d '"' | sort -u >"$REQUIRED"
 
 nm -gU "$LIB" | awk '{print $NF}' | sed 's/^_//' | grep -E '^lean_' |

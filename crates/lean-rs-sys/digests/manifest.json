@@ -34,6 +34,14 @@
     {
       "versions": ["4.31.0-rc1", "4.31.0-rc2"],
       "header_digest": "99ef35d69709e38caf836cf9ebbdf94d4474801e04157b8a72622dbdc653ec87"
+    },
+    {
+      "versions": ["4.31.0"],
+      "header_digest": "486fe204404c0fdfb753b7e089c1c0d38fbdb396206030497696165e31218992"
+    },
+    {
+      "versions": ["4.32.0-rc1"],
+      "header_digest": "22eed50aa703c4403010fabc12a7231ffa34dc979bd59ca1bfbac13c29a1dad2"
     }
   ]
 }
