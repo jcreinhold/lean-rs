@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
+#![allow(unsafe_code, clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
@@ -202,7 +202,7 @@ fn linux_parent_death_signal_exits_when_stdio_stays_open() {
             libc::kill(pid, libc::SIGTERM);
         }
     }
-    let _ = fs::remove_dir_all(&temp_root);
+    drop(fs::remove_dir_all(&temp_root));
 
     assert!(
         exited,
