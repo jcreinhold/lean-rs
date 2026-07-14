@@ -7,7 +7,16 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.3.1] - 2026-07-14
+
+### Typed thread and memory caps for Lean subprocesses
+
+Worker and build capabilities gain opt-in resource caps. `LeanWorkerCapabilityBuilder` and
+`LeanWorkerHostHandleBuilder` add `num_threads(u32)` and `lean_max_memory_kib(u64)`, which pass a task-manager thread
+count and a Lean runtime memory ceiling to the spawned worker child (via `LEAN_RS_LEAN_MAX_MEMORY_KIB`).
+`lean_toolchain::CargoLeanCapability` adds `lean_num_threads(u32)`, which caps `lake build` parallelism and each spawned
+`lean`'s task-manager threads through `LEAN_NUM_THREADS`. All three are additive builder methods; leaving them unset
+preserves the previous default behavior.
 
 ### Supported Lean toolchain window: add 4.32.0
 

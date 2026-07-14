@@ -433,6 +433,7 @@ pub fn lean_toolchain::CargoLeanCapability::build_quiet(self) -> core::result::R
 pub fn lean_toolchain::CargoLeanCapability::dependency(self, lean_toolchain::LeanLibraryDependency) -> Self
 pub fn lean_toolchain::CargoLeanCapability::env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::export_signature(self, lean_toolchain::LeanExportSignature) -> Self
+pub fn lean_toolchain::CargoLeanCapability::lean_num_threads(self, u32) -> Self
 pub fn lean_toolchain::CargoLeanCapability::lean_sysroot(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::manifest_env_var(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_toolchain::CargoLeanCapability::module(self, impl core::convert::Into<alloc::string::String>) -> Self
