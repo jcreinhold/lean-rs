@@ -8,7 +8,7 @@ creation, the per-crate live publish in dependency order, and opens a GitHub Rel
 This document is the **human checklist** for the steps before the tag push. The steps after the tag push are owned by
 the workflow.
 
-**Supported Lean window for v0.2.x:** 4.26.0 through 4.32.0-rc1. Adding the next release follows the
+**Supported Lean window for v0.2.x:** 4.26.0 through 4.32.0. Adding the next release follows the
 [bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
 `crates/lean-rs-abi/src/supported.rs` before any release.
 

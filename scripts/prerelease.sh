@@ -39,7 +39,7 @@ set -euo pipefail
 # The default mirrors `.github/workflows/release.yml::env.LEAN_VERSION_HEAD`.
 # Bumping the supported window requires editing both in lockstep — see
 # `docs/bump-toolchain.md`.
-DEFAULT_LEAN_VERSION="4.32.0-rc1"
+DEFAULT_LEAN_VERSION="4.32.0"
 
 LEAN_VERSION="$DEFAULT_LEAN_VERSION"
 RUN_FUZZ=1

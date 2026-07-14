@@ -95,7 +95,7 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         missing_symbols: &[],
     },
     SupportedToolchain {
-        versions: &["4.32.0-rc1"],
+        versions: &["4.32.0-rc1", "4.32.0"],
         header_digest: "22eed50aa703c4403010fabc12a7231ffa34dc979bd59ca1bfbac13c29a1dad2",
         missing_symbols: &[],
     },

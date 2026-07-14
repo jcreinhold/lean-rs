@@ -43,7 +43,7 @@ env:
   # against this version (the matrix in `verify` covers the rest).
   # Bumping the window: update this AND the matrix in `verify` AND
   # `crates/lean-rs-abi/src/supported.rs`. See `docs/bump-toolchain.md`.
-  LEAN_VERSION_HEAD: "4.32.0-rc1"
+  LEAN_VERSION_HEAD: "4.32.0"
 
 jobs:
   verify:
@@ -60,7 +60,7 @@ jobs:
         # than as silent regressions, and the version-window
         # SUPPORTED_TOOLCHAINS table is the source of truth.
         os: [ubuntu-latest, macos-latest]
-        lean_version: ["4.32.0-rc1"]
+        lean_version: ["4.32.0"]
     steps:
       - uses: actions/checkout@v6
 

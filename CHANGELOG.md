@@ -9,6 +9,13 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Supported Lean toolchain window: add 4.32.0
+
+The final Lean 4.32.0 release ships a `lean.h` byte-identical to 4.32.0-rc1, so it joins that entry's ABI-equivalence
+class in `SUPPORTED_TOOLCHAINS` rather than opening a new row, and becomes the new head of the supported window (now
+4.26.0 through 4.32.0). The digest matched an existing entry, so no layout or symbol re-probe was required; all 88
+`REQUIRED_SYMBOLS` remain resolved and `missing_symbols` stays empty. No public API change.
+
 ## [0.3.0] - 2026-06-19
 
 ### Batch declaration verification across the host and worker stacks

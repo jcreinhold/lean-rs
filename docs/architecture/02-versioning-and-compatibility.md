@@ -8,7 +8,7 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-06-19:
+is the single source of truth; this document mirrors it for narrative context. As of 2026-07-14:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
@@ -21,7 +21,7 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.30.0 | `5a25125970f4…` |
 | 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
 | 4.31.0 | `486fe204404c…` |
-| 4.32.0-rc1 | `22eed50aa703…` |
+| 4.32.0-rc1, 4.32.0 | `22eed50aa703…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -38,8 +38,9 @@ was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed a
 the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a byte-identical
 `lean.h`, so it shares the rc ABI-equivalence row. The final 4.31.0 release ships a *different* `lean.h` than its
 release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block; all 88
-symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate and is
-the current head of the window.
+symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate. The
+final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the same
+ABI-equivalence entry and is the current head of the window.
 
 **Policy.**
 
