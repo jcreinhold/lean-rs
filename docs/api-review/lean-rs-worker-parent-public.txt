@@ -522,11 +522,13 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::import_workspace_root(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::json_command_export(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::lean_max_memory_kib(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::max_frame_bytes(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::metadata_export(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::module_cache_limits(self, lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::num_threads(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerCapability, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
@@ -693,9 +695,11 @@ pub struct lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 impl lean_rs_worker_parent::LeanWorkerHostHandleBuilder
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::check(&self) -> lean_rs_worker_parent::LeanWorkerBootstrapReport
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::import_profile(self, lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::lean_max_memory_kib(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::long_running_requests(self) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::max_frame_bytes(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::module_cache_limits(self, lean_rs_worker_parent::LeanWorkerModuleCacheLimits) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::num_threads(self, u32) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerHostHandle, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
