@@ -202,6 +202,7 @@ pub struct CargoLeanCapability {
     env_var: Option<String>,
     manifest_env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
+    lean_num_threads: Option<u32>,
     export_signatures: Vec<LeanExportSignature>,
     dependencies: Vec<LeanLibraryDependency>,
 }
@@ -218,6 +219,7 @@ impl CargoLeanCapability {
             env_var: None,
             manifest_env_var: None,
             lean_sysroot: None,
+            lean_num_threads: None,
             export_signatures: Vec::new(),
             dependencies: Vec::new(),
         }
@@ -275,6 +277,20 @@ impl CargoLeanCapability {
     #[must_use]
     pub fn lean_sysroot(mut self, sysroot: impl Into<PathBuf>) -> Self {
         self.lean_sysroot = Some(sysroot.into());
+        self
+    }
+
+    /// Cap the parallelism of the spawned `lake build` by setting `LEAN_NUM_THREADS`.
+    ///
+    /// Lake 5.x has no `--jobs` flag; it derives both the number of concurrent build jobs and
+    /// each spawned `lean`'s task-manager thread count from `LEAN_NUM_THREADS`. Leaving this
+    /// unset uses Lake's hardware-concurrency default, which fans out to one multi-GB `lean`
+    /// process per core and can exhaust memory on large machines. Both [`Self::build`] and
+    /// [`Self::build_quiet`] pass this only to the spawned Lake command; they do not mutate the
+    /// parent process environment.
+    #[must_use]
+    pub fn lean_num_threads(mut self, threads: u32) -> Self {
+        self.lean_num_threads = Some(threads);
         self
     }
 
@@ -338,6 +354,7 @@ impl CargoLeanCapability {
         };
         let lake_options = LakeBuildOptions {
             lean_sysroot: self.lean_sysroot.clone(),
+            lean_num_threads: self.lean_num_threads,
         };
         let dylib_path = build_lake_target_with_runner_and_options(
             &self.project_root,
@@ -541,6 +558,13 @@ impl LakeRunner for RealLakeRunner {
         } else {
             Command::new("lake")
         };
+        // Lake 5.x has no `--jobs` flag; it derives both its build-job parallelism and each
+        // spawned `lean`'s task-manager thread count from `LEAN_NUM_THREADS`. Set it explicitly
+        // (rather than mutating the parent environment) so callers can bound a `lake build`
+        // fan-out that would otherwise spawn one multi-GB `lean` per core.
+        if let Some(threads) = options.lean_num_threads {
+            command.env("LEAN_NUM_THREADS", threads.to_string());
+        }
         let output = command
             .arg("build")
             .arg(format!("{target_name}:shared"))
@@ -558,6 +582,9 @@ impl LakeRunner for RealLakeRunner {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct LakeBuildOptions {
     lean_sysroot: Option<PathBuf>,
+    /// Value for `LEAN_NUM_THREADS` on the spawned `lake` command. `None` leaves Lake's default
+    /// (hardware-concurrency) parallelism, which can fork-storm a machine; `Some(n)` caps it.
+    lean_num_threads: Option<u32>,
 }
 
 struct LakeRun {
@@ -1394,6 +1421,7 @@ mod tests {
     struct FakeLake {
         calls: Rc<Cell<usize>>,
         seen_sysroots: Rc<RefCell<Vec<Option<PathBuf>>>>,
+        seen_threads: Rc<RefCell<Vec<Option<u32>>>>,
         mode: FakeMode,
     }
 
@@ -1410,6 +1438,7 @@ mod tests {
             Self {
                 calls: Rc::new(Cell::new(0)),
                 seen_sysroots: Rc::new(RefCell::new(Vec::new())),
+                seen_threads: Rc::new(RefCell::new(Vec::new())),
                 mode,
             }
         }
@@ -1420,6 +1449,10 @@ mod tests {
 
         fn seen_sysroots(&self) -> Vec<Option<PathBuf>> {
             self.seen_sysroots.borrow().clone()
+        }
+
+        fn seen_threads(&self) -> Vec<Option<u32>> {
+            self.seen_threads.borrow().clone()
         }
     }
 
@@ -1432,6 +1465,7 @@ mod tests {
         ) -> Result<LakeRun, std::io::Error> {
             self.calls.set(self.calls.get().saturating_add(1));
             self.seen_sysroots.borrow_mut().push(options.lean_sysroot.clone());
+            self.seen_threads.borrow_mut().push(options.lean_num_threads);
             match self.mode {
                 FakeMode::SuccessModern => {
                     let dylib = project_root
@@ -1563,6 +1597,7 @@ mod tests {
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
         let options = LakeBuildOptions {
             lean_sysroot: Some(sysroot.clone()),
+            ..LakeBuildOptions::default()
         };
         let first = build_lake_target_with_runner_and_options(
             &root,
@@ -1956,6 +1991,7 @@ mod tests {
             .expect("cargo helper build");
 
         assert_eq!(runner.seen_sysroots(), vec![Some(sysroot.clone())]);
+        assert_eq!(runner.seen_threads(), vec![None], "no thread cap set by default");
 
         let manifest: serde_json::Value =
             serde_json::from_slice(&fs::read(built.manifest_path()).expect("read manifest"))
@@ -1971,6 +2007,23 @@ mod tests {
             build_toolchain.get("sysroot").and_then(serde_json::Value::as_str),
             Some(sysroot.to_str().expect("test sysroot is UTF-8"))
         );
+    }
+
+    #[test]
+    fn cargo_capability_build_passes_lean_num_threads_to_lake() {
+        let root = make_project("cargo-capability-threads", "MyCapability");
+        let sysroot = make_fake_sysroot("cargo-capability-threads");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+
+        CargoLeanCapability::new(&root, "MyCapability")
+            .package("my_pkg")
+            .module("MyCapability")
+            .lean_sysroot(&sysroot)
+            .lean_num_threads(1)
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("cargo helper build with capped threads");
+
+        assert_eq!(runner.seen_threads(), vec![Some(1)]);
     }
 
     #[test]

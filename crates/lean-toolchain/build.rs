@@ -373,10 +373,7 @@ fn find_fixture_dir(start: &Path) -> Option<PathBuf> {
         if candidate.join("lakefile.lean").is_file() {
             return Some(candidate);
         }
-        match cursor.parent() {
-            Some(parent) => cursor = parent,
-            None => return None,
-        }
+        cursor = cursor.parent()?;
     }
 }
 

@@ -76,6 +76,8 @@ pub struct LeanWorkerCapabilityBuilder {
     restart_policy: Option<LeanWorkerRestartPolicy>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
+    num_threads: Option<u32>,
+    lean_max_memory_kib: Option<u64>,
     metadata_check: Option<CapabilityMetadataCheck>,
     max_frame_bytes: Option<u32>,
     worker_export_signatures: Vec<LeanExportSignature>,
@@ -114,6 +116,8 @@ impl LeanWorkerCapabilityBuilder {
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
+            num_threads: None,
+            lean_max_memory_kib: None,
             metadata_check: None,
             max_frame_bytes: None,
             worker_export_signatures: Vec::new(),
@@ -159,6 +163,8 @@ impl LeanWorkerCapabilityBuilder {
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
+            num_threads: None,
+            lean_max_memory_kib: None,
             metadata_check: None,
             max_frame_bytes: None,
             worker_export_signatures: Vec::new(),
@@ -262,6 +268,29 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn module_cache_limits(mut self, limits: LeanWorkerModuleCacheLimits) -> Self {
         self.module_cache_limits = Some(limits);
+        self
+    }
+
+    /// Cap the worker child's Lean task-manager thread pool via `LEAN_RS_NUM_THREADS`.
+    ///
+    /// Each worker child otherwise starts one task-manager worker thread per hardware core. When
+    /// several children run, or a single elaboration is memory-heavy, that thread pool multiplies
+    /// memory pressure. This is a typed knob (not a generic child-env passthrough): callers set a
+    /// thread count without knowing the child's environment-variable names.
+    #[must_use]
+    pub fn num_threads(mut self, threads: u32) -> Self {
+        self.num_threads = Some(threads);
+        self
+    }
+
+    /// Set an opt-in Lean runtime memory ceiling for the worker child via
+    /// `LEAN_RS_LEAN_MAX_MEMORY_KIB`.
+    ///
+    /// Lean checks this ceiling periodically and throws before the OS OOM-kills the process,
+    /// converting a runaway elaboration into a recoverable error instead of a machine crash.
+    #[must_use]
+    pub fn lean_max_memory_kib(mut self, limit_kib: u64) -> Self {
+        self.lean_max_memory_kib = Some(limit_kib);
         self
     }
 
@@ -493,6 +522,8 @@ impl LeanWorkerCapabilityBuilder {
             self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
+            self.num_threads,
+            self.lean_max_memory_kib,
         )?;
 
         let session_config = LeanWorkerSessionConfig::manifest_backed(
@@ -556,6 +587,8 @@ pub struct LeanWorkerHostHandleBuilder {
     restart_policy: Option<LeanWorkerRestartPolicy>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
+    num_threads: Option<u32>,
+    lean_max_memory_kib: Option<u64>,
     max_frame_bytes: Option<u32>,
 }
 
@@ -635,6 +668,8 @@ impl LeanWorkerHostHandleBuilder {
             restart_policy: None,
             rss_hard_limit: None,
             module_cache_limits: None,
+            num_threads: None,
+            lean_max_memory_kib: None,
             max_frame_bytes: None,
         }
     }
@@ -713,6 +748,24 @@ impl LeanWorkerHostHandleBuilder {
         self
     }
 
+    /// Cap the worker child's Lean task-manager thread pool via `LEAN_RS_NUM_THREADS`.
+    ///
+    /// Scoped to this handle; does not mutate process-global environment variables.
+    #[must_use]
+    pub fn num_threads(mut self, threads: u32) -> Self {
+        self.num_threads = Some(threads);
+        self
+    }
+
+    /// Set an opt-in Lean runtime memory ceiling via `LEAN_RS_LEAN_MAX_MEMORY_KIB`.
+    ///
+    /// Lean throws before the OS OOM-kills the child. Scoped to this handle.
+    #[must_use]
+    pub fn lean_max_memory_kib(mut self, limit_kib: u64) -> Self {
+        self.lean_max_memory_kib = Some(limit_kib);
+        self
+    }
+
     /// Set the per-frame byte cap negotiated with the worker child at handshake.
     #[must_use]
     pub fn max_frame_bytes(mut self, max_frame_bytes: u32) -> Self {
@@ -776,6 +829,8 @@ impl LeanWorkerHostHandleBuilder {
             self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
+            self.num_threads,
+            self.lean_max_memory_kib,
         )?;
         let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports)
             .with_import_profile(self.import_profile);
@@ -1490,6 +1545,8 @@ fn spawn_checked_worker(
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
+    num_threads: Option<u32>,
+    lean_max_memory_kib: Option<u64>,
 ) -> Result<LeanWorker, LeanWorkerError> {
     let worker_child = worker_child.unwrap_or_default();
     let worker_executable = worker_child.resolve()?;
@@ -1515,6 +1572,7 @@ fn spawn_checked_worker(
     if let Some(limits) = module_cache_limits.as_ref() {
         config = apply_module_cache_limits(config, limits);
     }
+    config = apply_runtime_limits(config, num_threads, lean_max_memory_kib);
     if let Some(cap) = max_frame_bytes {
         config = config.max_frame_bytes(cap);
     }
@@ -1522,6 +1580,25 @@ fn spawn_checked_worker(
     let mut worker = LeanWorker::spawn(&config)?;
     worker.health()?;
     Ok(worker)
+}
+
+/// Apply the typed worker-child runtime caps as child environment variables.
+///
+/// `num_threads` caps the child's Lean task-manager pool (`LEAN_RS_NUM_THREADS`); the memory ceiling
+/// arms the child's Lean runtime OOM guardrail (`LEAN_RS_LEAN_MAX_MEMORY_KIB`). Both are typed knobs
+/// so callers need not know the child's environment-variable names.
+fn apply_runtime_limits(
+    mut config: LeanWorkerConfig,
+    num_threads: Option<u32>,
+    lean_max_memory_kib: Option<u64>,
+) -> LeanWorkerConfig {
+    if let Some(threads) = num_threads {
+        config = config.env("LEAN_RS_NUM_THREADS", threads.to_string());
+    }
+    if let Some(limit_kib) = lean_max_memory_kib {
+        config = config.env("LEAN_RS_LEAN_MAX_MEMORY_KIB", limit_kib.to_string());
+    }
+    config
 }
 
 fn apply_module_cache_limits(mut config: LeanWorkerConfig, limits: &LeanWorkerModuleCacheLimits) -> LeanWorkerConfig {
@@ -1968,7 +2045,10 @@ fn dedup_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use super::{LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits};
+    use super::{
+        LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerModuleCacheLimits, apply_module_cache_limits,
+        apply_runtime_limits,
+    };
     use crate::supervisor::LeanWorkerConfig;
     use lean_rs_worker_protocol::types::LeanWorkerSessionImportProfile;
     use lean_toolchain::LeanBuiltCapability;
@@ -2160,5 +2240,24 @@ mod tests {
             env.iter()
                 .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB" && v == "8192")
         );
+    }
+
+    #[test]
+    fn runtime_limits_map_to_typed_child_env() {
+        let config = apply_runtime_limits(LeanWorkerConfig::new("/opt/worker"), Some(1), Some(16_777_216));
+        let env = config.env_overrides();
+        assert!(env.iter().any(|(k, v)| k == "LEAN_RS_NUM_THREADS" && v == "1"));
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_LEAN_MAX_MEMORY_KIB" && v == "16777216")
+        );
+    }
+
+    #[test]
+    fn runtime_limits_are_absent_when_unset() {
+        let config = apply_runtime_limits(LeanWorkerConfig::new("/opt/worker"), None, None);
+        let env = config.env_overrides();
+        assert!(!env.iter().any(|(k, _)| k == "LEAN_RS_NUM_THREADS"));
+        assert!(!env.iter().any(|(k, _)| k == "LEAN_RS_LEAN_MAX_MEMORY_KIB"));
     }
 }
