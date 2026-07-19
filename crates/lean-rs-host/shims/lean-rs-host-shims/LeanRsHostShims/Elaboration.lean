@@ -329,17 +329,26 @@ private def summarizeDeclaration (decl : Declaration) : Name × String × Expr :
   | _             => (Name.anonymous, "unsupported", Expr.sort .zero)
 
 /-- Re-validate a captured `LeanEvidence` against the current
-    environment. Re-runs the kernel via `Environment.addDeclCore`. The
+    environment. Re-runs the kernel via `Kernel.Environment.addDecl` on
+    the environment's kernel view (`Environment.toKernelEnv`). The
     declaration was accepted once by `hostKernelCheck` against this
     same environment (the session never installs the new constant),
     so the expected outcome on a fresh re-check is `Checked`; a
     `Rejected` result means the kernel now refuses the declaration
     (for example because a referenced constant changed). `Unavailable`
-    covers exceptions raised through `IO`. -/
+    covers exceptions raised through `IO`.
+
+    `Kernel.Environment.addDecl` is used rather than the higher-level
+    `Environment.addDeclCore` because its signature is stable across the
+    whole supported toolchain window: 4.33.0-rc1 inserted a second
+    `USize` parameter into `addDeclCore`, so a positional call to it
+    cannot compile on both the pre-4.33 and 4.33+ arities. The kernel
+    entry point takes `(kenv, options, decl)` unchanged across the
+    window and performs the same kernel type-check. -/
 @[export lean_rs_host_check_evidence]
 def hostCheckEvidence (env : Environment) (ev : Evidence) : IO EvidenceStatus := do
   try
-    match Environment.addDeclCore env 0 ev.decl none with
+    match Kernel.Environment.addDecl env.toKernelEnv {} ev.decl with
     | .ok _    => return .checked
     | .error _ => return .rejected
   catch _ =>

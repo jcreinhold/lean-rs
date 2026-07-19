@@ -22,7 +22,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  LEAN_VERSION_HEAD: "4.32.0"
+  LEAN_VERSION_HEAD: "4.33.0-rc1"
 
 jobs:
   compile-fail:

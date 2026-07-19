@@ -8,7 +8,7 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-07-14:
+is the single source of truth; this document mirrors it for narrative context. As of 2026-07-19:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
@@ -22,6 +22,7 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
 | 4.31.0 | `486fe204404c…` |
 | 4.32.0-rc1, 4.32.0 | `22eed50aa703…` |
+| 4.33.0-rc1 | `9018878554c5…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -40,7 +41,13 @@ the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2
 release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block; all 88
 symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate. The
 final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the same
-ABI-equivalence entry and is the current head of the window.
+ABI-equivalence entry. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h` digest, but
+the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside the opaque `lean_task_imp`)
+and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access. `_Atomic(T)` for a lock-free
+scalar/pointer keeps `T`'s size and alignment, so a probe against both headers reports byte-identical size, alignment,
+and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS` resolve. The
+textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the audited byte
+layout is preserved.
 
 **Policy.**
 

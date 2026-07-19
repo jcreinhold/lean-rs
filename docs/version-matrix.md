@@ -9,8 +9,10 @@ even if they happen to compile.
 
 ## Lean toolchain window
 
-Supported window: Lean 4.26.0–4.32.0 (ten entries; 4.31.0-rc1/4.31.0-rc2 and 4.32.0-rc1/4.32.0 each ship a
-byte-identical `lean.h` and share one entry). Authoritative list, including `lean.h` SHA-256 digests, lives in
+Supported window: Lean 4.26.0–4.33.0-rc1 (eleven entries; 4.31.0-rc1/4.31.0-rc2 and 4.32.0-rc1/4.32.0 each ship a
+byte-identical `lean.h` and share one entry). 4.33.0-rc1 ships a new digest whose only change is two C11 `_Atomic(...)`
+field qualifiers that leave every mirrored struct byte-identical in size, alignment, and field offsets. Authoritative
+list, including `lean.h` SHA-256 digests, lives in
 [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs). Releases that ship a byte-identical
 `lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is
 platform-independent; digests are identical across the two target triples.

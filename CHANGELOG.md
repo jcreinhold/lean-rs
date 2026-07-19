@@ -9,6 +9,15 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Supported Lean toolchain window: add 4.33.0-rc1
+
+Lean 4.33.0-rc1 joins `SUPPORTED_TOOLCHAINS` as the new head of the window (now 4.26.0 through 4.33.0-rc1). It ships a
+*new* `lean.h` digest, but the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside
+the opaque `lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access.
+`_Atomic(T)` for a lock-free scalar/pointer keeps `T`'s size and alignment, so a layout probe against both headers
+reports byte-identical size, alignment, and field offsets for all ten mirrored structs; `lean-rs-sys/src/repr.rs` is
+unchanged. All 88 `REQUIRED_SYMBOLS` resolve and `missing_symbols` stays empty. No public API change.
+
 ## [0.3.1] - 2026-07-14
 
 ### Typed thread and memory caps for Lean subprocesses

@@ -16,7 +16,7 @@ capability you need.
 
 ## Supported Lean window
 
-Currently **4.26.0 through 4.32.0**; the authoritative list lives in
+Currently **4.26.0 through 4.33.0-rc1**; the authoritative list lives in
 [`crates/lean-rs-abi/src/supported.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs).
 The build script computes a SHA-256 digest over the discovered `lean.h` and accepts any digest matching an entry in the
 [`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) table.

@@ -25,13 +25,14 @@ run_cmd do
       hints := .abbrev
       safety := .safe
     }
-  let addCoreDecl (decl : Declaration) : CoreM Unit := do
-    let env ← getEnv
-    let env ← ofExceptKernelException <| env.addDeclCore 0 decl none
-    setEnv env
   let privateName := mkPrivateNameCore `LeanRsFixture.SourceRanges (ns ++ `privateSynthetic)
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (ns ++ `syntheticNoRange) 0
-  Lean.Elab.Command.liftCoreM <| addCoreDecl <| mkDef privateName 1
+  -- `addDecl` (not the lower-level `Environment.addDeclCore`) so this compiles
+  -- across the whole supported window: 4.33.0-rc1 inserted a second `USize`
+  -- parameter into `addDeclCore`, breaking a positional call. `addDecl` adds
+  -- the same private synthetic constant with no source range, exactly as for
+  -- the sibling declarations below.
+  Lean.Elab.Command.liftCoreM <| addDecl <| mkDef privateName 1
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (.num (ns ++ `generatedFixture) 0) 1
   Lean.Elab.Command.liftCoreM <| addDecl <| mkDef (ns ++ `_internalFixture) 2
 

@@ -45,7 +45,7 @@ env:
   RUST_BACKTRACE: 1
   # Head of the supported Lean window — the publish verify build runs against
   # it, mirroring release.yml's publish job. Keep in lockstep with release.yml.
-  LEAN_VERSION_HEAD: "4.32.0"
+  LEAN_VERSION_HEAD: "4.33.0-rc1"
 
 jobs:
   recover:
