@@ -1,12 +1,8 @@
 {
-  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.26.0 — multi-toolchain sweep on 2026-05-18 surfaced an L2 refcount-path divergence on 4.25.x and earlier.",
+  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.27.0 — 4.26.0 was dropped on 2026-07-19 because it no longer builds the bundled lean-rs-host shim (missing ContextInfo.cmdEnv? / String.trimAscii and an Environment.addDecl-path type mismatch).",
   "captured_on": "aarch64-apple-darwin",
   "captured_date": "2026-05-30",
   "entries": [
-    {
-      "versions": ["4.26.0"],
-      "header_digest": "e0ea3efaccceb5b75c7e9e1ab92952c8aa85c3faee28ee949dfeb8ab428ad218"
-    },
     {
       "versions": ["4.27.0"],
       "header_digest": "42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13"

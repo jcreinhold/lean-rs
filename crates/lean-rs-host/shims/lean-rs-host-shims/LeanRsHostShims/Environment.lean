@@ -317,7 +317,7 @@ def sessionImport (searchPaths : Array String) (importNames : Array String) : IO
   -- Lean 4.30 enforces what earlier releases tolerated: `loadExts := true`
   -- requires `enableInitializersExecution` to have been called first, or
   -- `importModules` throws `IO.userError`. The flag is idempotent and
-  -- present on every toolchain in the supported window (4.26+), so we
+  -- present on every toolchain in the supported window (4.27+), so we
   -- call it unconditionally rather than version-branching.
   runSessionImport searchPaths importNames false true .private Options.empty
 

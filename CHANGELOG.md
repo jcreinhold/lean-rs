@@ -7,11 +7,11 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [0.3.2] - 2026-07-19
+## [0.4.0] - 2026-07-19
 
 ### Supported Lean toolchain window: add 4.33.0-rc1
 
-Lean 4.33.0-rc1 joins `SUPPORTED_TOOLCHAINS` as the new head of the window (now 4.26.0 through 4.33.0-rc1). It ships a
+Lean 4.33.0-rc1 joins `SUPPORTED_TOOLCHAINS` as the new head of the window (now 4.27.0 through 4.33.0-rc1). It ships a
 *new* `lean.h` digest, but the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside
 the opaque `lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access.
 `_Atomic(T)` for a lock-free scalar/pointer keeps `T`'s size and alignment, so a layout probe against both headers
@@ -26,6 +26,16 @@ keeps its signature across the whole window: `lean-rs-host`'s host shim (`hostCh
 `Kernel.Environment.addDecl` on `Environment.toKernelEnv`, and the `lean-rs` test fixture uses the standard `addDecl`
 `CoreM` helper. The change is byte-layout- and behavior-preserving on the existing window (local sweep: 4.33.0-rc1 and
 4.32.0 each 710 tests passing).
+
+### Supported Lean toolchain window: drop 4.26.0
+
+The window's lower bound moves from 4.26.0 to **4.27.0**. A full-matrix CI sweep surfaced that 4.26.0 no longer builds
+the bundled `lean-rs-host` shim on either platform: it lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and
+rejects an `Environment` add-declaration call on a type mismatch the current shim sources rely on. Rather than
+reintroduce version-conditional shim code for the oldest release, 4.26.0 is removed from `SUPPORTED_TOOLCHAINS`. The
+`lean-rs` C-ABI surface is unchanged; the dylib/initializer loader still probes the legacy `≤ 4.26` Lake naming shape,
+so out-of-window 4.26 toolchains keep loading even though they are no longer part of the tested window. Every remaining
+entry (4.27.0 through 4.33.0-rc1) passed the full `{ubuntu, macos}` matrix.
 
 ## [0.3.1] - 2026-07-14
 

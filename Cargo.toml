@@ -9,17 +9,17 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jcreinhold/lean-rs"
 rust-version = "1.91"
-version = "0.3.2"
+version = "0.4.0"
 
 [workspace.dependencies]
-lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.3.2" }
-lean-rs = { path = "crates/lean-rs", version = "0.3.2" }
-lean-rs-host = { path = "crates/lean-rs-host", version = "0.3.2" }
-lean-rs-interop-shims = { path = "crates/lean-rs/shims/lean-rs-interop-shims", version = "0.3.2" }
-lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.3.2" }
-lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.3.2" }
-lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.3.2" }
-lean-toolchain = { path = "crates/lean-toolchain", version = "0.3.2" }
+lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.4.0" }
+lean-rs = { path = "crates/lean-rs", version = "0.4.0" }
+lean-rs-host = { path = "crates/lean-rs-host", version = "0.4.0" }
+lean-rs-interop-shims = { path = "crates/lean-rs/shims/lean-rs-interop-shims", version = "0.4.0" }
+lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.4.0" }
+lean-rs-worker-parent = { path = "crates/lean-rs-worker-parent", version = "0.4.0" }
+lean-rs-worker-protocol = { path = "crates/lean-rs-worker-protocol", version = "0.4.0" }
+lean-toolchain = { path = "crates/lean-toolchain", version = "0.4.0" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 fs4 = "1.1"

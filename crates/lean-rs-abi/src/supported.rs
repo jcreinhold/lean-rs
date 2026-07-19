@@ -40,20 +40,16 @@ impl SupportedToolchain {
 ///
 /// Ordered by the first `versions` entry. To add a new toolchain, follow
 /// the checklist in `docs/bump-toolchain.md`.
-// Lower bound of the window is **4.26.0**, not 4.23.0. Empirical
-// verification (multi-toolchain sweep on 2026-05-18) showed that Lean
-// ≤ 4.25.x crashes inside `lean_dec_ref_cold` from the service layer—
-// a refcount-path divergence between 4.25 and 4.26 that the current
-// mirrors do not cover. Narrowing the window to the empirically green
-// range (4.26.0 → current head) is the honest v0.1.0 promise; reopening
-// the lower bound is its own follow-up (investigate the 4.25→4.26
-// refcount divergence).
+// Lower bound of the window is **4.27.0**. The prior 4.26.0 lower bound
+// was dropped on 2026-07-19: a full-matrix sweep showed 4.26.0 no longer
+// builds the bundled `lean-rs-host` shim on either CI platform—it lacks
+// `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects a
+// call in `Environment.lean` on a type mismatch the shim sources now
+// rely on. Rather than reintroduce version-conditional shim code for the
+// oldest release, the window starts at 4.27.0 (upper bound 4.25.x is
+// excluded by the same refcount divergence that has always bounded it—
+// ≤ 4.25.x crashes inside `lean_dec_ref_cold` from the service layer).
 pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
-    SupportedToolchain {
-        versions: &["4.26.0"],
-        header_digest: "e0ea3efaccceb5b75c7e9e1ab92952c8aa85c3faee28ee949dfeb8ab428ad218",
-        missing_symbols: &[],
-    },
     SupportedToolchain {
         versions: &["4.27.0"],
         header_digest: "42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13",

@@ -12,7 +12,6 @@ is the single source of truth; this document mirrors it for narrative context. A
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
-| 4.26.0 | `e0ea3efaccce…` |
 | 4.27.0 | `42255d180910…` |
 | 4.28.0 | `624726e5f1f1…` |
 | 4.28.1 | `648ecfb615ef…` |
@@ -30,10 +29,13 @@ Digests are shown as 12-character prefixes; the full SHA-256 for each row lives 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
 
-**Lower bound: 4.26.0.** A 2026-05-18 multi-toolchain sweep
-([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1. The six
-releases from 4.26.0 onwards pass clean (242 tests each, 0 failures); releases ≤ 4.25.x SIGSEGV inside
-`lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta). The 4.30.0 row replaced the 4.30.0-rc2 row
+**Lower bound: 4.27.0.** Originally 4.26.0: a 2026-05-18 multi-toolchain sweep
+([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1, and releases
+≤ 4.25.x SIGSEGV inside `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta) while 4.26.0+ passed.
+The lower bound was raised to **4.27.0 on 2026-07-19**: a full-matrix sweep showed 4.26.0 no longer builds the bundled
+`lean-rs-host` shim on either CI platform (it lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects
+an `Environment` add-declaration call on a type mismatch the current shim sources rely on). Rather than reintroduce
+version-conditional shim code for the oldest release, 4.26.0 was dropped from the window. The 4.30.0 row replaced the 4.30.0-rc2 row
 on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The 4.31.0-rc1 row
 was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h` byte-identical in
 the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a byte-identical
@@ -61,9 +63,10 @@ layout is preserved.
   initializer protocol—at any point in the window is a contract change. Stop; do not paper over the ABI change with
   brittle wrappers.
 
-**Lake naming conventions.** Two coexist in the window. The [dylib loader](../../crates/lean-rs/src/module/library.rs)
-and the [Lake-project discovery](../../crates/lean-rs-host/src/host/lake.rs) probe both so Rust code is
-convention-agnostic.
+**Lake naming conventions.** The current window (4.27.0+) uses only the `≥ 4.27` convention, but the
+[dylib loader](../../crates/lean-rs/src/module/library.rs) and the
+[Lake-project discovery](../../crates/lean-rs-host/src/host/lake.rs) still probe both shapes so Rust code stays
+convention-agnostic and the legacy `≤ 4.26` form keeps working for out-of-window toolchains.
 
 | Lean range | Dylib filename | Initializer symbol |
 | --- | --- | --- |
