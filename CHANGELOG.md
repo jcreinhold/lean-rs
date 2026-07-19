@@ -7,7 +7,7 @@ inside `pub(crate)` modules are not part of the public API and are excluded from
 The supported Lean toolchain range, Rust MSRV, and tested platforms for each release are recorded in
 [`docs/version-matrix.md`](docs/version-matrix.md); release-time procedure is in [`docs/release.md`](docs/release.md).
 
-## [Unreleased]
+## [0.3.2] - 2026-07-19
 
 ### Supported Lean toolchain window: add 4.33.0-rc1
 
@@ -17,6 +17,15 @@ the opaque `lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that
 `_Atomic(T)` for a lock-free scalar/pointer keeps `T`'s size and alignment, so a layout probe against both headers
 reports byte-identical size, alignment, and field offsets for all ten mirrored structs; `lean-rs-sys/src/repr.rs` is
 unchanged. All 88 `REQUIRED_SYMBOLS` resolve and `missing_symbols` stays empty. No public API change.
+
+### Bundled Lean shim/fixture sources: portable kernel-add call
+
+4.33.0-rc1 inserted a second `USize` parameter into `Environment.addDeclCore`, breaking a positional call in two
+package-owned Lean sources bundled with the crates. Both are repointed to the version-stable kernel entry point, which
+keeps its signature across the whole window: `lean-rs-host`'s host shim (`hostCheckEvidence`) re-checks evidence via
+`Kernel.Environment.addDecl` on `Environment.toKernelEnv`, and the `lean-rs` test fixture uses the standard `addDecl`
+`CoreM` helper. The change is byte-layout- and behavior-preserving on the existing window (local sweep: 4.33.0-rc1 and
+4.32.0 each 710 tests passing).
 
 ## [0.3.1] - 2026-07-14
 
