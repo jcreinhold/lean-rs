@@ -319,6 +319,20 @@ structure ProofAttemptEnvelope where
   candidates : Array ProofAttemptRow
   candidateLimit : Nat
   candidatesTruncated : Bool
+  /-- Goal state at the resolved proof position before any candidate ran — the
+      selected tactic's `goalsBefore`, i.e. the state the proof-position query
+      reports as `goalsBefore` at the same position (the goal a candidate for
+      the *next* step must close). Rendered once per batch through the same
+      machinery as the proof-position query; empty when the entry state is
+      degraded or unresolvable (resolution failure or the source-text
+      fallback), never an error. -/
+  entryGoals : Array RenderedInfo
+  /-- Local hypotheses at the resolved proof position, collected once per batch
+      with `LocalsRendering.pretty` (the proof-position query's default) from
+      the same `goalsBefore` state as `entryGoals` — identical to what the
+      proof-position query reports as `locals` at the same position. Empty
+      under the same conditions as `entryGoals`. -/
+  locals : Array LocalInfo
   deriving Inhabited
 
 inductive ProofAttemptOutcome where
@@ -1918,7 +1932,7 @@ private def SelectedTactic.ofSpan? (placement : TacticPlacement) (span : ModuleS
   if h : 0 < span.startColumn then some { span, placement, colPos := h } else none
 
 private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarget) :
-    IO (Except String (SelectedTactic × Option DeclarationTargetInfo × Option ProofPositionSummary)) := do
+    IO (Except String (SelectedTactic × Option DeclarationTargetInfo × Option ProofPositionSummary × Option TacticCandidate)) := do
   match edit with
   | .declaration name selector =>
     match declarationTargetByName snapshot.candidates name with
@@ -1929,16 +1943,18 @@ private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarge
       match selectProofPosition snapshot.document positions selector with
       | some pos =>
         match SelectedTactic.ofSpan? (selectorPlacement selector) pos.tactic.span with
-        | some sel => pure <| .ok (sel, some decl.info, some pos.summary)
+        | some sel => pure <| .ok (sel, some decl.info, some pos.summary, some pos.tactic)
         | none => pure <| .error "selected proof position is at an invalid column"
       | none =>
         match selector with
         | .afterText text occurrence? =>
           match sourceTextProofPosition? snapshot.document decl text occurrence? with
           | some (span, summary) =>
-            -- The source-text fallback always splices after the matched text.
+            -- The source-text fallback always splices after the matched text. It
+            -- carries no elaborated tactic state, so the envelope's entry goals
+            -- and locals come out empty for this path.
             match SelectedTactic.ofSpan? .after span with
-            | some sel => pure <| .ok (sel, some decl.info, some summary)
+            | some sel => pure <| .ok (sel, some decl.info, some summary, none)
             | none => pure <| .error "selected proof position is at an invalid column"
           | none => pure <| .error "declaration has no proof position matching the selector"
         | _ => pure <| .error "declaration has no proof position matching the selector"
@@ -2150,8 +2166,29 @@ private def attemptEnvelope
           proofPosition := none,
           outputTruncated := (renderStringBoundedWith request.budgets.perFieldBytes candidate.text).truncated
         }
-    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
-  | .ok (selected, declaration, proofPosition) =>
+    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated,
+           entryGoals := #[], locals := #[] }
+  | .ok (selected, declaration, proofPosition, entry?) =>
+    -- Render the entry state once per batch: the selected tactic's pre-state
+    -- (`goalsBefore`), exactly what the proof-position query reports as
+    -- `goalsBefore` and `locals` at the same position, through the same
+    -- `renderGoals` / `collectGoalLocals` machinery and its default `.pretty`
+    -- locals mode. A degraded entry state, or the source-text fallback that
+    -- carries no tactic state, yields empty arrays — never an error, and never
+    -- blocks the attempt itself.
+    let (entryGoals, locals) ← match entry? with
+      | some entryCandidate =>
+        if tacticCandidateDegraded entryCandidate then
+          pure (#[], #[])
+        else do
+          let (rendered, _, _) ←
+            renderGoals entryCandidate.ctx entryCandidate.mctxBefore entryCandidate.goalsBefore
+              request.budgets.perFieldBytes.toUSize 0
+          let entryLocals ←
+            collectGoalLocals .pretty request.budgets.perFieldBytes entryCandidate.ctx
+              entryCandidate.mctxBefore entryCandidate.goalsBefore
+          pure (renderedGoalInfos rendered request.budgets.perFieldBytes, entryLocals)
+      | none => pure (#[], #[])
     let mut rows : Array ProofAttemptRow := #[]
     let mut spent : Nat := 0
     for candidate in candidates do
@@ -2178,7 +2215,8 @@ private def attemptEnvelope
         else
           rows := rows.push row
           spent := spent + bytes
-    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated }
+    pure { candidates := rows, candidateLimit := proofCandidateLimit, candidatesTruncated,
+           entryGoals, locals }
 
 private def containsSubstr (text needle : String) : Bool :=
   (text.splitOn needle).length > 1

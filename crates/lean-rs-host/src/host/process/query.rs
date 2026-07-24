@@ -187,6 +187,19 @@ pub struct ProofAttemptEnvelope {
     pub candidates: Vec<ProofAttemptRow>,
     pub candidate_limit: u32,
     pub candidates_truncated: bool,
+    /// Goal state at the resolved proof position before any candidate ran —
+    /// the selected tactic's `goals_before`, identical to what the
+    /// proof-position query reports as `goals_before` at the same position,
+    /// rendered once per batch by the shim. Empty when the entry state is
+    /// degraded or unresolvable (resolution failure or the source-text
+    /// fallback).
+    pub entry_goals: Vec<RenderedInfo>,
+    /// Local hypotheses at the resolved proof position, rendered once per
+    /// batch with the proof-position query's pretty locals mode from the same
+    /// `goals_before` state — identical to what the proof-position query
+    /// reports as `locals` at the same position. Empty under the same
+    /// conditions as `entry_goals`.
+    pub locals: Vec<LocalInfo>,
 }
 
 /// Header-aware proof attempt outcome.
@@ -1130,11 +1143,14 @@ impl<'lean> TryFromLean<'lean> for ProofAttemptRow {
 impl<'lean> TryFromLean<'lean> for ProofAttemptEnvelope {
     fn try_from_lean(obj: Obj<'lean>) -> lean_rs::LeanResult<Self> {
         let candidates_truncated = bool_tail(&obj, 0, "ProofAttemptEnvelope.candidatesTruncated")?;
-        let [candidates, candidate_limit] = take_ctor_objects::<2>(obj, 0, "ProofAttemptEnvelope")?;
+        let [candidates, candidate_limit, entry_goals, locals] =
+            take_ctor_objects::<4>(obj, 0, "ProofAttemptEnvelope")?;
         Ok(Self {
             candidates: Vec::<ProofAttemptRow>::try_from_lean(candidates)?,
             candidate_limit: u32::try_from_lean(candidate_limit)?,
             candidates_truncated,
+            entry_goals: Vec::<RenderedInfo>::try_from_lean(entry_goals)?,
+            locals: Vec::<LocalInfo>::try_from_lean(locals)?,
         })
     }
 }

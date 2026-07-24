@@ -1866,6 +1866,8 @@ pub struct lean_rs_host::host::process::ProofAttemptEnvelope
 pub lean_rs_host::host::process::ProofAttemptEnvelope::candidate_limit: u32
 pub lean_rs_host::host::process::ProofAttemptEnvelope::candidates: alloc::vec::Vec<lean_rs_host::ProofAttemptRow>
 pub lean_rs_host::host::process::ProofAttemptEnvelope::candidates_truncated: bool
+pub lean_rs_host::host::process::ProofAttemptEnvelope::entry_goals: alloc::vec::Vec<lean_rs_host::host::process::RenderedInfo>
+pub lean_rs_host::host::process::ProofAttemptEnvelope::locals: alloc::vec::Vec<lean_rs_host::host::process::LocalInfo>
 impl core::clone::Clone for lean_rs_host::ProofAttemptEnvelope
 pub fn lean_rs_host::ProofAttemptEnvelope::clone(&self) -> lean_rs_host::ProofAttemptEnvelope
 impl core::fmt::Debug for lean_rs_host::ProofAttemptEnvelope
@@ -3310,6 +3312,8 @@ pub struct lean_rs_host::host::ProofAttemptEnvelope
 pub lean_rs_host::host::ProofAttemptEnvelope::candidate_limit: u32
 pub lean_rs_host::host::ProofAttemptEnvelope::candidates: alloc::vec::Vec<lean_rs_host::ProofAttemptRow>
 pub lean_rs_host::host::ProofAttemptEnvelope::candidates_truncated: bool
+pub lean_rs_host::host::ProofAttemptEnvelope::entry_goals: alloc::vec::Vec<lean_rs_host::host::process::RenderedInfo>
+pub lean_rs_host::host::ProofAttemptEnvelope::locals: alloc::vec::Vec<lean_rs_host::host::process::LocalInfo>
 impl core::clone::Clone for lean_rs_host::ProofAttemptEnvelope
 pub fn lean_rs_host::ProofAttemptEnvelope::clone(&self) -> lean_rs_host::ProofAttemptEnvelope
 impl core::fmt::Debug for lean_rs_host::ProofAttemptEnvelope
@@ -5049,6 +5053,8 @@ pub struct lean_rs_host::ProofAttemptEnvelope
 pub lean_rs_host::ProofAttemptEnvelope::candidate_limit: u32
 pub lean_rs_host::ProofAttemptEnvelope::candidates: alloc::vec::Vec<lean_rs_host::ProofAttemptRow>
 pub lean_rs_host::ProofAttemptEnvelope::candidates_truncated: bool
+pub lean_rs_host::ProofAttemptEnvelope::entry_goals: alloc::vec::Vec<lean_rs_host::host::process::RenderedInfo>
+pub lean_rs_host::ProofAttemptEnvelope::locals: alloc::vec::Vec<lean_rs_host::host::process::LocalInfo>
 impl core::clone::Clone for lean_rs_host::ProofAttemptEnvelope
 pub fn lean_rs_host::ProofAttemptEnvelope::clone(&self) -> lean_rs_host::ProofAttemptEnvelope
 impl core::fmt::Debug for lean_rs_host::ProofAttemptEnvelope
