@@ -2154,6 +2154,353 @@ end Outer
     );
 }
 
+/// Inline source exercising every declaration form the candidate scan
+/// catalogued late: multi-clause equation `def` and `theorem`, a
+/// `where`-structure def, a `structure`, a `class`, and an anonymous
+/// `instance` (plus a named instance as the pre-existing control).
+const SCAN_FORMS_SOURCE: &str = "\
+namespace ScanForms
+
+structure Point where
+  x : Nat
+  y : Nat
+
+class Default (\u{3b1} : Type) where
+  value : \u{3b1}
+
+def multi : Nat \u{2192} Nat
+  | 0 => 0
+  | k + 1 => multi k + 1
+
+theorem zeroOrSucc : \u{2200} n : Nat, n = 0 \u{2228} \u{2203} k, n = k + 1
+  | 0 => Or.inl rfl
+  | k + 1 => Or.inr \u{27e8}k, rfl\u{27e9}
+
+def origin : Point where
+  x := 0
+  y := 0
+
+instance : Default Point := \u{27e8}origin\u{27e9}
+
+instance namedDefault : Default Nat := \u{27e8}0\u{27e9}
+
+def multiBy : Nat \u{2192} Nat \u{2192} Nat
+  | 0 => fun x => x
+  | k + 1 => by
+      intro x
+      exact x + k
+
+end ScanForms
+";
+
+/// Drive the declaration outline over `source` and return the rows.
+#[cfg(test)]
+fn outline_rows(source: &str) -> Vec<crate::host::process::DeclarationTargetInfo> {
+    use crate::host::process::{
+        DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+        ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let outcome = session
+        .process_module_query_batch(
+            source,
+            &[ModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok declaration-outline outcome, got {outcome:?}");
+    };
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("expected one Ok outline item, got {:?}", result.items);
+    };
+    let ModuleQueryBatchResult::DeclarationOutline(DeclarationOutlineResult {
+        declarations,
+        truncated,
+    }) = result.as_ref()
+    else {
+        panic!("expected declaration-outline result, got {result:?}");
+    };
+    assert!(!truncated, "default budget should not truncate this outline");
+    declarations.clone()
+}
+
+#[test]
+fn declaration_outline_covers_multi_clause_where_structure_class_and_anonymous_instance() {
+    let declarations = outline_rows(SCAN_FORMS_SOURCE);
+    let rows: Vec<(&str, &str)> = declarations
+        .iter()
+        .map(|declaration| (declaration.short_name.as_str(), declaration.declaration_kind.as_str()))
+        .collect();
+    for expected in [
+        ("Point", "structure"),
+        ("Default", "class"),
+        ("multi", "def"),
+        ("zeroOrSucc", "theorem"),
+        ("origin", "def"),
+        ("namedDefault", "instance"),
+    ] {
+        assert!(
+            rows.contains(&expected),
+            "outline should contain {expected:?}, got {rows:?}"
+        );
+    }
+    let anonymous = declarations
+        .iter()
+        .find(|declaration| {
+            declaration.declaration_kind == "instance" && declaration.declaration_name.contains("instDefaultPoint")
+        })
+        .unwrap_or_else(|| panic!("anonymous instance should be catalogued under its generated name, got {rows:?}"));
+    assert!(
+        anonymous.declaration_name.starts_with("ScanForms.instDefaultPoint"),
+        "generated instance name resolves in its namespace: {anonymous:?}"
+    );
+    // Every row keeps a distinct name/body span.
+    for declaration in &declarations {
+        assert_ne!(
+            declaration.name_span, declaration.body_span,
+            "row should carry distinct name and body spans: {declaration:?}"
+        );
+    }
+    // The multi-clause def's body span covers both equation clauses.
+    let multi = declarations
+        .iter()
+        .find(|declaration| declaration.short_name == "multi")
+        .expect("multi row");
+    assert!(
+        multi.body_span.end_line > multi.body_span.start_line,
+        "multi-clause body span covers more than one source line: {:?}",
+        multi.body_span
+    );
+}
+
+#[test]
+fn declaration_target_resolves_the_new_scan_forms_by_name() {
+    use crate::host::process::{
+        DeclarationTargetResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
+        ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let selectors: Vec<ModuleQuerySelector> = [
+        ("target-structure", "ScanForms.Point"),
+        ("target-class", "ScanForms.Default"),
+        ("target-multi", "ScanForms.multi"),
+        ("target-theorem", "ScanForms.zeroOrSucc"),
+        ("target-where", "ScanForms.origin"),
+        ("target-instance", "ScanForms.namedDefault"),
+    ]
+    .into_iter()
+    .map(|(id, name)| ModuleQuerySelector::DeclarationTarget {
+        id: id.to_owned(),
+        name: Some(name.to_owned()),
+        line: None,
+        column: None,
+    })
+    .collect();
+    let outcome = session
+        .process_module_query_batch(
+            SCAN_FORMS_SOURCE,
+            &selectors,
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok declaration-target outcome, got {outcome:?}");
+    };
+    for item in &result.items {
+        let ModuleQueryBatchItem::Ok { id, result } = item else {
+            panic!("expected Ok declaration-target item, got {item:?}");
+        };
+        let ModuleQueryBatchResult::DeclarationTarget(DeclarationTargetResult::Target(_)) = result.as_ref() else {
+            panic!("{id} should resolve to a target, got {result:?}");
+        };
+    }
+}
+
+#[test]
+fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
+    use crate::host::process::{
+        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
+        DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let targets = [
+        "ScanForms.multi",
+        "ScanForms.zeroOrSucc",
+        "ScanForms.origin",
+        "ScanForms.Point",
+        "ScanForms.Default",
+    ]
+    .into_iter()
+    .map(|name| crate::host::process::DeclarationVerificationBatchItem {
+        id: name.to_owned(),
+        target: DeclarationVerificationTarget::Name { name: name.to_owned() },
+    })
+    .collect();
+    let request = DeclarationVerificationBatchRequest {
+        source: SCAN_FORMS_SOURCE.to_owned(),
+        targets,
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    for row in &results {
+        assert_eq!(
+            row.status,
+            DeclarationVerificationStatus::Accepted,
+            "{} should verify by name instead of returning not_found",
+            row.id
+        );
+    }
+}
+
+#[test]
+fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
+    use crate::host::process::{
+        DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
+        DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+
+    // Phase 1: the outline reports the generated name the kernel recorded.
+    let declarations = outline_rows(SCAN_FORMS_SOURCE);
+    let generated = &declarations
+        .iter()
+        .find(|declaration| declaration.declaration_name.contains("instDefaultPoint"))
+        .expect("anonymous instance is catalogued")
+        .declaration_name;
+
+    // Phase 2: verifying that name reaches the declaration, exactly what the
+    // kan-proofs field report could not do.
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let request = DeclarationVerificationBatchRequest {
+        source: SCAN_FORMS_SOURCE.to_owned(),
+        targets: vec![crate::host::process::DeclarationVerificationBatchItem {
+            id: "anon".to_owned(),
+            target: DeclarationVerificationTarget::Name {
+                name: generated.clone(),
+            },
+        }],
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: false,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("host stack reports no exception");
+    let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
+        panic!("expected Ok batch outcome, got {outcome:?}");
+    };
+    let [row] = results.as_slice() else {
+        panic!("expected one verification row, got {results:?}");
+    };
+    assert_eq!(
+        row.status,
+        DeclarationVerificationStatus::Accepted,
+        "anonymous instance verifies under its generated name {generated}"
+    );
+}
+
+#[test]
+fn surrounding_and_proof_state_work_inside_a_multi_clause_definition() {
+    use crate::host::process::{
+        ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
+        ModuleQuerySelector, ProofStateResult, SurroundingDeclarationResult,
+    };
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    // Line 29 is the `intro x` tactic inside the second equation clause of
+    // `multiBy` (1-based): a tactic block nested in a multi-clause def.
+    let outcome = session
+        .process_module_query_batch(
+            SCAN_FORMS_SOURCE,
+            &[
+                ModuleQuerySelector::SurroundingDeclaration {
+                    id: "surrounding".to_owned(),
+                    line: 29,
+                    column: 7,
+                },
+                ModuleQuerySelector::ProofStateInDeclaration {
+                    id: "proof-state".to_owned(),
+                    declaration: "ScanForms.multiBy".to_owned(),
+                    position: crate::host::process::ProofPositionSelector::Default,
+                    locals_raw: false,
+                },
+            ],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("host stack reports no exception");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
+        panic!("expected Ok outcome, got {outcome:?}");
+    };
+    let [surrounding, proof_state] = result.items.as_slice() else {
+        panic!("expected two items, got {:?}", result.items);
+    };
+    let ModuleQueryBatchItem::Ok {
+        result: surrounding_result,
+        ..
+    } = surrounding
+    else {
+        panic!("expected Ok surrounding item, got {surrounding:?}");
+    };
+    let ModuleQueryBatchResult::SurroundingDeclaration(SurroundingDeclarationResult::Declaration(info)) =
+        surrounding_result.as_ref()
+    else {
+        panic!("clause cursor should land inside a declaration, got {surrounding_result:?}");
+    };
+    assert_eq!(info.declaration_name, "ScanForms.multiBy");
+    let ModuleQueryBatchItem::Ok {
+        result: proof_state_result,
+        ..
+    } = proof_state
+    else {
+        panic!("expected Ok proof-state item, got {proof_state:?}");
+    };
+    assert!(
+        matches!(
+            proof_state_result.as_ref(),
+            ModuleQueryBatchResult::ProofState(ProofStateResult::State { .. })
+        ),
+        "proof state resolves inside a multi-clause def, got {proof_state_result:?}"
+    );
+}
+
 #[test]
 fn declaration_outline_returns_rows_alongside_diagnostics() {
     use crate::host::process::{

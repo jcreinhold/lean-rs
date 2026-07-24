@@ -861,6 +861,11 @@ private def declarationKeyword (stx : Syntax) : String :=
     "lemma"
   else if stx.getKind == ``Lean.Parser.Command.instance then
     "instance"
+  else if stx.getKind == ``Lean.Parser.Command.«structure» then
+    -- stx[0] is a named-parser node (`structureTk`/`classTk`) wrapping the
+    -- leading atom, not the atom itself, so the generic fallback below
+    -- cannot see it.
+    if stx.getNumArgs > 0 && stx[0].getKind == ``Lean.Parser.Command.classTk then "class" else "structure"
   else if stx.getNumArgs > 0 && stx[0].isAtom then
     stx[0].getAtomVal
   else
@@ -873,7 +878,11 @@ private def catalogDeclarationSyntax? (stx : Syntax) : Option Syntax :=
         inner.getKind == ``Lean.Parser.Command.definition ||
         inner.getKind == ``Lean.Parser.Command.abbrev ||
         inner.getKind == ``Lean.Parser.Command.opaque ||
-        inner.getKind == ``Lean.Parser.Command.instance then
+        inner.getKind == ``Lean.Parser.Command.instance ||
+        -- `class` shares the `«structure»` node kind (Command.lean: the
+        -- `(structureTk <|> classTk)` leading atom); `declarationKeyword`
+        -- already distinguishes them.
+        inner.getKind == ``Lean.Parser.Command.«structure» then
       some inner
     else
       none
@@ -884,9 +893,24 @@ private def catalogDeclarationSyntax? (stx : Syntax) : Option Syntax :=
 
 private partial def declarationBodySyntax? (stx : Syntax) : Option Syntax :=
   if stx.getKind == ``Lean.Parser.Command.instance && stx.getNumArgs >= 6 then
+    -- The instance case returns the whole `declVal` node, so multi-clause and
+    -- `where`-structure instance bodies are already covered by the node span.
     some stx[5]
   else if stx.getKind == ``Lean.Parser.Command.declValSimple && stx.getNumArgs >= 2 then
     some stx[1]
+  else if stx.getKind == ``Lean.Parser.Command.declValEqns then
+    -- Multi-clause equation definitions and theorems: the node spans every
+    -- `| pat => expr` clause, so the sorry/admit scan and the tactic
+    -- candidate search see the whole body.
+    some stx
+  else if stx.getKind == ``Lean.Parser.Command.whereStructInst then
+    -- `where`-structure definitions: the node spans every field initializer.
+    some stx
+  else if stx.getKind == ``Lean.Parser.Command.«structure» then
+    -- stx[3] is `optional ((":=" <|> " where ") >> optional structCtor >>
+    -- structFields)`: the field region. A field-less structure leaves it a
+    -- null node, so fall back to the whole command.
+    if stx.getNumArgs >= 4 && stx[3].getNumArgs > 0 then some stx[3] else some stx
   else
     stx.getArgs.findSome? declarationBodySyntax?
 
@@ -898,26 +922,39 @@ private structure DeclarationCandidate where
 private def fullDeclarationName (namespaceName shortName : Name) : Name :=
   if namespaceName.isAnonymous then shortName else namespaceName ++ shortName
 
+/-- `declRangeExt` stores Lean `Position`s (1-based lines, 0-based columns);
+    `ModuleSourceSpan` is 1-based in both coordinates (`rangeOfStx` adds one to
+    each column). Convert before comparing — a raw comparison never matches,
+    which kept every caller on its fallback name. -/
 private def declarationRangeMatchesSpan (range : DeclarationRange) (span : ModuleSourceSpan) : Bool :=
   range.pos.line == span.startLine &&
-    range.pos.column == span.startColumn &&
+    range.pos.column + 1 == span.startColumn &&
     range.endPos.line == span.endLine &&
-    range.endPos.column == span.endColumn
+    range.endPos.column + 1 == span.endColumn
 
+/-- Resolve the kernel-recorded name for a declaration whose syntax-level
+    name may be mangled (`private`) or absent (anonymous `instance`), by
+    matching `declRangeExt` selection ranges against the name span.
+
+    Every file-local constant is scanned: a command-level `ContextInfo`
+    carries the *post-command* environment in both `env` and `cmdEnv?`
+    (`Lean.Elab.Command.mkInfoTree` assigns `s.env` to both), so a
+    "not yet in `env`" newness filter can never match on this path — the
+    generated name is already present. The unique exact-span match is the
+    real discriminator; zero or multiple matches fall back to the caller. -/
 private def resolvedDeclarationName? (ctx : ContextInfo) (nameSpan : ModuleSourceSpan) : Option Name := do
   let commandEnv ← ctx.cmdEnv?
   Id.run do
     let mut matched : Array Name := #[]
     for (name, _) in commandEnv.constants.map₂ do
-      if !ctx.env.contains name then
-        let ranges? :=
-          declRangeExt.find? (level := .exported) commandEnv name <|>
-            declRangeExt.find? (level := .server) commandEnv name
-        match ranges? with
-        | some ranges =>
-          if declarationRangeMatchesSpan ranges.selectionRange nameSpan then
-            matched := matched.push name
-        | none => pure ()
+      let ranges? :=
+        declRangeExt.find? (level := .exported) commandEnv name <|>
+          declRangeExt.find? (level := .server) commandEnv name
+      match ranges? with
+      | some ranges =>
+        if declarationRangeMatchesSpan ranges.selectionRange nameSpan then
+          matched := matched.push name
+      | none => pure ()
     match matched with
     | #[name] => some name
     | _ => none
@@ -926,19 +963,35 @@ private def commandDeclaration? (doc : SourceDocument) (ctx : ContextInfo) (stx 
     IO (Option DeclarationCandidate) := do
   let some declStx := catalogDeclarationSyntax? stx | return none
   let nameStx := declIdNameStx declStx
-  if !nameStx.isIdent then
-    return none
   let some bodyStx := declarationBodySyntax? declStx | return none
   let some declarationSpanBody := doc.syntaxSpan? declStx | return none
   let some nameSpanBody := doc.syntaxSpan? nameStx | return none
   let some bodySpanBody := doc.syntaxSpan? bodyStx | return none
-  let shortName := nameStx.getId
   let namespaceName := ctx.currNamespace
   let nameSpan := doc.bodySpanToFile nameSpanBody
-  let fullName := (resolvedDeclarationName? ctx nameSpan).getD (fullDeclarationName namespaceName shortName)
+  let (shortName, fullName) ←
+    if nameStx.isIdent then
+      let shortName := nameStx.getId
+      let fullName := (resolvedDeclarationName? ctx nameSpan).getD
+        (fullDeclarationName namespaceName shortName)
+      pure (shortName.toString, fullName.toString)
+    else
+      -- Anonymous instance: `declIdNameStx` fell back to the `instance`
+      -- keyword atom. On v4.33.0-rc1 `declRangeExt` records the generated
+      -- `inst…` name with its selection range on exactly that keyword (probe
+      -- recorded in results/09-declaration-candidate-completeness.md), so a
+      -- unique span match yields the honest kernel name. Without one there is
+      -- no honest name — drop the candidate rather than mis-name it.
+      match resolvedDeclarationName? ctx nameSpan with
+      | some resolved =>
+        let shortName := match resolved with
+          | .str _ s => s
+          | _ => resolved.toString
+        pure (shortName, resolved.toString)
+      | none => return none
   let info : DeclarationTargetInfo := {
-    shortName := shortName.toString
-    declarationName := fullName.toString
+    shortName
+    declarationName := fullName
     namespaceName := namespaceName.toString
     declarationKind := declarationKeyword declStx
     declarationSpan := doc.bodySpanToFile declarationSpanBody
