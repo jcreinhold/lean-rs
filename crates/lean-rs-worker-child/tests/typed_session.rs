@@ -1475,6 +1475,121 @@ fn attempt_proof_successful_candidate_closes_simple_goal() {
             .all(|diagnostic| !diagnostic.message.contains("unexpected token '/--'")),
         "candidate overlay must not corrupt the following docstring"
     );
+    assert!(
+        !result.entry_goals.is_empty(),
+        "resolved attempt must carry the entry goals once per envelope: {:?}",
+        result.entry_goals
+    );
+    assert!(
+        result.entry_goals.iter().any(|goal| goal.value.contains("True")),
+        "entry goals at the default position are the pristine `True` goal: {:?}",
+        result.entry_goals
+    );
+    assert!(
+        result.locals.is_empty(),
+        "the pristine goal of a hypothesis-free theorem has no locals: {:?}",
+        result.locals
+    );
+}
+
+#[test]
+fn attempt_proof_envelope_entry_state_carries_goals_and_locals() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/entry-state.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source:
+            "import Lean\n\ntheorem t : ∀ n : Nat, n + 0 = n := by\n  intro n\n  show n + 0 = n\n  exact Nat.add_zero n\n"
+                .to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            // The `show n + 0 = n` tactic: its pre-state has `n` in scope.
+            position: LeanWorkerProofPositionSelector::Index { index: 2 },
+        },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "exact".to_owned(),
+            text: "exact Nat.add_zero n".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("attempt_proof dispatch succeeds");
+
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(result.candidates[0].status, LeanWorkerProofAttemptStatus::Closed);
+    assert!(
+        !result.entry_goals.is_empty(),
+        "resolved attempt must carry the entry goals once per envelope: {:?}",
+        result.entry_goals
+    );
+    assert!(
+        result.entry_goals.iter().any(|goal| goal.value.contains("n + 0 = n")),
+        "entry goals must be the selected tactic's pre-state: {:?}",
+        result.entry_goals
+    );
+    assert!(
+        result.locals.iter().any(|local| local.name == "n"),
+        "entry locals must include the hypothesis in scope at the position: {:?}",
+        result.locals
+    );
+    let local = result
+        .locals
+        .iter()
+        .find(|local| local.name == "n")
+        .expect("entry locals include n");
+    assert!(
+        local.type_str.value.contains("Nat"),
+        "entry locals carry the rendered hypothesis type: {local:?}"
+    );
+}
+
+#[test]
+fn attempt_proof_bad_selector_yields_empty_entry_state() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/attempt/bad-selector.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerProofAttemptRequest {
+        source: "import Lean\n\ntheorem t : True := by\n  trivial\n".to_owned(),
+        edit: LeanWorkerProofEditTarget::Declaration {
+            name: "t".to_owned(),
+            position: LeanWorkerProofPositionSelector::Index { index: 99 },
+        },
+        candidates: vec![LeanWorkerProofCandidate {
+            id: "trivial".to_owned(),
+            text: "trivial".to_owned(),
+        }],
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .attempt_proof(&request, &opts, None, None)
+        .expect("attempt_proof dispatch succeeds");
+
+    let LeanWorkerProofAttemptResult::Ok { result, .. } = result else {
+        panic!("expected Ok proof attempt, got {result:?}");
+    };
+    assert!(
+        result.entry_goals.is_empty() && result.locals.is_empty(),
+        "resolution failure must yield empty entry goals and locals: {:?}",
+        (result.entry_goals, result.locals)
+    );
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(
+        result.candidates[0].status,
+        LeanWorkerProofAttemptStatus::Failed,
+        "resolution failure keeps the existing all-failed candidate rows"
+    );
 }
 
 #[test]

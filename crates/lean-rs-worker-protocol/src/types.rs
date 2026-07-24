@@ -853,6 +853,17 @@ pub struct LeanWorkerProofAttemptEnvelope {
     pub candidates: Vec<LeanWorkerProofAttemptRow>,
     pub candidate_limit: u32,
     pub candidates_truncated: bool,
+    /// Goal state at the resolved proof position before any candidate ran,
+    /// rendered once per batch by the child. Empty when the entry state is
+    /// degraded or unresolvable. Additive field: frames written before this
+    /// field existed deserialize with an empty vector via `#[serde(default)]`.
+    #[serde(default)]
+    pub entry_goals: Vec<LeanWorkerRenderedInfo>,
+    /// Local hypotheses at the resolved proof position, rendered once per
+    /// batch by the child with the proof-position query's pretty locals mode.
+    /// Same additive-field compatibility rule as `entry_goals`.
+    #[serde(default)]
+    pub locals: Vec<LeanWorkerLocalInfo>,
 }
 
 /// Header-aware proof attempt outcome.

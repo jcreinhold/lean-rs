@@ -2533,6 +2533,8 @@ fn proof_attempt_envelope_wire(envelope: ProofAttemptEnvelope) -> LeanWorkerProo
         candidates: envelope.candidates.into_iter().map(proof_attempt_row_wire).collect(),
         candidate_limit: envelope.candidate_limit,
         candidates_truncated: envelope.candidates_truncated,
+        entry_goals: envelope.entry_goals.into_iter().map(rendered_info_wire).collect(),
+        locals: envelope.locals.into_iter().map(local_info_wire).collect(),
     }
 }
 

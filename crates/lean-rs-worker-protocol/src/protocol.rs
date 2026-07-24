@@ -690,17 +690,17 @@ mod tests {
         LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
         LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
-        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerModuleCacheStatus,
-        LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem,
-        LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult, LeanWorkerModuleQueryCacheFacts,
-        LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult, LeanWorkerModuleQuerySelector,
-        LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan, LeanWorkerOutputBudgets,
-        LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
-        LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus, LeanWorkerProofBoundaryCandidate,
-        LeanWorkerProofCandidate, LeanWorkerProofEditTarget, LeanWorkerProofPositionSelector,
-        LeanWorkerProofPositionSummary, LeanWorkerProofStateResult, LeanWorkerRenderedInfo, LeanWorkerRendering,
-        LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy, LeanWorkerSourceCoordinateSpace,
-        LeanWorkerSourceRange, LeanWorkerTypeAtResult,
+        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerLocalInfo,
+        LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+        LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
+        LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
+        LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSourceSpan,
+        LeanWorkerOutputBudgets, LeanWorkerProofAttemptEnvelope, LeanWorkerProofAttemptRequest,
+        LeanWorkerProofAttemptResult, LeanWorkerProofAttemptRow, LeanWorkerProofAttemptStatus,
+        LeanWorkerProofBoundaryCandidate, LeanWorkerProofCandidate, LeanWorkerProofEditTarget,
+        LeanWorkerProofPositionSelector, LeanWorkerProofPositionSummary, LeanWorkerProofStateResult,
+        LeanWorkerRenderedInfo, LeanWorkerRendering, LeanWorkerResourceExhaustedFacts, LeanWorkerSorryPolicy,
+        LeanWorkerSourceCoordinateSpace, LeanWorkerSourceRange, LeanWorkerTypeAtResult,
     };
 
     fn raw_json(value: &serde_json::Value) -> Box<RawValue> {
@@ -1429,6 +1429,22 @@ mod tests {
                     ],
                     candidate_limit: 16,
                     candidates_truncated: false,
+                    entry_goals: vec![LeanWorkerRenderedInfo {
+                        value: "⊢ True".to_owned(),
+                        truncated: false,
+                    }],
+                    locals: vec![LeanWorkerLocalInfo {
+                        name: "h".to_owned(),
+                        binder_info: "explicit".to_owned(),
+                        type_str: LeanWorkerRenderedInfo {
+                            value: "True".to_owned(),
+                            truncated: false,
+                        },
+                        value: Some(LeanWorkerRenderedInfo {
+                            value: "True.intro".to_owned(),
+                            truncated: false,
+                        }),
+                    }],
                 },
             },
         });
@@ -1436,6 +1452,21 @@ mod tests {
         write_frame(&mut bytes, response.clone(), MAX_FRAME_BYTES).expect("proof attempt response writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("proof attempt response reads");
         assert_eq!(frame.message, response);
+    }
+
+    #[test]
+    fn proof_attempt_envelope_legacy_frame_without_entry_state_defaults_to_empty() {
+        // Frames written before the envelope carried `entry_goals`/`locals`
+        // must still deserialize: both fields default to empty vectors.
+        let legacy = serde_json::json!({
+            "candidates": [],
+            "candidate_limit": 16,
+            "candidates_truncated": false,
+        });
+        let envelope: LeanWorkerProofAttemptEnvelope =
+            serde_json::from_value(legacy).expect("legacy envelope frame deserializes");
+        assert!(envelope.entry_goals.is_empty());
+        assert!(envelope.locals.is_empty());
     }
 
     #[test]

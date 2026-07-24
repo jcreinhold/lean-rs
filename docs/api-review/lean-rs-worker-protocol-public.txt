@@ -2446,6 +2446,8 @@ pub struct lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
 pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidate_limit: u32
 pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidates: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerProofAttemptRow>
 pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::candidates_truncated: bool
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::entry_goals: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerRenderedInfo>
+pub lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::locals: alloc::vec::Vec<lean_rs_worker_protocol::types::LeanWorkerLocalInfo>
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
 pub fn lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope::clone(&self) -> lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
 impl core::cmp::Eq for lean_rs_worker_protocol::types::LeanWorkerProofAttemptEnvelope
