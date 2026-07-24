@@ -9,6 +9,45 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-24
+
+### Attempt envelopes carry the pre-candidate entry state
+
+`ProofAttemptEnvelope` (lean-rs-host) gains `entry_goals` and `locals`: the goal state and local
+hypotheses at the resolved proof position *before* any candidate was spliced, rendered once per
+batch with the existing `renderGoals`/`collectGoalLocals` machinery instead of being discarded by
+`resolveEditTarget`. A client's trial loop no longer needs a separate proof-state query per step.
+Degraded or unresolvable entry state yields empty arrays, never errors. The Lean-side constructor
+appends both fields (positional decode order preserved; decode bumped to 4 fields), and
+`resolveEditTarget` now also returns the resolved `TacticCandidate`.
+
+`LeanWorkerProofAttemptEnvelope` (lean-rs-worker-protocol) gains the matching `entry_goals` and
+`locals` wire fields with `#[serde(default)]`, so older frames decode with empty arrays; the
+worker child maps them through with no frame-codec or parent-side change.
+
+Both are additive struct fields and therefore semver-breaking for struct-literal constructors;
+that is what this minor bump carries.
+
+### Declaration-candidate scan: four syntax forms no longer dropped
+
+The host shim's declaration-candidate scan — shared by the declaration outline, by-name
+`declarationTarget`, surrounding-declaration, proof-state-in-declaration, and by-name
+verification — catalogued only `theorem`/`definition`/`abbrev`/`opaque`/`instance` with
+`declValSimple` bodies, so it returned `not_found` for declarations the kernel knows. It now
+also catalogs `«structure»` (which the toolchain parser shares with `class`), accepts
+`declValEqns` bodies (multi-clause equation `def`s **and** theorems) and `whereStructInst`
+bodies (`where`-structure defs) with the whole node as the body span, and resolves anonymous
+`instance`s under their generated `inst…` names: on the supported toolchain `declRangeExt`
+records the generated name's selection range on the `instance` keyword itself, so the scan
+matches by that span and drops the candidate only when no unique name resolves.
+
+Two latent defects in the name resolver are fixed at the root: a newness filter that could never
+fire (command-level `ContextInfo` carries the post-command environment in both fields), and a
+span comparison that mixed 0-based `declRangeExt` columns with the shim's 1-based columns.
+`private` declarations now report the resolved mangled name the outline always documented,
+instead of the namespace-plus-short-name fallback. No wire-shape change; outline and target
+results only gain rows.
+
 ## [0.4.0] - 2026-07-19
 
 ### Supported Lean toolchain window: add 4.33.0-rc1
