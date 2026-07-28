@@ -163,7 +163,7 @@ fn reopening_an_identical_session_does_not_import_again() {
     assert_eq!(worker.stats().requests, 2);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn the_snapshot_cache_survives_a_reuse() {
     assert_eq!(worker.stats().imports, 1);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn switching_back_to_a_pooled_import_set_does_not_reimport() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// Two live environments must never answer for one another.
@@ -269,7 +269,7 @@ fn a_pooled_sibling_in_another_mode_never_answers_from_the_wrong_environment() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// `LEAN_RS_WORKER_SESSION_POOL_CAPACITY=1` is the rollback lever, so it is
@@ -306,7 +306,7 @@ fn capacity_one_restores_the_pre_pool_child() {
     assert_eq!(worker.stats().imports, 3);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// An alternation that fits the pool never evicts at all.
@@ -337,7 +337,7 @@ fn an_alternation_that_fits_the_pool_never_evicts() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// The bound `max_imports` exists to enforce cannot be silently skipped when
@@ -388,7 +388,7 @@ fn a_mispredicted_reuse_restarts_before_the_next_import() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 #[test]
@@ -472,7 +472,7 @@ fn a_reused_session_carries_no_state_from_the_previous_one() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 #[test]
@@ -499,7 +499,7 @@ fn max_imports_does_not_restart_on_an_identical_reopen() {
     assert_eq!(stats.imports, 1);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// The memory statement the rest of this file only implies: repeated identical
@@ -558,7 +558,7 @@ fn repeated_identical_opens_do_not_grow_the_child() {
     assert_eq!(worker.stats().imports, 1);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// Alternating two pooled profiles costs less than one import, total.
@@ -638,7 +638,7 @@ fn alternating_two_pooled_profiles_does_not_grow_the_child() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 // -- staleness: an environment left behind by a later registration -------
@@ -749,7 +749,7 @@ fn a_late_extension_registration_never_reaches_a_pooled_environment() {
     assert_eq!(stats.exits, 0);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
     assert!(!exit.diagnostics.contains(EXTENSION_PANIC), "{}", exit.diagnostics);
 }
 
@@ -783,7 +783,7 @@ fn a_late_extension_registration_evicts_the_pooled_environment() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
     assert!(!exit.diagnostics.contains(EXTENSION_PANIC), "{}", exit.diagnostics);
 }
 
@@ -816,7 +816,7 @@ fn an_import_that_registers_nothing_leaves_the_pool_intact() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// The rollback lever was never exposed to staleness and still is not: at
@@ -843,7 +843,7 @@ fn capacity_one_is_unaffected_by_staleness_eviction() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
     assert!(!exit.diagnostics.contains(EXTENSION_PANIC), "{}", exit.diagnostics);
 }
 
@@ -894,7 +894,7 @@ fn a_staleness_eviction_does_not_disable_the_reuse_hint() {
     assert_eq!(stats.restarts, 0);
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 // -- capacity: the eviction path that used to be unreachable --------------
@@ -948,7 +948,7 @@ fn a_full_pool_evicts_least_recently_used_and_re_imports() {
     assert_eq!(worker.stats().restarts, 0, "capacity eviction is not a restart");
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 #[test]
@@ -963,7 +963,7 @@ fn a_pool_with_room_serves_the_return_without_importing() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// Eviction discards the process-global snapshot cache, including entries built
@@ -989,7 +989,8 @@ fn a_capacity_eviction_clears_the_snapshot_cache() {
         LeanWorkerModuleCacheStatus::Miss,
         "the evicted environment's snapshot must go with it"
     );
-    assert!(evicting.shutdown().expect("worker terminates").exit.success);
+    let exit = evicting.shutdown().expect("worker terminates").exit;
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 
     // The control, so the assertion above is about eviction and not about
     // opening other sessions at all.
@@ -1006,7 +1007,8 @@ fn a_capacity_eviction_clears_the_snapshot_cache() {
         LeanWorkerModuleCacheStatus::Hit,
         "without an eviction there is nothing to clear"
     );
-    assert!(roomy.shutdown().expect("worker terminates").exit.success);
+    let exit = roomy.shutdown().expect("worker terminates").exit;
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// The decoupling itself: a generous import bound must not buy pool capacity.
@@ -1021,7 +1023,8 @@ fn pool_capacity_is_independent_of_the_import_restart_bound() {
         3,
         "with no explicit capacity the bound still supplies one, and 16 is room enough"
     );
-    assert!(derived.shutdown().expect("worker terminates").exit.success);
+    let exit = derived.shutdown().expect("worker terminates").exit;
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 
     let mut explicit =
         LeanWorker::spawn(&worker_config().restart_policy(policy).session_pool_capacity(2)).expect("worker starts");
@@ -1031,7 +1034,8 @@ fn pool_capacity_is_independent_of_the_import_restart_bound() {
         "capacity 2 must bind even though the import bound is 16"
     );
     assert_eq!(explicit.stats().restarts, 0);
-    assert!(explicit.shutdown().expect("worker terminates").exit.success);
+    let exit = explicit.shutdown().expect("worker terminates").exit;
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
 
 /// The rollback lever stays reachable: an embedder that names the variable
@@ -1053,5 +1057,5 @@ fn an_explicit_child_environment_outranks_the_configured_capacity() {
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;
-    assert!(exit.success);
+    assert!(exit.success, "child shutdown failed: {exit:?}");
 }
