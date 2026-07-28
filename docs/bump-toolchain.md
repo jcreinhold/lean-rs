@@ -102,6 +102,18 @@ Commit message: `Add Lean X.Y.Z to the supported toolchain window`. PR descripti
 - The step 6 summary.
 - Any `missing_symbols` updates and why.
 
+## Dropping a Lean release from the supported window
+
+The mirror of the add path: remove the entry (or version) from `SUPPORTED_TOOLCHAINS`, from
+[`crates/lean-rs-sys/digests/manifest.json`](../crates/lean-rs-sys/digests/manifest.json), from the full-matrix
+`include` list in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), and from
+[`docs/version-matrix.md`](version-matrix.md) and the window text in `README.md`, the crate READMEs,
+[`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md), and
+[`docs/release.md`](release.md). Record *why* in the comment above `SUPPORTED_TOOLCHAINS` and in the lower-bound
+paragraph of `02-versioning-and-compatibility.md`, with the verification evidence (a symbol probe, a failed sweep).
+A drop that corrects a support claim the runtime never delivered (the claimed versions already fail) is a patch;
+a drop of versions that genuinely worked is breaking and bumps the minor.
+
 ## When the bump fails
 
 A test failure on the new version does **not** justify pinning around it with brittle wrappers or version-specific

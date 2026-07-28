@@ -9,6 +9,20 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.6.1]
+
+### Removed
+
+- **Dropped Lean 4.27.0–4.29.1 from the supported toolchain window**; the lower bound is now **4.30.0**.
+  `libleanshared` in the dropped releases does not export
+  `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`, which the compiled
+  `lean-rs-host` shim dylib references through `Lean.collectAxioms` (present in the shims since v0.1.18), so the
+  mandatory host shim fails `dlopen` there — the window claimed support the runtime never delivered. Verified by
+  `nm -gU`: 4.29.1 exports zero `collectAndGet` symbols, 4.30.0 and later export four. Downstream hosts gating on
+  `WindowVerdict` (e.g. lean-host-mcp) now refuse these toolchains at the gate instead of failing the shim load at
+  session open. No API changes; the `SUPPORTED_TOOLCHAINS` table, its mirrors, and the CI full matrix lost the five
+  entries.
+
 ## [0.6.0]
 
 ### Pooled environments are no longer served after a later import registers an environment extension

@@ -8,15 +8,10 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-07-19:
+is the single source of truth; this document mirrors it for narrative context. As of 2026-07-28:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
-| 4.27.0 | `42255d180910…` |
-| 4.28.0 | `624726e5f1f1…` |
-| 4.28.1 | `648ecfb615ef…` |
-| 4.29.0 | `671683950ef4…` |
-| 4.29.1 | `2e481a0dac72…` |
 | 4.30.0 | `5a25125970f4…` |
 | 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
 | 4.31.0 | `486fe204404c…` |
@@ -29,13 +24,16 @@ Digests are shown as 12-character prefixes; the full SHA-256 for each row lives 
 Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
 is the [bump procedure](../bump-toolchain.md).
 
-**Lower bound: 4.27.0.** Originally 4.26.0: a 2026-05-18 multi-toolchain sweep
+**Lower bound: 4.30.0.** Originally 4.26.0: a 2026-05-18 multi-toolchain sweep
 ([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1, and releases ≤
 4.25.x SIGSEGV inside `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta) while 4.26.0+ passed.
-The lower bound was raised to **4.27.0 on 2026-07-19**: a full-matrix sweep showed 4.26.0 no longer builds the bundled
-`lean-rs-host` shim on either CI platform (it lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects
-an `Environment` add-declaration call on a type mismatch the current shim sources rely on). Rather than reintroduce
-version-conditional shim code for the oldest release, 4.26.0 was dropped from the window. The 4.30.0 row replaced the
+The bound was raised to **4.27.0 on 2026-07-19** when 4.26.0 stopped building the bundled `lean-rs-host` shim (it
+lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects an `Environment` add-declaration call on a
+type mismatch the shim sources rely on), and to **4.30.0 on 2026-07-28**: `libleanshared` in 4.27.0–4.29.1 does not
+export `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`, which the compiled host
+shim dylib references through `Lean.collectAxioms` (in the shims since v0.1.18), so the mandatory shim fails
+`dlopen` on those releases — the window had claimed support the runtime never delivered. Verified by `nm -gU`:
+4.29.1 exports zero `collectAndGet` symbols; 4.30.0 and later export four. The 4.30.0 row replaced the
 4.30.0-rc2 row on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The
 4.31.0-rc1 row was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h`
 byte-identical in the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a
@@ -63,7 +61,7 @@ audited byte layout is preserved.
   initializer protocol—at any point in the window is a contract change. Stop; do not paper over the ABI change with
   brittle wrappers.
 
-**Lake naming conventions.** The current window (4.27.0+) uses only the `≥ 4.27` convention, but the
+**Lake naming conventions.** The current window (4.30.0+) uses only the `≥ 4.27` convention, but the
 [dylib loader](../../crates/lean-rs/src/module/library.rs) and the
 [Lake-project discovery](../../crates/lean-rs-host/src/host/lake.rs) still probe both shapes so Rust code stays
 convention-agnostic and the legacy `≤ 4.26` form keeps working for out-of-window toolchains.

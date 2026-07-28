@@ -1,46 +1,38 @@
 {
-  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.27.0 — 4.26.0 was dropped on 2026-07-19 because it no longer builds the bundled lean-rs-host shim (missing ContextInfo.cmdEnv? / String.trimAscii and an Environment.addDecl-path type mismatch).",
+  "_comment": "Captured digests for the supported Lean toolchain window. The authoritative table is `crate::supported::SUPPORTED_TOOLCHAINS`; this file is a human-readable mirror used by docs and `scripts/test-all-toolchains.sh`. To add a row, follow `docs/bump-toolchain.md`. Lower bound is 4.30.0 \u2014 4.27.0\u20134.29.1 were dropped on 2026-07-28 because their libleanshared does not export the CollectAxioms.collectAndGet symbol the compiled lean-rs-host shim dylib references, so the mandatory host shim fails dlopen there (4.26.0 was dropped earlier, on 2026-07-19, for shim build failures).",
   "captured_on": "aarch64-apple-darwin",
   "captured_date": "2026-05-30",
   "entries": [
     {
-      "versions": ["4.27.0"],
-      "header_digest": "42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13"
-    },
-    {
-      "versions": ["4.28.0"],
-      "header_digest": "624726e5f1f10fd77cd95b8fe8f30389312e57c8fc98e6c2f1989289bdb5fb0e"
-    },
-    {
-      "versions": ["4.28.1"],
-      "header_digest": "648ecfb615ef0222cd63b5f1bbbc379a06749bc0f5f4c2eb16ffca26fd18fe81"
-    },
-    {
-      "versions": ["4.29.0"],
-      "header_digest": "671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c"
-    },
-    {
-      "versions": ["4.29.1"],
-      "header_digest": "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc"
-    },
-    {
-      "versions": ["4.30.0"],
+      "versions": [
+        "4.30.0"
+      ],
       "header_digest": "5a25125970f4f1dcf85a4c403463b387a8ff93535cd4a3054cafdee1759017d7"
     },
     {
-      "versions": ["4.31.0-rc1", "4.31.0-rc2"],
+      "versions": [
+        "4.31.0-rc1",
+        "4.31.0-rc2"
+      ],
       "header_digest": "99ef35d69709e38caf836cf9ebbdf94d4474801e04157b8a72622dbdc653ec87"
     },
     {
-      "versions": ["4.31.0"],
+      "versions": [
+        "4.31.0"
+      ],
       "header_digest": "486fe204404c0fdfb753b7e089c1c0d38fbdb396206030497696165e31218992"
     },
     {
-      "versions": ["4.32.0-rc1", "4.32.0"],
+      "versions": [
+        "4.32.0-rc1",
+        "4.32.0"
+      ],
       "header_digest": "22eed50aa703c4403010fabc12a7231ffa34dc979bd59ca1bfbac13c29a1dad2"
     },
     {
-      "versions": ["4.33.0-rc1"],
+      "versions": [
+        "4.33.0-rc1"
+      ],
       "header_digest": "9018878554c5552ff3754865780d21825c2d0c5c4b47491b37bf6fe046adcd56"
     }
   ]

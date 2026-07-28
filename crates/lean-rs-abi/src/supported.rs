@@ -40,41 +40,17 @@ impl SupportedToolchain {
 ///
 /// Ordered by the first `versions` entry. To add a new toolchain, follow
 /// the checklist in `docs/bump-toolchain.md`.
-// Lower bound of the window is **4.27.0**. The prior 4.26.0 lower bound
-// was dropped on 2026-07-19: a full-matrix sweep showed 4.26.0 no longer
-// builds the bundled `lean-rs-host` shim on either CI platform—it lacks
-// `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects a
-// call in `Environment.lean` on a type mismatch the shim sources now
-// rely on. Rather than reintroduce version-conditional shim code for the
-// oldest release, the window starts at 4.27.0 (upper bound 4.25.x is
-// excluded by the same refcount divergence that has always bounded it—
-// ≤ 4.25.x crashes inside `lean_dec_ref_cold` from the service layer).
+// Lower bound of the window is **4.30.0**. Releases 4.27.0–4.29.1 were
+// dropped on 2026-07-28: their `libleanshared` does not export
+// `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`,
+// which the compiled `lean-rs-host` shim dylib references through
+// `Lean.collectAxioms` (in the shims since v0.1.18), so the mandatory host
+// shim fails `dlopen` on those toolchains — the window claimed support the
+// runtime never had. Verified by `nm -gU`: 4.29.1 exports zero
+// `collectAndGet` symbols, 4.30.0 and later export four. The earlier 4.26.0
+// drop (2026-07-19) was for shim *build* failures; ≤ 4.25.x is excluded by
+// the refcount divergence that crashes inside `lean_dec_ref_cold`.
 pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
-    SupportedToolchain {
-        versions: &["4.27.0"],
-        header_digest: "42255d180910bb063d97c87cfb2a61550009ca9ceb6f495069c56bfaa6c92e13",
-        missing_symbols: &[],
-    },
-    SupportedToolchain {
-        versions: &["4.28.0"],
-        header_digest: "624726e5f1f10fd77cd95b8fe8f30389312e57c8fc98e6c2f1989289bdb5fb0e",
-        missing_symbols: &[],
-    },
-    SupportedToolchain {
-        versions: &["4.28.1"],
-        header_digest: "648ecfb615ef0222cd63b5f1bbbc379a06749bc0f5f4c2eb16ffca26fd18fe81",
-        missing_symbols: &[],
-    },
-    SupportedToolchain {
-        versions: &["4.29.0"],
-        header_digest: "671683950ef412474bede2c6a2b50aecf4f99bc29e1ddaf2222ee54ad4ffb91c",
-        missing_symbols: &[],
-    },
-    SupportedToolchain {
-        versions: &["4.29.1"],
-        header_digest: "2e481a0dac7215eb16123eaef97298ae5a6d0bd0c28c534c2818e2d2f2a28efc",
-        missing_symbols: &[],
-    },
     SupportedToolchain {
         versions: &["4.30.0"],
         header_digest: "5a25125970f4f1dcf85a4c403463b387a8ff93535cd4a3054cafdee1759017d7",
