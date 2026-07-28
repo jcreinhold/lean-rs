@@ -30,26 +30,26 @@ Lean does not always bump `lean.h` between point releases; rows that share a hea
 is the [bump procedure](../bump-toolchain.md).
 
 **Lower bound: 4.27.0.** Originally 4.26.0: a 2026-05-18 multi-toolchain sweep
-([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1, and releases
-≤ 4.25.x SIGSEGV inside `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta) while 4.26.0+ passed.
+([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1, and releases ≤
+4.25.x SIGSEGV inside `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta) while 4.26.0+ passed.
 The lower bound was raised to **4.27.0 on 2026-07-19**: a full-matrix sweep showed 4.26.0 no longer builds the bundled
 `lean-rs-host` shim on either CI platform (it lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects
 an `Environment` add-declaration call on a type mismatch the current shim sources rely on). Rather than reintroduce
-version-conditional shim code for the oldest release, 4.26.0 was dropped from the window. The 4.30.0 row replaced the 4.30.0-rc2 row
-on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The 4.31.0-rc1 row
-was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h` byte-identical in
-the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a byte-identical
-`lean.h`, so it shares the rc ABI-equivalence row. The final 4.31.0 release ships a *different* `lean.h` than its
-release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block; all 88
-symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate. The
-final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the same
-ABI-equivalence entry. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h` digest, but
-the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside the opaque `lean_task_imp`)
-and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access. `_Atomic(T)` for a lock-free
-scalar/pointer keeps `T`'s size and alignment, so a probe against both headers reports byte-identical size, alignment,
-and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS` resolve. The
-textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the audited byte
-layout is preserved.
+version-conditional shim code for the oldest release, 4.26.0 was dropped from the window. The 4.30.0 row replaced the
+4.30.0-rc2 row on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The
+4.31.0-rc1 row was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h`
+byte-identical in the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a
+byte-identical `lean.h`, so it shares the rc ABI-equivalence row. The final 4.31.0 release ships a *different* `lean.h`
+than its release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block;
+all 88 symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate.
+The final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the
+same ABI-equivalence entry. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h`
+digest, but the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside the opaque
+`lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access. `_Atomic(T)`
+for a lock-free scalar/pointer keeps `T`'s size and alignment, so a probe against both headers reports byte-identical
+size, alignment, and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS`
+resolve. The textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the
+audited byte layout is preserved.
 
 **Policy.**
 

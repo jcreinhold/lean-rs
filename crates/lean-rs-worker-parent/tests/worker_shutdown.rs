@@ -19,7 +19,8 @@ use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerCancellationToken, LeanWorkerCapabilityBuilder, LeanWorkerChild, LeanWorkerConfig,
     LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDeclarationVerificationBatchItem,
     LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationTarget, LeanWorkerError,
-    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerShutdownOutcome, LeanWorkerSorryPolicy,
+    LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerShutdownOutcome,
+    LeanWorkerSorryPolicy,
 };
 use lean_rs_worker_protocol::protocol::{
     DataRowEmitter, MAX_FRAME_BYTES, Message, PROTOCOL_VERSION, Request, Response, read_frame, write_frame,
@@ -38,6 +39,12 @@ use lean_toolchain::LeanBuiltCapability;
 use serde_json::value::RawValue;
 
 const FAKE_CHILD_ENV: &str = "LEAN_RS_WORKER_PARENT_FAKE_CHILD";
+
+/// Unreclaimable bytes the `residue_reporting` fake child attributes to each
+/// import. Small enough to keep the arithmetic in the tests legible; the policy
+/// only ever compares a running sum against a limit, so the magnitude is
+/// irrelevant to what is being pinned.
+const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 
 // Import-light conformance harness for the worker-parent runtime model.
 //
@@ -122,6 +129,14 @@ fn main() {
         (
             "conformance_pool_admission_refusal_is_explicit",
             conformance_pool_admission_refusal_is_explicit,
+        ),
+        (
+            "import_residue_accumulates_over_a_generation_and_resets_on_the_cycle",
+            import_residue_accumulates_over_a_generation_and_resets_on_the_cycle,
+        ),
+        (
+            "a_child_that_reports_no_region_bytes_is_counted_and_still_bounded",
+            a_child_that_reports_no_region_bytes_is_counted_and_still_bounded,
         ),
         (
             "declaration_outline_batch_selector_reaches_parent_session_path",
@@ -231,11 +246,18 @@ fn run_fake_child(mode: &str) {
                 import_profile,
                 ..
             } => {
+                let mut import_stats = fake_import_stats(imports, import_profile);
+                if mode == "residue_reporting" {
+                    // A child whose shim *does* attribute region bytes. The
+                    // default fake stats are the opposite case — modules in,
+                    // zero bytes out — which is what the unusable counter is for.
+                    import_stats.compacted_region_bytes = FAKE_IMPORT_RESIDUE_BYTES;
+                    import_stats.non_memory_mapped_region_bytes = FAKE_IMPORT_RESIDUE_BYTES;
+                    import_stats.imported_bytes = FAKE_IMPORT_RESIDUE_BYTES;
+                }
                 write_frame(
                     &mut stdout,
-                    Message::Response(Response::HostSessionOpened {
-                        import_stats: fake_import_stats(imports, import_profile),
-                    }),
+                    Message::Response(Response::HostSessionOpened { import_stats }),
                     MAX_FRAME_BYTES,
                 )
                 .expect("fake child writes session-open response");
@@ -1188,6 +1210,105 @@ fn conformance_pool_admission_refusal_is_explicit() -> Result<(), String> {
     assert_eq!(snapshot.cold_open_refusals, 1);
     assert_eq!(snapshot.refusal_reason.as_deref(), Some("max_workers"));
     assert!(trace.contains(&RuntimeTraceEvent::AdmissionRefused { reason: "max_workers" }));
+    Ok(())
+}
+
+/// The residue bound end to end against a child that reports region bytes:
+/// the running sum is what the parent acts on, and it is a *generation*
+/// quantity, so the replacement child starts from zero even though
+/// `LeanWorkerStats` is carried forward across the restart.
+fn import_residue_accumulates_over_a_generation_and_resets_on_the_cycle() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("import-residue")?;
+    // Three imports' worth. The check runs *before* a request, so the cycle
+    // lands on the open after the running sum reaches the limit, never on the
+    // import that carried it there.
+    let limit = FAKE_IMPORT_RESIDUE_BYTES * 3;
+    let mut capability = fixture
+        .builder("residue_reporting", ["Init"])?
+        .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(limit))
+        .open()
+        .map_err(|err| err.to_string())?;
+
+    // Opening the capability already imported once.
+    let opened = capability.lifecycle_snapshot();
+    assert_eq!(opened.import_residue_bytes, FAKE_IMPORT_RESIDUE_BYTES);
+    assert_eq!(opened.import_residue_limit_bytes, Some(limit));
+    assert_eq!(opened.worker_generation, 0);
+
+    for import in ["A", "B"] {
+        let _session = capability
+            .open_session_with_imports([import], None, None)
+            .map_err(|err| err.to_string())?;
+    }
+    let charged = capability.lifecycle_snapshot();
+    assert_eq!(charged.import_residue_bytes, limit);
+    assert_eq!(charged.worker_generation, 0, "reaching the limit is not itself a cycle");
+    assert_eq!(capability.stats().import_residue_restarts, 0);
+
+    // The next open is admitted only after the child is replaced, and the import
+    // it then performs is the new generation's first and only charge.
+    let _session = capability
+        .open_session_with_imports(["C"], None, None)
+        .map_err(|err| err.to_string())?;
+    let cycled = capability.lifecycle_snapshot();
+    assert_eq!(cycled.worker_generation, 1);
+    assert_eq!(
+        cycled.import_residue_bytes, FAKE_IMPORT_RESIDUE_BYTES,
+        "the budget is per generation, even though lifetime stats carry forward"
+    );
+    let stats = capability.stats();
+    assert_eq!(stats.import_residue_restarts, 1);
+    assert_eq!(stats.imports, 4, "the lifetime import count spans both generations");
+    assert_eq!(
+        stats.import_stats_unusable, 0,
+        "this child attributes region bytes, so nothing is unusable"
+    );
+    assert_eq!(
+        cycled
+            .last_restart_reason
+            .as_ref()
+            .map(LeanWorkerRestartReason::stable_cause),
+        Some("import_residue")
+    );
+    Ok(())
+}
+
+/// The degradation this design has to survive: a child whose shim reports
+/// modules but no region bytes. The byte bound can never fire, so it must be
+/// visible in the stats and the count backstop must still bound the child.
+fn a_child_that_reports_no_region_bytes_is_counted_and_still_bounded() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("import-residue-unusable")?;
+    let mut capability = fixture
+        .builder("normal", ["Init"])?
+        .restart_policy(
+            LeanWorkerRestartPolicy::default()
+                .max_import_residue_bytes(FAKE_IMPORT_RESIDUE_BYTES)
+                .max_imports(2),
+        )
+        .open()
+        .map_err(|err| err.to_string())?;
+
+    for import in ["A", "B", "C"] {
+        let _session = capability
+            .open_session_with_imports([import], None, None)
+            .map_err(|err| err.to_string())?;
+    }
+    let snapshot = capability.lifecycle_snapshot();
+    assert_eq!(snapshot.import_residue_bytes, 0, "nothing to accumulate");
+    assert_eq!(snapshot.worker_generation, 1, "the count backstop cycled the child");
+    assert_eq!(
+        snapshot
+            .last_restart_reason
+            .as_ref()
+            .map(LeanWorkerRestartReason::stable_cause),
+        Some("max_imports")
+    );
+    let stats = capability.stats();
+    assert_eq!(stats.import_residue_restarts, 0);
+    assert_eq!(
+        stats.import_stats_unusable, 4,
+        "every import — the capability's own plus the three here — reported modules with no bytes attributed to them"
+    );
     Ok(())
 }
 

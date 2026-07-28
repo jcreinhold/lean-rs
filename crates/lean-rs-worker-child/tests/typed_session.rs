@@ -2299,8 +2299,17 @@ fn process_module_query_batch_clear_evicts_snapshot() {
     assert_ne!(batch_facts(&after_clear).cache_status, LeanWorkerModuleCacheStatus::Hit);
 }
 
+/// A changed import set must never be answered from the previous
+/// environment's snapshot.
+///
+/// This used to read `Miss`, because switching imports dropped the old session
+/// and cleared the whole snapshot cache with it. The child now pools sessions,
+/// so the previous entry for this file is still there and the answer is
+/// `Rebuilt` — the key rejected it and it was recomputed. That is the same
+/// contract with better evidence: `Miss` could not distinguish "the key was
+/// respected" from "the cache happened to be empty".
 #[test]
-fn process_module_query_batch_changed_session_imports_miss() {
+fn process_module_query_batch_changed_session_imports_rebuilds() {
     ensure_fixture_built();
     let opts = LeanWorkerElabOptions::new().file_label("/cache/imports.lean");
     let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
@@ -2341,7 +2350,7 @@ fn process_module_query_batch_changed_session_imports_miss() {
             None,
         )
         .expect("changed-import batch succeeds");
-    assert_eq!(batch_facts(&outcome).cache_status, LeanWorkerModuleCacheStatus::Miss);
+    assert_eq!(batch_facts(&outcome).cache_status, LeanWorkerModuleCacheStatus::Rebuilt);
 }
 
 #[test]

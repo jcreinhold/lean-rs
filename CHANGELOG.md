@@ -9,43 +9,236 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Pooled environments are no longer served after a later import registers an environment extension
+
+`Lean.Environment.extensions` is sized exactly once, by `mkInitialExtensionStates` inside `finalizeImport`. Its only
+growth path, `EnvExtension.ensureExtensionsArraySize`, runs solely from `finalizePersistentExtensions` for the
+environment *being imported*, and both that helper and the `extensions` field are `private` — so an environment that
+outlives a `registerEnvExtension` has a permanently short array and **cannot be repaired**. Registration during import
+is ordinary rather than exotic: `Lean.initializing` is true for all of `importModules`, which is how every user
+`initialize` block and every `register_simp_attr` comes into existence.
+
+Serving a query from such an environment is not a degraded answer, it is a dead child. `ScopedEnvExtension.pushScope` /
+`popScope` / `setDelimitsLocal` / `activateScoped` walk the process-global `scopedEnvExtensionsRef` *without* filtering
+against the environment they are modifying, so every out-of-range slot reaches
+`panic! "invalid environment extension has been accessed"`. Their callers are ordinary elaboration: every `namespace`,
+every `section`, every `open … in`. Session pooling — in the worker child and in `SessionPool` alike — made this
+reachable by keeping environments alive across later imports.
+
+Both pools now record an extension-registration stamp at import and re-check it before reuse:
+
+- New mandatory host shim export `lean_rs_host_extension_registry_epoch`, summing three public append-only registries
+  (`persistentEnvExtensionsRef`, `scopedEnvExtensionsRef`, and `getNumBuiltinAttributes`) — the same signal Lean core
+  uses at `Environment.lean:1986`/`:1996`. Mandatory host shims are now 34, optional 13.
+- New `LeanSession::extension_registry_epoch` and `LeanSession::live_extension_registry_epoch`. The stamp is opaque and
+  monotone; only equality is meaningful.
+- The worker child sweeps its held sessions before any reuse decision and again after every import. A stale current
+  session falls through to the ordinary import path and reports `HostSessionOpened`, so the parent's import accounting
+  stays honest with **no new wire signal** and `PROTOCOL_VERSION` stays at 10.
+- `SessionPool` re-checks a matched entry against a live read before rewrapping it, and sweeps the free list with the
+  stamp already in hand. New `PoolStats::stale_evictions` and `PoolStats::miss_stale_environment`, and a new
+  `SessionPoolKeyMissReason::StaleEnvironment`.
+
+This means a pool can now evict **below capacity**. The direction only ever frees slots and lowers RSS, but "the pool
+never evicts" was previously stated as an invariant and is now a statement about capacity only.
+
+An import that registers nothing is untouched, which is the common case for a project whose modules carry no
+`initialize` blocks: no eviction, no re-import, no change.
+
+### A staleness eviction no longer disables the worker's reuse hint
+
+`LeanWorker` latches its reuse prediction off for the rest of a generation when it predicts a reuse, gets an import, and
+has never seen that child reuse anything — the signature of a pre-reuse worker binary. A staleness eviction produces
+exactly that signature on a healthy child, and so would any child whose first two import profiles differ in modules. The
+latch now additionally requires that the *immediately preceding* open used the same key, which is the one miss no
+eviction can produce: nothing imports between two consecutive identical opens, so the session cannot have gone stale and
+the LRU cannot have evicted its own most-recently-used entry. Without this the pool would be dead on arrival for such a
+child — every later open is admitted as `import_like`, so `max_imports` counts pool *hits*.
+
+### Import residue can be bounded in bytes instead of in imports
+
+`LeanWorkerRestartPolicy::max_imports` bounds the one quantity a child accumulates without bound, but in the wrong unit.
+An import's unreclaimable residue is its *whole closure*, not the delta against what is already loaded: `.olean`
+compacted regions are position-dependent and each `importModules` gets a fresh `ImportState`, so only the first import
+in a process is memory-mapped and every later one re-materializes even already-mapped modules as private dirty pages.
+Measured against real per-file headers from a Mathlib-scale project (five profiles per run, macOS `phys_footprint`), the
+first import costs 10–18 MB and each later one 2.0–4.5 GB — and five *near-identical* profiles cost 16.0 GiB where five
+unrelated ones cost 9.6 GiB, because overlap is exactly what gets re-copied. The same count of imports, 1.7× the memory.
+
+New `LeanWorkerRestartPolicy::max_import_residue_bytes` (`Option<u64>`, unset by default, so behaviour is unchanged for
+anyone who does not set it) accumulates `LeanWorkerImportStats::non_memory_mapped_region_bytes` across a generation and
+recycles the child when the running sum reaches the limit. That field was chosen by OLS through the origin against
+Δ`phys_footprint` (n = 12, first import of each process excluded): slope **1.091**, **R² = 0.962**.
+`compacted_region_bytes` (0.819), `total_imported_extension_entries` (0.822), and module count (0.827) all fail a ≥0.9
+bar. It also encodes "the first import is free" without a special case.
+
+- The residue check runs *before* the `max_imports` check, which remains as a pure backstop.
+- A single import can never restart before itself: the counter only advances on completed imports and the check runs
+  before the request, so a generation always performs at least one import even if that one exceeds the whole budget.
+- Only confirmed `HostSessionOpened` responses accumulate; a reuse adds nothing, exactly as with `max_imports`.
+- New `LeanWorkerRestartReason::ImportResidue { residue_bytes, limit_bytes }` (`stable_cause()` = `"import_residue"`),
+  new `LeanWorkerStats::import_residue_restarts` and `LeanWorkerStats::import_stats_unusable`, and new
+  `LeanWorkerLifecycleSnapshot::import_residue_bytes` / `import_residue_limit_bytes`.
+- A child that answers with `effective_module_count > 0` but all-zero region bytes advances `import_stats_unusable`, so
+  the degradation to the `max_imports` backstop is visible rather than silent.
+
+`LeanWorkerRestartReason` is now `#[non_exhaustive]` — the one breaking change, taken in the same commit as the variant
+that forces it. It is constructed only inside lean-rs. `PROTOCOL_VERSION` stays at 10.
+
+### Session pool capacity is a first-class knob, not a mirror of the restart bound
+
+The child's session pool capacity was derived from `max_imports`, which made the child's LRU eviction path **dead
+code**: the parent recycled the child exactly one open before the pool would have evicted the cheap way. New
+`LeanWorkerConfig::session_pool_capacity` (with builder methods on both worker builders) sets
+`LEAN_RS_WORKER_SESSION_POOL_CAPACITY` directly; unset, it still falls back to `max_imports`, so nothing changes for
+existing configurations. `reuse_hint_capacity()` follows the resolved capacity, so the parent's reuse prediction and the
+child's pool stay the same size by construction. An explicitly supplied child environment still wins over both.
+
+Holding an environment rather than dropping it costs about **70 MiB** — measured as 280 MiB for four extra held
+environments over the same workload — against 2.0–4.5 GB for the import it saves.
+
+Enabling the eviction path also enables the `clear_module_snapshot_cache()` call inside it, and Lean's snapshot cache is
+process-global and all-or-nothing, so a capacity eviction discards entries belonging to live sessions. This is
+self-limiting rather than mitigated: capacity eviction can only bind where `budget / residue-per-import > capacity`,
+i.e. where imports are small and the discarded snapshots are correspondingly cheap. At Mathlib scale the budget covers
+about four imports against a capacity of eight, so the loop never runs.
+
+### A child abort carries the exit status and the child's message
+
+`LeanWorkerRestartReason::ChildAbort` kept only the `operation` name. The child's stderr is drained exactly once, when
+the supervisor reaps the process, and retained nowhere else — so a consumer of the read-only verify/proof-state abort
+guard, which converts an abort into a degraded verdict rather than an error, saw `child_abort` and had no way to tell a
+Lean out-of-memory abort from a segfault from a protocol bug. The variant now carries `status` and `diagnostics`
+(trimmed, and truncated on the same budget as the `Display` rendering, since the reason is cloned onto every lifecycle
+snapshot that follows it).
+
+Breaking for exhaustive matchers on `ChildAbort`, which the enum's `#[non_exhaustive]` attribute does not cover for
+added *fields*. Nothing else changes; no wire-protocol change.
+
+A consumer that hit this immediately: `lean-host-mcp` traced an unexplained Mathlib-scale worker abort to a Lean heap
+ceiling set below its own import-residue budget, using nothing but the newly carried message.
+
+### Documented: the attribute map is import-history dependent
+
+`AttributeExtension.mkInitial` seeds each new environment's attribute map from the process-global `attributeMapRef`,
+which only ever grows, so a later environment accepts attribute syntax registered by modules only an earlier import
+brought in. It cannot make a proof unsound — the kernel never consults `attributeMapRef` — but it can let an elaboration
+succeed in a warm child and fail in the user's editor. It is not fixable at this layer (no unregister; registration is
+initialization-only), it predates pooling, and pooling neither amplifies nor relieves it. Recorded in
+[`docs/safety/long-session-memory.md`](docs/safety/long-session-memory.md) under "Process-global Lean state that is not
+memory", with `max_imports = 1` named as the only lever.
+
+### The worker child reuses a matching host session instead of re-importing
+
+`Request::OpenHostSession` was unconditional: it rebuilt host, capabilities, and session on every open, even when the
+live session already described the requested environment. Because each open runs a full `importModules` and
+`Environment.freeRegions` is unsound under `loadExts := true`, the imported regions were never reclaimable — a child's
+RSS grew with the *number of tool calls* rather than with the workload. Measured on the workspace fixture, eleven
+repeated identical opens cost about 2.9 GiB.
+
+The child now compares the request against the live session on `(project_root, mode, imports, import_profile)` — import
+order significant — and answers a match with the new `Response::HostSessionReused { import_stats }` without importing,
+leaving the retained module-snapshot cache reachable across the reopen. Host and capabilities are leaked once per
+distinct `(project_root, mode)` and shared by every session built from them, which bounds the previously per-open anchor
+leak to one per key per child process.
+
+On a mismatch, the child looks in a bounded pool of parked sessions before importing (see the next entry).
+
+`PROTOCOL_VERSION` is unchanged at 10 — the new response is an additive variant on a `#[non_exhaustive]` enum, and
+bumping the version would fail the handshake for every already installed worker binary. An older child never sends the
+new variant and keeps today's behaviour.
+
+Parent-side, `LeanWorker` predicts whether the next open will import and skips the `max_imports` admission check when it
+expects a reuse; without that, a `max_imports` user would restart the child immediately before the open that would not
+have imported. The prediction is only a hint — the child's answer decides what is counted, so `stats.imports`,
+`imports_since_restart`, and `last_session_open_import_elapsed` still measure imports rather than round trips, and a
+child that re-imports anyway is detected on its first disagreement and never predicted for again.
+
+**Behaviour change for existing callers:** the module-query cache key gains `project_root` and `import_profile`
+(`MODULE_QUERY_CACHE_API_VERSION` bumped to `…v2`): under reuse the same import names in a different project or profile
+resolve to different `.olean` files, and the previous clear-on-every-open hid their absence from the key.
+
+### The worker child pools imported sessions instead of dropping the outgoing one
+
+Reuse above removed the child's growth with call count; it did not stop the child re-importing on every *switch* of
+import profile, and it dropped the old environment first so that two would never coexist. That ordering turns out to buy
+nothing. Under `loadExts := true` an import's compacted regions survive the environment that owns them, so dropping
+reclaims essentially nothing — which the capacity-0 series in `docs/safety/long-session-memory.md` had already recorded
+without the consequence being drawn. Measured in fresh processes at a fixed import count by the new `pooled-distinct`
+arms of `examples/long_session_memory.rs`, holding N environments live costs 30–50 MB more than holding one and dropping
+N−1, against 0.8–1.0 GiB per import — 4–6% of a single import. At N=2 the same alternating workload falls from 8.82 GB
+and 8 imports to 1.68 GB and 2.
+
+The child now parks the outgoing session, MRU-ordered, and answers a later open for that key with
+`Response::HostSessionReused` and no import. Capacity is `LEAN_RS_WORKER_SESSION_POOL_CAPACITY`, which
+`LeanWorker::spawn` derives from `restart_policy.max_imports` unless the embedder sets it — so the parent cycles the
+child exactly where the pool would begin evicting, and one public knob governs both.
+`LEAN_RS_WORKER_SESSION_POOL_CAPACITY=1` reproduces the pre-pool child exactly. A failed open still leaves the child
+sessionless, but now leaves the pool intact, so the caller's retry on `worker_session_missing` may land on a key the
+pool still holds.
+
+`HostSessionMode` joins the module-query cache key (`MODULE_QUERY_CACHE_API_VERSION` bumped to `…v3`). The
+clear-on-every-mismatch that the pool removes is what previously hid its absence: with several live sessions, a
+`ShimsOnly` and a `Capability{..}` session over the same root, imports, and profile would otherwise answer from each
+other's environment. The snapshot cache is now cleared exactly when a session is *dropped* and never when one is merely
+parked.
+
+Parent-side, the reuse hint becomes a bounded MRU of session keys rather than a single key — with one key an alternating
+workload mispredicts every switch, and `max_imports` would restart the child immediately before the open that would not
+have imported. A mispredicted reuse is now ordinary pool staleness rather than proof that the child does not reuse, so
+the hint is only disabled permanently for a child that has never demonstrated reuse; a confirmed import that crosses
+`max_imports` while the check was skipped defers the restart to the next open, bounding the overshoot to exactly one
+import. Fixes a latent bug reachable today: `expect_reuse` was computed before `prepare_request`, so a restart for
+`max_requests`/`idle`/`max_rss_kib` made the following open necessarily import, which the parent read as "this child
+does not reuse sessions" and used to disable the hint for the rest of the generation.
+
+### Builders open a validation session only when they were told what to import
+
+`LeanWorkerHostHandleBuilder::open` and `LeanWorkerCapabilityBuilder::open` opened a session during startup purely to
+prove one could open. For a caller that names its imports per call — passing the builder an empty set and using
+`open_session_with_imports` — that session is never reused, so the open cost a full `importModules` whose unreclaimable
+regions, one pooled session slot, and one of `max_imports` stayed spent for the life of the child. A builder given no
+imports now opens none; a builder given imports still opens eagerly, because then the session it prepares is the one the
+caller's commands go on to reuse, and a broken import set still fails at `open` as before.
+
+`check()` opens a session unconditionally, so the deployment validation is unchanged for any caller that runs it.
+Without it, an unopenable session surfaces at the caller's first session instead of at `open`.
+`LeanWorkerStats::last_session_open_import_elapsed` is now first populated by that first real session, which is the more
+representative sample: it carries the caller's imports rather than the builder's placeholder set.
+
 ## [0.5.0] - 2026-07-24
 
 ### Attempt envelopes carry the pre-candidate entry state
 
-`ProofAttemptEnvelope` (lean-rs-host) gains `entry_goals` and `locals`: the goal state and local
-hypotheses at the resolved proof position *before* any candidate was spliced, rendered once per
-batch with the existing `renderGoals`/`collectGoalLocals` machinery instead of being discarded by
-`resolveEditTarget`. A client's trial loop no longer needs a separate proof-state query per step.
-Degraded or unresolvable entry state yields empty arrays, never errors. The Lean-side constructor
-appends both fields (positional decode order preserved; decode bumped to 4 fields), and
-`resolveEditTarget` now also returns the resolved `TacticCandidate`.
+`ProofAttemptEnvelope` (lean-rs-host) gains `entry_goals` and `locals`: the goal state and local hypotheses at the
+resolved proof position *before* any candidate was spliced, rendered once per batch with the existing
+`renderGoals`/`collectGoalLocals` machinery instead of being discarded by `resolveEditTarget`. A client's trial loop no
+longer needs a separate proof-state query per step. Degraded or unresolvable entry state yields empty arrays, never
+errors. The Lean-side constructor appends both fields (positional decode order preserved; decode bumped to 4 fields),
+and `resolveEditTarget` now also returns the resolved `TacticCandidate`.
 
-`LeanWorkerProofAttemptEnvelope` (lean-rs-worker-protocol) gains the matching `entry_goals` and
-`locals` wire fields with `#[serde(default)]`, so older frames decode with empty arrays; the
-worker child maps them through with no frame-codec or parent-side change.
+`LeanWorkerProofAttemptEnvelope` (lean-rs-worker-protocol) gains the matching `entry_goals` and `locals` wire fields
+with `#[serde(default)]`, so older frames decode with empty arrays; the worker child maps them through with no
+frame-codec or parent-side change.
 
-Both are additive struct fields and therefore semver-breaking for struct-literal constructors;
-that is what this minor bump carries.
+Both are additive struct fields and therefore semver-breaking for struct-literal constructors; that is what this minor
+bump carries.
 
 ### Declaration-candidate scan: four syntax forms no longer dropped
 
-The host shim's declaration-candidate scan — shared by the declaration outline, by-name
-`declarationTarget`, surrounding-declaration, proof-state-in-declaration, and by-name
-verification — catalogued only `theorem`/`definition`/`abbrev`/`opaque`/`instance` with
-`declValSimple` bodies, so it returned `not_found` for declarations the kernel knows. It now
-also catalogs `«structure»` (which the toolchain parser shares with `class`), accepts
-`declValEqns` bodies (multi-clause equation `def`s **and** theorems) and `whereStructInst`
-bodies (`where`-structure defs) with the whole node as the body span, and resolves anonymous
-`instance`s under their generated `inst…` names: on the supported toolchain `declRangeExt`
-records the generated name's selection range on the `instance` keyword itself, so the scan
-matches by that span and drops the candidate only when no unique name resolves.
+The host shim's declaration-candidate scan — shared by the declaration outline, by-name `declarationTarget`,
+surrounding-declaration, proof-state-in-declaration, and by-name verification — catalogued only
+`theorem`/`definition`/`abbrev`/`opaque`/`instance` with `declValSimple` bodies, so it returned `not_found` for
+declarations the kernel knows. It now also catalogs `«structure»` (which the toolchain parser shares with `class`),
+accepts `declValEqns` bodies (multi-clause equation `def`s **and** theorems) and `whereStructInst` bodies
+(`where`-structure defs) with the whole node as the body span, and resolves anonymous `instance`s under their generated
+`inst…` names: on the supported toolchain `declRangeExt` records the generated name's selection range on the `instance`
+keyword itself, so the scan matches by that span and drops the candidate only when no unique name resolves.
 
-Two latent defects in the name resolver are fixed at the root: a newness filter that could never
-fire (command-level `ContextInfo` carries the post-command environment in both fields), and a
-span comparison that mixed 0-based `declRangeExt` columns with the shim's 1-based columns.
-`private` declarations now report the resolved mangled name the outline always documented,
-instead of the namespace-plus-short-name fallback. No wire-shape change; outline and target
+Two latent defects in the name resolver are fixed at the root: a newness filter that could never fire (command-level
+`ContextInfo` carries the post-command environment in both fields), and a span comparison that mixed 0-based
+`declRangeExt` columns with the shim's 1-based columns. `private` declarations now report the resolved mangled name the
+outline always documented, instead of the namespace-plus-short-name fallback. No wire-shape change; outline and target
 results only gain rows.
 
 ## [0.4.0] - 2026-07-19
@@ -82,12 +275,11 @@ entry (4.27.0 through 4.33.0-rc1) passed the full `{ubuntu, macos}` matrix.
 
 ### Typed thread and memory caps for Lean subprocesses
 
-Worker and build capabilities gain opt-in resource caps. `LeanWorkerCapabilityBuilder` and
-`LeanWorkerHostHandleBuilder` add `num_threads(u32)` and `lean_max_memory_kib(u64)`, which pass a task-manager thread
-count and a Lean runtime memory ceiling to the spawned worker child (via `LEAN_RS_LEAN_MAX_MEMORY_KIB`).
-`lean_toolchain::CargoLeanCapability` adds `lean_num_threads(u32)`, which caps `lake build` parallelism and each spawned
-`lean`'s task-manager threads through `LEAN_NUM_THREADS`. All three are additive builder methods; leaving them unset
-preserves the previous default behavior.
+Worker and build capabilities gain opt-in resource caps. `LeanWorkerCapabilityBuilder` and `LeanWorkerHostHandleBuilder`
+add `num_threads(u32)` and `lean_max_memory_kib(u64)`, which pass a task-manager thread count and a Lean runtime memory
+ceiling to the spawned worker child (via `LEAN_RS_LEAN_MAX_MEMORY_KIB`). `lean_toolchain::CargoLeanCapability` adds
+`lean_num_threads(u32)`, which caps `lake build` parallelism and each spawned `lean`'s task-manager threads through
+`LEAN_NUM_THREADS`. All three are additive builder methods; leaving them unset preserves the previous default behavior.
 
 ### Supported Lean toolchain window: add 4.32.0
 

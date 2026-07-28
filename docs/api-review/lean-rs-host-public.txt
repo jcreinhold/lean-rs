@@ -767,6 +767,7 @@ pub enum lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub lean_rs_host::host::pool::SessionPoolKeyMissReason::EmptyPool
 pub lean_rs_host::host::pool::SessionPoolKeyMissReason::NoMatchingKey
 pub lean_rs_host::host::pool::SessionPoolKeyMissReason::ReuseDisabled
+pub lean_rs_host::host::pool::SessionPoolKeyMissReason::StaleEnvironment
 impl lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
 impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
@@ -799,11 +800,13 @@ pub lean_rs_host::host::pool::PoolStats::last_miss_reason: core::option::Option<
 pub lean_rs_host::host::pool::PoolStats::miss_empty_pool: u64
 pub lean_rs_host::host::pool::PoolStats::miss_no_matching_key: u64
 pub lean_rs_host::host::pool::PoolStats::miss_reuse_disabled: u64
+pub lean_rs_host::host::pool::PoolStats::miss_stale_environment: u64
 pub lean_rs_host::host::pool::PoolStats::released_dropped: u64
 pub lean_rs_host::host::pool::PoolStats::released_to_pool: u64
 pub lean_rs_host::host::pool::PoolStats::reused: u64
 pub lean_rs_host::host::pool::PoolStats::rss_samples: u64
 pub lean_rs_host::host::pool::PoolStats::rss_samples_unavailable: u64
+pub lean_rs_host::host::pool::PoolStats::stale_evictions: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats
@@ -2407,6 +2410,7 @@ pub enum lean_rs_host::host::SessionPoolKeyMissReason
 pub lean_rs_host::host::SessionPoolKeyMissReason::EmptyPool
 pub lean_rs_host::host::SessionPoolKeyMissReason::NoMatchingKey
 pub lean_rs_host::host::SessionPoolKeyMissReason::ReuseDisabled
+pub lean_rs_host::host::SessionPoolKeyMissReason::StaleEnvironment
 impl lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
 impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
@@ -3205,12 +3209,14 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, &[
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::extension_registry_epoch(&self) -> u64
 pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut self, &lean_rs_host::LeanDeclarationFilter, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, &lean_rs_host::LeanDeclarationFilter, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::live_extension_registry_epoch(&self) -> lean_rs::error::LeanResult<u64>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, &lean_rs::handle::name::LeanName<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, &[lean_rs::handle::name::LeanName<'lean>], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query(&mut self, &str, &lean_rs_host::host::process::ModuleQuery, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome>
@@ -3268,11 +3274,13 @@ pub lean_rs_host::host::PoolStats::last_miss_reason: core::option::Option<lean_r
 pub lean_rs_host::host::PoolStats::miss_empty_pool: u64
 pub lean_rs_host::host::PoolStats::miss_no_matching_key: u64
 pub lean_rs_host::host::PoolStats::miss_reuse_disabled: u64
+pub lean_rs_host::host::PoolStats::miss_stale_environment: u64
 pub lean_rs_host::host::PoolStats::released_dropped: u64
 pub lean_rs_host::host::PoolStats::released_to_pool: u64
 pub lean_rs_host::host::PoolStats::reused: u64
 pub lean_rs_host::host::PoolStats::rss_samples: u64
 pub lean_rs_host::host::PoolStats::rss_samples_unavailable: u64
+pub lean_rs_host::host::PoolStats::stale_evictions: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats
@@ -4047,6 +4055,7 @@ pub enum lean_rs_host::SessionPoolKeyMissReason
 pub lean_rs_host::SessionPoolKeyMissReason::EmptyPool
 pub lean_rs_host::SessionPoolKeyMissReason::NoMatchingKey
 pub lean_rs_host::SessionPoolKeyMissReason::ReuseDisabled
+pub lean_rs_host::SessionPoolKeyMissReason::StaleEnvironment
 impl lean_rs_host::host::pool::SessionPoolKeyMissReason
 pub const fn lean_rs_host::host::pool::SessionPoolKeyMissReason::label(self) -> &'static str
 impl core::clone::Clone for lean_rs_host::host::pool::SessionPoolKeyMissReason
@@ -4946,12 +4955,14 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_type_bulk(&mut self, &[
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::option::Option<&lean_rs::handle::expr::LeanExpr<'lean>>, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::extension_registry_epoch(&self) -> u64
 pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations(&mut self, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_filtered(&mut self, &lean_rs_host::LeanDeclarationFilter, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<lean_rs::handle::name::LeanName<'lean>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::list_declarations_strings(&mut self, &lean_rs_host::LeanDeclarationFilter, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::live_extension_registry_epoch(&self) -> lean_rs::error::LeanResult<u64>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string(&mut self, &lean_rs::handle::name::LeanName<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::name_to_string_bulk(&mut self, &[lean_rs::handle::name::LeanName<'lean>], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::process_module_query(&mut self, &str, &lean_rs_host::host::process::ModuleQuery, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleQueryOutcome>
@@ -5009,11 +5020,13 @@ pub lean_rs_host::PoolStats::last_miss_reason: core::option::Option<lean_rs_host
 pub lean_rs_host::PoolStats::miss_empty_pool: u64
 pub lean_rs_host::PoolStats::miss_no_matching_key: u64
 pub lean_rs_host::PoolStats::miss_reuse_disabled: u64
+pub lean_rs_host::PoolStats::miss_stale_environment: u64
 pub lean_rs_host::PoolStats::released_dropped: u64
 pub lean_rs_host::PoolStats::released_to_pool: u64
 pub lean_rs_host::PoolStats::reused: u64
 pub lean_rs_host::PoolStats::rss_samples: u64
 pub lean_rs_host::PoolStats::rss_samples_unavailable: u64
+pub lean_rs_host::PoolStats::stale_evictions: u64
 impl core::clone::Clone for lean_rs_host::host::pool::PoolStats
 pub fn lean_rs_host::host::pool::PoolStats::clone(&self) -> lean_rs_host::host::pool::PoolStats
 impl core::cmp::Eq for lean_rs_host::host::pool::PoolStats

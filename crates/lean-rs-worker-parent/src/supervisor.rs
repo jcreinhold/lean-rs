@@ -41,6 +41,9 @@ use crate::session::{
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKER_EVENT_BUFFER_CAPACITY: usize = 64;
 const DEFAULT_RESTART_INTENSITY_LIMIT: u64 = 16;
+/// Reuse-hint capacity for an embedder that sets no `max_imports`. Mirrors the
+/// child's own `SESSION_POOL_DEFAULT_CAPACITY`, which is what such a child uses.
+const DEFAULT_REUSE_HINT_CAPACITY: usize = 4;
 const DEFAULT_RESTART_INTENSITY_WINDOW: Duration = Duration::from_mins(1);
 
 /// Default deadline for one worker request after startup.
@@ -85,6 +88,7 @@ pub struct LeanWorkerConfig {
     request_timeout: Duration,
     shutdown_timeout: Duration,
     restart_policy: LeanWorkerRestartPolicy,
+    session_pool_capacity: Option<usize>,
     rss_hard_limit_kib: Option<u64>,
     rss_sample_interval: Duration,
     max_frame_bytes: u32,
@@ -101,6 +105,7 @@ impl LeanWorkerConfig {
             request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
             shutdown_timeout: LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT,
             restart_policy: LeanWorkerRestartPolicy::default(),
+            session_pool_capacity: None,
             rss_hard_limit_kib: None,
             rss_sample_interval: Duration::from_millis(250),
             max_frame_bytes: MAX_FRAME_BYTES,
@@ -178,6 +183,41 @@ impl LeanWorkerConfig {
         self
     }
 
+    /// How many imported environments the child may hold at once.
+    ///
+    /// This used to be derived from `max_imports`, which made the two equal by
+    /// construction and, as a side effect, made the child's capacity eviction
+    /// unreachable: the parent cycled the child exactly where the pool would
+    /// have started evicting. The two answer different questions. Capacity is
+    /// how many *distinct* profiles a workload alternates between, and a held
+    /// environment costs about 70 MiB. The restart bound is how much
+    /// unreclaimable residue one child may accumulate, and an import costs
+    /// 2–4 GiB of it. Sizing one by the other prices a cheap thing like an
+    /// expensive one.
+    ///
+    /// The supervisor's reuse hint tracks whatever this resolves to, so the
+    /// parent predicts reuse for exactly the keys the child can still hold.
+    /// Unset, the child keeps its own default.
+    #[must_use]
+    pub fn session_pool_capacity(mut self, capacity: usize) -> Self {
+        self.session_pool_capacity = Some(capacity.max(1));
+        self
+    }
+
+    /// The capacity the child will use, as the parent understands it.
+    ///
+    /// One resolver for both consumers — the environment variable handed to the
+    /// child and the reuse hint's own bound — so the two cannot drift. The
+    /// `max_imports` fallback preserves the old behaviour for an embedder that
+    /// set only that.
+    fn resolved_session_pool_capacity(&self) -> Option<usize> {
+        self.session_pool_capacity.or_else(|| {
+            self.restart_policy
+                .max_imports
+                .and_then(|limit| usize::try_from(limit).ok())
+        })
+    }
+
     /// Kill and replace the worker during an in-flight request if its RSS is
     /// sampled at or above `limit_kib`.
     ///
@@ -222,6 +262,7 @@ impl LeanWorkerConfig {
 pub struct LeanWorkerRestartPolicy {
     max_requests: Option<u64>,
     max_imports: Option<u64>,
+    max_import_residue_bytes: Option<u64>,
     max_rss_kib: Option<u64>,
     idle_restart_after: Option<Duration>,
     restart_intensity: RestartIntensityLimit,
@@ -287,6 +328,40 @@ impl LeanWorkerRestartPolicy {
         self
     }
 
+    /// Restart before an import-like request when completed imports have retained
+    /// this many bytes the child cannot reclaim.
+    ///
+    /// This is the byte-denominated form of [`Self::max_imports`], and the one to
+    /// prefer. An import retains its environment for the life of the process —
+    /// `freeRegions` is unsound once extensions are loaded — so the only question
+    /// a cycling policy can usefully ask is *how much* has been retained, not how
+    /// many times. One import ranges from tens of megabytes to several gigabytes
+    /// depending on the profile's closure, so a count that is right for one
+    /// project is wrong for the next by two orders of magnitude.
+    ///
+    /// The quantity accumulated is `non_memory_mapped_region_bytes` from the
+    /// child's own [`LeanWorkerImportStats`] — the compacted-region bytes Lean had
+    /// to materialise privately rather than map from an `.olean` file. Measured
+    /// against process `phys_footprint` on a Mathlib-scale project, it predicts
+    /// retained bytes with slope 1.09 and R² = 0.96; `compacted_region_bytes` and
+    /// the imported-extension-entry count both fall below 0.83. It also reports
+    /// near-zero for the first import in a fresh process, which is correct: that
+    /// import maps its regions at their preferred addresses and costs almost
+    /// nothing, and only later imports in the same process must copy.
+    ///
+    /// A generation always completes at least one import, however large: the
+    /// counter advances only on imports the child confirmed, and the check runs
+    /// before a request, so a single import can never restart before itself.
+    ///
+    /// Pair this with a high [`Self::max_imports`] backstop. Nothing else stands
+    /// between an accounting bug here and unbounded growth, and the backstop costs
+    /// one integer compare.
+    #[must_use]
+    pub fn max_import_residue_bytes(mut self, limit: u64) -> Self {
+        self.max_import_residue_bytes = Some(limit.max(1));
+        self
+    }
+
     /// Restart before a request when measured child RSS is at least this many KiB.
     ///
     /// RSS measurement is best effort. It is implemented for the current
@@ -322,8 +397,88 @@ impl LeanWorkerRestartPolicy {
     }
 }
 
+/// What one child generation has accumulated, and the cycling decision that
+/// follows from it.
+///
+/// These counters reset together on every restart, which is the whole reason
+/// they are one type: `LeanWorkerStats` is cloned forward onto the replacement
+/// child, so anything per-generation kept there would never reset.
+///
+/// It also owns the *ordering* of the import bounds. Two places ask whether an
+/// import bound has been crossed — the admission check before a request, and
+/// the deferred-restart path for an import whose admission check a reuse
+/// prediction skipped — and if they answered differently, a cycle would be
+/// reported under the wrong cause depending on how it was reached.
+///
+/// Residue is charged only by [`Self::record_import`], from the import stats the
+/// child returns with a confirmed open. [`Self::record_request`] can also count
+/// an import-like request, but the only callers that pass `true` are the fixture
+/// capability paths, which perform no session import; every production import
+/// goes through `open_worker_session` and is charged in full.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct GenerationBudget {
+    requests: u64,
+    imports: u64,
+    import_residue_bytes: u64,
+}
+
+impl GenerationBudget {
+    fn record_request(&mut self, import_like: bool) {
+        self.requests = self.requests.saturating_add(1);
+        if import_like {
+            self.imports = self.imports.saturating_add(1);
+        }
+    }
+
+    fn record_import(&mut self, import_stats: &LeanWorkerImportStats) {
+        self.imports = self.imports.saturating_add(1);
+        self.import_residue_bytes = self
+            .import_residue_bytes
+            .saturating_add(import_stats.non_memory_mapped_region_bytes);
+    }
+
+    /// Why this generation must cycle before it performs another import, if it must.
+    ///
+    /// Residue first: when both bounds are configured the byte bound is the one
+    /// meant to fire, and reporting a cycle as `max_imports` when bytes were what
+    /// ran out sends an operator to the wrong knob.
+    ///
+    /// A generation always completes at least one import however large, because
+    /// the counters only advance on completed imports and this is asked before a
+    /// request. That is deliberate: the alternative is a child that can never
+    /// serve a profile whose closure exceeds the whole budget.
+    fn import_limit_reached(&self, policy: &LeanWorkerRestartPolicy) -> Option<LeanWorkerRestartReason> {
+        if let Some(limit_bytes) = policy.max_import_residue_bytes
+            && self.import_residue_bytes >= limit_bytes
+        {
+            return Some(LeanWorkerRestartReason::ImportResidue {
+                residue_bytes: self.import_residue_bytes,
+                limit_bytes,
+            });
+        }
+        if let Some(limit) = policy.max_imports
+            && self.imports >= limit
+        {
+            return Some(LeanWorkerRestartReason::MaxImports { limit });
+        }
+        None
+    }
+
+    fn request_limit_reached(&self, policy: &LeanWorkerRestartPolicy) -> Option<LeanWorkerRestartReason> {
+        policy
+            .max_requests
+            .filter(|limit| self.requests >= *limit)
+            .map(|limit| LeanWorkerRestartReason::MaxRequests { limit })
+    }
+}
+
 /// Reason recorded for the latest worker cycle.
+///
+/// Non-exhaustive: cycling policy is expected to grow, and a caller that matches
+/// on the cause it cares about should not break when it does. Use
+/// [`Self::stable_cause`] for the flat wire-facing name.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum LeanWorkerRestartReason {
     /// The caller explicitly requested a process cycle.
     Explicit,
@@ -331,6 +486,8 @@ pub enum LeanWorkerRestartReason {
     MaxRequests { limit: u64 },
     /// Import-like request count reached the configured limit before the next import.
     MaxImports { limit: u64 },
+    /// Completed imports retained at least `limit_bytes` the child cannot reclaim.
+    ImportResidue { residue_bytes: u64, limit_bytes: u64 },
     /// Child resident set size reached the configured limit.
     RssCeiling {
         current_kib: u64,
@@ -357,7 +514,20 @@ pub enum LeanWorkerRestartReason {
     /// the supervisor respawned it. Used by the read-only verify/proof-state
     /// guard that converts such an abort into a degraded verdict instead of a
     /// hard error.
-    ChildAbort { operation: &'static str },
+    ///
+    /// `status` and `diagnostics` are carried because they are otherwise
+    /// **unrecoverable**: the child's stderr pipe is drained once, at exit, by
+    /// the same code path that builds this reason, and nothing else retains it.
+    /// A consumer that only sees `stable_cause() == "child_abort"` cannot
+    /// distinguish a Lean out-of-memory panic from a segfault from a protocol
+    /// bug — which is the difference between raising a limit and filing a bug.
+    ChildAbort {
+        operation: &'static str,
+        /// Platform-rendered exit status, e.g. `signal: 6 (SIGABRT)`.
+        status: String,
+        /// Child stderr at the abort, trimmed and truncated for display.
+        diagnostics: String,
+    },
 }
 
 impl LeanWorkerRestartReason {
@@ -372,6 +542,7 @@ impl LeanWorkerRestartReason {
             Self::Explicit => "explicit",
             Self::MaxRequests { .. } => "max_requests",
             Self::MaxImports { .. } => "max_imports",
+            Self::ImportResidue { .. } => "import_residue",
             Self::RssCeiling { .. } => "rss_ceiling",
             Self::RssHardLimit { .. } => "rss_hard_limit",
             Self::Idle { .. } => "idle",
@@ -422,6 +593,16 @@ pub struct LeanWorkerStats {
     pub max_request_restarts: u64,
     /// Restarts caused by `LeanWorkerRestartPolicy::max_imports`.
     pub max_import_restarts: u64,
+    /// Restarts caused by `LeanWorkerRestartPolicy::max_import_residue_bytes`.
+    pub import_residue_restarts: u64,
+    /// Confirmed imports whose reported region bytes could not be believed.
+    ///
+    /// The child said it imported modules but attributed no compacted-region
+    /// bytes to them. Residue accounting silently under-counts for exactly that
+    /// many imports, which is the difference between the byte bound doing its job
+    /// and the `max_imports` backstop being the only thing left. A non-zero value
+    /// here is the signal to look at the shim, not at the budget.
+    pub import_stats_unusable: u64,
     /// Restarts caused by `LeanWorkerRestartPolicy::max_rss_kib`.
     pub rss_restarts: u64,
     /// Restarts caused by `LeanWorkerRestartPolicy::idle_restart_after`.
@@ -504,10 +685,24 @@ pub struct LeanWorkerLifecycleSnapshot {
     pub last_rss_kib: Option<u64>,
     /// RSS checks skipped because the platform did not provide a usable sample.
     pub rss_samples_unavailable: u64,
+    /// Unreclaimable bytes retained by imports in the *current* child.
+    ///
+    /// Resets to zero on every restart, unlike everything else on this snapshot.
+    /// Compare it against `import_residue_limit_bytes` to see how close the
+    /// current generation is to its planned cycle — which is what an idle-time
+    /// cycling policy needs and cannot get from the lifetime counters.
+    pub import_residue_bytes: u64,
+    /// The configured residue limit, when one is set.
+    pub import_residue_limit_bytes: Option<u64>,
 }
 
 impl LeanWorkerLifecycleSnapshot {
-    fn from_worker(stats: &LeanWorkerStats, last_exit: Option<LeanWorkerExit>) -> Self {
+    fn from_worker(
+        stats: &LeanWorkerStats,
+        last_exit: Option<LeanWorkerExit>,
+        import_residue_bytes: u64,
+        import_residue_limit_bytes: Option<u64>,
+    ) -> Self {
         Self {
             worker_generation: stats.restarts,
             restarts: stats.restarts,
@@ -516,6 +711,8 @@ impl LeanWorkerLifecycleSnapshot {
             last_exit,
             last_rss_kib: stats.last_rss_kib,
             rss_samples_unavailable: stats.rss_samples_unavailable,
+            import_residue_bytes,
+            import_residue_limit_bytes,
         }
     }
 }
@@ -532,6 +729,9 @@ impl LeanWorkerStats {
             }
             LeanWorkerRestartReason::MaxImports { .. } => {
                 self.max_import_restarts = self.max_import_restarts.saturating_add(1);
+            }
+            LeanWorkerRestartReason::ImportResidue { .. } => {
+                self.import_residue_restarts = self.import_residue_restarts.saturating_add(1);
             }
             LeanWorkerRestartReason::RssCeiling { .. } => {
                 self.rss_restarts = self.rss_restarts.saturating_add(1);
@@ -1150,8 +1350,47 @@ pub struct LeanWorker {
     last_exit: Option<LeanWorkerExit>,
     runtime_metadata: LeanWorkerRuntimeMetadata,
     stats: LeanWorkerStats,
-    requests_since_restart: u64,
-    imports_since_restart: u64,
+    budget: GenerationBudget,
+    /// The session configs the live child was observed to hold, MRU at the
+    /// back, used only to predict whether the next `open_worker_session` will
+    /// import.
+    ///
+    /// A *list* because the child pools imported environments rather than
+    /// holding one: with a single key, a workload alternating two profiles
+    /// mispredicts every switch, and the resulting `max_imports` enforcement
+    /// restarts the child before it can answer `HostSessionReused` — which
+    /// would make the pool dead on arrival. Bounded by
+    /// [`Self::reuse_hint_capacity`], which is the same `max_imports` the child
+    /// derives its pool capacity from.
+    ///
+    /// Deliberately *not* carried across `restart_with_reason_before_spawn`,
+    /// which rebuilds through `*self = next`: the omission is what makes the
+    /// hint provably fresh on every restart path, with no code to forget.
+    open_session_keys: Vec<LeanWorkerSessionConfig>,
+    /// Cleared the first time a child re-imports a config it was predicted to
+    /// reuse **and has never demonstrated reuse at all**, which is how a
+    /// pre-reuse worker binary is detected. Without it, a stale binary would
+    /// keep answering `HostSessionOpened` while the parent kept skipping the
+    /// `max_imports` check that exists to bound exactly that growth.
+    ///
+    /// The `reuse_observed` qualifier is what a pool requires: once a child has
+    /// reused a session, a later miss is ordinary staleness — an eviction, or a
+    /// child whose capacity is below this parent's hint capacity — and
+    /// disabling the hint for the whole generation on the first eviction would
+    /// turn pooling off permanently.
+    reuse_hint_enabled: bool,
+    /// Whether this child generation has ever answered `HostSessionReused`.
+    reuse_observed: bool,
+    /// A restart the previous call could not perform.
+    ///
+    /// When a reuse is predicted, `prepare_request` skips the `max_imports`
+    /// check; if the child imports anyway, the bound has been crossed with no
+    /// check having run. Recording it here and consuming it at the top of the
+    /// next `open_worker_session` bounds a parent/child capacity disagreement
+    /// to exceeding the limit by exactly one import, rather than letting
+    /// `max_imports` silently never fire — which is the 11.2 GiB `SIGKILL` this
+    /// bound exists to prevent.
+    pending_restart: Option<LeanWorkerRestartReason>,
     last_activity: Instant,
     generation: WorkerGeneration,
     next_request_id: WorkerRequestId,
@@ -1181,6 +1420,15 @@ impl LeanWorker {
             .env("LEAN_ABORT_ON_PANIC", "1")
             .env("LEAN_BACKTRACE", "0")
             .env("RUST_BACKTRACE", "0");
+
+        // How many imported environments the child may hold. Independent of the
+        // restart bound: capacity is priced in held environments (~70 MiB each),
+        // the restart bound in unreclaimable import residue (~2–4 GiB each). Set
+        // before `config.env` so an embedder that names the variable explicitly
+        // still wins.
+        if let Some(capacity) = config.resolved_session_pool_capacity() {
+            command.env("LEAN_RS_WORKER_SESSION_POOL_CAPACITY", capacity.to_string());
+        }
 
         if let Some(current_dir) = &config.current_dir {
             command.current_dir(current_dir);
@@ -1290,8 +1538,11 @@ impl LeanWorker {
                 last_spawn_handshake_elapsed: Some(spawn_handshake_elapsed),
                 ..LeanWorkerStats::default()
             },
-            requests_since_restart: 0,
-            imports_since_restart: 0,
+            budget: GenerationBudget::default(),
+            open_session_keys: Vec::new(),
+            reuse_hint_enabled: true,
+            reuse_observed: false,
+            pending_restart: None,
             last_activity: Instant::now(),
             generation: WorkerGeneration::default(),
             next_request_id: WorkerRequestId::default(),
@@ -1414,16 +1665,26 @@ impl LeanWorker {
         self.stats.clone()
     }
 
+    /// `session_open_import_elapsed` is `None` when the builder opened no
+    /// session — the ordinary case now that opening one is reserved for a
+    /// metadata check. The first real session open records its own timing
+    /// through [`open_worker_session`](Self::open_worker_session), which is the
+    /// more representative sample anyway: it carries the caller's imports,
+    /// where a bootstrap open carried the builder's placeholder set.
     pub(crate) fn record_capability_open_timing(
         &mut self,
         capability_load_elapsed: Duration,
-        session_open_import_elapsed: Duration,
+        session_open_import_elapsed: Option<Duration>,
     ) {
         self.stats.last_capability_load_elapsed = Some(capability_load_elapsed);
-        self.stats.last_session_open_import_elapsed = Some(session_open_import_elapsed);
+        if let Some(elapsed) = session_open_import_elapsed {
+            self.stats.last_session_open_import_elapsed = Some(elapsed);
+        }
         if let Some(timing) = self.stats.last_replacement_timing.as_mut() {
             timing.capability_load = capability_load_elapsed;
-            timing.session_open_import = session_open_import_elapsed;
+            if let Some(elapsed) = session_open_import_elapsed {
+                timing.session_open_import = elapsed;
+            }
         }
     }
 
@@ -1444,7 +1705,12 @@ impl LeanWorker {
     /// Return policy-facing lifecycle facts for this supervisor.
     #[must_use]
     pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
-        LeanWorkerLifecycleSnapshot::from_worker(&self.stats, self.last_exit.clone())
+        LeanWorkerLifecycleSnapshot::from_worker(
+            &self.stats,
+            self.last_exit.clone(),
+            self.budget.import_residue_bytes,
+            self.config.restart_policy.max_import_residue_bytes,
+        )
     }
 
     /// Return protocol/runtime facts reported by the worker child.
@@ -1667,6 +1933,41 @@ impl LeanWorker {
         Err(unexpected_response(OPERATION, &response))
     }
 
+    /// How many session keys the reuse hint may remember.
+    ///
+    /// Exactly the pool capacity the child was spawned with, resolved through
+    /// the same function that set it, so the parent predicts reuse for exactly
+    /// the keys the child can still be holding. An embedder that configures
+    /// neither gets the child's own default; the two disagree only if the
+    /// child's `LEAN_RS_WORKER_SESSION_POOL_CAPACITY` was set by hand.
+    ///
+    /// Disagreement in either direction is bounded and cheap. Over-predicting
+    /// costs one deferred restart, which `pending_restart` handles. Under-
+    /// predicting costs one admission check that was not needed — free under a
+    /// byte bound, since the check is idempotent and a re-examined budget that
+    /// has not moved does not restart anything.
+    fn reuse_hint_capacity(&self) -> usize {
+        self.config
+            .resolved_session_pool_capacity()
+            .unwrap_or(DEFAULT_REUSE_HINT_CAPACITY)
+            .max(1)
+    }
+
+    /// Record that the child holds `config`, MRU at the back, evicting the
+    /// least recently used key past capacity — the child's own eviction order.
+    fn note_open_session_key(&mut self, config: &LeanWorkerSessionConfig) {
+        if let Some(index) = self.open_session_keys.iter().position(|key| key == config) {
+            let key = self.open_session_keys.remove(index);
+            self.open_session_keys.push(key);
+            return;
+        }
+        self.open_session_keys.push(config.clone());
+        let capacity = self.reuse_hint_capacity();
+        while self.open_session_keys.len() > capacity {
+            self.open_session_keys.remove(0);
+        }
+    }
+
     pub(crate) fn open_worker_session(
         &mut self,
         config: &LeanWorkerSessionConfig,
@@ -1676,7 +1977,23 @@ impl LeanWorker {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
         let before_restarts = self.stats.restarts;
-        self.prepare_request(true)?;
+        // A restart the previous call deferred because it had already skipped
+        // the admission check that would have performed it.
+        if let Some(reason) = self.pending_restart.take() {
+            self.restart_with_reason(reason)?;
+        }
+        // A hint, not a decision: it only picks which admission checks run
+        // before the frame goes out. What actually happened is whichever of
+        // `HostSessionOpened` / `HostSessionReused` comes back, and the import
+        // accounting below follows that, not this.
+        let expect_reuse = self.reuse_hint_enabled && self.open_session_keys.iter().any(|key| key == config);
+        self.prepare_request(!expect_reuse)?;
+        // `prepare_request` may have replaced the child — `max_requests`,
+        // `idle_timeout`, and `max_rss_kib` all restart from inside it. A fresh
+        // child necessarily imports, and reading that as "this worker binary
+        // does not reuse sessions" would permanently disable the hint for a
+        // reason that has nothing to do with the binary.
+        let expect_reuse = expect_reuse && self.stats.restarts == before_restarts;
         let import_started = Instant::now();
         let mode = match config.mode() {
             LeanWorkerSessionMode::Capability {
@@ -1696,9 +2013,62 @@ impl LeanWorker {
             imports: config.imports().to_vec(),
             import_profile: config.import_profile(),
         })?;
-        self.record_request(true);
-        match self.read_response_with_progress(OPERATION, progress, cancellation)? {
+        self.record_request(false);
+        // Every non-confirming outcome — an error response, a read failure, a
+        // cancellation — leaves the child in a state the parent did not observe:
+        // on the mismatch path it parks its outgoing session and may evict from
+        // the pool before the import fails, and the parent cannot tell which
+        // keys survived. Forgetting all of them is the safe direction, because a
+        // hint that under-predicts costs one admission check while one that
+        // over-predicts skips one.
+        //
+        // Only on those paths, though. Clearing *before* the read — which was
+        // right when this was a single `Option` being invalidated — would cap
+        // the list at one key no matter its capacity, and a one-key hint is
+        // exactly the mispredict-every-switch behaviour the list replaces.
+        let response = match self.read_response_with_progress(OPERATION, progress, cancellation) {
+            Ok(response) => response,
+            Err(err) => {
+                self.open_session_keys.clear();
+                return Err(err);
+            }
+        };
+        match response {
             Response::HostSessionOpened { import_stats } => {
+                if expect_reuse && !self.reuse_observed && self.open_session_keys.last() == Some(config) {
+                    // Predicted a reuse, got an import, this child has never
+                    // reused anything, and the *immediately preceding* open used
+                    // this very key: it is a pre-reuse worker binary. Stop
+                    // predicting for this generation so the `max_imports` check
+                    // is never skipped again.
+                    //
+                    // The consecutive-key condition is what keeps this from
+                    // firing on a healthy child. Any other miss has an innocent
+                    // explanation the hint should survive — an entry evicted for
+                    // capacity, or one dropped because a later import registered
+                    // an environment extension underneath it. Without the
+                    // condition, a child whose first two profiles merely differ
+                    // in modules disables its own hint during warm-up, after
+                    // which every open is admitted as `import_like` and the pool
+                    // is dead on arrival.
+                    //
+                    // A consecutive identical reopen is the one miss no
+                    // eviction can produce: nothing imports between the two
+                    // calls, so the session cannot have gone stale, and the LRU
+                    // cannot have evicted the entry that is currently at its
+                    // most-recently-used end.
+                    self.reuse_hint_enabled = false;
+                }
+                self.record_import(&import_stats);
+                if expect_reuse {
+                    // A bound was crossed by an import whose admission check the
+                    // reuse prediction skipped. Defer the restart to the next
+                    // call rather than tearing down a child that just produced
+                    // the session this call is about to use. Same question the
+                    // admission check asks, so the cause cannot depend on which
+                    // path reached it.
+                    self.pending_restart = self.budget.import_limit_reached(&self.config.restart_policy);
+                }
                 let session_open_import_elapsed = import_started.elapsed();
                 self.stats.last_session_open_import_elapsed = Some(session_open_import_elapsed);
                 if self.stats.restarts > before_restarts
@@ -1707,9 +2077,23 @@ impl LeanWorker {
                     timing.session_open_import = session_open_import_elapsed;
                 }
                 self.stats.last_import_stats = Some(import_stats);
+                self.note_open_session_key(config);
                 Ok(())
             }
-            other => Err(unexpected_response(OPERATION, &other)),
+            Response::HostSessionReused { import_stats } => {
+                // No import happened, so nothing that measures imports moves:
+                // not `stats.imports`, not `imports_since_restart`, and not
+                // `last_session_open_import_elapsed`, which would otherwise
+                // start reporting a round trip as an import time.
+                self.reuse_observed = true;
+                self.stats.last_import_stats = Some(import_stats);
+                self.note_open_session_key(config);
+                Ok(())
+            }
+            other => {
+                self.open_session_keys.clear();
+                Err(unexpected_response(OPERATION, &other))
+            }
         }
     }
 
@@ -2510,21 +2894,16 @@ impl LeanWorker {
             self.stats.last_import_like_rss_before_admission_kib = self.child_rss_kib();
         }
 
-        if let Some(limit) = self.config.restart_policy.max_requests
-            && self.requests_since_restart >= limit
-        {
-            self.restart_with_reason(LeanWorkerRestartReason::MaxRequests { limit })?;
+        if let Some(reason) = self.budget.request_limit_reached(&self.config.restart_policy) {
+            self.restart_with_reason(reason)?;
             if import_like {
                 self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
             }
             return Ok(());
         }
 
-        if import_like
-            && let Some(limit) = self.config.restart_policy.max_imports
-            && self.imports_since_restart >= limit
-        {
-            self.restart_with_reason(LeanWorkerRestartReason::MaxImports { limit })?;
+        if import_like && let Some(reason) = self.budget.import_limit_reached(&self.config.restart_policy) {
+            self.restart_with_reason(reason)?;
             self.stats.import_like_admitted = self.stats.import_like_admitted.saturating_add(1);
             return Ok(());
         }
@@ -2571,12 +2950,33 @@ impl LeanWorker {
 
     fn record_request(&mut self, import_like: bool) {
         self.stats.requests = self.stats.requests.saturating_add(1);
-        self.requests_since_restart = self.requests_since_restart.saturating_add(1);
         if import_like {
             self.stats.imports = self.stats.imports.saturating_add(1);
-            self.imports_since_restart = self.imports_since_restart.saturating_add(1);
         }
+        self.budget.record_request(import_like);
         self.last_activity = Instant::now();
+    }
+
+    /// Count an import that the child confirmed it performed, and charge its
+    /// unreclaimable bytes to the current generation.
+    ///
+    /// Separate from [`Self::record_request`] because a session open is a
+    /// request whether or not it imports: only the child's answer says which
+    /// happened, and it arrives after the request is already recorded. That
+    /// answer carries the import's own attribution, which is the only reason
+    /// this can be denominated in bytes at all — no `ps` fork, no sampling, and
+    /// nothing that counts the clean `.olean` pages an RSS reading is dominated
+    /// by. A reused session reports the same stats but performed no import, so
+    /// it charges nothing; the caller only reaches here on `HostSessionOpened`.
+    fn record_import(&mut self, import_stats: &LeanWorkerImportStats) {
+        self.stats.imports = self.stats.imports.saturating_add(1);
+        // Modules came in but no region bytes were attributed to them: the shim
+        // is not reporting what this policy is denominated in. Count it rather
+        // than guessing a figure, and let `max_imports` be the live bound.
+        if import_stats.effective_module_count > 0 && import_stats.compacted_region_bytes == 0 {
+            self.stats.import_stats_unusable = self.stats.import_stats_unusable.saturating_add(1);
+        }
+        self.budget.record_import(import_stats);
     }
 
     fn restart_with_reason(&mut self, reason: LeanWorkerRestartReason) -> Result<(), LeanWorkerError> {
@@ -2596,6 +2996,7 @@ impl LeanWorker {
             LeanWorkerRestartReason::Explicit
                 | LeanWorkerRestartReason::MaxRequests { .. }
                 | LeanWorkerRestartReason::MaxImports { .. }
+                | LeanWorkerRestartReason::ImportResidue { .. }
                 | LeanWorkerRestartReason::RssCeiling { .. }
                 | LeanWorkerRestartReason::Idle { .. }
         ) {
@@ -2618,8 +3019,7 @@ impl LeanWorker {
         self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
         let next_generation = self.generation.next();
         self.stats.record_restart(reason);
-        self.requests_since_restart = 0;
-        self.imports_since_restart = 0;
+        self.budget = GenerationBudget::default();
         let reason = self
             .stats
             .last_restart_reason
@@ -2689,8 +3089,8 @@ impl LeanWorker {
     /// can synthesise a degraded verdict. Any non-abort error (or a respawn
     /// failure) propagates unchanged.
     fn recover_child_abort(&mut self, operation: &'static str, err: LeanWorkerError) -> Result<(), LeanWorkerError> {
-        if matches!(err, LeanWorkerError::ChildPanicOrAbort { .. }) {
-            self.restart_with_reason(LeanWorkerRestartReason::ChildAbort { operation })
+        if let LeanWorkerError::ChildPanicOrAbort { exit } = &err {
+            self.restart_with_reason(child_abort_reason(operation, exit))
         } else {
             Err(err)
         }
@@ -3598,6 +3998,22 @@ fn wait_with_stderr(child: &mut Child, stderr: Option<ChildStderr>) -> Result<Le
 /// the field; this only limits what crosses the `Display` surface.
 const DISPLAY_DIAGNOSTICS_MAX_BYTES: usize = 4 * 1024;
 
+/// Carry the one record of *why* a child died into the restart reason.
+///
+/// The child's stderr is drained exactly once, when the supervisor reaps it, and
+/// retained nowhere else. A consumer that sees only `stable_cause()` cannot tell
+/// a Lean out-of-memory abort from a segfault from a protocol bug — which is the
+/// difference between raising a limit and filing a bug. Truncated on the same
+/// budget as the `Display` rendering, since the reason is cloned onto every
+/// lifetime snapshot that follows it.
+fn child_abort_reason(operation: &'static str, exit: &LeanWorkerExit) -> LeanWorkerRestartReason {
+    LeanWorkerRestartReason::ChildAbort {
+        operation,
+        status: exit.status.clone(),
+        diagnostics: truncate_for_display(exit.diagnostics.trim(), DISPLAY_DIAGNOSTICS_MAX_BYTES),
+    }
+}
+
 fn write_exit(f: &mut fmt::Formatter<'_>, prefix: &str, exit: &LeanWorkerExit) -> fmt::Result {
     let tail = exit.diagnostics.trim();
     if tail.is_empty() {
@@ -3833,12 +4249,13 @@ fn child_rss_kib(pid: u32) -> Option<u64> {
 #[allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 mod tests {
     use super::{
-        DISPLAY_DIAGNOSTICS_MAX_BYTES, LeanWorkerConfig, LeanWorkerDeclarationVerificationBatchResult,
-        LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationStatus, LeanWorkerError,
-        LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+        DISPLAY_DIAGNOSTICS_MAX_BYTES, GenerationBudget, LeanWorkerConfig,
+        LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationFacts,
+        LeanWorkerDeclarationVerificationStatus, LeanWorkerError, LeanWorkerExit, LeanWorkerImportStats,
+        LeanWorkerLifecycleSnapshot, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
         LeanWorkerModuleQuerySelector, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStats,
         MAX_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP, MIN_FRAME_BYTES, WorkerGeneration, WorkerRequestId,
-        stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
+        child_abort_reason, stale_worker_output_error, stale_worker_request_output_error, truncate_for_display,
     };
     use lean_rs_worker_protocol::types::{
         LeanWorkerDeclarationVerificationBatchItem, LeanWorkerDeclarationVerificationBatchRequest,
@@ -3896,6 +4313,162 @@ mod tests {
         assert_eq!(config.rss_sample_interval, Duration::from_millis(1));
     }
 
+    fn import_stats_with_residue(non_memory_mapped_region_bytes: u64) -> LeanWorkerImportStats {
+        LeanWorkerImportStats {
+            direct_import_names: vec!["Probe".to_owned()],
+            effective_module_count: 12,
+            compacted_region_count: 12,
+            memory_mapped_region_count: 0,
+            compacted_region_bytes: non_memory_mapped_region_bytes.max(1),
+            memory_mapped_region_bytes: 0,
+            non_memory_mapped_region_bytes,
+            imported_bytes: non_memory_mapped_region_bytes,
+            imported_constant_count: 100,
+            extension_count: 3,
+            total_imported_extension_entries: 30,
+            import_level: "server".to_owned(),
+            import_all: false,
+            load_exts: true,
+        }
+    }
+
+    #[test]
+    fn residue_accumulates_only_over_confirmed_imports() {
+        let mut budget = GenerationBudget::default();
+        budget.record_request(false);
+        budget.record_request(false);
+        assert_eq!(
+            budget.import_residue_bytes, 0,
+            "a request that did not import charges nothing"
+        );
+
+        budget.record_import(&import_stats_with_residue(1_000));
+        budget.record_import(&import_stats_with_residue(2_500));
+        assert_eq!(budget.import_residue_bytes, 3_500);
+        assert_eq!(budget.imports, 2);
+    }
+
+    #[test]
+    fn a_single_import_over_the_whole_budget_still_runs() {
+        let policy = LeanWorkerRestartPolicy::default().max_import_residue_bytes(1_000);
+        let mut budget = GenerationBudget::default();
+        // The check runs before the request, so an empty generation admits.
+        assert_eq!(budget.import_limit_reached(&policy), None);
+        budget.record_import(&import_stats_with_residue(9_000_000));
+        // And only then does it owe a cycle. A profile whose closure exceeds the
+        // entire budget must still be servable.
+        assert!(matches!(
+            budget.import_limit_reached(&policy),
+            Some(LeanWorkerRestartReason::ImportResidue { .. })
+        ));
+    }
+
+    #[test]
+    fn the_residue_bound_is_reported_ahead_of_the_import_count_backstop() {
+        let policy = LeanWorkerRestartPolicy::default()
+            .max_import_residue_bytes(1_000)
+            .max_imports(1);
+        let mut budget = GenerationBudget::default();
+        budget.record_import(&import_stats_with_residue(1_000));
+        // Both bounds are crossed by this one import. The byte bound is the one
+        // an operator would act on, so it is the one named.
+        assert_eq!(
+            budget.import_limit_reached(&policy),
+            Some(LeanWorkerRestartReason::ImportResidue {
+                residue_bytes: 1_000,
+                limit_bytes: 1_000,
+            })
+        );
+    }
+
+    #[test]
+    fn the_import_count_backstop_still_fires_when_residue_is_unreported() {
+        // A child that reports no region bytes — the failure this backstop
+        // exists for. The byte bound can never fire, so the count must.
+        let policy = LeanWorkerRestartPolicy::default()
+            .max_import_residue_bytes(1_000)
+            .max_imports(3);
+        let mut budget = GenerationBudget::default();
+        for _ in 0..3 {
+            budget.record_import(&import_stats_with_residue(0));
+        }
+        assert_eq!(budget.import_residue_bytes, 0);
+        assert_eq!(
+            budget.import_limit_reached(&policy),
+            Some(LeanWorkerRestartReason::MaxImports { limit: 3 })
+        );
+    }
+
+    #[test]
+    fn an_unset_residue_bound_never_cycles_however_much_is_imported() {
+        let policy = LeanWorkerRestartPolicy::default();
+        let mut budget = GenerationBudget::default();
+        for _ in 0..64 {
+            budget.record_import(&import_stats_with_residue(4 * 1024 * 1024 * 1024));
+        }
+        assert_eq!(budget.import_limit_reached(&policy), None);
+        assert_eq!(budget.request_limit_reached(&policy), None);
+    }
+
+    #[test]
+    fn residue_accounting_matches_the_sum_of_confirmed_imports() {
+        // The closed form: residue is the sum of `non_memory_mapped_region_bytes`
+        // over exactly the opens the child confirmed, and reuses contribute
+        // nothing however often they report the same stats.
+        let calls: Vec<(u64, bool)> = vec![
+            (2_000, false),
+            (0, true),
+            (3_500, false),
+            (3_500, true),
+            (3_500, true),
+            (1, false),
+            (0, false),
+        ];
+        let mut budget = GenerationBudget::default();
+        for (residue, was_reuse) in &calls {
+            budget.record_request(false);
+            if !was_reuse {
+                budget.record_import(&import_stats_with_residue(*residue));
+            }
+        }
+        let expected: u64 = calls
+            .iter()
+            .filter(|(_, was_reuse)| !was_reuse)
+            .map(|(residue, _)| residue)
+            .sum();
+        assert_eq!(budget.import_residue_bytes, expected);
+        assert_eq!(budget.imports, 4);
+        assert_eq!(budget.requests, u64::try_from(calls.len()).expect("small count"));
+    }
+
+    #[test]
+    fn a_default_config_leaves_pool_capacity_to_the_child() {
+        let config = LeanWorkerConfig::new("worker");
+        assert_eq!(config.resolved_session_pool_capacity(), None);
+    }
+
+    #[test]
+    fn pool_capacity_falls_back_to_max_imports_but_an_explicit_value_wins() {
+        let policy = LeanWorkerRestartPolicy::default().max_imports(3);
+        let derived = LeanWorkerConfig::new("worker").restart_policy(policy.clone());
+        assert_eq!(derived.resolved_session_pool_capacity(), Some(3));
+
+        // The decoupling: capacity is sized by what a held environment costs,
+        // the restart bound by what an import retains. Setting one must not move
+        // the other.
+        let explicit = LeanWorkerConfig::new("worker")
+            .restart_policy(policy)
+            .session_pool_capacity(8);
+        assert_eq!(explicit.resolved_session_pool_capacity(), Some(8));
+        assert_eq!(explicit.restart_policy.max_imports, Some(3));
+    }
+
+    #[test]
+    fn pool_capacity_clamps_to_a_servable_minimum() {
+        let config = LeanWorkerConfig::new("worker").session_pool_capacity(0);
+        assert_eq!(config.resolved_session_pool_capacity(), Some(1));
+    }
+
     #[test]
     fn restart_intensity_policy_clamps_to_nonzero_window() {
         let policy = LeanWorkerRestartPolicy::default().max_restarts_per_window(0, Duration::ZERO);
@@ -3943,7 +4516,7 @@ mod tests {
             ..LeanWorkerStats::default()
         };
         let exit = exit_with("bye", false);
-        let snapshot = LeanWorkerLifecycleSnapshot::from_worker(&stats, Some(exit.clone()));
+        let snapshot = LeanWorkerLifecycleSnapshot::from_worker(&stats, Some(exit.clone()), 0, None);
         assert_eq!(snapshot.worker_generation, 3);
         assert_eq!(snapshot.restarts, 3);
         assert_eq!(snapshot.exits, 2);
@@ -3993,9 +4566,61 @@ mod tests {
         // The verify/proof-state abort guard surfaces the same `child_abort`
         // cause the parent's relabel heuristic already keys on.
         assert_eq!(
-            LeanWorkerRestartReason::ChildAbort { operation: "test" }.stable_cause(),
+            LeanWorkerRestartReason::ChildAbort {
+                operation: "test",
+                status: String::from("signal: 6 (SIGABRT)"),
+                diagnostics: String::new(),
+            }
+            .stable_cause(),
             "child_abort"
         );
+    }
+
+    /// A child abort is unattributable unless the exit carries forward: the
+    /// stderr pipe is drained once, at reap, and kept nowhere else. The case
+    /// that motivated this is a Lean heap-ceiling overrun, which reaches the
+    /// parent as a bare SIGABRT and is indistinguishable from a segfault
+    /// without the child's own message.
+    #[test]
+    fn a_child_abort_carries_the_exit_status_and_the_child_message() {
+        let exit = LeanWorkerExit {
+            success: false,
+            code: Some(134),
+            status: String::from("exit status: 134"),
+            diagnostics: String::from(
+                "\n  fatal runtime error: Rust cannot catch foreign exceptions, aborting\n\
+                 lean-rs-worker child: SIGABRT, exiting immediately\n",
+            ),
+        };
+        let LeanWorkerRestartReason::ChildAbort {
+            operation,
+            status,
+            diagnostics,
+        } = child_abort_reason("verify_declaration", &exit)
+        else {
+            panic!("child_abort_reason must produce ChildAbort");
+        };
+        assert_eq!(operation, "verify_declaration");
+        assert_eq!(status, "exit status: 134");
+        // Trimmed, so the reason renders on one line, but the cause survives.
+        assert!(diagnostics.starts_with("fatal runtime error"), "{diagnostics}");
+        assert!(diagnostics.contains("SIGABRT"), "{diagnostics}");
+    }
+
+    /// The reason is cloned onto every lifecycle snapshot taken after it, so an
+    /// unbounded stderr capture would be retained per snapshot.
+    #[test]
+    fn a_child_abort_truncates_a_runaway_stderr_capture() {
+        let exit = LeanWorkerExit {
+            success: false,
+            code: None,
+            status: String::from("signal: 6 (SIGABRT)"),
+            diagnostics: "x".repeat(DISPLAY_DIAGNOSTICS_MAX_BYTES * 4),
+        };
+        let LeanWorkerRestartReason::ChildAbort { diagnostics, .. } = child_abort_reason("health", &exit) else {
+            panic!("child_abort_reason must produce ChildAbort");
+        };
+        assert!(diagnostics.contains("bytes truncated"), "{diagnostics}");
     }
 
     #[test]

@@ -7,6 +7,10 @@ use lean_rs_worker_parent::{
     LeanWorkerCapabilityBuilder, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
 };
 
+// What a child cannot reclaim, in bytes. Size it from the machine, not from a
+// module count: the same *number* of imports costs 9.6 GiB on one workload and
+// 16.0 GiB on another.
+const IMPORT_RESIDUE_BUDGET_BYTES: u64 = 9 * 1024 * 1024 * 1024;
 const CHILD_RSS_KIB: u64 = 1_572_864;
 
 let pool_config = LeanWorkerPoolConfig::new(1)
@@ -20,7 +24,17 @@ let builder = LeanWorkerCapabilityBuilder::new(
     ["MyCapability"],
 )
 .worker_executable(worker_child_binary)
-.restart_policy(LeanWorkerRestartPolicy::memory_bounded(1, CHILD_RSS_KIB));
+// How many warm import profiles one child holds. Independent of the restart
+// bound on purpose: derive one from the other and the pool never evicts,
+// because the parent recycles the child first.
+.session_pool_capacity(8)
+.restart_policy(
+    LeanWorkerRestartPolicy::default()
+        .max_import_residue_bytes(IMPORT_RESIDUE_BUDGET_BYTES)
+        // A backstop, not the bound: it catches a child whose import stats come
+        // back zeroed, which is the only way the byte accounting can go blind.
+        .max_imports(32),
+);
 
 let mut pool = LeanWorkerPool::new(pool_config);
 let mut lease = pool.acquire_lease(builder)?;
@@ -30,8 +44,13 @@ let mut lease = pool.acquire_lease(builder)?;
 let outcome = lease.process_module_query_batch(source, &selectors, &budgets, &options, None, None)?;
 ```
 
-Set the worker count, total child RSS budget, per-worker RSS ceiling, restart policy, and batching strategy together.
+Set the worker count, import residue budget, session pool capacity, restart policy, and batching strategy together.
 Changing only one of them can reintroduce the failure mode the worker boundary is meant to prevent.
+
+The RSS budgets above are a coarse outer guard, not the cycling policy. RSS counts clean mapped `.olean` pages that cost
+nothing to reclaim, and under memory pressure it *falls* while the unreclaimable total keeps growing — see
+[`docs/safety/long-session-memory.md`](safety/long-session-memory.md), which opens with the measurements. Bound the
+residue; leave RSS as a ceiling you do not expect to reach.
 
 ## Why This Shape
 
@@ -47,7 +66,7 @@ Rust can still control the operational shape:
 | Reuse | Reuse warm sessions keyed by canonical roots, ordered imports, import profile, metadata expectation, and toolchain facts. |
 | Scheduling | Keep local worker count bounded and size the total child RSS budget with `max_workers`. |
 | Batching | Keep one warm lease open for related module-query work and preserve item-level results. |
-| Cycling | Restart worker children after a bounded number of fresh imports or RSS growth. |
+| Cycling | Restart worker children once a generation has retained more than a byte budget of import residue. |
 | Reporting | Surface `ResourceExhausted` facts instead of returning empty or misleading Lean results. |
 
 The checked-in local defaults use one worker, one fresh full-session import per child, and a 1,572,864 KiB child RSS

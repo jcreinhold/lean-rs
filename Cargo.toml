@@ -12,8 +12,8 @@ rust-version = "1.91"
 version = "0.5.0"
 
 [workspace.dependencies]
-lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.5.0" }
 lean-rs = { path = "crates/lean-rs", version = "0.5.0" }
+lean-rs-abi = { path = "crates/lean-rs-abi", version = "0.5.0" }
 lean-rs-host = { path = "crates/lean-rs-host", version = "0.5.0" }
 lean-rs-interop-shims = { path = "crates/lean-rs/shims/lean-rs-interop-shims", version = "0.5.0" }
 lean-rs-sys = { path = "crates/lean-rs-sys", version = "0.5.0" }
@@ -23,8 +23,8 @@ lean-toolchain = { path = "crates/lean-toolchain", version = "0.5.0" }
 
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 fs4 = "1.1"
-serde_json = { version = "1", features = ["raw_value"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.11"
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
 # Baseline tracing-subscriber surface: `registry` + `std` is enough for the
@@ -48,8 +48,8 @@ unsafe-code = "deny"
 unused = { level = "warn", priority = -1 }
 
 [profile.profiling]
-inherits = "release"
 debug = true
+inherits = "release"
 
 # Comprehensive Clippy configuration for correctness, performance, and style
 [workspace.lints.clippy]

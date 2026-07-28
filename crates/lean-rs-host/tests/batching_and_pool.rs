@@ -488,6 +488,108 @@ fn session_pool_default_and_explicit_default_profile_reuse() {
     assert_eq!(stats.distinct_keys_seen, 1);
 }
 
+/// A pooled environment imported before a registering import must never be
+/// handed back out.
+///
+/// Lean sizes `Environment.extensions` once, at `finalizeImport`, and both the
+/// field and the growth helper are `private`. An environment that outlives a
+/// later `registerEnvExtension` therefore has a permanently short array, and
+/// `ScopedEnvExtension.pushScope` — reached by every `namespace`, `section`,
+/// and `open … in` — walks the *global* registry without filtering, panicking
+/// once per out-of-range slot. Reuse must lose to correctness here.
+/// The defensive half: registration that the pool never saw.
+///
+/// A `SessionPool` does not own every import in the process — a caller can
+/// hold `LeanCapabilities` and call `session` directly, and two pools can share
+/// one runtime. So the free-list sweep alone cannot be the guarantee; the
+/// stamp on a matched entry is re-checked against a live read before that
+/// environment is handed back out. This is the only path that produces a
+/// [`SessionPoolKeyMissReason::StaleEnvironment`] miss.
+#[test]
+fn a_stale_pooled_environment_is_dropped_on_acquire() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    // Shims-only: the late-extension module must register during
+    // `Lean.importModules`, not at dylib load, where registration throws.
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let pool = SessionPool::with_capacity(runtime, 4);
+    let probe = ["LeanRsFixture.Handles"];
+
+    drop(pool.acquire(&caps, &probe, None, None).expect("probe warms the pool"));
+
+    // Behind the pool's back, on purpose.
+    drop(
+        caps.session(&["LeanRsFixtureLateExtension"], None, None)
+            .expect("registering import succeeds outside the pool"),
+    );
+
+    drop(
+        pool.acquire(&caps, &probe, None, None)
+            .expect("stale probe re-imports rather than reusing"),
+    );
+
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 2, "the stale probe must import again");
+    assert_eq!(stats.reused, 0, "the matched entry must not be handed back out");
+    assert_eq!(stats.stale_evictions, 1);
+    assert_eq!(stats.miss_stale_environment, 1);
+    assert_eq!(stats.last_miss_reason, Some(SessionPoolKeyMissReason::StaleEnvironment));
+}
+
+/// The eager half: a registering import through the pool clears the free list
+/// on the spot, rather than leaving dead entries to be discovered one matching
+/// acquire at a time.
+///
+/// Also the negative test that keeps the fix from degenerating into "evict on
+/// every import": the fourth acquire below reuses.
+#[test]
+fn a_registering_import_sweeps_the_pool_immediately() {
+    let runtime = runtime();
+    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let pool = SessionPool::with_capacity(runtime, 4);
+    let probe = ["LeanRsFixture.Handles"];
+    let registrar = ["LeanRsFixtureLateExtension"];
+
+    drop(pool.acquire(&caps, &probe, None, None).expect("probe warms the pool"));
+    assert_eq!(pool.len(), 1);
+
+    drop(
+        pool.acquire(&caps, &registrar, None, None)
+            .expect("registering import succeeds"),
+    );
+    let stats = pool.stats();
+    assert_eq!(
+        stats.stale_evictions, 1,
+        "the probe entry must go at the moment of registration, not at the next probe acquire",
+    );
+    assert_eq!(pool.len(), 1, "only the registrar's own environment survives");
+
+    drop(
+        pool.acquire(&caps, &probe, None, None)
+            .expect("the swept probe re-imports"),
+    );
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 3);
+    assert_eq!(stats.reused, 0);
+    assert_eq!(
+        stats.miss_stale_environment, 0,
+        "the sweep already removed it, so this is an ordinary key miss",
+    );
+    assert_eq!(stats.last_miss_reason, Some(SessionPoolKeyMissReason::NoMatchingKey));
+
+    // Eviction is keyed on registration, not on "an import happened". Nothing
+    // registered since, so the pool works normally again.
+    drop(
+        pool.acquire(&caps, &probe, None, None)
+            .expect("the re-imported probe is reusable"),
+    );
+    let stats = pool.stats();
+    assert_eq!(stats.imports_performed, 3);
+    assert_eq!(stats.reused, 1);
+    assert_eq!(stats.stale_evictions, 1);
+}
+
 #[test]
 fn session_pool_import_profile_partitions_keys_before_import() {
     let runtime = runtime();

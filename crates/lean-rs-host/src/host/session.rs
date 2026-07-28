@@ -556,6 +556,10 @@ pub struct LeanSession<'lean, 'c> {
     /// capability export.
     environment: Obj<'lean>,
     import_stats: LeanImportStats,
+    /// Value of the process-global extension-registration stamp at the moment
+    /// this session's environment was imported. See
+    /// [`Self::extension_registry_epoch`] for what a mismatch means.
+    extension_registry_epoch: u64,
     /// Per-session dispatch metrics. `Cell` because every query method
     /// takes `&mut self` but the bulk path can also be invoked through a
     /// shared reference (e.g. inside a fold helper)—keeping the
@@ -687,11 +691,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 profile.import_level().as_str().to_owned(),
                 profile.load_exts(),
             )?;
+            // Read after the import, and inside the import lock, so the stamp
+            // describes the registry as it stood once this environment's own
+            // initializers had run. Reading it earlier would record a value
+            // this environment is already newer than.
+            let extension_registry_epoch = shims.extension_registry_epoch.call()?;
             Ok(Self {
                 capabilities,
                 shims,
                 environment,
                 import_stats,
+                extension_registry_epoch,
                 stats: Cell::new(SessionStats::default()),
             })
         })
@@ -730,11 +740,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 mode.import_level().as_str().to_owned(),
                 mode.load_exts(),
             )?;
+            let extension_registry_epoch = shims.extension_registry_epoch.call()?;
             Ok(Self {
                 capabilities,
                 shims,
                 environment,
                 import_stats,
+                extension_registry_epoch,
                 stats: Cell::new(SessionStats::default()),
             })
         })
@@ -752,6 +764,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         capabilities: &'c LeanCapabilities<'lean, 'c>,
         environment: Obj<'lean>,
         import_stats: LeanImportStats,
+        extension_registry_epoch: u64,
     ) -> LeanResult<Self> {
         let shims = HostShimBindings::resolve(capabilities.shim_capability())
             .map_err(|err| binding_error_to_lean_error(&err))?;
@@ -760,6 +773,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             shims,
             environment,
             import_stats,
+            extension_registry_epoch,
             stats: Cell::new(SessionStats::default()),
         })
     }
@@ -790,6 +804,55 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     #[must_use]
     pub fn import_stats(&self) -> &LeanImportStats {
         &self.import_stats
+    }
+
+    /// The process-global extension-registration stamp as it stood when this
+    /// session's environment was imported.
+    ///
+    /// Opaque and monotone; only equality against
+    /// [`Self::live_extension_registry_epoch`] carries meaning — never compare
+    /// two stamps with `<`. When the two differ, a later import registered a
+    /// Lean environment extension and this environment's `extensions` array is
+    /// permanently shorter than the registry: Lean sizes it once, at
+    /// `finalizeImport`, and keeps both the growth helper and the field
+    /// `private`. Elaborating any `namespace`, `section`, or `open … in`
+    /// against it makes `ScopedEnvExtension.pushScope` index past the end and
+    /// `panic!`. There is no repair — the only sound response is to drop the
+    /// session and re-import.
+    ///
+    /// A bare non-persistent `registerEnvExtension` moves none of the three
+    /// registries the stamp sums, so in principle it can grow the array
+    /// requirement without moving the stamp. The resulting mismatch is not
+    /// reachable: extension indices are shared across kinds, so if such an
+    /// extension lands at index *n* then `scopedEnvExtensionsRef` did not grow
+    /// and every scoped extension the blind iteration touches still has an
+    /// index inside the short array. The only other blind walks are over
+    /// `persistentEnvExtensionsRef` — import finalization, and olean writing,
+    /// which this host never performs. Beyond those, such an extension is
+    /// reached only through an explicit `ext.getState env` from the module that
+    /// registered it, and that module is not in the stale environment's import
+    /// closure. Re-check this argument at every toolchain bump.
+    #[must_use]
+    pub fn extension_registry_epoch(&self) -> u64 {
+        self.extension_registry_epoch
+    }
+
+    /// The current process-global extension-registration stamp.
+    ///
+    /// Compare against [`Self::extension_registry_epoch`] to decide whether
+    /// this session's environment is still safe to elaborate against. The
+    /// stamp is process-global, so one read answers for every live session,
+    /// whichever one it is read through.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shim raises through `IO` or the result cannot
+    /// be decoded.
+    pub fn live_extension_registry_epoch(&self) -> LeanResult<u64> {
+        let started = Instant::now();
+        let epoch = self.shims.extension_registry_epoch.call();
+        self.record_call(0, started.elapsed());
+        epoch
     }
 
     /// Internal helper: record one FFI call and add `batch` per-item

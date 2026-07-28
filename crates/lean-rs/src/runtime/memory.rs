@@ -3,6 +3,13 @@
 //! This is intentionally separate from runtime initialization and object
 //! ownership. The setter does not reclaim memory; it only configures Lean's
 //! periodic runtime memory check.
+//!
+//! The check is not recoverable from Rust. Lean signals an overrun by throwing a
+//! C++ exception, and it cannot unwind through the Rust frame that called into
+//! Lean: the process aborts with `fatal runtime error: Rust cannot catch foreign
+//! exceptions`. Treat the limit as a contained-abort guardrail — better than an
+//! OS OOM-kill of the whole machine — not as a way to turn a runaway elaboration
+//! into an error value.
 
 // SAFETY DOC: this module is the narrow safe wrapper around Lean's raw
 // process-global memory-limit setter.

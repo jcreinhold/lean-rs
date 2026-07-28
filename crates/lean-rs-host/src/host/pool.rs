@@ -35,6 +35,25 @@
 //! caches stay warm. There is no eviction-by-age or eviction-by-distinct-key
 //! policy beyond the capacity bound.
 //!
+//! ## Staleness eviction
+//!
+//! One thing does evict below capacity. Lean sizes `Environment.extensions`
+//! exactly once, when the environment is imported, and an import that runs a
+//! module's `initialize` block can register a new environment extension
+//! process-globally. Every environment that already exists then has a
+//! permanently short array — `private` on both the field and the growth
+//! helper, so no repair is possible — and elaborating a `namespace`,
+//! `section`, or `open … in` against it panics once per out-of-range slot.
+//!
+//! Each entry therefore records the extension-registration stamp it was
+//! imported under ([`crate::LeanSession::extension_registry_epoch`]), and
+//! [`SessionPool::acquire`] compares it against a live read before handing the
+//! environment back. A mismatch drops the entry, counts a
+//! [`SessionPoolKeyMissReason::StaleEnvironment`] miss, and imports fresh; the
+//! same live stamp then sweeps the rest of the free list. The sweep is lazy —
+//! it runs on acquire, not at the moment of registration — so
+//! [`PoolStats::stale_evictions`] lags the registration by one acquire.
+//!
 //! [`SessionPool::drain`] explicitly drops every cached free-list entry
 //! without discarding the pool itself. It releases the Rust-owned
 //! environment references the pool is holding; it does not reset Lean's
@@ -121,6 +140,16 @@ pub struct PoolStats {
     pub miss_reuse_disabled: u64,
     /// Key misses because cached entries existed but none matched the requested key.
     pub miss_no_matching_key: u64,
+    /// Key misses because the matching entry predated an environment-extension
+    /// registration and could no longer be elaborated against.
+    pub miss_stale_environment: u64,
+    /// Number of cached environments dropped because a later import
+    /// registered a Lean environment extension underneath them.
+    ///
+    /// Counts *entries*, not acquires: one stale acquire drops the entry it
+    /// matched plus every other entry the same sweep found, so this is at
+    /// least `miss_stale_environment`.
+    pub stale_evictions: u64,
     /// Most recent key-miss reason.
     pub last_miss_reason: Option<SessionPoolKeyMissReason>,
 }
@@ -131,6 +160,10 @@ pub enum SessionPoolKeyMissReason {
     EmptyPool,
     ReuseDisabled,
     NoMatchingKey,
+    /// A matching entry existed but was imported before a later import
+    /// registered an environment extension. See
+    /// [`crate::LeanSession::extension_registry_epoch`].
+    StaleEnvironment,
 }
 
 impl SessionPoolKeyMissReason {
@@ -138,6 +171,7 @@ impl SessionPoolKeyMissReason {
         match self {
             Self::EmptyPool => "empty_pool",
             Self::ReuseDisabled => "reuse_disabled",
+            Self::StaleEnvironment => "stale_environment",
             Self::NoMatchingKey => "no_matching_key",
         }
     }
@@ -267,6 +301,10 @@ struct PooledEntry<'lean> {
     key: SessionPoolKey,
     environment: Obj<'lean>,
     import_stats: LeanImportStats,
+    /// The process-global extension-registration stamp as it stood when this
+    /// environment was imported. Reuse is safe only while it still matches the
+    /// live stamp — see [`crate::LeanSession::extension_registry_epoch`].
+    extension_registry_epoch: u64,
 }
 
 // -- PoolInner: RefCell-protected free list ------------------------------
@@ -425,18 +463,50 @@ impl<'lean> SessionPool<'lean> {
         );
         let key = SessionPoolKey::from_capabilities(caps, imports, import_profile);
         self.remember_seen_key(&key);
-        let (session, hit) = {
+        let matched = {
             let mut inner = self.inner.borrow_mut();
-            if let Some(entry) = inner.take_matching(&key) {
-                self.bump_reused();
-                (
-                    LeanSession::from_environment_with_import_stats(caps, entry.environment, entry.import_stats)?,
-                    true,
-                )
-            } else {
-                let reason = self.miss_reason(&inner);
-                drop(inner);
+            match inner.take_matching(&key) {
+                Some(entry) => Ok(entry),
+                None => Err(self.miss_reason(&inner)),
+            }
+        };
+        // A pooled environment is reusable only while the process-global
+        // extension registry stands exactly where it stood when that
+        // environment was imported: Lean sizes `Environment.extensions` once,
+        // at import, and elaborating a `namespace`, `section`, or `open … in`
+        // against a short array panics once per out-of-range slot with no
+        // repair available. See `LeanSession::extension_registry_epoch`.
+        let reused = match matched {
+            Ok(entry) => {
+                let entry_epoch = entry.extension_registry_epoch;
+                let session = LeanSession::from_environment_with_import_stats(
+                    caps,
+                    entry.environment,
+                    entry.import_stats,
+                    entry_epoch,
+                )?;
+                let live = session.live_extension_registry_epoch().ok();
+                if live == Some(entry_epoch) {
+                    self.bump_reused();
+                    Some(session)
+                } else {
+                    // This is a bare `LeanSession`, not a `PooledSession`, so
+                    // dropping it releases the environment outright rather
+                    // than returning it to the free list.
+                    drop(session);
+                    self.bump_stale_evictions(1);
+                    self.bump_key_miss(SessionPoolKeyMissReason::StaleEnvironment);
+                    None
+                }
+            }
+            Err(reason) => {
                 self.bump_key_miss(reason);
+                None
+            }
+        };
+        let (session, hit) = match reused {
+            Some(session) => (session, true),
+            None => {
                 self.enforce_before_fresh_import(imports)?;
                 let session = caps.session_with_profile(imports, import_profile, cancellation, progress)?;
                 self.remember_import_stats(session.import_stats().clone());
@@ -444,6 +514,12 @@ impl<'lean> SessionPool<'lean> {
                 (session, false)
             }
         };
+        // Sweep with the stamp in hand. A reused session's stamp was just
+        // confirmed live; a freshly imported one's was read inside that
+        // import's own lock, so it is live too. Either way this costs no extra
+        // FFI call, and it keeps a dead entry from occupying a slot the
+        // capacity bound would otherwise spend evicting a live one.
+        self.sweep_stale(Some(session.extension_registry_epoch()));
         tracing::debug!(target: "lean_rs", hit = hit, "lean_rs.host.pool.acquire.result");
         Ok(PooledSession {
             pool: self,
@@ -567,6 +643,39 @@ impl<'lean> SessionPool<'lean> {
         }
     }
 
+    /// Drop every free-list entry whose environment predates `live`.
+    ///
+    /// `None` means the stamp could not be read, in which case every entry
+    /// compares unequal and the whole free list goes. That is the only
+    /// direction that cannot leave a short-`extensions` environment in
+    /// service, and it costs at most one re-import per pooled profile.
+    ///
+    /// This reaches only the free list. A [`PooledSession`] that is checked
+    /// out while some *other* code path imports a registering module stays
+    /// checked out; nothing at this layer can revoke it.
+    fn sweep_stale(&self, live: Option<u64>) {
+        let evicted = {
+            let mut inner = self.inner.borrow_mut();
+            let before = inner.free.len();
+            inner.free.retain(|entry| live == Some(entry.extension_registry_epoch));
+            before.saturating_sub(inner.free.len())
+        };
+        if evicted > 0 {
+            self.bump_stale_evictions(u64::try_from(evicted).unwrap_or(u64::MAX));
+        }
+    }
+
+    fn bump_stale_evictions(&self, count: u64) {
+        let mut s = self.stats.get();
+        s.stale_evictions = s.stale_evictions.saturating_add(count);
+        self.stats.set(s);
+        tracing::debug!(
+            target: "lean_rs",
+            count = count,
+            "lean_rs.host.pool.stale_eviction",
+        );
+    }
+
     fn bump_key_miss(&self, reason: SessionPoolKeyMissReason) {
         let mut s = self.stats.get();
         s.key_misses = s.key_misses.saturating_add(1);
@@ -579,6 +688,9 @@ impl<'lean> SessionPool<'lean> {
             }
             SessionPoolKeyMissReason::NoMatchingKey => {
                 s.miss_no_matching_key = s.miss_no_matching_key.saturating_add(1);
+            }
+            SessionPoolKeyMissReason::StaleEnvironment => {
+                s.miss_stale_environment = s.miss_stale_environment.saturating_add(1);
             }
         }
         s.last_miss_reason = Some(reason);
@@ -708,7 +820,13 @@ impl<'lean> SessionPool<'lean> {
         Ok(())
     }
 
-    fn release(&self, key: SessionPoolKey, env: Obj<'lean>, import_stats: LeanImportStats) {
+    fn release(
+        &self,
+        key: SessionPoolKey,
+        env: Obj<'lean>,
+        import_stats: LeanImportStats,
+        extension_registry_epoch: u64,
+    ) {
         let mut inner = self.inner.borrow_mut();
         let mut s = self.stats.get();
         let kept = inner.free.len() < self.capacity;
@@ -717,6 +835,7 @@ impl<'lean> SessionPool<'lean> {
                 key,
                 environment: env,
                 import_stats,
+                extension_registry_epoch,
             });
             s.released_to_pool = s.released_to_pool.saturating_add(1);
         } else {
@@ -837,8 +956,13 @@ impl Drop for PooledSession<'_, '_, '_> {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
             let import_stats = session.import_stats().clone();
+            // Recorded, not re-read: this is the stamp the environment was
+            // imported under, and the next acquire compares it against a live
+            // read rather than trusting it.
+            let extension_registry_epoch = session.extension_registry_epoch();
             let env = session.into_environment();
-            self.pool.release(self.key.clone(), env, import_stats);
+            self.pool
+                .release(self.key.clone(), env, import_stats, extension_registry_epoch);
         }
     }
 }

@@ -72,7 +72,44 @@ use lean_rs_worker_protocol::types::{
 use lean_rs_worker_protocol::worker_exports::WorkerExportOperation;
 
 const DECLARATION_TYPE_MAX_BYTES: usize = 64 * 1024;
-const MODULE_QUERY_CACHE_API_VERSION: &str = "lean-rs.module-query-cache.v1";
+/// Bumped whenever the key's *inputs* change, so a stale digest can never be
+/// read as a fresh one. Free to bump: the cache is a process-local `IO.Ref` in
+/// the child and never outlives it. v3 added `HostSessionMode`.
+const MODULE_QUERY_CACHE_API_VERSION: &str = "lean-rs.module-query-cache.v3";
+/// How many imported environments one child may hold at once, counting the one
+/// it is currently serving.
+///
+/// The embedder normally does not set this: `LeanWorker::spawn` injects
+/// `LEAN_RS_WORKER_SESSION_POOL_CAPACITY` from `LeanWorkerConfig`, which sizes
+/// it by what a held environment costs — about 70 MiB measured against process
+/// `phys_footprint`, against 2–4 GiB for the import that would otherwise have
+/// to run again.
+///
+/// It used to be derived from the parent's `max_imports` restart bound instead,
+/// which made capacity eviction unreachable: the parent cycled the child at
+/// exactly the point the pool would have begun evicting, so this file's LRU
+/// path never ran. The two are now independent, and eviction is a live path.
+/// [`evict_stale_host_sessions`] can additionally drop entries below capacity,
+/// which only frees slots. This default covers an embedder that configures
+/// neither.
+const SESSION_POOL_DEFAULT_CAPACITY: usize = 4;
+
+/// A capacity below 1 is meaningless (the child must be able to hold the session
+/// it is serving), so it clamps rather than erroring: this is a tuning knob read
+/// from the environment, not a request to validate.
+fn session_pool_capacity() -> usize {
+    std::env::var("LEAN_RS_WORKER_SESSION_POOL_CAPACITY")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(SESSION_POOL_DEFAULT_CAPACITY)
+        .max(1)
+}
+
+/// Entries are effectively per *file*, and this consumer derives a call's
+/// imports from that file's own header, so one file belongs to one import
+/// profile. The pool holding several environments therefore does not multiply
+/// the number of distinct snapshots in flight, and this does not scale with
+/// [`SESSION_POOL_DEFAULT_CAPACITY`].
 const MODULE_CACHE_DEFAULT_MAX_ENTRIES: u64 = 4;
 const MODULE_CACHE_DEFAULT_TTL_MILLIS: u64 = 5 * 60 * 1000;
 const MODULE_CACHE_DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -302,6 +339,15 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = stdin.lock();
     let writer = ProtocolWriter::new();
     let mut host_session: Option<HostSessionState> = None;
+    // Imported environments this child holds but is not currently serving, MRU
+    // at the back. Bounded by `session_pool_capacity` together with
+    // `host_session`; a linear scan for the same reason `anchors` is one.
+    let mut parked: Vec<HostSessionState> = Vec::new();
+    let session_pool_capacity = session_pool_capacity();
+    // One leaked anchor per distinct `(project_root, mode)` this child is
+    // asked for. A linear scan, not a map: `HostSessionMode` is not `Hash`,
+    // and a child serves one key in practice, so the list is length 1.
+    let mut anchors: Vec<&'static HostAnchor> = Vec::new();
 
     writer.write(Message::Handshake {
         worker_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -375,15 +421,19 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 imports,
                 import_profile,
             } => {
-                let response = match HostSessionState::open(runtime, &project_root, &mode, &imports, import_profile) {
-                    Ok(mut state) => {
-                        drop(state.clear_module_snapshot_cache());
-                        let import_stats = worker_import_stats(state.session.import_stats());
-                        host_session = Some(state);
-                        Response::HostSessionOpened { import_stats }
-                    }
-                    Err(err) => error_response(&err),
-                };
+                let response = open_or_reuse_host_session(
+                    runtime,
+                    &mut anchors,
+                    &mut host_session,
+                    &mut parked,
+                    session_pool_capacity,
+                    HostSessionKey {
+                        project_root,
+                        mode,
+                        imports,
+                        import_profile,
+                    },
+                );
                 write_response(&writer, response)?;
             }
             Request::Elaborate { source, options } => {
@@ -750,14 +800,54 @@ fn missing_session_response() -> Response {
     }
 }
 
-struct HostSessionState {
+/// Everything about an `OpenHostSession` request that determines which
+/// environment the resulting session holds.
+///
+/// Equality *is* the reuse predicate, so the fields are the contract: a
+/// different project or mode is a different anchor, a different import list is
+/// a different environment, and a different profile is a different set of
+/// modules behind the same list. `imports` is a `Vec`, not a set — import
+/// order is significant, and the host's own session-pool key treats it so.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostSessionKey {
+    project_root: String,
+    mode: HostSessionMode,
+    imports: Vec<String>,
+    import_profile: LeanWorkerSessionImportProfile,
+}
+
+/// The leaked, session-independent half of a host session: everything a
+/// [`LeanSession`] borrows from but that does not depend on the import set.
+///
+/// Sessions are `'static` because the host and capabilities behind them are
+/// leaked; the child cannot free them, so the only defence against unbounded
+/// growth is to build at most one anchor per distinct `(project_root, mode)`
+/// and reuse it. `LeanHost` caches nothing from disk — it is `{ runtime,
+/// project }` and re-reads the Lake manifest on each import — so reuse across
+/// differing import sets is sound, and `session_with_profile` already takes
+/// `&self` for exactly that reason.
+struct HostAnchor {
+    project_root: String,
+    mode: HostSessionMode,
     #[allow(dead_code, reason = "leaked host anchors the capability and session lifetimes")]
     host: &'static LeanHost<'static>,
-    #[allow(dead_code, reason = "leaked capabilities anchor the session borrow")]
     capabilities: &'static LeanCapabilities<'static, 'static>,
+    worker_capability: Option<&'static LeanCapability<'static>>,
+}
+
+impl HostAnchor {
+    fn matches(&self, project_root: &str, mode: &HostSessionMode) -> bool {
+        self.project_root == project_root && &self.mode == mode
+    }
+}
+
+struct HostSessionState {
+    /// Which open produced this session. Compared for equality to decide
+    /// reuse, and folded into the module-query cache key so an answer is never
+    /// served to a different environment.
+    key: HostSessionKey,
     worker_bindings: Option<WorkerCapabilityBindings>,
     session: LeanSession<'static, 'static>,
-    imports: Vec<String>,
 }
 
 struct WorkerCapabilityBindings {
@@ -923,37 +1013,218 @@ impl From<LeanError> for WorkerCallError {
     }
 }
 
-impl HostSessionState {
-    fn open(
-        runtime: &'static LeanRuntime,
-        project_root: &str,
-        mode: &HostSessionMode,
-        imports: &[String],
-        import_profile: LeanWorkerSessionImportProfile,
-    ) -> LeanResult<Self> {
+/// Answer one `OpenHostSession` request, reusing a held session when one
+/// already describes the requested environment.
+///
+/// A reuse is the whole point of the exercise: opening a session runs a full
+/// `importModules`, and with `loadExts := true` the imported regions are not
+/// reclaimable, so a child that re-imports per request grows with the *request
+/// count* rather than with the workload.
+///
+/// The child therefore holds up to `capacity` imported environments — the
+/// current one plus `parked`, MRU at the back — instead of one. Dropping a
+/// session is what does not help. Measured on a Mathlib-scale project with five
+/// unrelated real import profiles, holding every session costs 8,396,800 KiB of
+/// `phys_footprint` against 8,110,080 KiB for dropping each immediately — about
+/// 70 MiB per extra live environment, against 2.0–4.5 GB for the import that
+/// would otherwise have to run again. Re-importing is the expensive half, and a
+/// pool turns "one import per switch" into "one import per *distinct* profile".
+///
+/// The same shape shows up on the workspace fixture — holding four costs 4.19 GB
+/// against 4.04 GB for holding one, and an alternating workload costs 7.9 GB and
+/// sixteen imports without the pool against 4.19 GB and four with it — but those
+/// figures are RSS over modules that all import `Lean` and therefore share ~99%
+/// of their closure. Read them as a shape, not a magnitude.
+///
+/// `LEAN_RS_WORKER_SESSION_POOL_CAPACITY=1` restores the pre-pool child exactly:
+/// nothing is ever parked, so every mismatch drops the old session, clears the
+/// cache, and re-imports. That is the rollback lever and the test lever.
+///
+/// Two orderings are load-bearing when a session is actually **dropped** (not
+/// merely parked). The retained snapshot cache is cleared first, because a
+/// cached snapshot pins the environment of the session that built it; and the
+/// eviction completes before the replacement is imported, so a full pool does
+/// not transiently exceed its capacity. The cost of that ordering is that a
+/// failed import leaves the child without a *current* session — which the parent
+/// already handles, retrying on `worker_session_missing` — but `parked` survives
+/// it, so the retry may still land on a pooled key.
+fn open_or_reuse_host_session(
+    runtime: &'static LeanRuntime,
+    anchors: &mut Vec<&'static HostAnchor>,
+    host_session: &mut Option<HostSessionState>,
+    parked: &mut Vec<HostSessionState>,
+    capacity: usize,
+    key: HostSessionKey,
+) -> Response {
+    // Before any reuse decision, and before capacity eviction: dropping dead
+    // entries can only free slots, so the LRU loop below never discards a live
+    // entry while a dead one is still in the list.
+    //
+    // A stale *current* session becomes `None` here and falls through to the
+    // ordinary import path, reporting `HostSessionOpened`. The parent's import
+    // accounting therefore stays honest with no new wire signal.
+    evict_stale_host_sessions(host_session, parked);
+
+    if let Some(state) = host_session.as_ref()
+        && state.key == key
+    {
+        // Restated from the open that built this environment; `import_stats`
+        // is computed once at import and stored, so it still describes it.
+        return Response::HostSessionReused {
+            import_stats: worker_import_stats(state.session.import_stats()),
+        };
+    }
+
+    // A pooled hit: no clear and no import. The snapshot cache survives because
+    // the environment that built it does, which is sound only because `mode`
+    // now joins the module-query cache key — two live sessions over the same
+    // root, imports, and profile are otherwise indistinguishable to it.
+    if let Some(index) = parked.iter().position(|state| state.key == key) {
+        let state = parked.remove(index);
+        if let Some(outgoing) = host_session.take() {
+            parked.push(outgoing);
+        }
+        let import_stats = worker_import_stats(state.session.import_stats());
+        *host_session = Some(state);
+        return Response::HostSessionReused { import_stats };
+    }
+
+    if let Some(outgoing) = host_session.take() {
+        parked.push(outgoing);
+    }
+    // `capacity` counts the session this call is about to make current, so the
+    // pool may keep at most `capacity - 1`. Evicting from the front is LRU.
+    while parked.len() >= capacity {
+        let mut evicted = parked.remove(0);
+        // Lean's snapshot cache is process-global and clears all-or-nothing, so
+        // this also discards entries belonging to sessions that are still live.
+        // That costs recomputation and nothing else, and it is the only way to
+        // stop a retained snapshot from pinning the environment being dropped.
+        //
+        // This path only became reachable when pool capacity stopped being
+        // derived from the parent's restart bound, so the collateral clear is a
+        // new cost. It is self-limiting rather than merely tolerable: a parent
+        // using a byte-denominated restart bound recycles the child after
+        // `budget / residue-per-import` imports, so capacity binds only where
+        // that quotient exceeds `capacity` — which is exactly where imports are
+        // small. At Mathlib scale (2–4 GB retained per import against a
+        // 9 GiB floor) roughly four imports fit in a generation and this loop
+        // never runs; on a project importing 50 MB at a time it runs often, and
+        // there both the discarded snapshots and the re-import are cheap.
+        drop(evicted.clear_module_snapshot_cache());
+        drop(evicted);
+    }
+
+    let anchor = match anchors
+        .iter()
+        .find(|anchor| anchor.matches(&key.project_root, &key.mode))
+    {
+        Some(anchor) => *anchor,
+        None => match HostAnchor::build(runtime, &key.project_root, &key.mode) {
+            Ok(anchor) => {
+                anchors.push(anchor);
+                anchor
+            }
+            Err(err) => return error_response(&err),
+        },
+    };
+
+    match HostSessionState::open(anchor, key) {
+        Ok(state) => {
+            let import_stats = worker_import_stats(state.session.import_stats());
+            *host_session = Some(state);
+            // The import that just completed is the only moment the extension
+            // registry can move: `runSessionImport` is the sole registration
+            // site reachable in this embedding. Everything else either runs
+            // after `lean_io_mark_end_initialization` (where registration
+            // throws) or imports with `loadExts := false`. The session set
+            // above is definitionally not the one this can drop.
+            evict_stale_host_sessions(host_session, parked);
+            Response::HostSessionOpened { import_stats }
+        }
+        Err(err) => error_response(&err),
+    }
+}
+
+/// Drop every held session whose environment predates an environment-extension
+/// registration.
+///
+/// `Environment.extensions` is sized exactly once, by `mkInitialExtensionStates`
+/// inside `finalizeImport`. The only growth path,
+/// `EnvExtension.ensureExtensionsArraySize`, runs solely from
+/// `finalizePersistentExtensions` for the environment *being imported*, and both
+/// it and the `extensions` field are `private` — so an environment that outlives
+/// a `registerEnvExtension` can never be repaired. Registration during import is
+/// ordinary rather than exotic: `Lean.initializing` is true for all of
+/// `importModules`, which is how every user `initialize` block and every
+/// `register_simp_attr` comes into existence.
+///
+/// Serving a query from such an environment is not a degraded answer, it is a
+/// dead child. `ScopedEnvExtension.pushScope` / `popScope` / `setDelimitsLocal`
+/// / `activateScoped` walk the process-global `scopedEnvExtensionsRef` *without*
+/// filtering against the environment they are modifying, so each out-of-range
+/// slot reaches `panic! "invalid environment extension has been accessed"`.
+/// Their callers are ordinary elaboration: every `namespace`, every `section`,
+/// every `open … in`.
+///
+/// `host_session` and `parked` are swept together on purpose. Today only an
+/// import performed outside this function can leave the *current* session
+/// behind, but the two fields are one pool split for borrow reasons; letting
+/// them diverge is what would open a hole the first time another request path
+/// imports.
+///
+/// No logging, deliberately: the child has no `tracing` dependency, and writing
+/// to a stderr pipe the parent drains only after exit is the failure mode this
+/// function exists to prevent.
+fn evict_stale_host_sessions(host_session: &mut Option<HostSessionState>, parked: &mut Vec<HostSessionState>) {
+    // Any live session will do: the stamp reads process-global registries, not
+    // anything belonging to the session it is read through.
+    let Some(probe) = host_session.as_ref().or_else(|| parked.first()) else {
+        return;
+    };
+    // `None` compares unequal to every recorded stamp, so a failed read means
+    // "assume everything is stale". That costs one re-import per held profile
+    // and is the only direction that cannot leave a short-`extensions`
+    // environment in service.
+    let live = probe.session.live_extension_registry_epoch().ok();
+    let is_stale = |state: &HostSessionState| live != Some(state.session.extension_registry_epoch());
+    if !host_session.as_ref().is_some_and(&is_stale) && !parked.iter().any(&is_stale) {
+        return;
+    }
+    // Clear before any drop, for the same reason the capacity eviction does: a
+    // retained snapshot pins the environment that built it. Lean's cache is
+    // process-global and all-or-nothing, so one clear covers every held session.
+    if let Some(state) = host_session.as_mut().or_else(|| parked.first_mut()) {
+        drop(state.clear_module_snapshot_cache());
+    }
+    parked.retain(|state| !is_stale(state));
+    if host_session.as_ref().is_some_and(&is_stale) {
+        *host_session = None;
+    }
+}
+
+impl HostAnchor {
+    fn build(runtime: &'static LeanRuntime, project_root: &str, mode: &HostSessionMode) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let (capabilities, worker_bindings) = match mode {
+        let (capabilities, worker_capability) = match mode {
             HostSessionMode::Capability {
                 package,
                 lib_name,
                 manifest_path,
             } => {
-                let worker_bindings = match manifest_path {
-                    Some(path) => {
-                        let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
-                            runtime,
-                            LeanBuiltCapability::manifest_path(path),
-                        )?));
-                        Some(WorkerCapabilityBindings::new(capability))
-                    }
+                let worker_capability = match manifest_path {
+                    Some(path) => Some(&*Box::leak(Box::new(LeanCapability::from_build_manifest(
+                        runtime,
+                        LeanBuiltCapability::manifest_path(path),
+                    )?))),
                     None => None,
                 };
-                let capabilities = if worker_bindings.is_some() {
+                let capabilities = if worker_capability.is_some() {
                     Box::leak(Box::new(host.load_shims_only()?))
                 } else {
                     Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
                 };
-                (capabilities, worker_bindings)
+                (capabilities, worker_capability)
             }
             HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None),
             _ => {
@@ -962,15 +1233,29 @@ impl HostSessionState {
                 ));
             }
         };
-        let import_refs: Vec<&str> = imports.iter().map(String::as_str).collect();
-        let session =
-            capabilities.session_with_profile(&import_refs, host_import_profile(import_profile)?, None, None)?;
-        Ok(Self {
+        Ok(Box::leak(Box::new(Self {
+            project_root: project_root.to_owned(),
+            mode: mode.clone(),
             host,
             capabilities,
-            worker_bindings,
+            worker_capability,
+        })))
+    }
+}
+
+impl HostSessionState {
+    fn open(anchor: &'static HostAnchor, key: HostSessionKey) -> LeanResult<Self> {
+        let import_refs: Vec<&str> = key.imports.iter().map(String::as_str).collect();
+        let session = anchor.capabilities.session_with_profile(
+            &import_refs,
+            host_import_profile(key.import_profile)?,
+            None,
+            None,
+        )?;
+        Ok(Self {
+            worker_bindings: anchor.worker_capability.map(WorkerCapabilityBindings::new),
             session,
-            imports: imports.to_vec(),
+            key,
         })
     }
 
@@ -1638,17 +1923,8 @@ impl HostSessionState {
 
     fn clear_module_snapshot_cache_for_rss_guard(&mut self) -> LeanResult<()> {
         let guard_kib = module_cache_env_u64("LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB", MODULE_CACHE_DEFAULT_RSS_GUARD_KIB);
-        if guard_kib == 0 {
-            return Ok(());
-        }
-        match current_rss_kib() {
-            Some(current) if current >= guard_kib => {
-                let _cleared = self.session.clear_module_snapshot_cache()?;
-            }
-            None => {
-                let _cleared = self.session.clear_module_snapshot_cache()?;
-            }
-            Some(_) => {}
+        if should_clear_for_rss_guard(guard_kib, current_rss_kib()) {
+            let _cleared = self.session.clear_module_snapshot_cache()?;
         }
         Ok(())
     }
@@ -1660,7 +1936,15 @@ impl HostSessionState {
         let max_bytes = module_cache_env_u64("LEAN_RS_MODULE_CACHE_MAX_BYTES", MODULE_CACHE_DEFAULT_MAX_BYTES);
         ModuleQueryCachePolicy {
             file_identity: file_identity.clone(),
-            key: module_query_cache_key(source, &self.imports, options, &file_identity),
+            key: module_query_cache_key(
+                &self.key.project_root,
+                &self.key.mode,
+                source,
+                &self.key.imports,
+                self.key.import_profile,
+                options,
+                &file_identity,
+            ),
             max_entries,
             ttl_millis,
             max_bytes,
@@ -2299,14 +2583,52 @@ fn approx_json_bytes<T: serde::Serialize>(value: &T) -> u64 {
     serde_json::to_vec(value).map_or(0, |bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
 }
 
+/// Key one module-query answer to the environment that produced it.
+///
+/// Every input that can change the answer has to be here — the whole of
+/// [`HostSessionKey`], plus the source and elaboration options. `project_root`
+/// and `import_profile` joined the key when sessions became reusable across
+/// requests: before, the unconditional clear on every open hid their absence,
+/// and the same import *names* under a different project or profile resolve to
+/// different `.olean` files.
+///
+/// `mode` joined it when the child gained a **pool**, which is when the last of
+/// that cover disappeared. Two sessions differing only in mode — `ShimsOnly`
+/// versus a `Capability` dylib over the same root, imports, and profile — can
+/// now be live at once with no clear between them, and
+/// `processModuleQueryBatchCached` looks up by key *before* it touches the
+/// caller's environment, then projects the stored snapshot's. Without `mode` in
+/// the key one would answer from the other's environment.
+///
+/// Every other field is hashed directly; `mode` goes through its wire encoding,
+/// for the reason given at the call.
 fn module_query_cache_key(
+    project_root: &str,
+    mode: &HostSessionMode,
     source: &str,
     imports: &[String],
+    import_profile: LeanWorkerSessionImportProfile,
     options: &LeanWorkerElabOptions,
     file_identity: &str,
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(MODULE_QUERY_CACHE_API_VERSION.as_bytes());
+    hasher.update(b"\0project\0");
+    hasher.update(project_root.as_bytes());
+    hasher.update(b"\0mode\0");
+    // Through the wire encoding rather than field by field: that encoding *is*
+    // this type's contract, so it is stable and injective across variants —
+    // including ones added later, which a match on this `#[non_exhaustive]`
+    // enum would have to route through a wildcard and silently conflate. A
+    // digest that shifts on an unrelated protocol edit costs one cold cache in
+    // one child; a digest that fails to separate two environments serves a
+    // wrong answer.
+    match serde_json::to_string(mode) {
+        Ok(encoded) => hasher.update(encoded.as_bytes()),
+        // Unreachable for a plain tagged enum. The debug form rather than a
+        // constant, because a constant would hash every mode alike.
+        Err(_) => hasher.update(format!("{mode:?}").as_bytes()),
+    }
     hasher.update(b"\0file\0");
     hasher.update(file_identity.as_bytes());
     hasher.update(b"\0source\0");
@@ -2316,6 +2638,8 @@ fn module_query_cache_key(
         hasher.update(import.as_bytes());
         hasher.update(b"\0");
     }
+    hasher.update(b"\0import_profile\0");
+    hasher.update(import_profile.label().as_bytes());
     let toolchain = lean_toolchain::ToolchainFingerprint::current();
     hasher.update(b"\0toolchain\0");
     hasher.update(toolchain.lean_version.as_bytes());
@@ -2583,6 +2907,26 @@ fn taint_verification_under_memory_pressure(
 ) -> LeanWorkerDeclarationVerificationResult {
     let ceiling = module_cache_env_u64("LEAN_RS_VERIFY_RSS_TAINT_KIB", 0);
     apply_memory_pressure_taint(result, ceiling, current_rss_kib())
+}
+
+/// Whether the retained module-snapshot cache should be dropped before a
+/// cacheable module-query request, parameterised on the guard and the sampled
+/// RSS so it is testable without environment or platform state.
+///
+/// Clears only when the guard is enabled (`guard_kib != 0`), an RSS sample is
+/// available, and it is at or above the guard — the same three conditions
+/// [`apply_memory_pressure_taint`] applies. An unavailable sample must not
+/// clear: sampling shells out to `ps` on non-Linux hosts, so a transient
+/// failure would otherwise discard the whole cache on an otherwise healthy
+/// child, turning a missing measurement into guaranteed re-elaboration.
+const fn should_clear_for_rss_guard(guard_kib: u64, current_rss_kib: Option<u64>) -> bool {
+    if guard_kib == 0 {
+        return false;
+    }
+    match current_rss_kib {
+        Some(current_kib) => current_kib >= guard_kib,
+        None => false,
+    }
 }
 
 /// Pure core of [`taint_verification_under_memory_pressure`], parameterised on
@@ -3081,11 +3425,135 @@ fn _path_for_diagnostics(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_memory_pressure_taint, verification_status_non_positive};
+    use super::{
+        HostSessionKey, apply_memory_pressure_taint, module_query_cache_key, should_clear_for_rss_guard,
+        verification_status_non_positive,
+    };
+    use lean_rs_worker_protocol::protocol::HostSessionMode;
     use lean_rs_worker_protocol::types::{
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
-        LeanWorkerDeclarationVerificationStatus,
+        LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerSessionImportProfile,
     };
+
+    fn session_key() -> HostSessionKey {
+        HostSessionKey {
+            project_root: "/proj".to_owned(),
+            mode: HostSessionMode::ShimsOnly,
+            imports: vec!["Init".to_owned(), "Std".to_owned()],
+            import_profile: LeanWorkerSessionImportProfile::Private,
+        }
+    }
+
+    /// Equality on this key *is* the reuse predicate, so every field has to
+    /// participate: a key that ignored one would reuse an environment the
+    /// request did not ask for, and every answer computed from it would be
+    /// quietly wrong rather than merely stale.
+    #[test]
+    fn every_dimension_of_a_session_key_defeats_reuse() {
+        assert_eq!(session_key(), session_key());
+
+        let mut project = session_key();
+        project.project_root = "/other".to_owned();
+        assert_ne!(session_key(), project);
+
+        let mut mode = session_key();
+        mode.mode = HostSessionMode::Capability {
+            package: "p".to_owned(),
+            lib_name: "L".to_owned(),
+            manifest_path: None,
+        };
+        assert_ne!(session_key(), mode);
+
+        let mut imports = session_key();
+        imports.imports.push("Lean".to_owned());
+        assert_ne!(session_key(), imports);
+
+        let mut profile = session_key();
+        profile.import_profile = LeanWorkerSessionImportProfile::Server;
+        assert_ne!(session_key(), profile);
+    }
+
+    /// Import order is significant — the host's own session-pool key treats it
+    /// so — which is why `imports` is a sequence and not a set.
+    #[test]
+    fn reordering_imports_defeats_reuse() {
+        let mut reordered = session_key();
+        reordered.imports.reverse();
+        assert_ne!(session_key(), reordered);
+    }
+
+    /// A session is now reused across requests, so the project and the import
+    /// profile have to be in the module-query cache key. Before reuse, the
+    /// unconditional clear on every open hid their absence; under reuse the
+    /// same import *names* under a different project or profile resolve to
+    /// different `.olean` files, and a shared key would serve one file's
+    /// answer for the other.
+    ///
+    /// `mode` is here for the same reason one step further on: the pool can
+    /// hold a `ShimsOnly` and a `Capability` session over otherwise identical
+    /// inputs at the same time, with no clear between them.
+    #[test]
+    fn the_module_query_cache_key_separates_projects_modes_and_import_profiles() {
+        let options = LeanWorkerElabOptions::default();
+        let imports = vec!["Init".to_owned()];
+        let capability = HostSessionMode::Capability {
+            package: "pkg".to_owned(),
+            lib_name: "Lib".to_owned(),
+            manifest_path: None,
+        };
+        let other_lib = HostSessionMode::Capability {
+            package: "pkg".to_owned(),
+            lib_name: "Other".to_owned(),
+            manifest_path: None,
+        };
+        let key = |root: &str, mode: &HostSessionMode, profile| {
+            module_query_cache_key(
+                root,
+                mode,
+                "theorem t : True := trivial",
+                &imports,
+                profile,
+                &options,
+                "f.lean",
+            )
+        };
+
+        let shims = HostSessionMode::ShimsOnly;
+        let base = key("/a", &shims, LeanWorkerSessionImportProfile::Private);
+        assert_ne!(base, key("/b", &shims, LeanWorkerSessionImportProfile::Private));
+        assert_ne!(base, key("/a", &shims, LeanWorkerSessionImportProfile::Server));
+        assert_ne!(
+            base,
+            key("/a", &capability, LeanWorkerSessionImportProfile::Private),
+            "shims-only and a capability dylib are different environments"
+        );
+        assert_ne!(
+            key("/a", &capability, LeanWorkerSessionImportProfile::Private),
+            key("/a", &other_lib, LeanWorkerSessionImportProfile::Private),
+            "the whole mode is keyed, not just which variant it is"
+        );
+        assert_eq!(base, key("/a", &shims, LeanWorkerSessionImportProfile::Private));
+    }
+
+    #[test]
+    fn rss_guard_zero_never_clears() {
+        assert!(!should_clear_for_rss_guard(0, Some(u64::MAX)));
+        assert!(!should_clear_for_rss_guard(0, None));
+    }
+
+    #[test]
+    fn rss_guard_clears_only_at_or_above_an_available_sample() {
+        assert!(!should_clear_for_rss_guard(1024, Some(1023)));
+        assert!(should_clear_for_rss_guard(1024, Some(1024)));
+        assert!(should_clear_for_rss_guard(1024, Some(1025)));
+    }
+
+    #[test]
+    fn rss_guard_unavailable_sample_does_not_clear() {
+        // Sampling shells out to `ps` off Linux; a transient failure must not
+        // discard the cache on an otherwise healthy child.
+        assert!(!should_clear_for_rss_guard(1024, None));
+    }
 
     fn ok_result(
         status: LeanWorkerDeclarationVerificationStatus,

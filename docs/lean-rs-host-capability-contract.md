@@ -1,6 +1,6 @@
 # `lean-rs-host` Capability Contract
 
-The 32 mandatory + 10 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
+The 34 mandatory + 13 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
 [`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host`
 crate ships the implementation under `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop
 dependency under `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
@@ -50,6 +50,7 @@ object-slot structure ABI as the rest of the host-defined records; Rust callers 
 | `lean_rs_host_session_import_profile` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (loadExts profiler traceProfiler : Bool) (traceProfilerOutput : String) : IO Environment` | explicit profile and profiling imports |
 | `lean_rs_host_session_import_profile_progress` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (handle trampoline : USize) : IO (Except UInt8 Environment)` | explicit profile imports with progress |
 | `lean_rs_host_env_import_stats` | `(env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats` | `LeanSession::import_stats()` attribution |
+| `lean_rs_host_extension_registry_epoch` | `(_unit : Unit) : IO UInt64` | `LeanSession::extension_registry_epoch()` / `live_extension_registry_epoch()` — opaque, monotone, equality-only |
 | `lean_rs_host_bracketed_import_query` | `(searchPaths : Array String) (importNames : Array String) (declarationNames : Array String) (handle trampoline : USize) : IO (Except UInt8 String)` | `LeanCapabilities::bracketed_import_query(...)` |
 | `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
 | `lean_rs_host_name_to_string` | `(n : Name) : String` | `name_to_string(name, cancellation)` (and `name_to_string_bulk` / `list_declarations_strings`) |
@@ -132,8 +133,8 @@ policy, extra logging on the kernel-check path) must keep:
 
 - Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can
   initialize the module and interpret symbol names consistently.
-- Same 32 mandatory `@[export]` symbol names with manifest-compatible signatures.
-- The 10 optional symbols are truly optional; omitting any collapses the corresponding session method to its
+- Same 34 mandatory `@[export]` symbol names with manifest-compatible signatures.
+- The 13 optional symbols are truly optional; omitting any collapses the corresponding session method to its
   `Unsupported` arm (`run_meta` for the five meta services, module-query methods for bounded module projections, or
   cache-clear reporting unsupported).
 

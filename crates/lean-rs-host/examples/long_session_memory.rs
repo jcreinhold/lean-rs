@@ -32,6 +32,7 @@ use lean_rs_host::{
 use lean_toolchain::LEAN_VERSION;
 
 const DEFAULT_IMPORTS: usize = 4;
+const DEFAULT_ROUNDS: usize = 4;
 const DEFAULT_BULK: usize = 64;
 const DEFAULT_ELAB: usize = 64;
 const DEFAULT_POOL_CAPACITY: usize = 1;
@@ -40,6 +41,21 @@ const STEADY_STATE_PAUSE_MS: u64 = 2_000;
 
 const IMPORTS: [&str; 1] = ["LeanRsFixture.Handles"];
 const MIXED_IMPORTS: [&str; 2] = ["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"];
+
+/// Distinct import *sets*, for the `pooled-distinct` arms. Every other mode
+/// here re-acquires one set, which answers what a repeated profile costs; these
+/// answer what *alternating* profiles cost, which is the workload a session pool
+/// exists for.
+const DISTINCT_IMPORT_SETS: [&[&str]; 8] = [
+    &["LeanRsFixture.Handles"],
+    &["LeanRsFixture.Strings"],
+    &["LeanRsFixture.Scalars"],
+    &["LeanRsFixture.Meta"],
+    &["LeanRsFixture.Evidence"],
+    &["LeanRsFixture.SourceRanges"],
+    &["LeanRsFixture.Effects"],
+    &["LeanRsFixture.Containers"],
+];
 const BULK_NAMES: [&str; 16] = [
     "LeanRsFixture.Handles.nameAnonymous",
     "LeanRsFixture.Handles.nameMkStr",
@@ -67,7 +83,9 @@ const BRACKETED_DECLS: [&str; 2] = [
 #[derive(Debug)]
 struct Config {
     mode: Mode,
+    arm: Option<Arm>,
     imports: usize,
+    rounds: usize,
     bulk: usize,
     elab: usize,
     pool_capacity: usize,
@@ -83,7 +101,30 @@ enum Mode {
     ImportMatrix,
     BracketedLightweight,
     DerivedIndexes,
+    PooledDistinct,
     All,
+}
+
+/// One arm of the `pooled-distinct` comparison.
+///
+/// The quantity in question is **Δ = RSS(N live environments) − RSS(1 live,
+/// N−1 dropped)** at equal import count: if dropping a session under
+/// `loadExts := true` reclaims nothing (`Environment.freeRegions` being unsound
+/// there), Δ is ~0 and a session pool costs no memory over today's
+/// drop-and-re-import child while removing every re-import. Δ large refutes
+/// that, and the pool must then stay at today's capacity.
+///
+/// [`Arm::Alternating`] against [`Arm::Pooled`] at equal rounds is the headline
+/// — the same workload, with and without the pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Arm {
+    /// Capacity 0: imports N·M, holds 1. Today's child.
+    Alternating,
+    /// Capacity N: imports N, holds N. The pool.
+    Pooled,
+    /// Capacity 0, truncated at N acquisitions: imports N, holds 1. The control
+    /// that isolates *holding* from *importing*.
+    Truncated,
 }
 
 fn main() -> ExitCode {
@@ -94,7 +135,9 @@ fn main() -> ExitCode {
     println!("platform={} {}", std::env::consts::OS, std::env::consts::ARCH);
     println!("lean_version={LEAN_VERSION}");
     println!("mode={}", config.mode.as_str());
+    println!("arm={}", config.arm.map_or("none", Arm::as_str));
     println!("imports_n={}", config.imports);
+    println!("rounds_m={}", config.rounds);
     println!("bulk_m={}", config.bulk);
     println!("elab_k={}", config.elab);
     println!("pool_capacity={}", config.pool_capacity);
@@ -106,8 +149,16 @@ fn main() -> ExitCode {
             .map_or_else(|| "none".to_owned(), |value| value.to_string())
     );
 
-    if config.mode == Mode::All {
-        return match run_all_children() {
+    // `pooled-distinct` without an arm is the driver: it forks the three arms,
+    // because whole-process RSS is only meaningful in a process that imported
+    // nothing else.
+    let children = match (config.mode, config.arm) {
+        (Mode::All, _) => Some(run_all_children()),
+        (Mode::PooledDistinct, None) => Some(run_pooled_distinct_arms()),
+        _ => None,
+    };
+    if let Some(result) = children {
+        return match result {
             Ok(()) => {
                 println!("status=ok");
                 ExitCode::SUCCESS
@@ -178,6 +229,12 @@ fn run(config: &Config) -> LeanResult<()> {
         Mode::DerivedIndexes => {
             run_derived_indexes(&caps, config)?;
         }
+        Mode::PooledDistinct => {
+            run_pooled_distinct_arm(runtime, &caps, config)?;
+            // The arm's whole claim is what is *still held* at this point, so
+            // return before the shared teardown snapshots drop it.
+            return Ok(());
+        }
         Mode::All => {}
     }
 
@@ -191,7 +248,9 @@ impl Config {
     fn from_env() -> Self {
         Self {
             mode: Mode::from_env(),
+            arm: Arm::from_env(),
             imports: env_usize("LEAN_RS_LONG_SESSION_IMPORTS", DEFAULT_IMPORTS),
+            rounds: env_usize("LEAN_RS_LONG_SESSION_ROUNDS", DEFAULT_ROUNDS).max(1),
             bulk: env_usize("LEAN_RS_LONG_SESSION_BULK", DEFAULT_BULK),
             elab: env_usize("LEAN_RS_LONG_SESSION_ELAB", DEFAULT_ELAB),
             pool_capacity: env_usize("LEAN_RS_LONG_SESSION_POOL_CAPACITY", DEFAULT_POOL_CAPACITY),
@@ -217,6 +276,7 @@ impl Mode {
             "import-matrix" => Some(Self::ImportMatrix),
             "bracketed-lightweight" => Some(Self::BracketedLightweight),
             "derived-indexes" => Some(Self::DerivedIndexes),
+            "pooled-distinct" => Some(Self::PooledDistinct),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -230,7 +290,29 @@ impl Mode {
             Self::ImportMatrix => "import-matrix",
             Self::BracketedLightweight => "bracketed-lightweight",
             Self::DerivedIndexes => "derived-indexes",
+            Self::PooledDistinct => "pooled-distinct",
             Self::All => "all",
+        }
+    }
+}
+
+impl Arm {
+    fn from_env() -> Option<Self> {
+        std::env::var("LEAN_RS_LONG_SESSION_ARM")
+            .ok()
+            .and_then(|raw| match raw.trim() {
+                "alternating" => Some(Self::Alternating),
+                "pooled" => Some(Self::Pooled),
+                "truncated" => Some(Self::Truncated),
+                _ => None,
+            })
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Alternating => "alternating",
+            Self::Pooled => "pooled",
+            Self::Truncated => "truncated",
         }
     }
 }
@@ -410,6 +492,133 @@ fn run_import_matrix(
         }
     }
     Ok(())
+}
+
+/// One arm of the Δ comparison; see [`Arm`]. Each arm runs in its own process
+/// (the mode's parent forks them), because the number being read is whole-process
+/// RSS and no arm may inherit another's imports.
+fn run_pooled_distinct_arm(
+    runtime: &'static LeanRuntime,
+    caps: &LeanCapabilities<'static, '_>,
+    config: &Config,
+) -> LeanResult<()> {
+    let arm = config.arm.unwrap_or(Arm::Truncated);
+    let distinct = config.imports.clamp(1, DISTINCT_IMPORT_SETS.len());
+    let (capacity, acquisitions) = match arm {
+        Arm::Alternating => (0, distinct.saturating_mul(config.rounds)),
+        Arm::Pooled => (distinct, distinct.saturating_mul(config.rounds)),
+        Arm::Truncated => (0, distinct),
+    };
+    println!(
+        "arm={} distinct_sets={distinct} rounds={} capacity={capacity} acquisitions={acquisitions}",
+        arm.as_str(),
+        config.rounds,
+    );
+
+    // The pool's own fresh-import ceiling would otherwise fire mid-arm and turn
+    // a memory measurement into an error path.
+    let policy = SessionPoolMemoryPolicy::disabled().max_fresh_imports(acquisitions as u64);
+    let pool = SessionPool::with_memory_policy(runtime, capacity, policy);
+
+    // One session outlives the loop so the "1 live" in the capacity-0 arms is a
+    // live environment and not a hopeful reading of a freed one. It is released
+    // *before* the next acquire, not after: a checked-out session is not in the
+    // pool, so holding it across the acquire would make every hit a miss and
+    // silently turn the pooled arm into another capacity-0 arm.
+    let mut held = None;
+    let rotation = DISTINCT_IMPORT_SETS.iter().take(distinct).cycle();
+    for (iteration, imports) in (1..=acquisitions).zip(rotation) {
+        drop(held.take());
+        let session = pool.acquire(caps, imports, None, None)?;
+        held = Some(session);
+        maybe_checkpoint(
+            &format!("pooled_distinct_{}", arm.as_str()),
+            iteration,
+            config.checkpoint_every,
+        );
+    }
+
+    report_pool_stats(&format!("pooled_distinct_{}", arm.as_str()), pool.stats());
+    snapshot("pooled_distinct_before_pause");
+    // macOS compresses idle pages, so a sample taken the instant the loop ends
+    // reads high relative to a settled process. Every arm pays the same pause.
+    thread::sleep(Duration::from_millis(STEADY_STATE_PAUSE_MS));
+
+    let imports_performed = pool.stats().imports_performed;
+    let live = if capacity == 0 { 1 } else { capacity };
+    match rss_kib() {
+        Ok(kib) => println!(
+            "arm_result={} live_environments={live} imports_performed={imports_performed} rss_kib={kib}",
+            arm.as_str()
+        ),
+        Err(err) => println!("arm_result={} rss_error={err}", arm.as_str()),
+    }
+    drop(held);
+    Ok(())
+}
+
+/// Run the three arms in fresh processes and print the Δ they were built to
+/// produce, so the comparison is not left to whoever reads the log.
+fn run_pooled_distinct_arms() -> Result<(), Box<dyn std::error::Error>> {
+    let exe = std::env::current_exe()?;
+    let mut results = Vec::new();
+    for arm in [Arm::Alternating, Arm::Pooled, Arm::Truncated] {
+        println!("child_arm_begin={}", arm.as_str());
+        let output = Command::new(&exe)
+            .env("LEAN_RS_LONG_SESSION_MODE", Mode::PooledDistinct.as_str())
+            .env("LEAN_RS_LONG_SESSION_ARM", arm.as_str())
+            .output()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        print!("{text}");
+        if !output.status.success() {
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            return Err(format!("pooled-distinct arm {} failed", arm.as_str()).into());
+        }
+        let row = text
+            .lines()
+            .find(|line| line.starts_with("arm_result="))
+            .ok_or_else(|| format!("pooled-distinct arm {} reported no result", arm.as_str()))?;
+        results.push((arm, field(row, "imports_performed"), field(row, "rss_kib")));
+    }
+
+    println!("pooled_distinct_table=arm,live_environments,imports_performed,rss_kib");
+    for (arm, imports, rss) in &results {
+        println!(
+            "pooled_distinct_row={},{},{},{}",
+            arm.as_str(),
+            if *arm == Arm::Pooled { "N" } else { "1" },
+            imports.map_or_else(|| "?".to_owned(), |value| value.to_string()),
+            rss.map_or_else(|| "?".to_owned(), |value| value.to_string()),
+        );
+    }
+
+    let rss_of = |wanted: Arm| {
+        results
+            .iter()
+            .find(|(arm, _, _)| *arm == wanted)
+            .and_then(|(_, _, rss)| *rss)
+    };
+    if let (Some(pooled), Some(truncated)) = (rss_of(Arm::Pooled), rss_of(Arm::Truncated)) {
+        // Δ: what holding N−1 extra live environments costs at equal imports.
+        println!(
+            "pooled_distinct_delta_kib={}",
+            i128::from(pooled).saturating_sub(i128::from(truncated))
+        );
+    }
+    if let (Some(alternating), Some(pooled)) = (rss_of(Arm::Alternating), rss_of(Arm::Pooled)) {
+        // The headline: the same workload with and without the pool.
+        println!(
+            "pooled_distinct_saved_kib={}",
+            i128::from(alternating).saturating_sub(i128::from(pooled))
+        );
+    }
+    Ok(())
+}
+
+fn field(line: &str, key: &str) -> Option<u64> {
+    line.split_whitespace()
+        .find_map(|token| token.strip_prefix(key)?.strip_prefix('='))
+        .and_then(|value| value.parse().ok())
 }
 
 fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {

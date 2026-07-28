@@ -74,6 +74,7 @@ pub struct LeanWorkerCapabilityBuilder {
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     num_threads: Option<u32>,
@@ -114,6 +115,7 @@ impl LeanWorkerCapabilityBuilder {
             request_timeout: None,
             shutdown_timeout: None,
             restart_policy: None,
+            session_pool_capacity: None,
             rss_hard_limit: None,
             module_cache_limits: None,
             num_threads: None,
@@ -161,6 +163,7 @@ impl LeanWorkerCapabilityBuilder {
             request_timeout: None,
             shutdown_timeout: None,
             restart_policy: None,
+            session_pool_capacity: None,
             rss_hard_limit: None,
             module_cache_limits: None,
             num_threads: None,
@@ -252,6 +255,18 @@ impl LeanWorkerCapabilityBuilder {
         self
     }
 
+    /// Set how many imported environments the child may hold at once.
+    ///
+    /// Sized by what a held environment costs (~70 MiB), not by the restart
+    /// bound: see [`LeanWorkerConfig::session_pool_capacity`]. Unset, it falls
+    /// back to the restart policy's `max_imports`, and then to the child's own
+    /// default.
+    #[must_use]
+    pub fn session_pool_capacity(mut self, capacity: usize) -> Self {
+        self.session_pool_capacity = Some(capacity.max(1));
+        self
+    }
+
     /// Configure the parent-side hard RSS kill watchdog for in-flight worker
     /// requests.
     #[must_use]
@@ -286,8 +301,16 @@ impl LeanWorkerCapabilityBuilder {
     /// Set an opt-in Lean runtime memory ceiling for the worker child via
     /// `LEAN_RS_LEAN_MAX_MEMORY_KIB`.
     ///
-    /// Lean checks this ceiling periodically and throws before the OS OOM-kills the process,
-    /// converting a runaway elaboration into a recoverable error instead of a machine crash.
+    /// **Crossing it kills the child.** Lean's allocator signals the overrun by throwing a C++
+    /// exception, which cannot unwind through the Rust frame at the FFI boundary any Lean call in
+    /// this embedding crosses: the process aborts with `fatal runtime error: Rust cannot catch
+    /// foreign exceptions, aborting`, and the supervisor reports
+    /// [`LeanWorkerRestartReason::ChildAbort`]. Lean's *monadic* check point does raise a catchable
+    /// error, but only where Lean code reaches it — `importModules` never does.
+    ///
+    /// So this trades an OS OOM-kill of the machine for a contained abort of one child, which is
+    /// worth having, but it is not a graceful limit. Set it above everything healthy work reaches,
+    /// and put any policy that recycles the child *cleanly* strictly below it.
     #[must_use]
     pub fn lean_max_memory_kib(mut self, limit_kib: u64) -> Self {
         self.lean_max_memory_kib = Some(limit_kib);
@@ -391,7 +414,12 @@ impl LeanWorkerCapabilityBuilder {
     /// provenance.
     #[must_use]
     pub fn session_key(&self) -> LeanWorkerSessionKey {
+        // Pool capacity rides the same class. It is not part of the restart
+        // policy, but it changes how many environments the child holds, and the
+        // class exists to keep builders whose lifecycle configuration differs
+        // from sharing one pooled worker.
         let restart_policy_class = match &self.restart_policy {
+            _ if self.session_pool_capacity.is_some() => LeanWorkerRestartPolicyClass::Custom,
             Some(policy) if policy == &LeanWorkerRestartPolicy::default() => LeanWorkerRestartPolicyClass::Default,
             Some(_policy) => LeanWorkerRestartPolicyClass::Custom,
             None => LeanWorkerRestartPolicyClass::Default,
@@ -519,6 +547,7 @@ impl LeanWorkerCapabilityBuilder {
             self.request_timeout,
             self.shutdown_timeout,
             self.restart_policy,
+            self.session_pool_capacity,
             self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
@@ -535,28 +564,33 @@ impl LeanWorkerCapabilityBuilder {
         )
         .with_import_profile(self.import_profile);
 
-        let session_open_import_elapsed;
-        let validated_metadata = {
+        // Opened when this builder was told what to import — so the session it
+        // prepares is the one the caller's commands then reuse — or when there
+        // is metadata to read from it. A builder given no imports skips it: a
+        // caller that names its imports per call never reuses the empty
+        // session, so opening it cost a full Lean import that was thrown away,
+        // plus one of the child's pooled session slots and one of
+        // `max_imports`.
+        let mut session_open_import_elapsed = None;
+        let mut validated_metadata = None;
+        if self.metadata_check.is_some() || !session_config.imports().is_empty() {
             let session_open_started = Instant::now();
             let mut session = worker.open_session(&session_config, None, None)?;
-            session_open_import_elapsed = session_open_started.elapsed();
-            match self.metadata_check {
-                Some(check) => {
-                    let metadata = session.capability_metadata(&check.export, &check.request, None, None)?;
-                    if let Some(expected) = check.expected
-                        && metadata != expected
-                    {
-                        return Err(LeanWorkerError::CapabilityMetadataMismatch {
-                            export: check.export,
-                            expected: Box::new(expected),
-                            actual: Box::new(metadata),
-                        });
-                    }
-                    Some(metadata)
+            session_open_import_elapsed = Some(session_open_started.elapsed());
+            if let Some(check) = self.metadata_check {
+                let metadata = session.capability_metadata(&check.export, &check.request, None, None)?;
+                if let Some(expected) = check.expected
+                    && metadata != expected
+                {
+                    return Err(LeanWorkerError::CapabilityMetadataMismatch {
+                        export: check.export,
+                        expected: Box::new(expected),
+                        actual: Box::new(metadata),
+                    });
                 }
-                None => None,
+                validated_metadata = Some(metadata);
             }
-        };
+        }
         worker.record_capability_open_timing(capability_load_elapsed, session_open_import_elapsed);
 
         Ok(LeanWorkerCapability {
@@ -585,6 +619,7 @@ pub struct LeanWorkerHostHandleBuilder {
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     num_threads: Option<u32>,
@@ -630,9 +665,15 @@ impl LeanWorkerModuleCacheLimits {
 
     /// Set the child RSS guard above which the child clears retained snapshots
     /// before cacheable module-query requests.
+    ///
+    /// `0` disables the guard, matching the child, which treats a zero guard as
+    /// "never clear". It is deliberately not clamped up to `1`: a 1 KiB guard is
+    /// the most aggressive setting possible — every child is above it, so the
+    /// snapshot cache would be cleared before every cacheable request — and that
+    /// is the opposite of what a caller passing `0` asks for.
     #[must_use]
     pub fn rss_guard_kib(mut self, rss_guard_kib: u64) -> Self {
-        self.rss_guard_kib = Some(rss_guard_kib.max(1));
+        self.rss_guard_kib = Some(rss_guard_kib);
         self
     }
 
@@ -640,11 +681,17 @@ impl LeanWorkerModuleCacheLimits {
     /// `verify_declaration` verdict (e.g. `NotFound`) is relabeled to
     /// `BudgetExceeded`: near the cap the worker cannot distinguish a genuine
     /// "name absent" from an elaboration silently degraded by memory pressure.
-    /// Leave unset (the default) to disable the taint; set it well above the
+    /// Leave unset, or pass `0`, to disable the taint; set it well above the
     /// warm mathlib baseline so genuine name-absent queries are not mislabeled.
+    ///
+    /// `0` is not clamped up to `1` for the same reason as
+    /// [`rss_guard_kib`](Self::rss_guard_kib): the child disables the taint only
+    /// at exactly zero, so clamping would turn "disable" into a 1 KiB ceiling
+    /// that every child exceeds, relabeling every genuine `NotFound` as
+    /// `BudgetExceeded`.
     #[must_use]
     pub fn verify_rss_taint_kib(mut self, verify_rss_taint_kib: u64) -> Self {
-        self.verify_rss_taint_kib = Some(verify_rss_taint_kib.max(1));
+        self.verify_rss_taint_kib = Some(verify_rss_taint_kib);
         self
     }
 }
@@ -666,6 +713,7 @@ impl LeanWorkerHostHandleBuilder {
             request_timeout: None,
             shutdown_timeout: None,
             restart_policy: None,
+            session_pool_capacity: None,
             rss_hard_limit: None,
             module_cache_limits: None,
             num_threads: None,
@@ -730,6 +778,18 @@ impl LeanWorkerHostHandleBuilder {
         self
     }
 
+    /// Set how many imported environments the child may hold at once.
+    ///
+    /// Sized by what a held environment costs (~70 MiB), not by the restart
+    /// bound: see [`LeanWorkerConfig::session_pool_capacity`]. Unset, it falls
+    /// back to the restart policy's `max_imports`, and then to the child's own
+    /// default.
+    #[must_use]
+    pub fn session_pool_capacity(mut self, capacity: usize) -> Self {
+        self.session_pool_capacity = Some(capacity.max(1));
+        self
+    }
+
     /// Configure the parent-side hard RSS kill watchdog for in-flight worker
     /// requests.
     #[must_use]
@@ -759,7 +819,9 @@ impl LeanWorkerHostHandleBuilder {
 
     /// Set an opt-in Lean runtime memory ceiling via `LEAN_RS_LEAN_MAX_MEMORY_KIB`.
     ///
-    /// Lean throws before the OS OOM-kills the child. Scoped to this handle.
+    /// Contains an overrun to one aborted child instead of an OS OOM-kill of the machine; it does
+    /// not make the overrun recoverable. See the builder's `lean_max_memory_kib` for why. Scoped to
+    /// this handle.
     #[must_use]
     pub fn lean_max_memory_kib(mut self, limit_kib: u64) -> Self {
         self.lean_max_memory_kib = Some(limit_kib);
@@ -785,7 +847,13 @@ impl LeanWorkerHostHandleBuilder {
         }
 
         match self.clone().open_unchecked() {
-            Ok(handle) => {
+            Ok(mut handle) => {
+                // `open` no longer opens a session eagerly, so this check must:
+                // proving a shims-only session can open is the part of the
+                // report that a static path cannot answer.
+                if let Err(err) = handle.open_session(None, None) {
+                    checks.push(check_from_open_error(&err));
+                }
                 drop(handle.shutdown());
             }
             Err(err) => checks.push(check_from_open_error(&err)),
@@ -793,13 +861,25 @@ impl LeanWorkerHostHandleBuilder {
         LeanWorkerBootstrapReport::new(checks)
     }
 
-    /// Start the worker, open a shims-only host session once, and return a ready handle.
+    /// Start the worker and, if this builder was told what to import, open that
+    /// session once.
+    ///
+    /// A builder given **no** imports opens no session. It has nothing to
+    /// prepare: a caller who names its imports per call
+    /// ([`open_session_with_imports`](LeanWorkerHostHandle::open_session_with_imports))
+    /// never reuses the empty one, so opening it cost a full Lean import that
+    /// was thrown away, plus one of the child's pooled session slots and one of
+    /// `max_imports` for the life of the child. The deployment validation that
+    /// open also performed is unchanged and available up front through
+    /// [`check`](Self::check), which opens a session unconditionally; without
+    /// that call, an unopenable session surfaces at the caller's first session
+    /// instead of here.
     ///
     /// # Errors
     ///
     /// Returns `LeanWorkerError` if the worker child cannot be resolved or
-    /// spawned, startup/health fails, or the shims-only session cannot open.
-    /// This method does not build a user Lake shared-library target.
+    /// spawned, startup/health fails, or a named import set cannot open. This
+    /// method does not build a user Lake shared-library target.
     pub fn open(self) -> Result<LeanWorkerHostHandle, LeanWorkerError> {
         let report = self.bootstrap_static_report();
         if let Some(check) = report.first_error() {
@@ -826,6 +906,7 @@ impl LeanWorkerHostHandleBuilder {
             self.request_timeout,
             self.shutdown_timeout,
             self.restart_policy,
+            self.session_pool_capacity,
             self.rss_hard_limit,
             self.module_cache_limits,
             self.max_frame_bytes,
@@ -834,7 +915,7 @@ impl LeanWorkerHostHandleBuilder {
         )?;
         let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports)
             .with_import_profile(self.import_profile);
-        {
+        if !session_config.imports().is_empty() {
             let _session = worker.open_session(&session_config, None, None)?;
         }
         Ok(LeanWorkerHostHandle { worker, session_config })
@@ -1163,9 +1244,11 @@ pub struct LeanWorkerHostHandle {
 impl LeanWorkerHostHandle {
     /// Open a worker session for this host handle.
     ///
-    /// The builder has already proved that the session can open. This method
-    /// is still fallible because worker cycling, cancellation, or a child
-    /// failure may require a fresh session.
+    /// The builder does not open one, so the first call here is also where a
+    /// project that cannot produce a session first says so — run
+    /// [`LeanWorkerHostHandleBuilder::check`] first to learn that up front.
+    /// Later calls remain fallible because worker cycling, cancellation, or a
+    /// child failure may require a fresh session.
     ///
     /// # Errors
     ///
@@ -1542,6 +1625,7 @@ fn spawn_checked_worker(
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
+    session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
     module_cache_limits: Option<LeanWorkerModuleCacheLimits>,
     max_frame_bytes: Option<u32>,
@@ -1565,6 +1649,9 @@ fn spawn_checked_worker(
     }
     if let Some(policy) = restart_policy {
         config = config.restart_policy(policy);
+    }
+    if let Some(capacity) = session_pool_capacity {
+        config = config.session_pool_capacity(capacity);
     }
     if let Some((limit_kib, sample_interval)) = rss_hard_limit {
         config = config.rss_hard_limit(limit_kib, sample_interval);
@@ -2240,6 +2327,24 @@ mod tests {
             env.iter()
                 .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB" && v == "8192")
         );
+    }
+
+    #[test]
+    fn zero_disables_rather_than_becoming_the_strictest_setting() {
+        // The child spells "off" as exactly 0 for both knobs. Clamping 0 up to
+        // 1 would invert each one into its most aggressive form: a 1 KiB cache
+        // guard clears before every request, and a 1 KiB verify ceiling
+        // relabels every genuine `NotFound` as `BudgetExceeded`.
+        let limits = LeanWorkerModuleCacheLimits::default()
+            .rss_guard_kib(0)
+            .verify_rss_taint_kib(0);
+        let config = apply_module_cache_limits(LeanWorkerConfig::new("/opt/worker"), &limits);
+        let env = config.env_overrides();
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB" && v == "0")
+        );
+        assert!(env.iter().any(|(k, v)| k == "LEAN_RS_VERIFY_RSS_TAINT_KIB" && v == "0"));
     }
 
     #[test]

@@ -295,6 +295,46 @@ def envImportStats (env : Environment) (importLevel : String) (loadExts : Bool) 
     loadExts
   }
 
+/-- Opaque, monotone stamp for the process-global environment-extension
+    registries. Only *equality* between two readings is meaningful; the
+    magnitude means nothing and must never be compared with `<`.
+
+    `Environment.extensions` is sized exactly once, by
+    `mkInitialExtensionStates` inside `finalizeImport`. The one growth path,
+    `EnvExtension.ensureExtensionsArraySize`, is reachable only from
+    `finalizePersistentExtensions` — that is, for the environment currently
+    being imported — and both the `Environment.ensureExtensionsArraySize`
+    wrapper and the `extensions` field itself are `private`. So an environment
+    created before a later import ran a module initializer that called
+    `registerEnvExtension` has a permanently short array, with no repair
+    available to any caller. `registerEnvExtension`'s own docstring states the
+    invariant this breaks: "our implementation assumes the number of extensions
+    does not change after an environment object is created".
+
+    That is not a latent flaw. `ScopedEnvExtension.pushScope`, `popScope`,
+    `setDelimitsLocal`, and `activateScoped` iterate the *global*
+    `scopedEnvExtensionsRef` with no filtering against the environment they are
+    modifying, so every `namespace`, `section`, and `open … in` elaborated
+    against such an environment drives `EnvExtension.modifyStateImpl` past the
+    end of the array and hits `panic! "invalid environment extension has been
+    accessed"` once per out-of-range slot.
+
+    `envExtensionsRef`, which would answer this exactly, is `private`. These
+    three are not. Lean core runs the same test on two of them:
+    `finalizePersistentExtensions` compares `persistentEnvExtensionsRef.size`
+    and `getNumBuiltinAttributes` against the values it captured one step
+    earlier. `scopedEnvExtensionsRef` is summed on its own terms, because it is
+    the registry whose blind iteration does the damage, even though today every
+    scoped extension is also persistent. All three are append-only —
+    `registerBuiltinAttribute` only inserts, and neither extension registry has
+    an unregister — so the sum changes if and only if one of them grew. -/
+@[export lean_rs_host_extension_registry_epoch]
+def extensionRegistryEpoch (_unit : Unit) : IO UInt64 := do
+  let persistentExts ← persistentEnvExtensionsRef.get
+  let scopedExts ← scopedEnvExtensionsRef.get
+  let builtinAttributes ← getNumBuiltinAttributes
+  pure <| u64 (persistentExts.size + scopedExts.size + builtinAttributes)
+
 /-- Initialise the Lean search path and import the named modules into a
     fresh environment. The Rust caller passes the resolved
     `.lake/build/lib/lean` search-path entries (one per Lake package

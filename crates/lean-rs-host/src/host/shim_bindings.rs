@@ -38,6 +38,8 @@ macro_rules! host_shim_exports {
                 => [(Vec<String>, Vec<String>, bool, u8, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory env_import_stats => "lean_rs_host_env_import_stats"
                 => [(Obj<'lean>, String, bool)] => [LeanIo<LeanImportStats>];
+            mandatory extension_registry_epoch => "lean_rs_host_extension_registry_epoch"
+                => [()] => [LeanIo<u64>];
             mandatory bracketed_import_query => "lean_rs_host_bracketed_import_query"
                 => [(Vec<String>, Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory name_from_string => "lean_rs_host_name_from_string"

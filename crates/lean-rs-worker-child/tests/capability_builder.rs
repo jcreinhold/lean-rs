@@ -415,6 +415,83 @@ fn shims_only_host_handle_skips_user_shared_build() {
     }
 }
 
+/// A builder given no imports opens no session, and the child never imports one.
+///
+/// `open` used to import the builder's import set — empty or not — purely to
+/// prove a session could open. For a caller that names its imports per call
+/// that session is never reused, so the import was thrown away while its
+/// unreclaimable Lean regions, one pooled session slot, and one of
+/// `max_imports` stayed spent for the life of the child. A builder that *does*
+/// name imports still opens eagerly, because then the session it prepares is
+/// the one the caller's commands go on to reuse.
+#[test]
+fn a_host_handle_built_without_imports_opens_no_session() {
+    let project = TempLakeProject::new("host-handle-no-bootstrap-import");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage worker_host_lazy\nlean_lib Demo\n",
+    );
+    project.write("Demo.lean", "import Demo.Good\n");
+    project.write("Demo/Good.lean", "def goodValue : Nat := 41\n");
+    project.lake_build_ok("Demo.Good");
+
+    let mut handle = LeanWorkerHostHandleBuilder::shims_only(project.path(), std::iter::empty::<String>())
+        .worker_executable(worker_binary())
+        .open()
+        .expect("a shims-only handle with no imports opens");
+    assert_eq!(
+        handle.stats().imports,
+        0,
+        "opening the handle must not import; there is nothing to import yet"
+    );
+
+    // The caller's own first session is the first import, and it carries the
+    // caller's imports rather than the builder's empty set.
+    handle
+        .open_session_with_imports(["Demo.Good"], None, None)
+        .expect("the first real session opens");
+    assert_eq!(
+        handle.stats().imports,
+        1,
+        "the caller's first session should be the child's first and only import"
+    );
+
+    // `check` still opens one, which is what keeps deployment validation
+    // available up front rather than deferred to the caller's first session.
+    let report = LeanWorkerHostHandleBuilder::shims_only(project.path(), std::iter::empty::<String>())
+        .worker_executable(worker_binary())
+        .check();
+    assert!(
+        report.first_error().is_none(),
+        "a healthy project reports no bootstrap error: {:?}",
+        report.first_error()
+    );
+}
+
+/// An import set the builder *was* given still fails at `open`, as before.
+#[test]
+fn a_host_handle_built_with_a_broken_import_still_fails_at_open() {
+    let project = TempLakeProject::new("host-handle-broken-eager-import");
+    project.write(
+        "lakefile.lean",
+        "import Lake\nopen Lake DSL\npackage worker_host_broken\nlean_lib Demo\n",
+    );
+    project.write("Demo.lean", "import Demo.Broken\n");
+    project.write("Demo/Broken.lean", "theorem broken : True := sorry_that_doesnt_exist\n");
+    project.lake_build_err("Demo.Broken");
+
+    match LeanWorkerHostHandleBuilder::shims_only(project.path(), ["Demo.Broken"])
+        .worker_executable(worker_binary())
+        .open()
+    {
+        Ok(_) => panic!("a named broken import should still fail while opening the handle"),
+        Err(LeanWorkerError::Worker { code, message }) => {
+            assert_eq!(code, "lean_rs.lean_exception", "got worker error message: {message}");
+        }
+        Err(other) => panic!("expected a LeanException worker error for the broken import, got {other:?}"),
+    }
+}
+
 #[test]
 fn shims_only_host_handle_imports_transitive_lake_package_oleans() {
     let project = TempLakeProject::new("host-handle-transitive-oleans");

@@ -273,6 +273,21 @@ pub enum Response {
     HostSessionOpened {
         import_stats: LeanWorkerImportStats,
     },
+    /// The child already held a session matching the request, so it answered
+    /// without importing again.
+    ///
+    /// A separate variant rather than a flag on [`Response::HostSessionOpened`]:
+    /// the two differ in what the parent must *do* — an open advances the
+    /// import accounting that drives restart policy, a reuse must leave it
+    /// alone — and a new variant on this `#[non_exhaustive]` enum is additive
+    /// where a new field would break every struct pattern.
+    ///
+    /// `import_stats` describes the still-live environment, restated from the
+    /// open that built it, so a caller reading only this field cannot tell the
+    /// two apart.
+    HostSessionReused {
+        import_stats: LeanWorkerImportStats,
+    },
     Elaboration {
         outcome: LeanWorkerElabResult,
     },
@@ -690,7 +705,7 @@ mod tests {
         LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
         LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
-        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerLocalInfo,
+        LeanWorkerDiagnostic, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerImportStats, LeanWorkerLocalInfo,
         LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
         LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
         LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
@@ -901,6 +916,59 @@ mod tests {
         .expect("rows complete writes");
         let frame = read_frame(&mut Cursor::new(bytes), MAX_FRAME_BYTES).expect("rows complete reads");
         assert_eq!(frame.message, Message::Response(Response::RowsComplete { count: 2 }));
+    }
+
+    fn import_stats_fixture() -> LeanWorkerImportStats {
+        LeanWorkerImportStats {
+            direct_import_names: vec!["Init".to_owned()],
+            effective_module_count: 3,
+            compacted_region_count: 1,
+            memory_mapped_region_count: 2,
+            compacted_region_bytes: 16,
+            memory_mapped_region_bytes: 32,
+            non_memory_mapped_region_bytes: 8,
+            imported_bytes: 64,
+            imported_constant_count: 128,
+            extension_count: 4,
+            total_imported_extension_entries: 256,
+            import_level: "private".to_owned(),
+            import_all: false,
+            load_exts: true,
+        }
+    }
+
+    /// The two session-open answers are distinct on the wire and neither
+    /// perturbs the other. `host_session_opened` is spelled out literally
+    /// because an already-installed child keeps emitting it: renaming the tag
+    /// while adding the reuse variant would break every worker binary in the
+    /// field, which is precisely what the added-variant approach avoids.
+    #[test]
+    fn session_open_and_reuse_are_distinct_wire_answers() {
+        let opened = Message::Response(Response::HostSessionOpened {
+            import_stats: import_stats_fixture(),
+        });
+        let reused = Message::Response(Response::HostSessionReused {
+            import_stats: import_stats_fixture(),
+        });
+        assert_frame_round_trips(&opened);
+        assert_frame_round_trips(&reused);
+        assert_ne!(opened, reused);
+
+        let opened_body = Response::HostSessionOpened {
+            import_stats: import_stats_fixture(),
+        };
+        let opened_json = serde_json::to_value(&opened_body).expect("opened serializes");
+        let reused_json = serde_json::to_value(Response::HostSessionReused {
+            import_stats: import_stats_fixture(),
+        })
+        .expect("reused serializes");
+        assert_eq!(opened_json.get("status"), Some(&json!("host_session_opened")));
+        assert_eq!(reused_json.get("status"), Some(&json!("host_session_reused")));
+
+        // A frame written by a child that predates the reuse variant still
+        // deserializes unchanged.
+        let legacy: Response = serde_json::from_value(opened_json).expect("legacy open frame still deserializes");
+        assert_eq!(legacy, opened_body);
     }
 
     #[test]

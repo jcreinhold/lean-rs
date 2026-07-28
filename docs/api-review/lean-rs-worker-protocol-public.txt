@@ -228,6 +228,8 @@ pub lean_rs_worker_protocol::protocol::Response::Error::message: alloc::string::
 pub lean_rs_worker_protocol::protocol::Response::HealthOk
 pub lean_rs_worker_protocol::protocol::Response::HostSessionOpened
 pub lean_rs_worker_protocol::protocol::Response::HostSessionOpened::import_stats: lean_rs_worker_protocol::types::LeanWorkerImportStats
+pub lean_rs_worker_protocol::protocol::Response::HostSessionReused
+pub lean_rs_worker_protocol::protocol::Response::HostSessionReused::import_stats: lean_rs_worker_protocol::types::LeanWorkerImportStats
 pub lean_rs_worker_protocol::protocol::Response::JsonCommand
 pub lean_rs_worker_protocol::protocol::Response::JsonCommand::response_json: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Response::KernelCheck

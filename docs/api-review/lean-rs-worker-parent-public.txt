@@ -297,15 +297,20 @@ impl core::marker::Unpin for lean_rs_worker_parent::LeanWorkerRestartPolicyClass
 impl core::marker::UnsafeUnpin for lean_rs_worker_parent::LeanWorkerRestartPolicyClass
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWorkerRestartPolicyClass
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerRestartPolicyClass
-pub enum lean_rs_worker_parent::LeanWorkerRestartReason
+#[non_exhaustive] pub enum lean_rs_worker_parent::LeanWorkerRestartReason
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Cancelled
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Cancelled::operation: &'static str
 pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort::diagnostics: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort::operation: &'static str
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ChildAbort::status: alloc::string::String
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Explicit
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Idle
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Idle::idle_for: core::time::Duration
 pub lean_rs_worker_parent::LeanWorkerRestartReason::Idle::limit: core::time::Duration
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ImportResidue
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ImportResidue::limit_bytes: u64
+pub lean_rs_worker_parent::LeanWorkerRestartReason::ImportResidue::residue_bytes: u64
 pub lean_rs_worker_parent::LeanWorkerRestartReason::MaxImports
 pub lean_rs_worker_parent::LeanWorkerRestartReason::MaxImports::limit: u64
 pub lean_rs_worker_parent::LeanWorkerRestartReason::MaxRequests
@@ -534,6 +539,7 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::request_timeout(self,
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::rss_hard_limit(self, u64, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::session_key(&self) -> lean_rs_worker_parent::LeanWorkerSessionKey
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::session_pool_capacity(self, usize) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::shutdown_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::startup_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::streaming_command_export(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -586,6 +592,7 @@ pub fn lean_rs_worker_parent::LeanWorkerConfig::new(impl core::convert::Into<std
 pub fn lean_rs_worker_parent::LeanWorkerConfig::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::rss_hard_limit(self, u64, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerConfig::session_pool_capacity(self, usize) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::shutdown_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerConfig::startup_timeout(self, core::time::Duration) -> Self
 impl core::clone::Clone for lean_rs_worker_parent::LeanWorkerConfig
@@ -704,6 +711,7 @@ pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::open(self) -> core::r
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::request_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::rss_hard_limit(self, u64, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::session_pool_capacity(self, usize) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::shims_only(impl core::convert::Into<std::path::PathBuf>, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::shutdown_timeout(self, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerHostHandleBuilder::startup_timeout(self, core::time::Duration) -> Self
@@ -785,6 +793,8 @@ impl<Req, Resp> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_paren
 impl<Req, Resp> core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerJsonCommand<Req, Resp>
 pub struct lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
 pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::exits: u64
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::import_residue_bytes: u64
+pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::import_residue_limit_bytes: core::option::Option<u64>
 pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_exit: core::option::Option<lean_rs_worker_parent::LeanWorkerExit>
 pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_restart_reason: core::option::Option<lean_rs_worker_parent::LeanWorkerRestartReason>
 pub lean_rs_worker_parent::LeanWorkerLifecycleSnapshot::last_rss_kib: core::option::Option<u64>
@@ -1040,6 +1050,7 @@ pub struct lean_rs_worker_parent::LeanWorkerRestartPolicy
 impl lean_rs_worker_parent::LeanWorkerRestartPolicy
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::disabled() -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::idle_restart_after(self, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_import_residue_bytes(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_imports(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_requests(self, u64) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerRestartPolicy::max_restarts_per_window(self, u64, core::time::Duration) -> Self
@@ -1223,6 +1234,8 @@ pub lean_rs_worker_parent::LeanWorkerStats::explicit_cycles: u64
 pub lean_rs_worker_parent::LeanWorkerStats::idle_restarts: u64
 pub lean_rs_worker_parent::LeanWorkerStats::import_like_admission_attempts: u64
 pub lean_rs_worker_parent::LeanWorkerStats::import_like_admitted: u64
+pub lean_rs_worker_parent::LeanWorkerStats::import_residue_restarts: u64
+pub lean_rs_worker_parent::LeanWorkerStats::import_stats_unusable: u64
 pub lean_rs_worker_parent::LeanWorkerStats::imports: u64
 pub lean_rs_worker_parent::LeanWorkerStats::last_capability_load_elapsed: core::option::Option<core::time::Duration>
 pub lean_rs_worker_parent::LeanWorkerStats::last_first_command_elapsed: core::option::Option<core::time::Duration>
