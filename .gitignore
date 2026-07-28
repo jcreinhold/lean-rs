@@ -44,8 +44,9 @@ crates/*/fuzz/target/
 # Claude harness state (the skills/ subtree is tracked; only ephemeral state is ignored)
 .claude/scheduled_tasks.lock
 
-# Pi harness state (settings, extensions, and agents are tracked; package installs and
-# editor-facing node_modules are ephemeral)
+# Pi harness state (settings, extensions, and agents are tracked; package installs,
+# editor-facing node_modules, and session transcripts are ephemeral)
 .pi/git/
 .pi/npm/
 .pi/node_modules/
+.pi/sessions/

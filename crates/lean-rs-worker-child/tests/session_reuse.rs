@@ -319,8 +319,10 @@ fn capacity_one_restores_the_pre_pool_child() {
 #[test]
 fn an_alternation_that_fits_the_pool_never_evicts() {
     ensure_fixture_built();
-    let narrow = elaboration_session_config();
-    let wide = handles_session_config();
+    // Pure pool-key behavior with no elaboration, so the `Init`-only profiles
+    // keep this child small (see the capacity section below for why).
+    let narrow = scalars_config();
+    let wide = scalars_then_strings_config();
     // Capacity 2: current + one parked. A,B,A,B alternation fits exactly, so
     // nothing is ever evicted; a third distinct set would push A out.
     let mut worker =
@@ -905,13 +907,32 @@ fn a_staleness_eviction_does_not_disable_the_reuse_hint() {
 // the pool would have begun evicting. The two are now independent, sized by what
 // they each actually cost: a held environment is ~70 MiB, an import is 2–4 GB of
 // unreclaimable residue. These tests pin the eviction path now that it runs.
+//
+// The pool-key profiles below import the lightest modules the fixture offers:
+// `LeanRsFixture.Scalars` and `LeanRsFixture.Strings` close over `Init` alone,
+// where the staleness profiles above close over the whole compiler. These tests
+// pin *key* behavior — which profile is parked, which is evicted — and (apart
+// from the snapshot-cache probe) never elaborate, so a compiler environment
+// buys them nothing. The lighter imports keep each child well under the macOS
+// CI runner's memory limit: the compiler-environment variant of these tests
+// was SIGKILLed there by `memorystatus` (empty diagnostics, exit `signal: 9`).
 
-/// A third distinct pool key. Same closure as [`staleness_inert_config`] in a
-/// different order, which is deliberate: the key is the ordered import list, so
-/// this is a genuine pool miss while importing nothing the fixture has not
-/// already proven safe to import.
-fn reordered_inert_config() -> LeanWorkerSessionConfig {
-    LeanWorkerSessionConfig::shims_only(fixture_root(), ["LeanRsFixture.Meta", "LeanRsHostShims.Elaboration"])
+/// First pool key: an `Init`-only import.
+fn scalars_config() -> LeanWorkerSessionConfig {
+    LeanWorkerSessionConfig::shims_only(fixture_root(), ["LeanRsFixture.Scalars"])
+}
+
+/// Second pool key: a strict superset closure of [`scalars_config`]'s.
+fn scalars_then_strings_config() -> LeanWorkerSessionConfig {
+    LeanWorkerSessionConfig::shims_only(fixture_root(), ["LeanRsFixture.Scalars", "LeanRsFixture.Strings"])
+}
+
+/// A third distinct pool key. Same closure as [`scalars_then_strings_config`]
+/// in a different order, which is deliberate: the key is the ordered import
+/// list, so this is a genuine pool miss while importing nothing the fixture has
+/// not already proven safe to import.
+fn strings_then_scalars_config() -> LeanWorkerSessionConfig {
+    LeanWorkerSessionConfig::shims_only(fixture_root(), ["LeanRsFixture.Strings", "LeanRsFixture.Scalars"])
 }
 
 /// Open three distinct profiles, then the first again, and report how many
@@ -919,10 +940,10 @@ fn reordered_inert_config() -> LeanWorkerSessionConfig {
 /// still pooled.
 fn imports_over_three_profiles_and_a_return(worker: &mut LeanWorker) -> u64 {
     for config in [
-        staleness_probe_config(),
-        staleness_inert_config(),
-        reordered_inert_config(),
-        staleness_probe_config(),
+        scalars_config(),
+        scalars_then_strings_config(),
+        strings_then_scalars_config(),
+        scalars_config(),
     ] {
         let _session = worker.open_session(&config, None, None).expect("open succeeds");
     }
@@ -981,7 +1002,7 @@ fn a_capacity_eviction_clears_the_snapshot_cache() {
         batch_facts(&probe_scopes(&mut evicting, &probe, LABEL)).cache_status,
         LeanWorkerModuleCacheStatus::Miss
     );
-    for config in [staleness_inert_config(), reordered_inert_config()] {
+    for config in [scalars_then_strings_config(), strings_then_scalars_config()] {
         let _session = evicting.open_session(&config, None, None).expect("open succeeds");
     }
     assert_eq!(
@@ -999,7 +1020,7 @@ fn a_capacity_eviction_clears_the_snapshot_cache() {
         batch_facts(&probe_scopes(&mut roomy, &probe, LABEL)).cache_status,
         LeanWorkerModuleCacheStatus::Miss
     );
-    for config in [staleness_inert_config(), reordered_inert_config()] {
+    for config in [scalars_then_strings_config(), strings_then_scalars_config()] {
         let _session = roomy.open_session(&config, None, None).expect("open succeeds");
     }
     assert_eq!(

@@ -104,6 +104,15 @@ full contract.
 CI runs the `ci` nextest profile (`cargo nextest run --workspace --profile ci`), which adds one automatic retry on
 transient failures. See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
+Per-test memory still matters under nextest's process isolation: a single worker child that performs several
+compiler-environment imports in one test can exceed the CI runner's memory on its own. The `session_reuse` pool-key
+tests import the `Init`-only fixture modules (`LeanRsFixture.Scalars`/`Strings`) rather than
+`LeanRsHostShims.Elaboration` wherever the test pins key/eviction behavior and never elaborates: measured locally,
+the compiler-environment variant of the capacity tests peaked at ~7.2 GiB of child RSS and was SIGKILLed by
+`memorystatus` on the 7 GB macOS runner (empty diagnostics, exit `signal: 9`); the `Init`-only variant peaks at
+~1.3 GiB. Tests that genuinely elaborate keep the heavy imports. New worker tests should pick the lightest import
+profile that exercises the behavior they pin.
+
 ## Why nextest
 
 Each test that exercises a `LeanSession` imports `LeanRsFixture.Handles`, which transitively imports the full Lean
