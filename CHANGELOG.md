@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Added
+
+- **Added Lean 4.32.2 and 4.33.0-rc2 to the supported toolchain window.**
+  Each shares the byte-identical `lean.h` ABI of its preceding compatible
+  release and resolves the complete required `libleanshared` symbol surface.
+
 ## [0.6.1]
 
 ### Removed

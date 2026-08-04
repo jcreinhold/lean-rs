@@ -67,7 +67,7 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         missing_symbols: &[],
     },
     SupportedToolchain {
-        versions: &["4.32.0-rc1", "4.32.0"],
+        versions: &["4.32.0-rc1", "4.32.0", "4.32.2"],
         header_digest: "22eed50aa703c4403010fabc12a7231ffa34dc979bd59ca1bfbac13c29a1dad2",
         missing_symbols: &[],
     },
@@ -80,7 +80,7 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
     // field offsets for all 10 mirrored structs. `repr.rs` is unchanged; all
     // 88 REQUIRED_SYMBOLS resolve. Added 2026-07-19 as the new head.
     SupportedToolchain {
-        versions: &["4.33.0-rc1"],
+        versions: &["4.33.0-rc1", "4.33.0-rc2"],
         header_digest: "9018878554c5552ff3754865780d21825c2d0c5c4b47491b37bf6fe046adcd56",
         missing_symbols: &[],
     },

@@ -15,8 +15,8 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.30.0 | `5a25125970f4…` |
 | 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
 | 4.31.0 | `486fe204404c…` |
-| 4.32.0-rc1, 4.32.0 | `22eed50aa703…` |
-| 4.33.0-rc1 | `9018878554c5…` |
+| 4.32.0-rc1, 4.32.0, 4.32.2 | `22eed50aa703…` |
+| 4.33.0-rc1, 4.33.0-rc2 | `9018878554c5…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -41,13 +41,14 @@ byte-identical `lean.h`, so it shares the rc ABI-equivalence row. The final 4.31
 than its release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block;
 all 88 symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate.
 The final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the
-same ABI-equivalence entry. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h`
+same ABI-equivalence entry; 4.32.2 joined it on 2026-08-04 under the same digest and symbol checks. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h`
 digest, but the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside the opaque
 `lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access. `_Atomic(T)`
 for a lock-free scalar/pointer keeps `T`'s size and alignment, so a probe against both headers reports byte-identical
 size, alignment, and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS`
 resolve. The textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the
-audited byte layout is preserved.
+audited byte layout is preserved. The 4.33.0-rc2 release joined the same ABI-equivalence entry on 2026-08-04: its
+header digest is identical and all 88 `REQUIRED_SYMBOLS` resolve.
 
 **Policy.**
 
