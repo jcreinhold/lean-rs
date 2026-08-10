@@ -4,6 +4,16 @@
 #
 # See `docs/testing.md` for the rationale behind each variable.
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
 [build]
 # Keep cargo itself from multiplying rustc/link jobs while Lean-linked tests
 # are also spawning child worker processes.
