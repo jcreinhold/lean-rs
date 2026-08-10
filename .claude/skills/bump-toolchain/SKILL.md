@@ -20,7 +20,9 @@ The window itself lives in `crates/lean-rs-abi/src/supported.rs`; the procedure 
    `docs/version-matrix.md`.
 5. Add `"X.Y.Z"` to the matrix in `.github/workflows/ci.yml`; if it is the new head, also bump the head version in
    `.github/workflows/sanitizer.yml`.
-6. Run `scripts/test-all-toolchains.sh` (per-version pass/fail sweep).
+6. Run the cheap local check per `docs/bump-toolchain.md` step 6: select `vX.Y.Z`, run
+   `cargo nextest run -p lean-rs-abi -p lean-toolchain`, then restore the override. The full
+   `scripts/test-all-toolchains.sh` sweep runs on CI (`full_matrix` dispatch), not locally.
 7. Commit as `Add Lean X.Y.Z to the supported toolchain window`. Record the new digest and the step-6 summary in the
    commit message, plus any `missing_symbols` changes with rationale.
 

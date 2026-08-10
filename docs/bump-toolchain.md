@@ -83,16 +83,37 @@ version, but `lean-rs-worker-child`'s build script trusts `LEAN_SYSROOT` unverif
 (uninstalled) head prefix, so the loader fails with `libleanshared.so: cannot open shared object file`. Keep the
 committed pins equal to the head.
 
-### 6. Run the local sweep
+### 6. Verify the new version
+
+**Local (cheap path):** build and test against the new version only. Digest equality (step 2) already proves the
+layout and symbol surface match an existing entry, so the remaining local question is whether the toolchain resolves
+into the window and links:
+
+```sh
+# From the workspace root with the new toolchain selected:
+elan override set leanprover/lean4:vX.Y.Z
+cargo nextest run -p lean-rs-abi -p lean-toolchain
+elan override unset
+```
+
+The `version_window` tests (`baked_toolchain_is_in_the_supported_window`,
+`resolved_version_aliases_into_the_matched_entry`) prove the new version aliases into its entry; the lean-toolchain
+linkage tests prove `REQUIRED_SYMBOLS` resolve against its `libleanshared`. A failure on a version *other* than the
+one being added is pre-existing — investigate separately; it is not caused by appending a version string.
+
+**CI (authoritative gate):** the full per-version sweep below is slow (~7 min per version) and installs every window
+toolchain locally, so run it on CI via the `full_matrix` workflow-dispatch input rather than locally:
 
 ```sh
 scripts/test-all-toolchains.sh
 ```
 
-Iterates every version in `digests/manifest.json`, repoints the workspace `lean-toolchain` files (root + bundled shim
-packages under `crates/lean-rs/shims/` and `crates/lean-rs-host/shims/` + `fixtures/lean` + `fixtures/interop-shims`),
-rebuilds the Lake packages, runs `cargo nextest run --workspace`, and prints a per-version pass/fail summary. Restores
-the original `lean-toolchain` files on exit (even on failure).
+It iterates every version in `digests/manifest.json`, repoints the workspace `lean-toolchain` files (root + bundled
+shim packages under `crates/lean-rs/shims/` and `crates/lean-rs-host/shims/` + `fixtures/lean` +
+`fixtures/interop-shims`), rebuilds the Lake packages, runs `cargo nextest run --workspace`, and prints a per-version
+pass/fail summary. Restores the original `lean-toolchain` files on exit (even on failure). Run it locally only when
+the change could plausibly break an *existing* entry (new digest, `missing_symbols` edits, repr changes) or before a
+release.
 
 ### 7. Commit and PR
 
