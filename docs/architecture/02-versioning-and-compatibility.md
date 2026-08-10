@@ -16,7 +16,7 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
 | 4.31.0 | `486fe204404c…` |
 | 4.32.0-rc1, 4.32.0, 4.32.2 | `22eed50aa703…` |
-| 4.33.0-rc1, 4.33.0-rc2 | `9018878554c5…` |
+| 4.33.0-rc1, 4.33.0-rc2, 4.33.0 | `9018878554c5…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -48,7 +48,7 @@ for a lock-free scalar/pointer keeps `T`'s size and alignment, so a probe agains
 size, alignment, and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS`
 resolve. The textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the
 audited byte layout is preserved. The 4.33.0-rc2 release joined the same ABI-equivalence entry on 2026-08-04: its
-header digest is identical and all 88 `REQUIRED_SYMBOLS` resolve.
+header digest is identical and all 88 `REQUIRED_SYMBOLS` resolve. The final 4.33.0 release joined the same entry on 2026-08-10 (byte-identical header).
 
 **Policy.**
 
