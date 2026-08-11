@@ -338,6 +338,66 @@ run_gate() {
 
 # -- gates ------------------------------------------------------------------
 
+# Derive the window head (last version of the last SUPPORTED_TOOLCHAINS
+# entry) and assert every head reference agrees with it. A stale head
+# splits the toolchain: `sanitizer.yml`/`compile-fail.yml` have no repin
+# step, so a stale committed pin makes the loader fail with
+# `libleanshared.so: cannot open shared object file`, and a stale
+# `release.yml` verify matrix dirties the tree at the repin step and
+# fails `cargo package`. Both only surface after push/tag — catch them
+# here instead. See `docs/bump-toolchain.md` step 5.
+check_head_consistency() {
+	local supported="$REPO_ROOT/crates/lean-rs-abi/src/supported.rs"
+	local head
+	head=$(grep 'versions: &\[' "$supported" | grep -o '"[0-9][^"]*"' | tail -1 | tr -d '"')
+	if [[ -z "$head" ]]; then
+		log_err "could not derive window head from $supported"
+		return 1
+	fi
+	log_step "window head: $head"
+
+	local -a problems=()
+
+	# Committed lean-toolchain pins (sanitizer.yml/compile-fail.yml have
+	# no repin step; they build against these).
+	local f
+	while IFS= read -r f; do
+		grep -qx "leanprover/lean4:v$head" "$f" || problems+=("$f does not pin v$head")
+	done < <(find "$REPO_ROOT" -name lean-toolchain -type f -not -path '*/.git/*' -not -path '*/target/*')
+
+	# Workflow heads.
+	local wf
+	for wf in sanitizer.yml compile-fail.yml release-recover.yml release.yml; do
+		grep -q "LEAN_VERSION_HEAD: \"$head\"" "$REPO_ROOT/.github/workflows/$wf" ||
+			problems+=(".github/workflows/$wf LEAN_VERSION_HEAD != $head")
+	done
+
+	# Default matrices (release.yml's verify + ci.yml's two-cell matrix).
+	grep -q "lean_version: \[\"$head\"\]" "$REPO_ROOT/.github/workflows/release.yml" ||
+		problems+=("release.yml verify matrix != $head")
+	grep -q "lean_version: \[\"$head\"\]" "$REPO_ROOT/.github/workflows/ci.yml" ||
+		problems+=("ci.yml default matrix != $head")
+
+	# Head-gated steps in ci.yml (actionlint, package/docs.rs simulation,
+	# nightly install, public-API diff) must key on the head.
+	local v
+	while IFS= read -r v; do
+		[[ "$v" == "$head" ]] || problems+=("ci.yml head-gated step keys on $v, not $head")
+	done < <(grep -o "lean_version == '[^']*'" "$REPO_ROOT/.github/workflows/ci.yml" | sed "s/lean_version == '//; s/'//" | sort -u)
+
+	# This script's own default must mirror release.yml's head.
+	[[ "$DEFAULT_LEAN_VERSION" == "$head" ]] ||
+		problems+=("prerelease.sh DEFAULT_LEAN_VERSION ($DEFAULT_LEAN_VERSION) != $head")
+
+	if ((${#problems[@]} > 0)); then
+		local p
+		for p in "${problems[@]}"; do log_err "stale head reference: $p"; done
+		return 1
+	fi
+}
+
+run_gate "Toolchain head consistency" check_head_consistency
+
 log_step "Building Lake packages"
 for dir in \
 	"$REPO_ROOT/crates/lean-rs/shims/lean-rs-interop-shims" \

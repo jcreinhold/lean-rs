@@ -32,7 +32,9 @@ The window itself lives in `crates/lean-rs-abi/src/supported.rs`; the procedure 
      `libleanshared.so: cannot open shared object file`.
    - Head/window references in `README.md`, `crates/lean-rs-sys/README.md`, `crates/lean-rs-host/README.md`,
      `docs/release.md`, and `docs/architecture/02-versioning-and-compatibility.md`.
-   Grep for the old head string repo-wide (excluding `.git/`) to confirm nothing is left.
+   Grep for the old head string repo-wide (excluding `.git/`) to confirm nothing is left. `scripts/prerelease.sh`
+   runs a "Toolchain head consistency" gate that derives the head from `SUPPORTED_TOOLCHAINS` and fails on any stale
+   reference — run it before committing.
 6. Run the cheap local check per `docs/bump-toolchain.md` step 6: select `vX.Y.Z`, run
    `cargo nextest run -p lean-rs-abi -p lean-toolchain`, then restore the override. The full
    `scripts/test-all-toolchains.sh` sweep runs on CI (`full_matrix` dispatch), not locally.
