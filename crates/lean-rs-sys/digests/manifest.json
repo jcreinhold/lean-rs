@@ -37,6 +37,12 @@
         "4.33.0"
       ],
       "header_digest": "9018878554c5552ff3754865780d21825c2d0c5c4b47491b37bf6fe046adcd56"
+    },
+    {
+      "versions": [
+        "4.34.0-rc1"
+      ],
+      "header_digest": "19510ea01b07c55bd49066566e586179fe77f11120eeab7a29da50fa93cb1c8a"
     }
   ]
 }

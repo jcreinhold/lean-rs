@@ -84,6 +84,19 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "9018878554c5552ff3754865780d21825c2d0c5c4b47491b37bf6fe046adcd56",
         missing_symbols: &[],
     },
+    // 4.34.0-rc1 ships a *new* `lean.h` digest, but the change is confined to
+    // TSan instrumentation: `#define LEAN_TSAN` guards and three
+    // `lean_internal_*_rc` static-inline helpers that read/write `m_rc`
+    // through seq-cst atomics only when compiled under ThreadSanitizer. No
+    // struct declaration changes, so the probe against both headers reports
+    // byte-identical size, alignment, and field offsets for all 10 mirrored
+    // structs. `repr.rs` is unchanged; all 88 REQUIRED_SYMBOLS resolve.
+    // Added 2026-08-11 as the new head.
+    SupportedToolchain {
+        versions: &["4.34.0-rc1"],
+        header_digest: "19510ea01b07c55bd49066566e586179fe77f11120eeab7a29da50fa93cb1c8a",
+        missing_symbols: &[],
+    },
 ];
 
 /// Return the [`SupportedToolchain`] entry that includes `version`, if any.
