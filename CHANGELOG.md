@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.7.2]
+
+### Added
+
+- **Added Lean 4.34.0-rc1 to the supported toolchain window.** The new `lean.h` digest's only change is
+  ThreadSanitizer instrumentation (`LEAN_TSAN` guards and `lean_internal_*_rc` static-inline refcount helpers);
+  every mirrored struct is byte-identical in size, alignment, and field offsets, and all 88 required symbols
+  resolve. The head of the window (CI matrices, sanitizer workflow, and committed `lean-toolchain` pins) moves
+  from 4.33.0 to 4.34.0-rc1.
+
 ## [0.7.1]
 
 ### Added
