@@ -8,7 +8,7 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-07-28:
+is the single source of truth; this document mirrors it for narrative context. As of 2026-08-15:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
@@ -17,6 +17,9 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.31.0 | `486fe204404c…` |
 | 4.32.0-rc1, 4.32.0, 4.32.2 | `22eed50aa703…` |
 | 4.33.0-rc1, 4.33.0-rc2, 4.33.0 | `9018878554c5…` |
+| 4.33.1 | `02af00402831…` |
+| 4.34.0-rc1 | `19510ea01b07…` |
+| 4.34.0-rc2 | `982c731a1fba…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -49,6 +52,14 @@ size, alignment, and field offsets for all ten mirrored structs; `repr.rs` is un
 resolve. The textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the
 audited byte layout is preserved. The 4.33.0-rc2 release joined the same ABI-equivalence entry on 2026-08-04: its
 header digest is identical and all 88 `REQUIRED_SYMBOLS` resolve. The final 4.33.0 release joined the same entry on 2026-08-10 (byte-identical header).
+The 4.34.0-rc1 row was added on 2026-08-11 as the new head: a new digest whose only change is TSan-instrumented
+refcount inlines (`LEAN_TSAN` guards and `lean_internal_*_rc` helpers), with byte-identical struct layouts and all
+88 symbols resolving. The 4.33.1 patch release backports that same TSan instrumentation plus sticky-rc comments, so
+it was added on 2026-08-15 as its own row under the same gate. The 4.34.0-rc2 row was added the same day as the new
+head: it implements the sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned
+wrap-around arithmetic in `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported
+`lean_nat_size_in_bytes`; no struct declaration changes, so layouts stay byte-identical and all 88
+`REQUIRED_SYMBOLS` resolve (the two new exports are additive, not part of the required surface).
 
 **Policy.**
 

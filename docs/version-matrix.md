@@ -9,11 +9,14 @@ even if they happen to compile.
 
 ## Lean toolchain window
 
-Supported window: Lean 4.30.0–4.34.0-rc1 (six entries; 4.31.0-rc1/4.31.0-rc2, 4.32.0-rc1/4.32.0/4.32.2, and
+Supported window: Lean 4.30.0–4.34.0-rc2 (eight entries; 4.31.0-rc1/4.31.0-rc2, 4.32.0-rc1/4.32.0/4.32.2, and
 4.33.0-rc1/4.33.0-rc2/4.33.0 each ship a byte-identical `lean.h` and share one entry). 4.33.0-rc1 ships a new digest whose only change is two C11 `_Atomic(...)`
 field qualifiers that leave every mirrored struct byte-identical in size, alignment, and field offsets. 4.34.0-rc1
 ships a new digest whose only change is TSan-instrumented refcount inlines (`lean_internal_*_rc` helpers) with no
-struct layout change. Authoritative
+struct layout change. 4.33.1 backports that same TSan instrumentation (plus sticky-rc comments) with no struct
+layout change. 4.34.0-rc2 implements the sticky-rc band (`LEAN_RC_STICKY` thresholds, unsigned wrap-around
+refcount arithmetic, cold-path `lean_inc_ref_huge_n`) and adds the exported `lean_nat_size_in_bytes`; no struct
+layout change. Authoritative
 list, including `lean.h` SHA-256 digests, lives in
 [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs). Releases that ship a byte-identical
 `lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is

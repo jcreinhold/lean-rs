@@ -84,6 +84,18 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "9018878554c5552ff3754865780d21825c2d0c5c4b47491b37bf6fe046adcd56",
         missing_symbols: &[],
     },
+    // 4.33.1 ships a *new* `lean.h` digest: it backports the TSan
+    // instrumentation that 4.34.0-rc1 introduced (`#define LEAN_TSAN` guards
+    // and the `lean_internal_*_rc` static-inline helpers) and documents the
+    // sticky-rc band in comments. No struct declaration changes, so the
+    // probe against the 4.33.0 header reports byte-identical size,
+    // alignment, and field offsets for all 10 mirrored structs. `repr.rs`
+    // is unchanged; all 88 REQUIRED_SYMBOLS resolve. Added 2026-08-15.
+    SupportedToolchain {
+        versions: &["4.33.1"],
+        header_digest: "02af0040283143b264e3a44b06b348b6973ae6037fa8f550701c83dd7a062ace",
+        missing_symbols: &[],
+    },
     // 4.34.0-rc1 ships a *new* `lean.h` digest, but the change is confined to
     // TSan instrumentation: `#define LEAN_TSAN` guards and three
     // `lean_internal_*_rc` static-inline helpers that read/write `m_rc`
@@ -95,6 +107,21 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
     SupportedToolchain {
         versions: &["4.34.0-rc1"],
         header_digest: "19510ea01b07c55bd49066566e586179fe77f11120eeab7a29da50fa93cb1c8a",
+        missing_symbols: &[],
+    },
+    // 4.34.0-rc2 ships a *new* `lean.h` digest implementing the sticky-rc
+    // band it previously only documented: `LEAN_RC_STICKY` /
+    // `LEAN_RC_STICKY_DROP` / `LEAN_RC_INC_MAX` macros, unsigned wrap-around
+    // arithmetic in `lean_inc_ref_n`, a new cold-path helper
+    // `lean_inc_ref_huge_n`, and a new `lean_nat_size_in_bytes` export.
+    // No struct declaration changes, so the probe against the 4.34.0-rc1
+    // header reports byte-identical size, alignment, and field offsets for
+    // all 10 mirrored structs. `repr.rs` is unchanged; all 88
+    // REQUIRED_SYMBOLS resolve (the two new exports are additive and not
+    // part of the required surface). Added 2026-08-15 as the new head.
+    SupportedToolchain {
+        versions: &["4.34.0-rc2"],
+        header_digest: "982c731a1fbacc7688006f44f9f7af9d9e3e0247d310a728827f49e7f1466c13",
         missing_symbols: &[],
     },
 ];

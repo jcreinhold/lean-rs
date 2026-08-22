@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Added
+
+- **Added Lean 4.33.1 and 4.34.0-rc2 to the supported toolchain window.** Both ship new `lean.h` digests
+  with no struct layout change: 4.33.1 backports the TSan-instrumented refcount inlines from 4.34.0-rc1, and
+  4.34.0-rc2 implements the sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned
+  wrap-around arithmetic in `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported
+  `lean_nat_size_in_bytes`. Every mirrored struct is byte-identical in size, alignment, and field offsets, and
+  all 88 required symbols resolve on both. The head of the window (CI matrices, sanitizer/release workflows,
+  and committed `lean-toolchain` pins) moves from 4.34.0-rc1 to 4.34.0-rc2.
+
 ## [0.7.2]
 
 ### Added

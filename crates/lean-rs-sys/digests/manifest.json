@@ -40,9 +40,21 @@
     },
     {
       "versions": [
+        "4.33.1"
+      ],
+      "header_digest": "02af0040283143b264e3a44b06b348b6973ae6037fa8f550701c83dd7a062ace"
+    },
+    {
+      "versions": [
         "4.34.0-rc1"
       ],
       "header_digest": "19510ea01b07c55bd49066566e586179fe77f11120eeab7a29da50fa93cb1c8a"
+    },
+    {
+      "versions": [
+        "4.34.0-rc2"
+      ],
+      "header_digest": "982c731a1fbacc7688006f44f9f7af9d9e3e0247d310a728827f49e7f1466c13"
     }
   ]
 }
