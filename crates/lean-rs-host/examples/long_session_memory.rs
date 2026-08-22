@@ -837,9 +837,7 @@ fn import_profiler_options(mode: LeanImportProfileMode, iteration: usize) -> Lea
 }
 
 fn env_bool(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    std::env::var(name).is_ok_and(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
 fn report_import_profile_gap(mode: LeanImportProfileMode, iteration: usize, err: &LeanError) {

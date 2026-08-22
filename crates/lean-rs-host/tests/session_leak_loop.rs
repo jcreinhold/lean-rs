@@ -54,9 +54,7 @@ fn iters(default: usize) -> usize {
 }
 
 fn env_value_truthy(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+    std::env::var(name).is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
 }
 
 fn import_heavy_diagnostics_enabled() -> bool {

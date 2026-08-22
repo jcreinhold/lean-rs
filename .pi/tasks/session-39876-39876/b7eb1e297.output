@@ -1,0 +1,294 @@
+menting lean-rs-worker-child v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-child)
+ Documenting lean-rs-worker-parent v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-parent)
+ Documenting lean-rs-host v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-host)
+ Documenting lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+ Documenting lean-rs-interop-shims v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs/shims/lean-rs-interop-shims)
+ Documenting lean-rs-worker-protocol v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-protocol)
+ Documenting lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.96s
+   Generated /Users/jcreinhold/Code/lean-rs/target/doc/lean_rs/index.html and 12 other files
+✓ cargo doc --no-deps --workspace (DOCS_RS=1) (9s)
+
+==> Package tarball docs.rs simulation
+   Packaging lean-rs-abi v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-abi)
+    Packaged 9 files, 22.7KiB (7.9KiB compressed)
+   Packaging lean-rs-sys v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+    Updating crates.io index
+    Packaged 31 files, 165.5KiB (42.8KiB compressed)
+   Packaging lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Updating crates.io index
+    Packaged 23 files, 282.6KiB (62.5KiB compressed)
+   Packaging lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+    Updating crates.io index
+    Packaged 65 files, 537.7KiB (134.7KiB compressed)
+   Packaging lean-rs-host v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-host)
+    Updating crates.io index
+    Packaged 84 files, 1.0MiB (209.4KiB compressed)
+   Packaging lean-rs-interop-shims v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs/shims/lean-rs-interop-shims)
+    Updating crates.io index
+    Packaged 16 files, 41.1KiB (13.7KiB compressed)
+   Packaging lean-rs-profiling v0.7.3 (/Users/jcreinhold/Code/lean-rs/profiling)
+    Updating crates.io index
+    Packaged 16 files, 117.3KiB (25.0KiB compressed)
+   Packaging lean-rs-worker-protocol v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-protocol)
+    Updating crates.io index
+    Packaged 12 files, 169.4KiB (36.8KiB compressed)
+   Packaging lean-rs-worker-parent v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-parent)
+    Updating crates.io index
+    Packaged 14 files, 502.6KiB (101.0KiB compressed)
+   Packaging lean-rs-worker-child v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-child)
+    Updating crates.io index
+    Packaged 40 files, 728.1KiB (133.1KiB compressed)
+[1m[92m    Updating[0m crates.io index
+[1m[92m     Locking[0m 109 packages to latest Rust 1.94 compatible versions
+[1m[92m      Adding[0m libloading v0.8.9 [1m[33m(available: v0.9.0)[0m
+[1m[92m      Adding[0m object v0.36.7 [1m[33m(available: v0.40.0)[0m
+[1m[92m Documenting[0m lean-rs-abi v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-abi-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.44s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_abi/index.html
+[1m[92m   Compiling[0m typenum v1.20.1
+[1m[92m   Compiling[0m hybrid-array v0.4.14
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m   Compiling[0m crypto-common v0.2.2
+[1m[92m   Compiling[0m block-buffer v0.12.1
+[1m[92m   Compiling[0m const-oid v0.10.2
+[1m[92m   Compiling[0m digest v0.11.3
+[1m[92m   Compiling[0m cpufeatures v0.3.0
+[1m[92m   Compiling[0m cfg-if v1.0.4
+[1m[92m   Compiling[0m sha2 v0.11.0
+[1m[92m   Compiling[0m lean-rs-abi v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-abi-0.7.3)
+[1m[92m   Compiling[0m lean-rs-sys v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-sys-0.7.3)
+[1m[33mwarning[0m: lean-rs-sys@0.7.3: lean-rs-sys: DOCS_RS=1; emitting documentation metadata without probing Lean
+[1m[92m Documenting[0m lean-rs-sys v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-sys-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 2.78s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_sys/index.html
+[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m   Compiling[0m proc-macro2 v1.0.107
+[1m[92m    Checking[0m typenum v1.20.1
+[1m[92m   Compiling[0m quote v1.0.47
+[1m[92m   Compiling[0m unicode-ident v1.0.24
+[1m[92m    Checking[0m hybrid-array v0.4.14
+[1m[92m   Compiling[0m rustix v1.1.4
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m   Compiling[0m syn v3.0.3
+[1m[92m    Checking[0m block-buffer v0.12.1
+[1m[92m    Checking[0m crypto-common v0.2.2
+[1m[92m    Checking[0m errno v0.3.14
+[1m[92m    Checking[0m winnow v1.0.4
+[1m[92m   Compiling[0m serde v1.0.229
+[1m[92m   Compiling[0m serde_json v1.0.151
+[1m[92m    Checking[0m const-oid v0.10.2
+[1m[92m    Checking[0m bitflags v2.13.1
+[1m[92m    Checking[0m digest v0.11.3
+[1m[92m   Compiling[0m lean-toolchain v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-toolchain-0.7.3)
+[1m[92m    Checking[0m toml_parser v1.1.3+spec-1.1.0
+[1m[92m   Compiling[0m serde_derive v1.0.229
+[1m[92m    Checking[0m cpufeatures v0.3.0
+[1m[92m    Checking[0m toml_datetime v1.1.1+spec-1.1.0
+[1m[92m    Checking[0m serde_spanned v1.1.1
+[1m[92m    Checking[0m itoa v1.0.18
+[1m[92m    Checking[0m cfg-if v1.0.4
+[1m[92m    Checking[0m memchr v2.8.3
+[1m[92m    Checking[0m sha2 v0.11.0
+[1m[92m    Checking[0m toml v1.1.4+spec-1.1.0
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m    Checking[0m fs4 v1.1.0
+[1m[92m Documenting[0m lean-toolchain v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-toolchain-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 8.24s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_toolchain/index.html
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m    Checking[0m lean-toolchain v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-toolchain-0.7.3)
+[1m[92m Documenting[0m lean-rs-interop-shims v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-interop-shims-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.60s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_interop_shims/index.html
+[1m[92m   Compiling[0m proc-macro2 v1.0.107
+[1m[92m   Compiling[0m quote v1.0.47
+[1m[92m   Compiling[0m syn v3.0.3
+[1m[92m    Checking[0m once_cell v1.21.4
+[1m[92m    Checking[0m tracing-core v0.1.36
+[1m[92m   Compiling[0m serde_derive v1.0.229
+[1m[33mwarning[0m: lean-rs-sys@0.7.3: lean-rs-sys: DOCS_RS=1; emitting documentation metadata without probing Lean
+[1m[92m   Compiling[0m syn v2.0.119
+[1m[92m   Compiling[0m object v0.36.7
+[1m[92m    Checking[0m lazy_static v1.5.0
+[1m[92m    Checking[0m sharded-slab v0.1.7
+[1m[92m   Compiling[0m tracing-attributes v0.1.31
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m    Checking[0m serde v1.0.229
+[1m[92m    Checking[0m thread_local v1.1.10
+[1m[92m    Checking[0m pin-project-lite v0.2.17
+[1m[92m   Compiling[0m lean-rs v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-0.7.3)
+[1m[92m    Checking[0m tracing v0.1.44
+[1m[92m    Checking[0m tracing-subscriber v0.3.23
+[1m[92m    Checking[0m lean-toolchain v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-toolchain-0.7.3)
+[1m[92m    Checking[0m lean-rs-sys v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-sys-0.7.3)
+[1m[92m    Checking[0m libloading v0.8.9
+[1m[92m Documenting[0m lean-rs v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 7.84s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs/index.html
+[1m[33mwarning[0m: lean-rs-sys@0.7.3: lean-rs-sys: DOCS_RS=1; emitting documentation metadata without probing Lean
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m   Compiling[0m lean-rs-host v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-host-0.7.3)
+[1m[92m    Checking[0m lean-rs v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-0.7.3)
+[1m[92m Documenting[0m lean-rs-host v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-host-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.02s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_host/index.html
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m Documenting[0m lean-rs-worker-protocol v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-protocol-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.71s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_worker_protocol/index.html
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[92m    Checking[0m lean-rs-worker-protocol v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-protocol-0.7.3)
+[1m[92m Documenting[0m lean-rs-worker-parent v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-parent-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 1.99s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_worker_parent/index.html
+[1m[92m   Compiling[0m libc v0.2.189
+[1m[92m    Checking[0m errno v0.3.14
+[1m[92m    Checking[0m rustix v1.1.4
+[1m[92m    Checking[0m cpufeatures v0.3.0
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: DOCS_RS=1; emitting latest-supported Lean metadata without probing
+[1m[33mwarning[0m: lean-toolchain@0.7.3: lean-toolchain: workspace fixture not present in package build; LAKE_FIXTURE_DIGEST is zero
+[1m[33mwarning[0m: lean-rs-sys@0.7.3: lean-rs-sys: DOCS_RS=1; emitting documentation metadata without probing Lean
+[1m[92m    Checking[0m sha2 v0.11.0
+[1m[92m    Checking[0m fs4 v1.1.0
+[1m[92m    Checking[0m lean-toolchain v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-toolchain-0.7.3)
+[1m[92m    Checking[0m lean-rs v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-0.7.3)
+[1m[92m   Compiling[0m lean-rs-worker-child v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-child-0.7.3)
+[1m[92m    Checking[0m lean-rs-host v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-host-0.7.3)
+[1m[92m    Checking[0m lean-rs-worker-protocol v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-protocol-0.7.3)
+[1m[92m Documenting[0m lean-rs-worker-child v0.7.3 (/var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/lean-rs-worker-child-0.7.3)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 4.22s
+[1m[92m   Generated[0m /var/folders/xv/790tmq394tn46sg83vw4dr480000gn/T/lean-rs-package-docsrs-3mv6iaq4/workspace/target/doc/lean_rs_worker_child/index.html
+package check: docs.rs tarball simulation passed
+✓ Package tarball docs.rs simulation (33s)
+
+==> Public-API baseline diff
+   Compiling typenum v1.20.1
+   Compiling hybrid-array v0.4.14
+   Compiling libc v0.2.189
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling const-oid v0.10.2
+   Compiling digest v0.11.3
+   Compiling cpufeatures v0.3.0
+   Compiling cfg-if v1.0.4
+   Compiling sha2 v0.11.0
+   Compiling lean-rs-abi v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-abi)
+   Compiling lean-rs-sys v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+warning: lean-rs-sys@0.7.3: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.34.0-rc2
+ Documenting lean-rs-sys v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.79s
+   Compiling serde_core v1.0.229
+   Compiling libc v0.2.189
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+    Checking typenum v1.20.1
+    Checking hybrid-array v0.4.14
+   Compiling zmij v1.0.23
+   Compiling rustix v1.1.4
+   Compiling syn v3.0.3
+    Checking block-buffer v0.12.1
+    Checking crypto-common v0.2.2
+    Checking errno v0.3.14
+    Checking const-oid v0.10.2
+    Checking winnow v1.0.4
+   Compiling serde v1.0.229
+    Checking bitflags v2.13.1
+   Compiling serde_json v1.0.151
+    Checking toml_parser v1.1.3+spec-1.1.0
+    Checking digest v0.11.3
+   Compiling lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+   Compiling serde_derive v1.0.229
+    Checking cpufeatures v0.3.0
+    Checking toml_datetime v1.1.1+spec-1.1.0
+    Checking serde_spanned v1.1.1
+    Checking memchr v2.8.3
+    Checking cfg-if v1.0.4
+    Checking itoa v1.0.18
+    Checking sha2 v0.11.0
+    Checking toml v1.1.4+spec-1.1.0
+    Checking fs4 v1.1.0
+ Documenting lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.48s
+    Checking lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+ Documenting lean-rs-interop-shims v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs/shims/lean-rs-interop-shims)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling syn v3.0.3
+    Checking once_cell v1.21.4
+    Checking tracing-core v0.1.36
+   Compiling serde_derive v1.0.229
+warning: lean-rs-sys@0.7.3: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.34.0-rc2
+   Compiling syn v2.0.119
+   Compiling object v0.36.7
+    Checking lazy_static v1.5.0
+    Checking sharded-slab v0.1.7
+   Compiling tracing-attributes v0.1.31
+    Checking serde v1.0.229
+    Checking thread_local v1.1.10
+    Checking pin-project-lite v0.2.17
+   Compiling lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+    Checking tracing v0.1.44
+    Checking tracing-subscriber v0.3.23
+    Checking lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Checking lean-rs-sys v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-sys)
+    Checking libloading v0.8.9
+ Documenting lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.37s
+warning: lean-rs-sys@0.7.3: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.34.0-rc2
+   Compiling lean-rs-host v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-host)
+    Checking lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+ Documenting lean-rs-host v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.96s
+ Documenting lean-rs-worker-protocol v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-protocol)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.62s
+    Checking lean-rs-worker-protocol v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-protocol)
+ Documenting lean-rs-worker-parent v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-parent)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.77s
+   Compiling libc v0.2.189
+    Checking errno v0.3.14
+    Checking rustix v1.1.4
+    Checking cpufeatures v0.3.0
+warning: lean-rs-sys@0.7.3: lean-rs-sys: using Lean toolchain prefix /Users/jcreinhold/.elan/toolchains/leanprover--lean4---v4.34.0-rc2
+    Checking sha2 v0.11.0
+    Checking fs4 v1.1.0
+    Checking lean-toolchain v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-toolchain)
+    Checking lean-rs v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs)
+   Compiling lean-rs-worker-child v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-child)
+    Checking lean-rs-host v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-host)
+    Checking lean-rs-worker-protocol v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-protocol)
+ Documenting lean-rs-worker-child v0.7.3 (/Users/jcreinhold/Code/lean-rs/crates/lean-rs-worker-child)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.48s
+✓ Public-API baseline diff (34s)
+! ABI fuzz smoke runs only on Linux (release.yml gates it the same way)
+
+====== Pre-release summary ======
+Lean version: 4.34.0-rc2
+OS:           Darwin
+Mode:         host
+
+passed (9):
+  ✓ Toolchain head consistency
+  ✓ cargo fmt --check
+  ✓ actionlint workflows
+  ✓ cargo nextest run --workspace --profile ci
+  ✓ cargo test --doc --workspace
+  ✓ cargo doc --no-deps --workspace (-D warnings)
+  ✓ cargo doc --no-deps --workspace (DOCS_RS=1)
+  ✓ Package tarball docs.rs simulation
+  ✓ Public-API baseline diff
+
+skipped (1):
+  - ABI fuzz smoke (non-Linux)
+
+failed (1):
+  ✗ cargo clippy --all-targets -- -D warnings
