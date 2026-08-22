@@ -50,3 +50,4 @@ crates/*/fuzz/target/
 .pi/npm/
 .pi/node_modules/
 .pi/sessions/
+.pi/tasks/
