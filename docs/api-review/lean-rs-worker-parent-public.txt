@@ -386,6 +386,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerS
 pub struct lean_rs_worker_parent::LeanWorker
 impl lean_rs_worker_parent::LeanWorker
 pub fn lean_rs_worker_parent::LeanWorker::call_fixture_mul(&mut self, impl core::convert::AsRef<std::path::Path>, u64, u64) -> core::result::Result<u64, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorker::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorker::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::health(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorker::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
@@ -495,6 +496,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_parent::LeanWork
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerCancellationToken
 pub struct lean_rs_worker_parent::LeanWorkerCapability
 impl lean_rs_worker_parent::LeanWorkerCapability
+pub fn lean_rs_worker_parent::LeanWorkerCapability::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::dylib_path(&self) -> &std::path::Path
 pub fn lean_rs_worker_parent::LeanWorkerCapability::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
@@ -671,6 +673,7 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerE
 pub struct lean_rs_worker_parent::LeanWorkerHostHandle
 impl lean_rs_worker_parent::LeanWorkerHostHandle
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::attempt_proof_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerProofAttemptRequest, &lean_rs_worker_protocol::types::LeanWorkerElabOptions, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerProofAttemptResult, lean_rs_worker_parent::LeanWorkerError>
+pub fn lean_rs_worker_parent::LeanWorkerHostHandle::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::inspect_declaration_with_imports(&mut self, alloc::vec::Vec<alloc::string::String>, &lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionRequest, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_protocol::types::LeanWorkerDeclarationInspectionResult, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerHostHandle::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot

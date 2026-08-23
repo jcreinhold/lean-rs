@@ -4384,8 +4384,6 @@ mod tests {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
     }
 
-
-
     #[cfg(target_os = "macos")]
     #[test]
     fn child_cpu_millis_delta_moves_on_a_busy_child() {
