@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Added
+
+- **`lean-rs-worker-parent`: child CPU-time sampling.** `LeanWorkerSupervisor::cumulative_cpu_millis` (plus
+  `LeanWorkerHostHandle::cumulative_cpu_millis` and `LeanWorkerCapability::cumulative_cpu_millis` accessors) reports the worker child's
+  cumulative CPU time (user + system) in milliseconds, for per-call contention-immune cost deltas around worker jobs.
+  Linux reads `/proc/<pid>/stat` (`utime`+`stime`, USER_HZ=100 ABI); macOS calls `proc_pidinfo`
+  (`PROC_PIDTASKINFO`, scaled by `mach_timebase_info` — the counters are mach absolute-time ticks, and
+  `proc_pid_rusage` returns zeros on current macOS); the crate's `forbid(unsafe_code)` relaxed to `deny` for this one
+  narrowly documented FFI call. Other Unix falls back to `ps -o cputime=` at one-second granularity.
+
 ## [0.7.3]
 
 ### Changed

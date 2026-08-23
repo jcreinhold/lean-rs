@@ -439,6 +439,8 @@ version = "0.7.3"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
+ "libc",
+ "mach2",
  "serde",
  "serde_json",
 ]
@@ -494,6 +496,12 @@ checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
 ]
+
+[[package]]
+name = "mach2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "matchers"

@@ -1176,6 +1176,15 @@ impl LeanWorkerCapability {
         self.worker.rss_kib()
     }
 
+    /// Measure the current child CPU time (user + system) in milliseconds.
+    ///
+    /// Cumulative since the child started; take a delta around a unit of work
+    /// for a contention-immune cost measure. `None` means the platform did not
+    /// provide a usable sample; it is not a worker failure.
+    pub fn cumulative_cpu_millis(&mut self) -> Option<u64> {
+        self.worker.cumulative_cpu_millis()
+    }
+
     /// Explicitly cycle the worker process.
     ///
     /// # Errors
@@ -1472,6 +1481,15 @@ impl LeanWorkerHostHandle {
     /// Measure the current child RSS in KiB when supported by the platform.
     pub fn rss_kib(&mut self) -> Option<u64> {
         self.worker.rss_kib()
+    }
+
+    /// Measure the current child CPU time (user + system) in milliseconds.
+    ///
+    /// Cumulative since the child started; take a delta around a unit of work
+    /// for a contention-immune cost measure. `None` means the platform did not
+    /// provide a usable sample; it is not a worker failure.
+    pub fn cumulative_cpu_millis(&mut self) -> Option<u64> {
+        self.worker.cumulative_cpu_millis()
     }
 
     /// Explicitly cycle the worker process.

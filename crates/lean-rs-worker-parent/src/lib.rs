@@ -11,7 +11,10 @@
 //! This crate does not link `libleanshared`. The worker child runtime that
 //! does is published separately as [`lean-rs-worker-child`](https://docs.rs/lean-rs-worker-child).
 
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`, so the macOS child-CPU sampler can take a narrowly
+// scoped exception for the one `proc_pid_rusage` FFI call (see
+// `supervisor::child_cpu_millis`); every other module stays unsafe-free.
+#![deny(unsafe_code)]
 
 mod capability;
 mod planning;

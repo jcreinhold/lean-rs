@@ -25,8 +25,12 @@ version.workspace = true
 [dependencies]
 lean-rs-worker-protocol = { workspace = true }
 lean-toolchain = { workspace = true }
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.6"
 
 [dev-dependencies]
 lean-rs-worker-protocol = { workspace = true, features = ["harness"] }
