@@ -2063,6 +2063,46 @@ fn attempt_proof_global_output_budget_returns_partial_not_attempted_rows() {
     assert_eq!(result.candidates[2].status, LeanWorkerProofAttemptStatus::NotAttempted);
 }
 
+/// A name that does not resolve still names what the caller probably meant:
+/// the `not_found` verdict carries the file's declarations whose short name
+/// matches the requested one across namespaces and case, so the parent can
+/// suggest them instead of sending the caller back to a full inventory.
+#[test]
+fn verify_declaration_not_found_carries_similar_declarations() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/verify/similar.lean");
+    let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let request = LeanWorkerDeclarationVerificationRequest {
+        source: "namespace Probe\ntheorem fooBar : True := by\n  trivial\ntheorem unrelated : True := by\n  trivial\nend Probe\n"
+            .to_owned(),
+        target: LeanWorkerDeclarationVerificationTarget::Name {
+            name: "Other.fooBar".to_owned(),
+        },
+        sorry_policy: LeanWorkerSorryPolicy::Deny,
+        report_axioms: false,
+        budgets: LeanWorkerOutputBudgets::default(),
+    };
+
+    let result = session
+        .verify_declaration(&request, &opts, None, None)
+        .expect("verification of a missing name succeeds as a verdict");
+    match result {
+        LeanWorkerDeclarationVerificationResult::Ok {
+            verification_status,
+            facts,
+            ..
+        } => {
+            assert_eq!(verification_status, LeanWorkerDeclarationVerificationStatus::NotFound);
+            let names: Vec<&str> = facts.candidates.iter().map(|c| c.declaration_name.as_str()).collect();
+            assert_eq!(names, vec!["Probe.fooBar"], "similar declarations: {names:?}");
+        }
+        other => panic!("expected a not_found verdict, got {other:?}"),
+    }
+}
+
 #[test]
 fn verify_declaration_accepts_closed_theorem_and_rejects_sorry() {
     ensure_fixture_built();
@@ -2255,6 +2295,74 @@ fn process_module_query_batch_rebuilds_when_content_changes() {
         .expect("changed-content batch succeeds");
     assert_batch_has_state(&changed);
     assert_eq!(batch_facts(&changed).cache_status, LeanWorkerModuleCacheStatus::Rebuilt);
+}
+
+/// A rebuild of a file the cache already holds continues Lean's incremental
+/// frontend from the previous snapshot instead of elaborating from the first
+/// command. The wire status stays `Rebuilt`; what the results must not be able
+/// to tell apart is a continued build from a cold one — after an edit past the
+/// probed declaration, and after an edit before it that shifts every position.
+#[test]
+fn process_module_query_batch_incremental_rebuild_matches_a_cold_build() {
+    ensure_fixture_built();
+    let opts = LeanWorkerElabOptions::new().file_label("/cache/incremental.lean");
+    let mut worker = LeanWorker::spawn(&cache_worker_config()).expect("worker starts");
+    let mut session = worker
+        .open_session(&elaboration_session_config(), None, None)
+        .expect("worker session opens");
+    let budgets = LeanWorkerOutputBudgets::default();
+    let base = "theorem t (h : True) : True := by\n  exact h\n";
+
+    let first = session
+        .process_module_query_batch(base, &cache_probe_selectors(), &budgets, &opts, None, None)
+        .expect("first batch succeeds");
+    assert_eq!(batch_facts(&first).cache_status, LeanWorkerModuleCacheStatus::Miss);
+    assert_batch_has_state(&first);
+
+    // An edit after the probed declaration: its own commands are unchanged.
+    let extended = format!("{base}\ntheorem u : 1 = 1 := by\n  rfl\n");
+    let suffix_edit = session
+        .process_module_query_batch(&extended, &cache_probe_selectors(), &budgets, &opts, None, None)
+        .expect("suffix-edit batch succeeds");
+    assert_eq!(
+        batch_facts(&suffix_edit).cache_status,
+        LeanWorkerModuleCacheStatus::Rebuilt
+    );
+    assert_batch_has_state(&suffix_edit);
+
+    // An edit before it shifts every later command; the probe moves with it.
+    let shifted = format!("theorem s : 2 = 2 := by\n  rfl\n\n{base}");
+    let shifted_selectors = vec![LeanWorkerModuleQuerySelector::ProofState {
+        id: "state".to_owned(),
+        line: 5,
+        column: 4,
+    }];
+    let prefix_edit = session
+        .process_module_query_batch(&shifted, &shifted_selectors, &budgets, &opts, None, None)
+        .expect("prefix-edit batch succeeds");
+    assert_eq!(
+        batch_facts(&prefix_edit).cache_status,
+        LeanWorkerModuleCacheStatus::Rebuilt
+    );
+    assert_batch_has_state(&prefix_edit);
+
+    let cold_opts = LeanWorkerElabOptions::new().file_label("/cache/incremental-cold.lean");
+    let cold = session
+        .process_module_query_batch(&shifted, &shifted_selectors, &budgets, &cold_opts, None, None)
+        .expect("cold batch succeeds");
+    assert_eq!(batch_facts(&cold).cache_status, LeanWorkerModuleCacheStatus::Miss);
+    let (
+        LeanWorkerModuleQueryBatchOutcome::Ok { result: continued, .. },
+        LeanWorkerModuleQueryBatchOutcome::Ok { result: fresh, .. },
+    ) = (&prefix_edit, &cold)
+    else {
+        panic!("expected Ok outcomes, got {prefix_edit:?} and {cold:?}");
+    };
+    assert_eq!(
+        format!("{:?}", continued.items),
+        format!("{:?}", fresh.items),
+        "a continued build must answer exactly like a cold build of the same source"
+    );
 }
 
 #[test]

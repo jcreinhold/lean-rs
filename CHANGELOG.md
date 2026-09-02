@@ -9,6 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Added
+
+- The host shim reuses Lean's command-level incremental elaboration across one-shot builds of the same file label:
+  after an edit, the module is re-elaborated only from the first changed command, provided the imported environment,
+  heartbeat limit, and namespace context are unchanged. The retained `IncrementalState` shares its environment and
+  messages with the snapshot and is accounted at 2 KiB per command in the cache byte bound.
+- `verify_declaration` and `verify_declaration_batch` attach, on a `not_found` verdict, up to five declarations of the
+  module whose short name matches the target ignoring namespace and case, in `facts.candidates`; the proof-attempt edit
+  target error names them too.
+
 ## [0.8.0]
 
 ### Added

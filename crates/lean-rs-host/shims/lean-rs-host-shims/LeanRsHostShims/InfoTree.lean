@@ -1044,6 +1044,30 @@ private def declarationTargetByName (candidates : Array DeclarationCandidate) (n
   | #[candidate] => .target candidate.info
   | many => .ambiguous (many.map (·.info))
 
+private def similarDeclarationLimit : Nat := 5
+
+private def hasSubstring (text needle : String) : Bool :=
+  !needle.isEmpty && (text.splitOn needle).length > 1
+
+/-- Declarations of the module whose names resemble a name that did not resolve:
+    the same short name in another namespace or case, or a short name that
+    contains or is contained in the requested one. Bounded and deduplicated, so
+    a `not_found` verdict can name the likely intended declaration instead of
+    sending the caller back to a full inventory. -/
+private def similarDeclarationsByName (candidates : Array DeclarationCandidate) (name : String) :
+    Array DeclarationTargetInfo :=
+  let requested := name.toLower
+  let needle := ((requested.splitOn ".").getLast?.getD requested)
+  if needle.isEmpty then
+    #[]
+  else
+    let matched := dedupByDeclarationName <| candidates.filter fun candidate =>
+      let short := candidate.info.shortName.toLower
+      let full := candidate.info.declarationName.toLower
+      short == needle || full.endsWith ("." ++ requested) || requested.endsWith ("." ++ short) ||
+        hasSubstring short needle || hasSubstring needle short
+    (matched.map (·.info)).extract 0 similarDeclarationLimit
+
 private def declarationAt? (doc : SourceDocument) (candidates : Array DeclarationCandidate) (line column : Nat) :
     Option DeclarationCandidate :=
   let bodyCursorLine := doc.fileLineToBody line
@@ -1689,6 +1713,20 @@ private structure ModuleSnapshot where
       graph transitively, so storing the reference adds negligible memory
       beyond the trees already retained. -/
   env : Environment
+  /-- The environment the body was elaborated on top of: the session
+      environment, or a header re-import when the file uses the module system.
+      Compared by pointer when a later build of the same file asks whether it
+      may continue from this snapshot's command chain. -/
+  baseEnv : Environment
+  heartbeats : UInt64
+  namespaceContext : String
+  /-- Lean's per-command snapshot chain from the build that produced this
+      entry. A later build of the same file hands it to
+      `Lean.Elab.IO.processCommandsIncrementally`, which re-elaborates only from
+      the first changed command on. `none` when the body was not elaborated.
+      The chain shares its environments, messages, and info trees structurally
+      with the fields above, so it adds little beyond the snapshot nodes. -/
+  incremental? : Option Lean.Elab.IncrementalState
   approxBytes : Nat
   lastUsedMs : Nat
 
@@ -1780,8 +1818,48 @@ private def hasFileIdentity (fileIdentity : String) (entries : Array ModuleSnaps
 private def upsertSnapshot (snapshot : ModuleSnapshot) (entries : Array ModuleSnapshot) : Array ModuleSnapshot :=
   (entries.filter (fun entry => entry.key != snapshot.key)).push snapshot
 
+/-- The most recently used cached snapshot of one file, whatever its content. -/
+private def newestSameFileSnapshot? (fileIdentity : String) (entries : Array ModuleSnapshot) :
+    Option ModuleSnapshot :=
+  entries.foldl (init := none) fun best? entry =>
+    if entry.fileIdentity != fileIdentity then
+      best?
+    else
+      match best? with
+      | none => some entry
+      | some best => if entry.lastUsedMs > best.lastUsedMs then some entry else best?
+
+/-- The newest cached snapshot of `fileLabel`, if any, for a one-shot build of
+    an overlay or verification source of that file to continue from. Read-only:
+    one-shot snapshots never enter the cache. -/
+private def cachedSameFileSnapshot? (fileLabel : String) : IO (Option ModuleSnapshot) := do
+  let cache ← moduleSnapshotCache.get
+  pure (newestSameFileSnapshot? fileLabel cache.entries)
+
+/-- Approximate retained bytes per command of an `IncrementalState` chain beyond
+    the info trees and messages the snapshot already counts. Each command's
+    `Command.State` shares its environment and message log structurally with
+    its neighbours, so only the snapshot nodes and syntax are new. -/
+private def incrementalCommandApproxBytes : Nat := 2048
+
+/-- The previous build's command chain, when a new build of the same file may
+    continue from it. Lean's incremental frontend re-parses every command and
+    reuses an elaboration result only while the syntax, positions included, is
+    unchanged, so the reuse is exact provided both builds started from the same
+    state: the same base environment object (pointer equality — a header
+    re-import is a different environment), the same heartbeat budget, and the
+    same namespace scope. -/
+private def reusableIncrementalState? (old : ModuleSnapshot) (baseEnv : Environment) (heartbeats : UInt64)
+    (namespaceContext : String) : Option Lean.Elab.IncrementalState :=
+  let sameEnv := unsafe ptrEq old.baseEnv baseEnv
+  if sameEnv && old.heartbeats == heartbeats && old.namespaceContext == namespaceContext then
+    old.incremental?
+  else
+    none
+
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (policy : ModuleQueryCachePolicy) :
+    (heartbeats : UInt64) (diagBytes : USize) (policy : ModuleQueryCachePolicy)
+    (old? : Option ModuleSnapshot := none) :
     IO (Except (LeanRsFixture.Elaboration.ElabFailure × Nat) (ModuleSnapshot × ModuleQueryTimings)) := do
   let headerStart ← IO.monoMsNow
   let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
@@ -1836,6 +1914,10 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       imports := userImports
       missing
       env := commandState.env
+      baseEnv := commandEnv
+      heartbeats
+      namespaceContext
+      incremental? := none
       approxBytes := approxSnapshotBytes source commandState.messages commandState.infoState.trees #[]
       lastUsedMs := nowMs
     }
@@ -1847,11 +1929,14 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     })
   try
     let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
-    let st ← Lean.Elab.IO.processCommands bodyInputCtx { : Parser.ModuleParserState } commandState
+    let reusable? := old?.bind fun old => reusableIncrementalState? old commandEnv heartbeats namespaceContext
+    let st ← Lean.Elab.IO.processCommandsIncrementally bodyInputCtx { : Parser.ModuleParserState } commandState
+      reusable?
     let elabMicros ← elapsedMicrosSince elabStart
     let finalCmdState := st.commandState
     let candidates ← declarationCandidates document finalCmdState.infoState.trees
     let approxBytes := approxSnapshotBytes source finalCmdState.messages finalCmdState.infoState.trees candidates
+      + st.commands.size * incrementalCommandApproxBytes
     let nowMs ← IO.monoMsNow
     let snapshot : ModuleSnapshot := {
       fileIdentity := policy.fileIdentity
@@ -1863,6 +1948,10 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       imports := userImports
       missing
       env := finalCmdState.env
+      baseEnv := commandEnv
+      heartbeats
+      namespaceContext
+      incremental? := some st
       approxBytes
       lastUsedMs := nowMs
     }
@@ -2011,7 +2100,13 @@ private def resolveEditTarget (snapshot : ModuleSnapshot) (edit : ProofEditTarge
             | none => pure <| .error "selected proof position is at an invalid column"
           | none => pure <| .error "declaration has no proof position matching the selector"
         | _ => pure <| .error "declaration has no proof position matching the selector"
-    | .notFound => pure <| .error "declaration was not found in the module"
+    | .notFound =>
+      let similar := similarDeclarationsByName snapshot.candidates name
+      if similar.isEmpty then
+        pure <| .error "declaration was not found in the module"
+      else
+        let names := ", ".intercalate (similar.map (·.declarationName)).toList
+        pure <| .error s!"declaration was not found in the module; similar declarations: {names}"
     | .ambiguous _ => pure <| .error "declaration name is ambiguous in the module"
 
 private def SourceDocument.tacticInsertion? (doc : SourceDocument) (selected : SelectedTactic)
@@ -2145,7 +2240,8 @@ private def classifyAttempt
 
 private def attemptCandidate
     (env : Environment) (request : ProofAttemptRequest) (namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (document : SourceDocument) (selected : SelectedTactic)
+    (heartbeats : UInt64) (diagBytes : USize) (base? : Option ModuleSnapshot) (document : SourceDocument)
+    (selected : SelectedTactic)
     (declaration : Option DeclarationTargetInfo) (proofPosition : Option ProofPositionSummary)
     (candidate : ProofCandidate) : IO ProofAttemptRow := do
   let candidateText := renderStringBoundedWith request.budgets.perFieldBytes candidate.text
@@ -2157,7 +2253,8 @@ private def attemptCandidate
         downstreamDiagnostics := emptyFailure,
         goals := #[], declaration, proofPosition, outputTruncated := candidateText.truncated
       }
-  match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes (oneShotPolicy overlay fileLabel) with
+  match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes (oneShotPolicy overlay fileLabel)
+      base? with
   | .error (failure, _) =>
     let (localFailure, downstreamFailure) := document.splitFailureAtBodySpan site.insertedBodySpan failure
     return {
@@ -2259,8 +2356,8 @@ private def attemptEnvelope
         }
       else
         let row ←
-          attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes base.document selected
-            declaration proofPosition candidate
+          attemptCandidate env request namespaceContext fileLabel heartbeats diagBytes (some base) base.document
+            selected declaration proofPosition candidate
         let bytes := attemptRowBytes row
         if spent + bytes > request.budgets.totalBytes then
           rows := rows.push { row with status := .budgetExceeded, outputTruncated := true }
@@ -2279,6 +2376,14 @@ private def resolveVerificationTarget (snapshot : ModuleSnapshot) (target : Decl
   match target with
   | .name name => declarationTargetByName snapshot.candidates name
   | .span span => declarationTargetByPosition snapshot.document snapshot.candidates span.startLine span.startColumn
+
+/-- Similar declarations for a verification target that did not resolve;
+    position targets carry no name to compare. -/
+private def similarDeclarations (candidates : Array DeclarationCandidate) (target : DeclarationVerificationTarget) :
+    Array DeclarationTargetInfo :=
+  match target with
+  | .name name => similarDeclarationsByName candidates name
+  | .span _ => #[]
 
 /-- Walk a verified declaration's axiom dependencies via `Lean.collectAxioms`
     over the overlay's elaborated environment, bounded by the same heartbeat
@@ -2440,7 +2545,8 @@ private def verifyDeclarationRow
       let (facts, degraded) ← verificationFacts singleRequest snapshot fileLabel (some info) candidate? #[] heartbeats
       pure (verificationStatus request.sorryPolicy degraded facts, facts)
     | .notFound => do
-      let (facts, _) ← verificationFacts singleRequest snapshot fileLabel none none #[] heartbeats
+      let similar := similarDeclarations snapshot.candidates item.target
+      let (facts, _) ← verificationFacts singleRequest snapshot fileLabel none none similar heartbeats
       let status :=
         if !snapshot.missing.isEmpty then .needsBuild
         else if diagnosticMentionsHeartbeat facts.diagnostics then .timeout
@@ -2668,7 +2774,8 @@ def processModuleQueryBatchCached
       if sameFileBeforeBuild then .rebuilt
       else if evictedBeforeLookup then .evicted
       else .miss
-    match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes policy with
+    let old? := newestSameFileSnapshot? policy.fileIdentity cache1.entries
+    match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes policy old? with
     | .error (failure, headerMicros) =>
       moduleSnapshotCache.set cache1
       pure <| headerFailureCachedOutcome failure status headerMicros cache1
@@ -2690,8 +2797,9 @@ def attemptProof
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize)
     : IO ProofAttemptOutcome := do
+  let old? ← cachedSameFileSnapshot? fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
-      (oneShotPolicy request.source fileLabel) with
+      (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
     let envelope ← attemptEnvelope env request namespaceContext fileLabel heartbeats diagBytes snapshot
@@ -2706,8 +2814,9 @@ def verifyDeclaration
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize)
     : IO DeclarationVerificationOutcome := do
+  let old? ← cachedSameFileSnapshot? fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
-      (oneShotPolicy request.source fileLabel) with
+      (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
     let targetResult := resolveVerificationTarget snapshot request.target
@@ -2723,7 +2832,8 @@ def verifyDeclaration
       -- resource-exhausted elaboration could not be trusted to have searched
       -- (`timeout`/`budgetExceeded`); otherwise it is genuinely absent.
       | .notFound => do
-        let (facts, _) ← verificationFacts request snapshot fileLabel none none #[] heartbeats
+        let similar := similarDeclarations snapshot.candidates request.target
+        let (facts, _) ← verificationFacts request snapshot fileLabel none none similar heartbeats
         let status :=
           if !snapshot.missing.isEmpty then .needsBuild
           else if diagnosticMentionsHeartbeat facts.diagnostics then .timeout
@@ -2746,8 +2856,9 @@ def verifyDeclarationBatch
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize)
     : IO DeclarationVerificationBatchOutcome := do
+  let old? ← cachedSameFileSnapshot? fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
-      (oneShotPolicy request.source fileLabel) with
+      (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
     let rows ← verifyDeclarationRows request snapshot fileLabel heartbeats
