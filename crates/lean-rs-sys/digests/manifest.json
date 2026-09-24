@@ -52,9 +52,22 @@
     },
     {
       "versions": [
-        "4.34.0-rc2"
+        "4.34.0-rc2",
+        "4.34.0"
       ],
       "header_digest": "982c731a1fbacc7688006f44f9f7af9d9e3e0247d310a728827f49e7f1466c13"
+    },
+    {
+      "versions": [
+        "4.35.0-rc1"
+      ],
+      "header_digest": "322d6bd8ab2646dfe3aa781a5f02e7d63ef7f121889b450fd55a1118b1afe3dc"
+    },
+    {
+      "versions": [
+        "4.35.0-rc2"
+      ],
+      "header_digest": "071e79d039717e51b1bd44bf0e1cdd950bc8fc2495a9e05f7aea481b42fa9926"
     }
   ]
 }

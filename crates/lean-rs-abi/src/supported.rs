@@ -118,10 +118,38 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
     // header reports byte-identical size, alignment, and field offsets for
     // all 10 mirrored structs. `repr.rs` is unchanged; all 88
     // REQUIRED_SYMBOLS resolve (the two new exports are additive and not
-    // part of the required surface). Added 2026-08-15 as the new head.
+    // part of the required surface). Added 2026-08-15 as the new head. The
+    // final 4.34.0 ships a byte-identical header and joined on 2026-09-24.
     SupportedToolchain {
-        versions: &["4.34.0-rc2"],
+        versions: &["4.34.0-rc2", "4.34.0"],
         header_digest: "982c731a1fbacc7688006f44f9f7af9d9e3e0247d310a728827f49e7f1466c13",
+        missing_symbols: &[],
+    },
+    // 4.35.0-rc1 ships a *new* `lean.h` digest. No struct declaration
+    // changes, so all 10 mirrored structs keep byte-identical size,
+    // alignment, and field offsets, and all 88 REQUIRED_SYMBOLS resolve. One
+    // change is semantic: `LEAN_LINEAR_MARK_MASK` (0x80) claims the top bit
+    // of `m_other` in arrays, scalar arrays, and strings as a linearity
+    // marker set by `Array.markLinear`, and `lean_sarray_elem_size` masks it
+    // out; the `lean-rs-sys` mirror masks it too. The rest is additive or
+    // off our surface: the `lean_*_mark_linear` / `propagate_mark` inlines,
+    // `lean_copy_sarray{,_nonlinear}` and `lean_copy_string{,_nonlinear}`
+    // replacing `lean_copy_byte_array` / `lean_copy_float_array`,
+    // `lean_st_ref_set` / `reset` renamed to `put` / `take`, and an exported
+    // mimalloc fast path (`lean_alloc_small_object_core`) behind the inline
+    // allocator—`lean-rs-sys` calls none of these. Added 2026-09-24.
+    SupportedToolchain {
+        versions: &["4.35.0-rc1"],
+        header_digest: "322d6bd8ab2646dfe3aa781a5f02e7d63ef7f121889b450fd55a1118b1afe3dc",
+        missing_symbols: &[],
+    },
+    // 4.35.0-rc2 ships a *new* `lean.h` digest whose only change from
+    // 4.35.0-rc1 is one additive export, `lean_nat_powmod`, which is not
+    // part of the required surface; layouts are byte-identical and all 88
+    // REQUIRED_SYMBOLS resolve. Added 2026-09-24 as the new head.
+    SupportedToolchain {
+        versions: &["4.35.0-rc2"],
+        header_digest: "071e79d039717e51b1bd44bf0e1cdd950bc8fc2495a9e05f7aea481b42fa9926",
         missing_symbols: &[],
     },
 ];

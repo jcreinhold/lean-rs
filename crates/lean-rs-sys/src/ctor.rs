@@ -590,6 +590,27 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
+    fn sarray_elem_size_ignores_linearity_marker() {
+        ensure_runtime();
+        use crate::array::{lean_alloc_sarray, lean_sarray_elem_size};
+        use crate::repr::LeanObjectRepr;
+
+        // SAFETY: fresh exclusive one-byte-element sarray; set the 4.35
+        // linearity marker bit in `m_other` as `Array.markLinear` would, read
+        // the element size, then clear the bit so the free path of pre-4.35
+        // runtimes (which read `m_other` raw) sees the original header.
+        unsafe {
+            let o = lean_alloc_sarray(1, 0, 4);
+            let header = o.cast::<LeanObjectRepr>();
+            (*header).m_other |= 0x80;
+            assert_eq!(lean_sarray_elem_size(o), 1);
+            (*header).m_other &= !0x80;
+            lean_dec(o);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
     fn alloc_sarray_empty_is_valid() {
         ensure_runtime();
         use crate::array::{lean_alloc_sarray, lean_sarray_size};

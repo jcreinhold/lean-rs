@@ -4,7 +4,7 @@
 #![allow(clippy::inline_always)]
 // `lean_alloc_sarray` takes `elem_size: u32` to mirror the C `unsigned`
 // signature but stores the value in `m_other` (u8). The truncation is
-// gated by a documented caller precondition (`elem_size <= u8::MAX`).
+// gated by a documented caller precondition (`elem_size < 0x80`).
 #![allow(clippy::cast_possible_truncation)]
 
 use core::mem::size_of;
@@ -71,9 +71,9 @@ pub unsafe fn lean_alloc_array(size: usize, capacity: usize) -> lean_obj_res {
 ///
 /// # Safety
 ///
-/// * `elem_size` must fit a `u8` (Lean stores it in `m_other`) and must be
-///   one of `{1, 2, 4, 8}` for the existing scalar-array consumers
-///   (`ByteArray` uses `1`).
+/// * `elem_size` must be below `0x80` (Lean stores it in `m_other`, whose top
+///   bit is the linearity marker) and must be one of `{1, 2, 4, 8}` for the
+///   existing scalar-array consumers (`ByteArray` uses `1`).
 /// * `size <= capacity`.
 /// * `size_of::<LeanSArrayObjectRepr>() + elem_size * capacity` must not
 ///   overflow `usize`; the helper checks this with `strict_*` arithmetic
@@ -91,8 +91,8 @@ pub unsafe fn lean_alloc_sarray(elem_size: u32, size: usize, capacity: usize) ->
         let header = o.cast::<LeanObjectRepr>();
         (*header).m_rc = 1;
         (*header).m_tag = LEAN_SCALAR_ARRAY;
-        // `elem_size` is asserted by the caller to fit a `u8`; cast loss
-        // is impossible inside the documented contract.
+        // `elem_size` is asserted by the caller to be below `0x80`; cast
+        // loss is impossible inside the documented contract.
         (*header).m_other = elem_size as u8;
         let sarray = o.cast::<LeanSArrayObjectRepr>();
         (*sarray).size = size;
@@ -171,7 +171,17 @@ pub unsafe fn lean_array_set_core(o: *mut lean_object, i: usize, v: lean_obj_arg
     unsafe { *lean_array_cptr(o).add(i) = v }
 }
 
-/// Element size of a scalar array (`lean.h:1011–1014`).
+/// Linearity marker bit in `m_other` of arrays, scalar arrays, and strings
+/// (`LEAN_LINEAR_MARK_MASK`, introduced in Lean 4.35.0-rc1 and set by
+/// `Array.markLinear`). Earlier toolchains never set it: every scalar-array
+/// element size they store is at most 8, so masking it is correct across
+/// the whole supported window.
+const LEAN_LINEAR_MARK_MASK: u8 = 0x80;
+
+/// Element size of a scalar array (`lean.h:1198–1201`).
+///
+/// Masks out the linearity marker bit, as `lean.h` does from 4.35.0-rc1 on;
+/// a raw `m_other` read reports `0x81` for a linear-marked `ByteArray`.
 ///
 /// # Safety
 ///
@@ -179,7 +189,7 @@ pub unsafe fn lean_array_set_core(o: *mut lean_object, i: usize, v: lean_obj_arg
 #[inline(always)]
 pub unsafe fn lean_sarray_elem_size(o: *mut lean_object) -> u8 {
     // SAFETY: stored in m_other; layout pinned by build digest.
-    unsafe { crate::object::lean_ptr_other(o) }
+    unsafe { crate::object::lean_ptr_other(o) & !LEAN_LINEAR_MARK_MASK }
 }
 
 /// `m_size` of a scalar array (`lean.h:1019`).

@@ -8,7 +8,7 @@ a compatibility commitment; bumping any of them requires a versioned proposal, n
 
 `lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
 being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-08-15:
+is the single source of truth; this document mirrors it for narrative context. As of 2026-09-24:
 
 | Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
 | --- | --- |
@@ -19,7 +19,9 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.33.0-rc1, 4.33.0-rc2, 4.33.0 | `9018878554c5…` |
 | 4.33.1 | `02af00402831…` |
 | 4.34.0-rc1 | `19510ea01b07…` |
-| 4.34.0-rc2 | `982c731a1fba…` |
+| 4.34.0-rc2, 4.34.0 | `982c731a1fba…` |
+| 4.35.0-rc1 | `322d6bd8ab26…` |
+| 4.35.0-rc2 | `071e79d03971…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -59,7 +61,17 @@ it was added on 2026-08-15 as its own row under the same gate. The 4.34.0-rc2 ro
 head: it implements the sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned
 wrap-around arithmetic in `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported
 `lean_nat_size_in_bytes`; no struct declaration changes, so layouts stay byte-identical and all 88
-`REQUIRED_SYMBOLS` resolve (the two new exports are additive, not part of the required surface).
+`REQUIRED_SYMBOLS` resolve (the two new exports are additive, not part of the required surface). The final 4.34.0
+joined that row on 2026-09-24 (byte-identical header). The 4.35.0-rc1 row was added on 2026-09-24: a new digest with
+no struct declaration changes and all 88 symbols resolving, but one semantic change to a mirrored inline.
+`LEAN_LINEAR_MARK_MASK` (0x80) claims the top bit of `m_other` in arrays, scalar arrays, and strings as the
+`Array.markLinear` linearity marker, and `lean_sarray_elem_size` masks it out; the `lean-rs-sys` mirror masks it too,
+which is correct across the whole window because earlier releases never set that bit (element sizes are at most 8).
+The other header changes (`mark_linear`/`propagate_mark` inlines, `lean_copy_sarray`/`lean_copy_string` replacing
+`lean_copy_byte_array`/`lean_copy_float_array`, `lean_st_ref_set`/`reset` renamed to `put`/`take`, an exported mimalloc
+fast path behind the inline small-object allocator) touch nothing `lean-rs-sys` declares or mirrors. The 4.35.0-rc2
+row was added the same day as the new head: a new digest whose only change from 4.35.0-rc1 is the additive
+`lean_nat_powmod` export, with all 88 symbols resolving.
 
 **Policy.**
 

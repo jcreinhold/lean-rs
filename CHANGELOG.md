@@ -9,6 +9,20 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Added
+
+- **Added Lean 4.34.0, 4.35.0-rc1, and 4.35.0-rc2 to the supported toolchain window.** 4.34.0 ships a
+  byte-identical `lean.h` to 4.34.0-rc2 and joins that entry. 4.35.0-rc1 and 4.35.0-rc2 ship new digests with no
+  struct layout change, and all 88 required symbols resolve on both. The head of the window (CI matrices,
+  sanitizer/release workflows, and committed `lean-toolchain` pins) moves from 4.34.0-rc2 to 4.35.0-rc2.
+
+### Fixed
+
+- **`lean-rs-sys`: `lean_sarray_elem_size` masks the linearity marker bit.** Lean 4.35.0-rc1 reserves the top
+  bit of `m_other` in arrays, scalar arrays, and strings for `Array.markLinear` (`LEAN_LINEAR_MARK_MASK`). The
+  raw read reported `0x81` for a linear-marked `ByteArray`, so `lean-rs` would have rejected it as not a
+  `ByteArray`. Masking is correct on every supported toolchain because earlier releases never set that bit.
+
 ## [0.9.0]
 
 ### Added
