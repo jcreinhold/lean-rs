@@ -125,6 +125,18 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "982c731a1fbacc7688006f44f9f7af9d9e3e0247d310a728827f49e7f1466c13",
         missing_symbols: &[],
     },
+    // 4.34.1 ships a *new* `lean.h` digest. It factors the sticky-rc test in
+    // `lean_inc_ref_n` into a `lean_is_unstuck_mt` inline (the same unsigned
+    // comparison), adds a `lean_is_never_freed` inline, and documents
+    // `LEAN_RC_STUCK_ST`, where the runtime's `lean_inc_ref_huge_n` freezes an
+    // overflowing single-threaded count. The inline refcount paths
+    // `lean-rs-sys` mirrors behave identically; layouts are byte-identical and
+    // all 88 REQUIRED_SYMBOLS resolve. Added 2026-09-25.
+    SupportedToolchain {
+        versions: &["4.34.1"],
+        header_digest: "866d80c309a9945b401e61fcf335a3b8545fb75c8b0a8b721fb1d3d3143d5d9c",
+        missing_symbols: &[],
+    },
     // 4.35.0-rc1 ships a *new* `lean.h` digest. No struct declaration
     // changes, so all 10 mirrored structs keep byte-identical size,
     // alignment, and field offsets, and all 88 REQUIRED_SYMBOLS resolve. One
@@ -146,10 +158,20 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
     // 4.35.0-rc2 ships a *new* `lean.h` digest whose only change from
     // 4.35.0-rc1 is one additive export, `lean_nat_powmod`, which is not
     // part of the required surface; layouts are byte-identical and all 88
-    // REQUIRED_SYMBOLS resolve. Added 2026-09-24 as the new head.
+    // REQUIRED_SYMBOLS resolve. Added 2026-09-24.
     SupportedToolchain {
         versions: &["4.35.0-rc2"],
         header_digest: "071e79d039717e51b1bd44bf0e1cdd950bc8fc2495a9e05f7aea481b42fa9926",
+        missing_symbols: &[],
+    },
+    // 4.35.0-rc3 ships a *new* `lean.h` digest whose only change from
+    // 4.35.0-rc2 is the refcount-helper patch 4.34.1 also carries
+    // (`lean_is_unstuck_mt`, `lean_is_never_freed`, `LEAN_RC_STUCK_ST`);
+    // mirrored inline behavior is unchanged, layouts are byte-identical, and
+    // all 88 REQUIRED_SYMBOLS resolve. Added 2026-09-25 as the new head.
+    SupportedToolchain {
+        versions: &["4.35.0-rc3"],
+        header_digest: "eb951e1171d39b828e7ad60aed0b90759598b678bfe58cf85c65a1559c021bf9",
         missing_symbols: &[],
     },
 ];

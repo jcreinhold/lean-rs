@@ -20,8 +20,10 @@ is the single source of truth; this document mirrors it for narrative context. A
 | 4.33.1 | `02af00402831…` |
 | 4.34.0-rc1 | `19510ea01b07…` |
 | 4.34.0-rc2, 4.34.0 | `982c731a1fba…` |
+| 4.34.1 | `866d80c309a9…` |
 | 4.35.0-rc1 | `322d6bd8ab26…` |
 | 4.35.0-rc2 | `071e79d03971…` |
+| 4.35.0-rc3 | `eb951e1171d3…` |
 
 Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
 [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
@@ -71,7 +73,11 @@ The other header changes (`mark_linear`/`propagate_mark` inlines, `lean_copy_sar
 `lean_copy_byte_array`/`lean_copy_float_array`, `lean_st_ref_set`/`reset` renamed to `put`/`take`, an exported mimalloc
 fast path behind the inline small-object allocator) touch nothing `lean-rs-sys` declares or mirrors. The 4.35.0-rc2
 row was added the same day as the new head: a new digest whose only change from 4.35.0-rc1 is the additive
-`lean_nat_powmod` export, with all 88 symbols resolving.
+`lean_nat_powmod` export, with all 88 symbols resolving. The 4.34.1 and 4.35.0-rc3 rows were added on 2026-09-25,
+4.35.0-rc3 as the new head. Both carry the same refcount-helper patch: the sticky-rc test in `lean_inc_ref_n` is
+factored into a `lean_is_unstuck_mt` inline (the same comparison), a `lean_is_never_freed` inline is added, and
+`LEAN_RC_STUCK_ST` documents where the runtime's `lean_inc_ref_huge_n` freezes an overflowing single-threaded count.
+The inline paths `lean-rs-sys` mirrors behave identically, layouts are byte-identical, and all 88 symbols resolve.
 
 **Policy.**
 

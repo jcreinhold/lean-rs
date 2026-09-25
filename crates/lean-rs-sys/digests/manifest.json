@@ -59,6 +59,12 @@
     },
     {
       "versions": [
+        "4.34.1"
+      ],
+      "header_digest": "866d80c309a9945b401e61fcf335a3b8545fb75c8b0a8b721fb1d3d3143d5d9c"
+    },
+    {
+      "versions": [
         "4.35.0-rc1"
       ],
       "header_digest": "322d6bd8ab2646dfe3aa781a5f02e7d63ef7f121889b450fd55a1118b1afe3dc"
@@ -68,6 +74,12 @@
         "4.35.0-rc2"
       ],
       "header_digest": "071e79d039717e51b1bd44bf0e1cdd950bc8fc2495a9e05f7aea481b42fa9926"
+    },
+    {
+      "versions": [
+        "4.35.0-rc3"
+      ],
+      "header_digest": "eb951e1171d39b828e7ad60aed0b90759598b678bfe58cf85c65a1559c021bf9"
     }
   ]
 }

@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Added
+
+- **Added Lean 4.34.1 and 4.35.0-rc3 to the supported toolchain window.** Both ship new `lean.h` digests carrying
+  the same refcount-helper patch (`lean_is_unstuck_mt`, `lean_is_never_freed`, `LEAN_RC_STUCK_ST`); the inline
+  refcount paths `lean-rs-sys` mirrors behave identically, there is no struct layout change, and all 88 required
+  symbols resolve on both. The head of the window (CI matrices, sanitizer/release workflows, and committed
+  `lean-toolchain` pins) moves from 4.35.0-rc2 to 4.35.0-rc3.
+
 ## [0.9.1]
 
 ### Added
