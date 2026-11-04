@@ -157,8 +157,8 @@ pub struct LeanWorkerRuntimeMetadata {
 /// Parent-side cancellation token for worker-session requests.
 ///
 /// Cancellation is observed by the supervisor before a request is sent and at
-/// worker progress frames while a request is in flight. In-flight cancellation
-/// cycles the child process; it does not share an in-process
+/// least every 50 ms while awaiting IPC, even when a worker sends no progress.
+/// In-flight cancellation cycles the child process; it does not share an in-process
 /// `LeanCancellationToken` with the child.
 #[derive(Clone, Debug, Default)]
 pub struct LeanWorkerCancellationToken {

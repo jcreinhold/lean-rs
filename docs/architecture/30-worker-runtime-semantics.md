@@ -152,6 +152,9 @@ current request, and `c` is an observed child exit or fatal condition. The curre
 stdio pipes, and stats as separate fields, but its private `WorkerSupervisorState` records the model-facing phases:
 idle, busy, streaming, stopping, killing, reaping, crashed, restart-exhausted, and exited. Spawn-time `Starting` remains
 inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor.
+An armed startup guard owns the child through pipe setup, handshake, and frame-limit negotiation. Any early error
+before ownership transfers to the supervisor kills and polls for reaping of that child within the normal kill-wait
+deadline. Successful startup disarms the guard without disturbing the child.
 
 The core transitions are:
 
@@ -221,6 +224,9 @@ record a structured result.
 **Cleanup terminalization.** Explicit shutdown, policy cycle, timeout, cancellation-triggered cycle, hard-RSS kill,
 fatal exit, and `Drop` all drive the child toward a terminal reaped state as far as the parent process is alive and
 Tokio/Rust cleanup can run.
+For requests carrying a cancellation token, the IPC wait checks that token at intervals of at most 50 ms even when
+the worker emits no events. This does not renew the request deadline, and excludes caller sink execution and OS
+scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement.
 
 **Restart intensity.** Replacement attempts are bounded by a moving window. The default policy admits at most 16
 restarts per 60 seconds; exhaustion returns `RestartLimitExceeded`, leaves the supervisor not accepting more work, and

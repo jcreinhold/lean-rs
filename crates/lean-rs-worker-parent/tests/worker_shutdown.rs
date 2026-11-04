@@ -87,6 +87,14 @@ fn main() {
             conformance_stream_cancellation_after_rows_discards_tentative_rows,
         ),
         (
+            "conformance_silent_worker_cancellation_reaps_only_owned_child",
+            conformance_silent_worker_cancellation_reaps_only_owned_child,
+        ),
+        (
+            "conformance_silent_worker_deadline_is_not_renewed_by_polling",
+            conformance_silent_worker_deadline_is_not_renewed_by_polling,
+        ),
+        (
             "conformance_stream_backpressure_is_bounded_and_observable",
             conformance_stream_backpressure_is_bounded_and_observable,
         ),
@@ -827,6 +835,77 @@ fn conformance_stream_backpressure_is_bounded_and_observable() -> Result<(), Str
         waits: stats.backpressure_waits,
     }));
     drop(worker);
+    Ok(())
+}
+
+fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(), String> {
+    let mut worker = fake_worker_with_config("rows_then_hang", |config| {
+        config.request_timeout(Duration::from_secs(5))
+    })
+    .map_err(|err| err.to_string())?;
+    let mut unrelated = fake_worker("normal").map_err(|err| err.to_string())?;
+    let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
+    let unrelated_pid = unrelated.__child_pid_for_test();
+    let cancellation = LeanWorkerCancellationToken::new();
+    let token = cancellation.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    struct Started(std::sync::mpsc::Sender<()>);
+    impl LeanWorkerDataSink for Started {
+        fn report(&self, _row: LeanWorkerDataRow) {
+            self.0.send(()).expect("signal first row");
+        }
+    }
+    let canceller = thread::spawn(move || {
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("request entered worker");
+        // Cancellation happens after the last frame, while the child is silent.
+        thread::sleep(Duration::from_millis(100));
+        token.cancel();
+    });
+    let started = std::time::Instant::now();
+    let error = worker
+        .__emit_test_rows(vec!["started".to_owned()], Some(&cancellation), Some(&Started(sender)))
+        .expect_err("silent child must observe cancellation before its request deadline");
+    canceller.join().map_err(|_| "canceller thread panicked".to_owned())?;
+    assert!(
+        matches!(error, LeanWorkerError::Cancelled { .. }),
+        "unexpected outcome: {error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "silent cancellation waited for request timeout"
+    );
+    assert_reaped(old_pid)?;
+    assert_ne!(worker.__child_pid_for_test(), Some(old_pid));
+    assert_eq!(worker.stats().cancelled_restarts, 1);
+    worker.health().map_err(|err| err.to_string())?;
+    unrelated.health().map_err(|err| err.to_string())?;
+    assert_eq!(unrelated.__child_pid_for_test(), unrelated_pid);
+    Ok(())
+}
+
+fn conformance_silent_worker_deadline_is_not_renewed_by_polling() -> Result<(), String> {
+    for token_present in [false, true] {
+        let timeout = Duration::from_millis(180);
+        let mut worker = fake_worker_with_config("rows_then_hang", |config| config.request_timeout(timeout))
+            .map_err(|err| err.to_string())?;
+        let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
+        let token = LeanWorkerCancellationToken::new();
+        let started = std::time::Instant::now();
+        let error = worker
+            .__emit_test_rows(Vec::new(), token_present.then_some(&token), None)
+            .expect_err("silent child must reach original request deadline");
+        assert!(matches!(error, LeanWorkerError::Timeout { duration, .. } if duration == timeout));
+        assert!(started.elapsed() >= timeout);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "polling renewed the original deadline"
+        );
+        assert_reaped(old_pid)?;
+        assert_eq!(worker.stats().timeout_restarts, 1);
+        assert_eq!(worker.stats().cancelled_restarts, 0);
+    }
     Ok(())
 }
 

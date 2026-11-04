@@ -35,7 +35,10 @@ Worker progress is a parent-side IPC event, not a cross-process callback handle.
 the parent.
 
 `LeanWorkerCancellationToken` is also parent-side. The supervisor checks it before sending a request and after progress
-frames while a request is in flight. If cancellation is observed during a request, the supervisor cycles the child
+frames while a request is in flight, and at intervals of at most 50 ms while waiting for IPC even if the child is silent.
+The observation bound excludes time spent in caller-provided sinks and OS scheduling. Cancellation completes through
+the normal kill, reap, reader-drain, and replacement path; that cleanup adds its own bounded deadlines.
+If cancellation is observed during a request, the supervisor cycles the child
 process, returns `LeanWorkerError::Cancelled`, and invalidates the open `LeanWorkerSession`. Open a new session before
 issuing more host requests.
 

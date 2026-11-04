@@ -40,11 +40,47 @@ use crate::session::{
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKER_EVENT_BUFFER_CAPACITY: usize = 64;
+const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const DEFAULT_RESTART_INTENSITY_LIMIT: u64 = 16;
 /// Reuse-hint capacity for an embedder that sets no `max_imports`. Mirrors the
 /// child's own `SESSION_POOL_DEFAULT_CAPACITY`, which is what such a child uses.
 const DEFAULT_REUSE_HINT_CAPACITY: usize = 4;
 const DEFAULT_RESTART_INTENSITY_WINDOW: Duration = Duration::from_mins(1);
+
+/// Own a newly spawned process until all pipe/handshake/config setup succeeds.
+/// `Child` itself does not terminate or reap its process when dropped.
+struct StartupChild(Option<Child>);
+
+impl StartupChild {
+    fn child_mut(&mut self) -> Result<&mut Child, LeanWorkerError> {
+        self.0.as_mut().ok_or_else(|| LeanWorkerError::Setup {
+            message: "startup child was already transferred".to_owned(),
+        })
+    }
+
+    fn into_child(mut self) -> Result<Child, LeanWorkerError> {
+        self.0.take().ok_or_else(|| LeanWorkerError::Setup {
+            message: "startup child was already transferred".to_owned(),
+        })
+    }
+}
+
+impl Drop for StartupChild {
+    fn drop(&mut self) {
+        let Some(child) = self.0.as_mut() else { return };
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        drop(child.kill());
+        let started = Instant::now();
+        while started.elapsed() < LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT {
+            match child.try_wait() {
+                Ok(Some(_)) | Err(_) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+    }
+}
 
 /// Default deadline for one worker request after startup.
 pub const LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
@@ -1437,22 +1473,23 @@ impl LeanWorker {
             command.env(key, value);
         }
 
-        let mut child = command.spawn().map_err(|source| LeanWorkerError::Spawn {
+        let mut child = StartupChild(Some(command.spawn().map_err(|source| LeanWorkerError::Spawn {
             executable: config.executable.clone(),
             source,
-        })?;
+        })?));
 
         let mut stdin = child
+            .child_mut()?
             .stdin
             .take()
             .map(BufWriter::new)
             .ok_or_else(|| LeanWorkerError::Setup {
                 message: "child stdin unavailable".to_owned(),
             })?;
-        let stdout = child.stdout.take().ok_or_else(|| LeanWorkerError::Setup {
+        let stdout = child.child_mut()?.stdout.take().ok_or_else(|| LeanWorkerError::Setup {
             message: "child stdout unavailable".to_owned(),
         })?;
-        let stderr = child.stderr.take();
+        let stderr = child.child_mut()?.stderr.take();
 
         let max_frame_bytes = config.max_frame_bytes;
         let (sender, receiver) = mpsc::channel();
@@ -1472,8 +1509,8 @@ impl LeanWorker {
                 // stderr. Kill if still alive, then go through the canonical
                 // post-mortem path so `LeanWorkerExit.diagnostics` carries the
                 // bootstrap stderr with the same diagnostic contract as a runtime crash.
-                drop(child.kill());
-                let exit = wait_with_stderr(&mut child, stderr)?;
+                drop(child.child_mut()?.kill());
+                let exit = wait_with_stderr(child.child_mut()?, stderr)?;
                 return Err(if exit.success {
                     LeanWorkerError::ChildExited { exit }
                 } else {
@@ -1481,8 +1518,8 @@ impl LeanWorker {
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                drop(child.kill());
-                let _exit = wait_with_stderr(&mut child, stderr)?;
+                drop(child.child_mut()?.kill());
+                let _exit = wait_with_stderr(child.child_mut()?, stderr)?;
                 return Err(LeanWorkerError::Timeout {
                     operation: "startup",
                     duration: config.startup_timeout,
@@ -1526,6 +1563,7 @@ impl LeanWorker {
         })?;
 
         let spawn_handshake_elapsed = spawn_started.elapsed();
+        let child = child.into_child()?;
         Ok(Self {
             config: config.clone(),
             child: Some(child),
@@ -3186,6 +3224,33 @@ impl LeanWorker {
             thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation, request_id));
 
         loop {
+            if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
+                if streaming {
+                    self.record_stream_failure(started, request_backpressure_waits);
+                }
+                if let Err(err) =
+                    self.restart_with_reason_before_spawn(LeanWorkerRestartReason::Cancelled { operation }, || {
+                        drop(receiver);
+                        drop(reader.join());
+                    })
+                {
+                    self.finish_in_flight();
+                    return Err(err);
+                }
+                self.finish_in_flight();
+                return Err(LeanWorkerError::Cancelled {
+                    operation,
+                    resource: Box::new(worker_resource_facts(
+                        "worker_cancelled",
+                        true,
+                        Some(operation),
+                        &self.stats,
+                        self.stats.last_rss_kib,
+                        None,
+                        None,
+                    )),
+                });
+            }
             if let Some((current_kib, limit_kib)) = self.hard_rss_limit_exceeded() {
                 if streaming {
                     self.record_stream_failure(started, request_backpressure_waits);
@@ -3223,7 +3288,7 @@ impl LeanWorker {
                     )),
                 });
             }
-            let event = match deadline.and_then(|deadline| deadline.checked_duration_since(Instant::now())) {
+            let event = match deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())) {
                 Some(remaining) if remaining.is_zero() => {
                     if streaming {
                         self.record_stream_failure(started, request_backpressure_waits);
@@ -3258,14 +3323,17 @@ impl LeanWorker {
                 }
                 Some(remaining) => {
                     let hard_watch_enabled = self.config.rss_hard_limit_kib.is_some();
-                    let wait_for = if hard_watch_enabled {
+                    let mut wait_for = if hard_watch_enabled {
                         remaining.min(self.config.rss_sample_interval)
                     } else {
                         remaining
                     };
+                    if cancellation.is_some() {
+                        wait_for = wait_for.min(CANCELLATION_POLL_INTERVAL);
+                    }
                     match receiver.recv_timeout(wait_for) {
                         Ok(event) => event,
-                        Err(mpsc::RecvTimeoutError::Timeout) if hard_watch_enabled && wait_for < remaining => {
+                        Err(mpsc::RecvTimeoutError::Timeout) if wait_for < remaining => {
                             continue;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -3309,6 +3377,17 @@ impl LeanWorker {
                         }
                     }
                 }
+                None if cancellation.is_some() => match receiver.recv_timeout(CANCELLATION_POLL_INTERVAL) {
+                    Ok(event) => event,
+                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        self.finish_in_flight();
+                        drop(reader.join());
+                        return Err(LeanWorkerError::Protocol {
+                            message: "worker response reader exited without a terminal response".to_owned(),
+                        });
+                    }
+                },
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_err) => {
@@ -4382,6 +4461,49 @@ mod tests {
 
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_failure_guard_reaps_owned_child_and_preserves_other_child() {
+        use std::process::{Command, Stdio};
+        let child = Command::new("sleep")
+            .arg("60")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("owned test child");
+        let pid = child.id();
+        let other = Command::new("sleep").arg("60").spawn().expect("unrelated test child");
+        let mut other = super::StartupChild(Some(other));
+        let failed_setup = (|| -> Result<(), LeanWorkerError> {
+            let mut owned = super::StartupChild(Some(child));
+            let _stdin = owned.child_mut()?.stdin.take().ok_or_else(|| LeanWorkerError::Setup {
+                message: "test child stdin unavailable".to_owned(),
+            })?;
+            // Inject the error after pipe setup, before ownership transfers to
+            // LeanWorker, as a failed ConfigureFrameLimit write would do.
+            Err(LeanWorkerError::Protocol {
+                message: "injected frame-limit write failure".to_owned(),
+            })
+        })();
+        assert!(matches!(failed_setup, Err(LeanWorkerError::Protocol { .. })));
+        let exists = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .expect("check owned child existence");
+        assert!(
+            !exists.success(),
+            "failed startup left its owned child alive or unreaped"
+        );
+        assert!(
+            other
+                .child_mut()
+                .expect("unrelated child still owned")
+                .try_wait()
+                .expect("check unrelated child")
+                .is_none()
+        );
     }
 
     #[cfg(target_os = "macos")]
