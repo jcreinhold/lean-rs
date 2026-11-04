@@ -49,6 +49,7 @@ const DEFAULT_RESTART_INTENSITY_WINDOW: Duration = Duration::from_mins(1);
 
 /// Own a newly spawned process until all pipe/handshake/config setup succeeds.
 /// `Child` itself does not terminate or reap its process when dropped.
+#[derive(Debug)]
 struct StartupChild(Option<Child>);
 
 impl StartupChild {
@@ -58,26 +59,98 @@ impl StartupChild {
         })
     }
 
-    fn into_child(mut self) -> Result<Child, LeanWorkerError> {
+    fn take_child(&mut self) -> Result<Child, LeanWorkerError> {
         self.0.take().ok_or_else(|| LeanWorkerError::Setup {
             message: "startup child was already transferred".to_owned(),
         })
+    }
+
+    fn cleanup(&mut self) -> Result<ExitStatus, LeanWorkerError> {
+        let child = self.child_mut()?;
+        if let Some(status) = child.try_wait().map_err(|source| LeanWorkerError::Wait { source })? {
+            self.0.take();
+            return Ok(status);
+        }
+        // A failed kill can race with a natural exit. Only wait/reap proves exit.
+        let kill_error = child.kill().err();
+        let started = Instant::now();
+        loop {
+            match child.try_wait().map_err(|source| LeanWorkerError::Wait { source })? {
+                Some(status) => {
+                    self.0.take();
+                    return Ok(status);
+                }
+                None if started.elapsed() >= LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT => {
+                    return Err(kill_error.map_or(
+                        LeanWorkerError::WaitTimeout {
+                            operation: "startup_cleanup",
+                            duration: LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT,
+                        },
+                        |source| LeanWorkerError::Kill { source },
+                    ));
+                }
+                None => thread::sleep(Duration::from_millis(5)),
+            }
+        }
     }
 }
 
 impl Drop for StartupChild {
     fn drop(&mut self) {
-        let Some(child) = self.0.as_mut() else { return };
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return;
+        if self.0.is_some() {
+            drop(self.cleanup());
         }
-        drop(child.kill());
-        let started = Instant::now();
-        while started.elapsed() < LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT {
-            match child.try_wait() {
-                Ok(Some(_)) | Err(_) => return,
-                Ok(None) => thread::sleep(Duration::from_millis(5)),
-            }
+    }
+}
+
+/// Failed setup keeps ownership when bounded cleanup cannot establish exit.
+struct SpawnFailure {
+    error: LeanWorkerError,
+    pending: Option<Box<StartupChild>>,
+    exit: Option<Box<LeanWorkerExit>>,
+}
+
+impl SpawnFailure {
+    fn no_child(error: LeanWorkerError) -> Self {
+        Self {
+            error,
+            pending: None,
+            exit: None,
+        }
+    }
+
+    fn after_spawn(
+        mut child: StartupChild,
+        error: LeanWorkerError,
+        cleanup: impl FnOnce(&mut StartupChild) -> Result<ExitStatus, LeanWorkerError>,
+    ) -> Self {
+        // Handshake error/timeout cleanup may already have reaped and released it.
+        if child.0.is_none() {
+            let exit =
+                if let LeanWorkerError::ChildExited { exit } | LeanWorkerError::ChildPanicOrAbort { exit } = &error {
+                    Some(Box::new(exit.clone()))
+                } else {
+                    None
+                };
+            return Self {
+                error,
+                pending: None,
+                exit,
+            };
+        }
+        match cleanup(&mut child) {
+            Ok(status) => Self {
+                error,
+                pending: None,
+                exit: Some(Box::new(LeanWorkerExit::from_status(status, String::new()))),
+            },
+            Err(cleanup_error) => Self {
+                error: LeanWorkerError::Setup {
+                    message: format!("{error}; spawned child cleanup unconfirmed: {cleanup_error}"),
+                },
+                pending: Some(Box::new(child)),
+                exit: None,
+            },
         }
     }
 }
@@ -1384,6 +1457,9 @@ pub struct LeanWorker {
     stdout: Option<BufReader<ChildStdout>>,
     stderr: Option<ChildStderr>,
     last_exit: Option<LeanWorkerExit>,
+    /// A failed replacement's process is still owned until cleanup proves exit.
+    /// Historical `last_exit` belongs to an earlier child and is not that proof.
+    pending_startup: Option<Box<StartupChild>>,
     runtime_metadata: LeanWorkerRuntimeMetadata,
     stats: LeanWorkerStats,
     budget: GenerationBudget,
@@ -1447,6 +1523,10 @@ impl LeanWorker {
     /// fails, the child exits before handshaking, or the startup timeout
     /// expires.
     pub fn spawn(config: &LeanWorkerConfig) -> Result<Self, LeanWorkerError> {
+        Self::spawn_tracked(config).map_err(|failure| failure.error)
+    }
+
+    fn spawn_tracked(config: &LeanWorkerConfig) -> Result<Self, SpawnFailure> {
         let spawn_started = Instant::now();
         let mut command = Command::new(&config.executable);
         command
@@ -1473,11 +1553,21 @@ impl LeanWorker {
             command.env(key, value);
         }
 
-        let mut child = StartupChild(Some(command.spawn().map_err(|source| LeanWorkerError::Spawn {
-            executable: config.executable.clone(),
-            source,
+        let mut child = StartupChild(Some(command.spawn().map_err(|source| {
+            SpawnFailure::no_child(LeanWorkerError::Spawn {
+                executable: config.executable.clone(),
+                source,
+            })
         })?));
+        let initialized = Self::initialize_child(config, spawn_started, &mut child);
+        initialized.map_err(|error| SpawnFailure::after_spawn(child, error, StartupChild::cleanup))
+    }
 
+    fn initialize_child(
+        config: &LeanWorkerConfig,
+        spawn_started: Instant,
+        child: &mut StartupChild,
+    ) -> Result<Self, LeanWorkerError> {
         let mut stdin = child
             .child_mut()?
             .stdin
@@ -1509,8 +1599,7 @@ impl LeanWorker {
                 // stderr. Kill if still alive, then go through the canonical
                 // post-mortem path so `LeanWorkerExit.diagnostics` carries the
                 // bootstrap stderr with the same diagnostic contract as a runtime crash.
-                drop(child.child_mut()?.kill());
-                let exit = wait_with_stderr(child.child_mut()?, stderr)?;
+                let exit = wait_with_stderr(child, stderr)?;
                 return Err(if exit.success {
                     LeanWorkerError::ChildExited { exit }
                 } else {
@@ -1518,8 +1607,7 @@ impl LeanWorker {
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                drop(child.child_mut()?.kill());
-                let _exit = wait_with_stderr(child.child_mut()?, stderr)?;
+                let _exit = wait_with_stderr(child, stderr)?;
                 return Err(LeanWorkerError::Timeout {
                     operation: "startup",
                     duration: config.startup_timeout,
@@ -1563,7 +1651,7 @@ impl LeanWorker {
         })?;
 
         let spawn_handshake_elapsed = spawn_started.elapsed();
-        let child = child.into_child()?;
+        let child = child.take_child()?;
         Ok(Self {
             config: config.clone(),
             child: Some(child),
@@ -1571,6 +1659,7 @@ impl LeanWorker {
             stdout: Some(stdout),
             stderr,
             last_exit: None,
+            pending_startup: None,
             runtime_metadata,
             stats: LeanWorkerStats {
                 last_spawn_handshake_elapsed: Some(spawn_handshake_elapsed),
@@ -1662,6 +1751,9 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
+        if self.pending_startup.is_some() {
+            return Err(self.dead_error());
+        }
         if let Some(exit) = &self.last_exit {
             self.state = WorkerSupervisorState::Exited {
                 generation: self.generation,
@@ -3035,6 +3127,15 @@ impl LeanWorker {
         reason: LeanWorkerRestartReason,
         before_spawn: impl FnOnce(),
     ) -> Result<(), LeanWorkerError> {
+        self.restart_with_reason_before_spawn_using(reason, before_spawn, Self::spawn_tracked)
+    }
+
+    fn restart_with_reason_before_spawn_using(
+        &mut self,
+        reason: LeanWorkerRestartReason,
+        before_spawn: impl FnOnce(),
+        spawn: impl FnOnce(&LeanWorkerConfig) -> Result<Self, SpawnFailure>,
+    ) -> Result<(), LeanWorkerError> {
         let config = self.config.clone();
         let replacement_started = Instant::now();
         self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
@@ -3072,12 +3173,17 @@ impl LeanWorker {
             .last_restart_reason
             .as_ref()
             .map_or_else(|| "unknown".to_owned(), |reason| reason.stable_cause().to_owned());
-        let mut next = match Self::spawn(&config) {
+        let mut next = match spawn(&config) {
             Ok(next) => next,
-            Err(err) => {
+            Err(failure) => {
                 self.stats.replacement_failures = self.stats.replacement_failures.saturating_add(1);
                 self.stats.last_replacement_skipped_reason = Some("spawn_failed".to_owned());
-                return Err(err);
+                self.pending_startup = failure.pending;
+                if let Some(exit) = failure.exit {
+                    self.last_exit = Some(*exit);
+                    self.stats.exits = self.stats.exits.saturating_add(1);
+                }
+                return Err(failure.error);
             }
         };
         let next_request_id = self.next_request_id;
@@ -3674,8 +3780,34 @@ impl LeanWorker {
     }
 
     fn shutdown_child(&mut self, intent: ShutdownIntent) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.shutdown_child_with_cleanup(intent, StartupChild::cleanup)
+    }
+
+    fn shutdown_child_with_cleanup(
+        &mut self,
+        intent: ShutdownIntent,
+        cleanup: impl FnOnce(&mut StartupChild) -> Result<ExitStatus, LeanWorkerError>,
+    ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         let started = Instant::now();
         let graceful_timeout = self.config.shutdown_timeout;
+        if let Some(mut pending) = self.pending_startup.take() {
+            let status = match cleanup(&mut pending) {
+                Ok(status) => status,
+                Err(error) => {
+                    self.pending_startup = Some(pending);
+                    return Err(error);
+                }
+            };
+            let exit = self.finalize_child_exit(status);
+            return Ok(LeanWorkerShutdownReport {
+                outcome: LeanWorkerShutdownOutcome::KillOnly,
+                exit,
+                graceful_timeout,
+                elapsed: started.elapsed(),
+                kill_elapsed: Some(started.elapsed()),
+                wait_elapsed: started.elapsed(),
+            });
+        }
         match self.status()? {
             LeanWorkerStatus::Exited(exit) => {
                 return Ok(LeanWorkerShutdownReport {
@@ -3870,6 +4002,11 @@ impl LeanWorker {
     }
 
     fn dead_error(&self) -> LeanWorkerError {
+        if self.pending_startup.is_some() {
+            return LeanWorkerError::Setup {
+                message: "replacement child exit remains unconfirmed; structured shutdown is required".to_owned(),
+            };
+        }
         let exit = self.last_exit.clone().unwrap_or_else(|| LeanWorkerExit {
             success: false,
             code: None,
@@ -4076,8 +4213,8 @@ fn expect_handshake(
     }
 }
 
-fn wait_with_stderr(child: &mut Child, stderr: Option<ChildStderr>) -> Result<LeanWorkerExit, LeanWorkerError> {
-    let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
+fn wait_with_stderr(child: &mut StartupChild, stderr: Option<ChildStderr>) -> Result<LeanWorkerExit, LeanWorkerError> {
+    let status = child.cleanup()?;
     let mut diagnostics = String::new();
     if let Some(mut pipe) = stderr {
         drop(pipe.read_to_string(&mut diagnostics));
@@ -4461,6 +4598,190 @@ mod tests {
 
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
+    }
+
+    #[cfg(unix)]
+    fn sleeping_worker() -> super::LeanWorker {
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("owned old test child");
+        super::LeanWorker {
+            config: dummy_config(),
+            child: Some(child),
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            last_exit: None,
+            pending_startup: None,
+            runtime_metadata: crate::session::LeanWorkerRuntimeMetadata {
+                worker_version: "test".to_owned(),
+                protocol_version: 1,
+                lean_version: None,
+            },
+            stats: LeanWorkerStats::default(),
+            budget: GenerationBudget::default(),
+            open_session_keys: Vec::new(),
+            reuse_hint_enabled: true,
+            reuse_observed: false,
+            pending_restart: None,
+            last_activity: std::time::Instant::now(),
+            generation: WorkerGeneration::default(),
+            next_request_id: WorkerRequestId::default(),
+            restart_window: std::collections::VecDeque::new(),
+            state: super::WorkerSupervisorState::Idle {
+                generation: WorkerGeneration::default(),
+            },
+        }
+    }
+
+    #[cfg(unix)]
+    fn child_exists(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("check test child existence")
+            .success()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_replacement_retains_unconfirmed_child_instead_of_reusing_old_exit() {
+        let mut worker = sleeping_worker();
+        let old_pid = worker.child.as_ref().expect("old child").id();
+        let replacement_pid = std::cell::Cell::new(0);
+        let error = worker
+            .restart_with_reason_before_spawn_using(
+                LeanWorkerRestartReason::Cancelled {
+                    operation: "test_replacement",
+                },
+                || {},
+                |_config| {
+                    assert!(!child_exists(old_pid), "replacement must follow confirmed old exit");
+                    let replacement = std::process::Command::new("sleep")
+                        .arg("60")
+                        .spawn()
+                        .expect("replacement test child");
+                    replacement_pid.set(replacement.id());
+                    Err(super::SpawnFailure::after_spawn(
+                        super::StartupChild(Some(replacement)),
+                        LeanWorkerError::Protocol {
+                            message: "injected post-spawn setup failure".to_owned(),
+                        },
+                        |_child| {
+                            Err(LeanWorkerError::Wait {
+                                source: std::io::Error::other("injected cleanup uncertainty"),
+                            })
+                        },
+                    ))
+                },
+            )
+            .expect_err("replacement setup must fail");
+        assert!(matches!(error, LeanWorkerError::Setup { .. }));
+        assert!(worker.last_exit.is_some(), "old exit remains historical evidence");
+        assert!(
+            worker.pending_startup.is_some(),
+            "failed replacement ownership must survive the error"
+        );
+        assert!(child_exists(replacement_pid.get()));
+        assert!(worker.status().is_err(), "the old exit cannot prove replacement exit");
+        assert!(
+            worker.health().is_err(),
+            "no request may use an unconfirmed replacement"
+        );
+        let failed_shutdown = worker.shutdown_child_with_cleanup(super::ShutdownIntent::Graceful, |_child| {
+            Err(LeanWorkerError::Wait {
+                source: std::io::Error::other("injected persistent cleanup uncertainty"),
+            })
+        });
+        assert!(matches!(failed_shutdown, Err(LeanWorkerError::Wait { .. })));
+        assert!(worker.pending_startup.is_some());
+        assert!(worker.status().is_err());
+        assert!(child_exists(replacement_pid.get()));
+        let confirmed = worker
+            .shutdown_child(super::ShutdownIntent::Graceful)
+            .expect("retry cleanup and reap replacement");
+        assert_eq!(confirmed.outcome, super::LeanWorkerShutdownOutcome::KillOnly);
+        assert!(!child_exists(replacement_pid.get()));
+        assert!(worker.pending_startup.is_none());
+        assert_eq!(worker.stats.exits, 2);
+        let repeated = worker
+            .shutdown_child(super::ShutdownIntent::Graceful)
+            .expect("already confirmed exit");
+        assert_eq!(repeated.outcome, super::LeanWorkerShutdownOutcome::AlreadyExited);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_replacement_releases_only_after_confirmed_cleanup_or_no_spawn() {
+        for spawned in [false, true] {
+            let mut worker = sleeping_worker();
+            let replacement_pid = std::cell::Cell::new(0);
+            let result = worker.restart_with_reason_before_spawn_using(
+                LeanWorkerRestartReason::Cancelled {
+                    operation: "test_confirmed_failure",
+                },
+                || {},
+                |_config| {
+                    if !spawned {
+                        return Err(super::SpawnFailure::no_child(LeanWorkerError::Spawn {
+                            executable: PathBuf::from("missing"),
+                            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                        }));
+                    }
+                    let replacement = std::process::Command::new("sleep")
+                        .arg("60")
+                        .spawn()
+                        .expect("replacement test child");
+                    replacement_pid.set(replacement.id());
+                    Err(super::SpawnFailure::after_spawn(
+                        super::StartupChild(Some(replacement)),
+                        LeanWorkerError::Protocol {
+                            message: "injected setup failure".to_owned(),
+                        },
+                        super::StartupChild::cleanup,
+                    ))
+                },
+            );
+            assert!(result.is_err());
+            assert!(worker.pending_startup.is_none());
+            if spawned {
+                assert!(!child_exists(replacement_pid.get()));
+            }
+            assert!(matches!(worker.status(), Ok(super::LeanWorkerStatus::Exited(_))));
+            assert_eq!(worker.stats.exits, if spawned { 2 } else { 1 });
+            assert_eq!(
+                worker
+                    .shutdown_child(super::ShutdownIntent::Graceful)
+                    .expect("confirmed shutdown")
+                    .outcome,
+                super::LeanWorkerShutdownOutcome::AlreadyExited
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tracked_spawn_timeout_confirms_exit_and_spawn_failure_has_no_child() {
+        let no_spawn = super::LeanWorker::spawn_tracked(&dummy_config()).expect_err("missing executable");
+        assert!(matches!(no_spawn.error, LeanWorkerError::Spawn { .. }));
+        assert!(no_spawn.pending.is_none());
+        let timeout = super::LeanWorker::spawn_tracked(
+            &LeanWorkerConfig::new("/bin/sh").startup_timeout(Duration::from_millis(10)),
+        )
+        .expect_err("shell does not speak the worker protocol");
+        assert!(matches!(
+            timeout.error,
+            LeanWorkerError::Timeout {
+                operation: "startup",
+                ..
+            }
+        ));
+        assert!(
+            timeout.pending.is_none(),
+            "confirmed startup timeout must not quarantine a nonexistent child"
+        );
     }
 
     #[cfg(unix)]

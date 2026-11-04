@@ -42,6 +42,11 @@ If cancellation is observed during a request, the supervisor cycles the child
 process, returns `LeanWorkerError::Cancelled`, and invalidates the open `LeanWorkerSession`. Open a new session before
 issuing more host requests.
 
+If replacement startup fails, a previous child's exit does not acknowledge the failed replacement's exit. The
+supervisor retains any replacement whose cleanup remains unconfirmed and rejects status and new requests until
+structured shutdown can establish exit. This ownership rule applies to every replacement policy; callers do not need
+to infer it from cancellation, timeout, or setup error strings.
+
 This is a worker-safe boundary. It does not share an in-process `LeanCancellationToken` or `LeanCallbackHandle` with the
 child.
 

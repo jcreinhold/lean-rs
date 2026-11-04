@@ -252,6 +252,14 @@ waits up to `LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT` by default, escalates to `kil
 whether the child had already exited, stopped gracefully, or required kill escalation. `terminate` remains a deprecated
 compatibility wrapper over this structured path.
 
+**Failed replacement startup.** A reaped generation's exit does not prove that a subsequently spawned replacement has
+exited. Every replacement path uses the same tracked startup: if setup fails and bounded cleanup cannot confirm exit,
+the supervisor retains that replacement's process handle. Status and new requests fail rather than treating the old
+exit as current proof. Structured shutdown retries bounded cleanup of the retained process and reports success only
+after it is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child
+and can still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation, timeout,
+and crash-triggered replacement; it is independent of the host's capacity policy.
+
 **Drop semantics.** `Drop for LeanWorker` invokes the same bounded shutdown machinery. Rust `Drop` cannot return
 protocol, kill, or wait failures, so callers needing status must call `shutdown`. Drop is a cleanup obligation, not a
 status-reporting API.
