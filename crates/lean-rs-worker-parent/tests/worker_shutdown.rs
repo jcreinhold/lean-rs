@@ -807,16 +807,21 @@ fn conformance_stream_cancellation_after_rows_discards_tentative_rows() -> Resul
 }
 
 fn conformance_stream_backpressure_is_bounded_and_observable() -> Result<(), String> {
-    let mut worker = fake_worker_with_config("normal", |config| config.request_timeout(Duration::from_secs(15)))
+    // Four times the reader's 64-event buffer is enough to force backpressure;
+    // this is a conformance check, not a throughput benchmark. Hosted macOS can
+    // heavily coalesce each one-millisecond sink sleep. Keep a finite, generous
+    // hang backstop rather than interpreting timer scheduling as protocol failure.
+    // The dedicated timeout tests retain their short deadlines.
+    let mut worker = fake_worker_with_config("normal", |config| config.request_timeout(Duration::from_secs(120)))
         .map_err(|err| err.to_string())?;
     let generation = worker.lifecycle_snapshot().worker_generation;
     let sink = SlowSink::new(Duration::from_millis(1));
-    let streams = (0..5_000).map(|_| "rows".to_owned()).collect::<Vec<_>>();
+    let streams = (0..256).map(|_| "rows".to_owned()).collect::<Vec<_>>();
     let count = worker
         .__emit_test_rows(streams, None, Some(&sink))
         .map_err(|err| err.to_string())?;
-    assert_eq!(count, 5_000);
-    assert_eq!(sink.rows().len(), 5_000);
+    assert_eq!(count, 256);
+    assert_eq!(sink.rows().len(), 256);
     let stats = worker.stats();
     let trace = [RuntimeTraceEvent::BackpressureObserved {
         generation,

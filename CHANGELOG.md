@@ -9,10 +9,16 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
-## [0.9.5]
+## [0.9.6]
+
+This release includes the fixes prepared for v0.9.5, whose hosted macOS test gate failed before any crate upload.
+The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 
 ### Fixed
 
+- The bounded-backpressure conformance test uses a smaller burst that still overfills the bounded reader buffer,
+  with a generous hang backstop for macOS timer coalescing. All row-delivery, buffer-pressure and terminal-outcome
+  assertions remain; dedicated request-deadline tests keep their short deadlines.
 - Worker cancellation is observed at least every 50 ms while awaiting IPC, including when the child emits no progress.
   Partial responses preserve the original request deadline.
 - Failed worker startup performs bounded child cleanup. If replacement cleanup cannot confirm exit, the supervisor
