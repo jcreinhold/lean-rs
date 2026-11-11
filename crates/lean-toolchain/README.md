@@ -26,7 +26,7 @@ Lake shared library and emits the compile-time path that runtime code opens thro
 
 ```toml
 [build-dependencies]
-lean-toolchain = "0.2"
+lean-toolchain = "0.9"
 ```
 
 ```rust,ignore

@@ -46,9 +46,9 @@ same set via `lean_rs_sys::REQUIRED_SYMBOLS`. All 88 symbols are present in ever
 
 | Field | Value |
 | --- | --- |
-| MSRV | `1.91` (from `[workspace.package].rust-version`) |
+| MSRV | `1.94` (from `[workspace.package].rust-version`) |
 | Channel | `stable` (pinned by [`rust-toolchain.toml`](../rust-toolchain.toml)) |
-| Captured at release | `rustc 1.95.0 (59807616e 2026-04-14)` |
+| Captured at release | `rustc 1.99.0 (b940084d7 2026-09-28)` |
 
 The MSRV is the floor a downstream consumer can rely on; the CI release matrix runs on the current stable.
 

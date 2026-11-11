@@ -9,6 +9,21 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.9.5]
+
+### Fixed
+
+- Worker cancellation is observed at least every 50 ms while awaiting IPC, including when the child emits no progress.
+  Partial responses preserve the original request deadline.
+- Failed worker startup performs bounded child cleanup. If replacement cleanup cannot confirm exit, the supervisor
+  retains the replacement identity; status and shutdown cannot mistake the previous child's exit for confirmation.
+
+### Changed
+
+- Replaced deprecated Cargo lint spellings and made lint-group priorities explicit without weakening the lint policy.
+- Updated installation examples to the current 0.9 crate line and corrected the documented Rust floor to 1.94. The
+  public API, worker protocol and Lean 4.30.0–4.35.0 toolchain window are unchanged.
+
 ## [0.9.4]
 
 ### Added

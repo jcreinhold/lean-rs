@@ -31,10 +31,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lean-rs = "0.2"
+lean-rs = "0.9"
 
 [build-dependencies]
-lean-toolchain = "0.2"
+lean-toolchain = "0.9"
 ```
 
 **`build.rs`**—one helper covers link-search, link-lib, the runtime rpath, Lake build, Cargo rerun triggers, the
