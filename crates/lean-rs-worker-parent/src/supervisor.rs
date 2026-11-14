@@ -1,10 +1,11 @@
 use crate::pipe::Pipe;
+use crate::process::{LeanWorkerProcessTracker, OwnedChild};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{BufReader, BufWriter, Read as _};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -133,16 +134,16 @@ impl Drop for ReaderGuard {
 /// Own a newly spawned process until all pipe/handshake/config setup succeeds.
 /// `Child` itself does not terminate or reap its process when dropped.
 #[derive(Debug)]
-struct StartupChild(Option<Child>);
+struct StartupChild(Option<OwnedChild>);
 
 impl StartupChild {
-    fn child_mut(&mut self) -> Result<&mut Child, LeanWorkerError> {
+    fn child_mut(&mut self) -> Result<&mut OwnedChild, LeanWorkerError> {
         self.0.as_mut().ok_or_else(|| LeanWorkerError::Setup {
             message: "startup child was already transferred".to_owned(),
         })
     }
 
-    fn take_child(&mut self) -> Result<Child, LeanWorkerError> {
+    fn take_child(&mut self) -> Result<OwnedChild, LeanWorkerError> {
         self.0.take().ok_or_else(|| LeanWorkerError::Setup {
             message: "startup child was already transferred".to_owned(),
         })
@@ -274,6 +275,7 @@ pub const LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(
 #[derive(Clone, Debug)]
 pub struct LeanWorkerConfig {
     executable: PathBuf,
+    process_tracker: LeanWorkerProcessTracker,
     current_dir: Option<PathBuf>,
     env: Vec<(OsString, OsString)>,
     startup_timeout: Duration,
@@ -291,6 +293,7 @@ impl LeanWorkerConfig {
     pub fn new(executable: impl Into<PathBuf>) -> Self {
         Self {
             executable: executable.into(),
+            process_tracker: LeanWorkerProcessTracker::new(),
             current_dir: None,
             env: Vec::new(),
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
@@ -302,6 +305,13 @@ impl LeanWorkerConfig {
             rss_sample_interval: Duration::from_millis(250),
             max_frame_bytes: MAX_FRAME_BYTES,
         }
+    }
+
+    /// Share confirmed-exit accounting across this worker's child generations.
+    #[must_use]
+    pub fn process_tracker(mut self, tracker: LeanWorkerProcessTracker) -> Self {
+        self.process_tracker = tracker;
+        self
     }
 
     /// Return the child executable path.
@@ -1535,7 +1545,7 @@ impl WorkerSupervisorState {
 #[derive(Debug)]
 pub struct LeanWorker {
     config: LeanWorkerConfig,
-    child: Option<Child>,
+    child: Option<OwnedChild>,
     stdin: Option<BufWriter<Pipe<ChildStdin>>>,
     request_started: Option<Instant>,
     stdout: Option<BufReader<Pipe<ChildStdout>>>,
@@ -1637,12 +1647,12 @@ impl LeanWorker {
             command.env(key, value);
         }
 
-        let mut child = StartupChild(Some(command.spawn().map_err(|source| {
+        let mut child = StartupChild(Some(config.process_tracker.own(command.spawn().map_err(|source| {
             SpawnFailure::no_child(LeanWorkerError::Spawn {
                 executable: config.executable.clone(),
                 source,
             })
-        })?));
+        })?)));
         let initialized = Self::initialize_child(config, spawn_started, &mut child);
         initialized.map_err(|error| SpawnFailure::after_spawn(child, error, StartupChild::cleanup))
     }
@@ -2038,7 +2048,7 @@ impl LeanWorker {
     /// Return the child process id for supervisor tests.
     #[must_use]
     pub fn __child_pid_for_test(&self) -> Option<u32> {
-        self.child.as_ref().map(Child::id)
+        self.child.as_ref().map(|child| child.id())
     }
 
     /// Ask the child to terminate cleanly and wait for it.
@@ -2060,6 +2070,14 @@ impl LeanWorker {
     /// kill escalation fails, or the child cannot be reaped within the bounded
     /// wait.
     pub fn shutdown(mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.try_shutdown()
+    }
+
+    /// Stop the child without consuming this owner if cleanup fails.
+    ///
+    /// # Errors
+    /// Returns the cleanup error while retaining the child for another attempt.
+    pub fn try_shutdown(&mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         self.shutdown_child(ShutdownIntent::Graceful)
     }
 
@@ -4900,7 +4918,7 @@ mod tests {
             .stdin
             .take()
             .map(|pipe| std::io::BufWriter::new(super::Pipe::new(pipe).expect("nonblocking stdin")));
-        worker.child = Some(child);
+        worker.child = Some(super::LeanWorkerProcessTracker::new().own(child));
         worker.last_exit = None;
         worker.state = super::WorkerSupervisorState::Idle {
             generation: worker.generation,
@@ -5061,6 +5079,34 @@ mod tests {
         child.wait().expect("reap holder");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn failed_cleanup_keeps_process_count_until_confirmed_exit() {
+        let tracker = super::LeanWorkerProcessTracker::new();
+        let child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn retained child");
+        let mut worker = sleeping_worker();
+        worker
+            .shutdown_child(super::ShutdownIntent::KillOnly)
+            .expect("stop initial child");
+        worker.pending_startup = Some(Box::new(super::StartupChild(Some(tracker.own(child)))));
+        let failure = worker.shutdown_child_with_cleanup(super::ShutdownIntent::KillOnly, |_| {
+            Err(LeanWorkerError::WaitTimeout {
+                operation: "injected_wait_failure",
+                duration: Duration::ZERO,
+            })
+        });
+        assert!(failure.is_err());
+        assert_eq!(tracker.active_processes(), 1);
+        assert!(worker.pending_startup.is_some());
+        worker.try_shutdown().expect("retry cleanup confirms exit");
+        assert_eq!(tracker.active_processes(), 0);
+        drop(worker);
+        assert_eq!(tracker.active_processes(), 0);
+    }
+
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
     }
@@ -5073,7 +5119,7 @@ mod tests {
             .expect("owned old test child");
         super::LeanWorker {
             config: dummy_config(),
-            child: Some(child),
+            child: Some(super::LeanWorkerProcessTracker::new().own(child)),
             stdin: None,
             request_started: None,
             stdout: None,
@@ -5131,7 +5177,7 @@ mod tests {
                         .expect("replacement test child");
                     replacement_pid.set(replacement.id());
                     Err(super::SpawnFailure::after_spawn(
-                        super::StartupChild(Some(replacement)),
+                        super::StartupChild(Some(super::LeanWorkerProcessTracker::new().own(replacement))),
                         LeanWorkerError::Protocol {
                             message: "injected post-spawn setup failure".to_owned(),
                         },
@@ -5202,7 +5248,7 @@ mod tests {
                         .expect("replacement test child");
                     replacement_pid.set(replacement.id());
                     Err(super::SpawnFailure::after_spawn(
-                        super::StartupChild(Some(replacement)),
+                        super::StartupChild(Some(super::LeanWorkerProcessTracker::new().own(replacement))),
                         LeanWorkerError::Protocol {
                             message: "injected setup failure".to_owned(),
                         },
@@ -5261,9 +5307,9 @@ mod tests {
             .expect("owned test child");
         let pid = child.id();
         let other = Command::new("sleep").arg("60").spawn().expect("unrelated test child");
-        let mut other = super::StartupChild(Some(other));
+        let mut other = super::StartupChild(Some(super::LeanWorkerProcessTracker::new().own(other)));
         let failed_setup = (|| -> Result<(), LeanWorkerError> {
-            let mut owned = super::StartupChild(Some(child));
+            let mut owned = super::StartupChild(Some(super::LeanWorkerProcessTracker::new().own(child)));
             let _stdin = owned.child_mut()?.stdin.take().ok_or_else(|| LeanWorkerError::Setup {
                 message: "test child stdin unavailable".to_owned(),
             })?;

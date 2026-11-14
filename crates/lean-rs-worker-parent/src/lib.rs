@@ -20,6 +20,7 @@ mod capability;
 mod pipe;
 mod planning;
 mod pool;
+mod process;
 mod session;
 mod supervisor;
 
@@ -36,6 +37,7 @@ pub use pool::{
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
     LeanWorkerSessionLease,
 };
+pub use process::LeanWorkerProcessTracker;
 pub use session::{
     LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
     LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,

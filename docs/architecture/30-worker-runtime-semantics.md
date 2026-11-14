@@ -391,5 +391,25 @@ diagnostic output, never proof evidence.
 These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or
 serialization. Killing, reaping, and starting a replacement also take time after a
 request expires. If the OS cannot confirm exit, cleanup returns an error and keeps
-ownership rather than treating the child as stopped. Slot recovery after that
-failure requires the separate retained-child lifecycle work.
+ownership rather than treating the child as stopped. The process tracker below keeps that child counted until cleanup confirms exit.
+
+
+## Confirmed child exit and capacity
+
+`LeanWorkerProcessTracker` counts child processes across startup and replacement.
+Pass one shared tracker to every worker builder covered by a capacity slot. After
+the actor stops and cannot spawn again, release its slot only when
+`active_processes()` returns zero. The count decreases only after `try_wait`
+confirms exit, not when the owner drops, a request expires, or a PID disappears.
+
+`try_shutdown(&mut self)` allows cleanup retries without consuming the owner.
+Dropping an owner moves any unconfirmed child into the tracker's cleanup registry.
+At most one cleanup thread per tracker retries every 100 ms, then stops when the
+registry is empty. A poll also retries cleanup and thread creation if needed. Keep
+the tracker until its count reaches zero, especially if cleanup-thread creation
+fails. Dropping the last tracker after a thread-start failure can discard pending
+handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill only after
+`try_wait` reports the owned child still running; a wait error keeps the handle and
+count without risking a signal to a reused PID. OS wait errors can therefore keep
+capacity unavailable indefinitely (including `ECHILD`, which means another party
+may have reaped the process). A normal stopped child recovers automatically.

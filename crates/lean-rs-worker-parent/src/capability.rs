@@ -5,6 +5,7 @@
 //! target and may validate downstream metadata. Shim-backed host sessions skip
 //! that user dylib path entirely and use only the bundled host services.
 
+use crate::process::LeanWorkerProcessTracker;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -73,6 +74,7 @@ pub struct LeanWorkerCapabilityBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
+    process_tracker: Option<LeanWorkerProcessTracker>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
@@ -114,6 +116,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             shutdown_timeout: None,
+            process_tracker: None,
             restart_policy: None,
             session_pool_capacity: None,
             rss_hard_limit: None,
@@ -162,6 +165,7 @@ impl LeanWorkerCapabilityBuilder {
             startup_timeout: None,
             request_timeout: None,
             shutdown_timeout: None,
+            process_tracker: None,
             restart_policy: None,
             session_pool_capacity: None,
             rss_hard_limit: None,
@@ -238,6 +242,13 @@ impl LeanWorkerCapabilityBuilder {
     #[must_use]
     pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.shutdown_timeout = Some(timeout);
+        self
+    }
+
+    /// Track all child generations, including failed startup and cleanup.
+    #[must_use]
+    pub fn process_tracker(mut self, tracker: LeanWorkerProcessTracker) -> Self {
+        self.process_tracker = Some(tracker);
         self
     }
 
@@ -546,6 +557,7 @@ impl LeanWorkerCapabilityBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.shutdown_timeout,
+            self.process_tracker,
             self.restart_policy,
             self.session_pool_capacity,
             self.rss_hard_limit,
@@ -618,6 +630,7 @@ pub struct LeanWorkerHostHandleBuilder {
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
+    process_tracker: Option<LeanWorkerProcessTracker>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
@@ -712,6 +725,7 @@ impl LeanWorkerHostHandleBuilder {
             startup_timeout: None,
             request_timeout: None,
             shutdown_timeout: None,
+            process_tracker: None,
             restart_policy: None,
             session_pool_capacity: None,
             rss_hard_limit: None,
@@ -761,6 +775,13 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.shutdown_timeout = Some(timeout);
+        self
+    }
+
+    /// Track all child generations, including failed startup and cleanup.
+    #[must_use]
+    pub fn process_tracker(mut self, tracker: LeanWorkerProcessTracker) -> Self {
+        self.process_tracker = Some(tracker);
         self
     }
 
@@ -905,6 +926,7 @@ impl LeanWorkerHostHandleBuilder {
             self.startup_timeout,
             self.request_timeout,
             self.shutdown_timeout,
+            self.process_tracker,
             self.restart_policy,
             self.session_pool_capacity,
             self.rss_hard_limit,
@@ -1236,6 +1258,14 @@ impl LeanWorkerCapability {
     pub fn shutdown(self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         self.worker.shutdown()
     }
+
+    /// Stop the worker while retaining its owner if cleanup fails.
+    ///
+    /// # Errors
+    /// Returns a shutdown error without discarding the child process handle.
+    pub fn try_shutdown(&mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.worker.try_shutdown()
+    }
 }
 
 /// A worker-backed host session handle that is backed only by bundled shims.
@@ -1529,6 +1559,14 @@ impl LeanWorkerHostHandle {
     pub fn shutdown(self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         self.worker.shutdown()
     }
+
+    /// Stop the worker while retaining its owner if cleanup fails.
+    ///
+    /// # Errors
+    /// Returns a shutdown error without discarding the child process handle.
+    pub fn try_shutdown(&mut self) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.worker.try_shutdown()
+    }
 }
 
 fn worker_session_missing(err: &LeanWorkerError) -> bool {
@@ -1642,6 +1680,7 @@ fn spawn_checked_worker(
     startup_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     shutdown_timeout: Option<Duration>,
+    process_tracker: Option<LeanWorkerProcessTracker>,
     restart_policy: Option<LeanWorkerRestartPolicy>,
     session_pool_capacity: Option<usize>,
     rss_hard_limit: Option<(u64, Duration)>,
@@ -1656,6 +1695,9 @@ fn spawn_checked_worker(
     let lean_sysroot = worker_child.resolve_lean_sysroot()?;
 
     let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
+    if let Some(tracker) = process_tracker {
+        config = config.process_tracker(tracker);
+    }
     if let Some(timeout) = startup_timeout {
         config = config.startup_timeout(timeout);
     }
