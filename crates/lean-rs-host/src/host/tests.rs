@@ -2752,7 +2752,7 @@ theorem withSorry : True := by
             DeclarationVerificationStatus::NotFound,
         ]
     );
-    let [closed, with_sorry, _missing] = results.as_slice() else {
+    let [closed, with_sorry, missing] = results.as_slice() else {
         panic!("expected three verification rows, got {results:?}");
     };
     assert!(
@@ -2760,6 +2760,73 @@ theorem withSorry : True := by
         "resolved first row should have an axiom walk when requested"
     );
     assert!(with_sorry.facts.contains_sorry);
+    assert!(!missing.facts.axioms_available);
+}
+
+#[test]
+fn private_declaration_verification_reports_real_axioms() {
+    use crate::host::process::{
+        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
+        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
+        ModuleQueryBatchResult, ModuleQueryOutputBudgets, ModuleQuerySelector, SorryPolicy,
+    };
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    // The module header shifts parser coordinates; the ordinary body-only
+    // test previously hid the private-name resolution failure.
+    let source = "module\npublic section\nnamespace PrivateAxioms\naxiom witness : False\nprivate theorem hidden : False := witness\nend PrivateAxioms\n";
+    let outline = session
+        .process_module_query_batch(
+            source,
+            &[ModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .expect("outline");
+    let ModuleQueryBatchOutcome::Ok { result, .. } = outline else {
+        panic!("{outline:?}")
+    };
+    let [ModuleQueryBatchItem::Ok { result, .. }] = result.items.as_slice() else {
+        panic!("{result:?}")
+    };
+    let ModuleQueryBatchResult::DeclarationOutline(outline) = result.as_ref() else {
+        panic!("{result:?}")
+    };
+    let [declaration] = outline.declarations.as_slice() else {
+        panic!("{outline:?}")
+    };
+    let canonical = &declaration.declaration_name;
+    assert!(canonical.starts_with("_private."), "{canonical}");
+    let request = DeclarationVerificationBatchRequest {
+        source: source.to_owned(),
+        targets: ["hidden", "PrivateAxioms.hidden", canonical]
+            .into_iter()
+            .map(|name| DeclarationVerificationBatchItem {
+                id: name.to_owned(),
+                target: DeclarationVerificationTarget::Name { name: name.to_owned() },
+            })
+            .collect(),
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("verify");
+    let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    for row in results {
+        assert_eq!(row.status, DeclarationVerificationStatus::Accepted, "{row:?}");
+        assert!(row.facts.axioms_available, "{row:?}");
+        assert_eq!(row.facts.axioms, ["PrivateAxioms.witness"], "{row:?}");
+    }
 }
 
 #[test]

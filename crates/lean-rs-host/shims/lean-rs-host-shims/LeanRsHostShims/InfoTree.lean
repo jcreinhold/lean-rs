@@ -944,9 +944,10 @@ private def declarationRangeMatchesSpan (range : DeclarationRange) (span : Modul
     real discriminator; zero or multiple matches fall back to the caller. -/
 private def resolvedDeclarationName? (ctx : ContextInfo) (nameSpan : ModuleSourceSpan) : Option Name := do
   let commandEnv ← ctx.cmdEnv?
+  let commandEnv := commandEnv.setExporting false
   Id.run do
     let mut matched : Array Name := #[]
-    for (name, _) in commandEnv.constants.map₂ do
+    for (name, _) in commandEnv.checked.get.constants.map₂ do
       let ranges? :=
         declRangeExt.find? (level := .exported) commandEnv name <|>
           declRangeExt.find? (level := .server) commandEnv name
@@ -969,10 +970,12 @@ private def commandDeclaration? (doc : SourceDocument) (ctx : ContextInfo) (stx 
   let some bodySpanBody := doc.syntaxSpan? bodyStx | return none
   let namespaceName := ctx.currNamespace
   let nameSpan := doc.bodySpanToFile nameSpanBody
+  -- Declaration ranges come from the header-stripped parser input, not the
+  -- original file. Use body coordinates for kernel-name resolution below.
   let (shortName, fullName) ←
     if nameStx.isIdent then
       let shortName := nameStx.getId
-      let fullName := (resolvedDeclarationName? ctx nameSpan).getD
+      let fullName := (resolvedDeclarationName? ctx nameSpanBody).getD
         (fullDeclarationName namespaceName shortName)
       pure (shortName.toString, fullName.toString)
     else
@@ -982,7 +985,7 @@ private def commandDeclaration? (doc : SourceDocument) (ctx : ContextInfo) (stx 
       -- recorded in results/09-declaration-candidate-completeness.md), so a
       -- unique span match yields the honest kernel name. Without one there is
       -- no honest name — drop the candidate rather than mis-name it.
-      match resolvedDeclarationName? ctx nameSpan with
+      match resolvedDeclarationName? ctx nameSpanBody with
       | some resolved =>
         let shortName := match resolved with
           | .str _ s => s
@@ -1038,7 +1041,8 @@ private def dedupByDeclarationName (candidates : Array DeclarationCandidate) : A
 private def declarationTargetByName (candidates : Array DeclarationCandidate) (name : String) :
     DeclarationTargetResult :=
   let matched := dedupByDeclarationName <| candidates.filter fun candidate =>
-    candidate.info.declarationName == name || candidate.info.shortName == name
+    candidate.info.declarationName == name || candidate.info.shortName == name ||
+      (privateToUserName candidate.info.declarationName.toName).toString == name
   match matched with
   | #[] => .notFound
   | #[candidate] => .target candidate.info
@@ -2430,6 +2434,9 @@ private def similarDeclarations (candidates : Array DeclarationCandidate) (targe
     budget truncated an otherwise-successful walk. -/
 private def collectAxiomNames (env : Environment) (declName : Name) (heartbeats : UInt64) (perFieldBytes : Nat) :
     IO (Option (Array String × Bool)) := do
+  -- collectAxioms returns an empty array for an absent constant as well.
+  -- Only a kernel declaration can support a claim that its axiom set is empty.
+  if ((env.setExporting false).checked.get.find? declName).isNone then return none
   let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
   let coreCtx : Core.Context := { fileName := "<verify-axioms>", fileMap := default, options := opts }
   let coreState : Core.State := { env }
