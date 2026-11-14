@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.9.7]
+
+### Fixed
+
+- Reuse unchanged module headers across source edits. This avoids repeated imports and preserves incremental
+  elaboration. Changes to the session, header, file context or options invalidate reuse, and failed header imports
+  retry normally. This does not change worker resource limits or make foreign exceptions recoverable.
+
 ## [0.9.6]
 
 This release includes the fixes prepared for v0.9.5, whose hosted macOS test gate failed before any crate upload.
