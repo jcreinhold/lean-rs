@@ -36,7 +36,7 @@ use crate::types::{
 
 /// Wire protocol version negotiated between parent and child during the
 /// handshake frame. Bump only on a breaking wire change.
-pub const PROTOCOL_VERSION: u16 = 11;
+pub const PROTOCOL_VERSION: u16 = 12;
 
 /// Default per-frame size limit applied by the parent when no explicit cap is
 /// configured on the capability builder.
@@ -103,6 +103,12 @@ pub enum Message {
     },
     /// Parent → child request frame.
     Request(Request),
+    /// Cumulative source-header bytes in this child generation. Sent before the terminal response.
+    HeaderImportState {
+        bytes: u64,
+        imports: u64,
+        accounting_unknown: bool,
+    },
     /// Child → parent terminal response for one request.
     Response(Response),
     /// Child → parent intermediate diagnostic frame.
@@ -265,6 +271,8 @@ pub enum HostSessionMode {
 #[serde(tag = "status", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Response {
+    /// A fresh source-header import was declined before body execution; retry once in a fresh child.
+    HeaderImportRecycle,
     HealthOk,
     CapabilityLoaded,
     U64 {

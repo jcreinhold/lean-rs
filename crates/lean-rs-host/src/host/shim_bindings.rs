@@ -147,6 +147,12 @@ macro_rules! host_shim_exports {
             optional verify_declaration_batch => "lean_rs_host_verify_declaration_batch"
                 => [(Obj<'lean>, DeclarationVerificationBatchRequest, String, String, u64, usize, String)]
                 => [LeanIo<DeclarationVerificationBatchOutcome>];
+            optional configure_header_import_budget => "lean_rs_host_configure_header_import_budget"
+                => [(u64, u64)] => [LeanIo<()>];
+            optional header_import_state => "lean_rs_host_header_import_state"
+                => [()] => [LeanIo<String>];
+            optional clear_module_header_cache => "lean_rs_host_clear_module_header_cache"
+                => [(Obj<'lean>,)] => [LeanIo<()>];
             optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
                 => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
         }

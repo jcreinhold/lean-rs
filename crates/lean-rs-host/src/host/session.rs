@@ -135,7 +135,7 @@
 #![allow(private_bounds, private_interfaces)]
 
 use core::cell::Cell;
-use std::sync::Mutex;
+use std::sync::{Mutex, TryLockError};
 use std::time::Instant;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
@@ -568,14 +568,39 @@ pub struct LeanSession<'lean, 'c> {
     stats: Cell<SessionStats>,
 }
 
-/// Process-wide serialization for [`LeanSession::import`]. See the
-/// comment at the lock-acquire site for the Lean-4.30 race it closes.
+/// Cumulative source-header import allocations in this Lean process.
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+pub struct HeaderImportState {
+    /// Successful imported region bytes not backed by memory-mapped files.
+    pub non_memory_mapped_bytes: u64,
+    /// Fresh successful header imports; cache hits do not increment this.
+    pub imports: u64,
+    /// An import failed and may have left unmeasured allocations.
+    pub accounting_unknown: bool,
+    /// The resolver declined a fresh import before starting it.
+    pub recycle_requested: bool,
+}
+
+/// Process-local serialization for imports and source-header operations.
+///
+/// Both mutate Lean extension registries and the shared header/snapshot caches.
+/// This does not coordinate or block separate worker processes.
 static SESSION_IMPORT_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn with_session_import_lock<T>(f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
-    let _import_guard = SESSION_IMPORT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    with_import_lock(&SESSION_IMPORT_LOCK, f)
+}
+
+fn with_import_lock<T>(lock: &Mutex<()>, f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
+    let _import_guard = match lock.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => {
+            return Err(lean_rs::__host_internals::host_resource_exhausted(
+                "host import/source state is busy in this process; retry after the active operation returns (recursive calls are not supported)",
+            ));
+        }
+    };
     f()
 }
 
@@ -1682,16 +1707,18 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             return Ok(ModuleQueryOutcome::Unsupported);
         };
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            source.to_owned(),
-            query.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                source.to_owned(),
+                query.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+            )
+        });
         self.record_call(0, t.elapsed());
         result
     }
@@ -1741,17 +1768,19 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         };
         let selectors_owned = selectors.to_vec();
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            source.to_owned(),
-            selectors_owned,
-            budgets.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                source.to_owned(),
+                selectors_owned,
+                budgets.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+            )
+        });
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
         result
     }
@@ -1798,18 +1827,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
         );
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            source.to_owned(),
-            selectors_owned,
-            budgets.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-            policy_text,
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                source.to_owned(),
+                selectors_owned,
+                budgets.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+                policy_text,
+            )
+        });
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
         result
     }
@@ -1846,15 +1877,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             return Ok(ProofAttemptOutcome::Unsupported);
         };
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            request.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                request.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+            )
+        });
         self.record_call(u64::try_from(request.candidates.len()).unwrap_or(u64::MAX), t.elapsed());
         result
     }
@@ -1891,15 +1924,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             return Ok(DeclarationVerificationOutcome::Unsupported);
         };
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            request.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                request.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+            )
+        });
         self.record_call(1, t.elapsed());
         result
     }
@@ -1938,15 +1973,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             return Ok(DeclarationVerificationBatchOutcome::Unsupported);
         };
         let t = Instant::now();
-        let result = call.call(
-            self.environment.clone(),
-            request.clone(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = with_session_import_lock(|| {
+            call.call(
+                self.environment.clone(),
+                request.clone(),
+                options.namespace_context_str().to_owned(),
+                options.file_label_str().to_owned(),
+                options.heartbeats(),
+                options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
+            )
+        });
         self.record_call(u64::try_from(request.targets.len()).unwrap_or(u64::MAX), t.elapsed());
         result
     }
@@ -1970,9 +2007,43 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             });
         };
         let t = Instant::now();
-        let result = call.call();
+        let result = with_session_import_lock(|| call.call());
         self.record_call(0, t.elapsed());
         result
+    }
+
+    /// Set the cumulative session-import charge and source-header budget.
+    /// A zero limit disables the byte limit, not failed-import retirement.
+    /// This setting is process-wide. Callers using multiple host threads must
+    /// coordinate budget configuration; worker children use one serial thread.
+    /// # Errors
+    /// Returns a shim call error.
+    pub fn configure_header_import_budget(&mut self, session_bytes: u64, limit_bytes: u64) -> LeanResult<()> {
+        match self.shims.configure_header_import_budget.as_ref() {
+            Some(call) => with_session_import_lock(|| call.call(session_bytes, limit_bytes)),
+            None => Ok(()),
+        }
+    }
+
+    /// Read process-wide cumulative source-header accounting.
+    /// # Errors
+    /// Returns a shim call or malformed JSON error.
+    pub fn header_import_state(&self) -> LeanResult<HeaderImportState> {
+        let Some(call) = self.shims.header_import_state.as_ref() else {
+            return Ok(HeaderImportState::default());
+        };
+        serde_json::from_str(&with_session_import_lock(|| call.call())?)
+            .map_err(|err| conversion_error(format!("invalid header import state: {err}")))
+    }
+
+    /// Drop the reusable header for this session, without changing its charge.
+    /// # Errors
+    /// Returns a shim call error.
+    pub fn clear_module_header_cache(&mut self) -> LeanResult<()> {
+        match self.shims.clear_module_header_cache.as_ref() {
+            Some(call) => with_session_import_lock(|| call.call(self.environment.clone())),
+            None => Ok(()),
+        }
     }
 
     /// Parse and elaborate a single Lean term against the imported
@@ -2560,4 +2631,44 @@ fn unsupported_meta_response<Resp>(symbol: &str) -> LeanMetaResponse<Resp> {
         format!("bundled host shim does not export meta service '{symbol}'"),
         "<lean-rs-host meta>".to_owned(),
     ))
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "test assertions fail the test on unexpected lock behavior"
+)]
+mod import_lock_tests {
+    use super::with_import_lock;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn import_lock_reentry_fails_without_waiting() {
+        let lock = Mutex::new(());
+        let error = with_import_lock(&lock, || with_import_lock(&lock, || Ok(()))).expect_err("reentry fails");
+        assert!(error.to_string().contains("busy"));
+        with_import_lock(&lock, || Ok(())).expect("outer guard released");
+    }
+
+    #[test]
+    #[allow(clippy::panic, reason = "exercise guard release during Rust unwinding")]
+    fn import_lock_panic_releases_guard() {
+        let lock = Mutex::new(());
+        let panic = std::panic::catch_unwind(|| with_import_lock::<()>(&lock, || panic!("test panic")));
+        assert!(panic.is_err());
+        with_import_lock(&lock, || Ok(())).expect("poisoned guard is recoverable");
+    }
+
+    #[test]
+    fn import_lock_concurrent_call_is_explicitly_busy() {
+        let lock = Arc::new(Mutex::new(()));
+        let guard = lock.lock().expect("hold lock");
+        let other = Arc::clone(&lock);
+        let busy = std::thread::spawn(move || with_import_lock(&other, || Ok(())).is_err())
+            .join()
+            .expect("join");
+        assert!(busy);
+        drop(guard);
+        with_import_lock(&lock, || Ok(())).expect("capacity available again");
+    }
 }

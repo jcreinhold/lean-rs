@@ -413,3 +413,40 @@ handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill 
 count without risking a signal to a reused PID. OS wait errors can therefore keep
 capacity unavailable indefinitely (including `ECHILD`, which means another party
 may have reaped the process). A normal stopped child recovers automatically.
+
+## Source-header imports and retained memory
+
+Protocol 12 reports cumulative successful source-header import bytes before each source
+response. The child excludes memory-mapped regions and regions already charged to the
+input session. The parent adds only increases to its generation budget. Evicting a
+snapshot, a reusable header, or a session never subtracts this charge: these operations
+do not free Lean's imported regions.
+
+Source headers have a separate bounded cache. The RSS snapshot guard can discard large
+elaboration snapshots without forcing another header import. Matching warm headers and
+sessions remain usable after the byte budget is reached. A fresh generation may perform
+its first necessary session and header import even if they exceed that budget. A later
+actual cache miss is declined before importing; the parent recycles, reopens the session,
+and retries once. A second recycle response fails rather than looping.
+
+A failed header import can leave allocations whose size is unknown. Its original result
+and diagnostics are returned without retry. Before the next request, the parent replaces
+the child and reopens the required session. A missing accounting response due to a child
+crash remains a failed request under the ordinary process-failure rules, never a pass.
+This byte budget is not a peak-memory prediction or a substitute for process isolation.
+
+The direct in-process host API guards imports, source elaboration, and cache/accounting
+access with one process-local mutex because Lean's extension registry and these caches
+are global. It never waits for this mutex: concurrent or recursive entry returns an
+explicit busy resource error before entering Lean. The caller may retry after the active
+operation returns. Rust unwinding releases the guard, including after a panic. Ordinary
+lookups and separate worker processes do not acquire this mutex. This deliberately avoids
+an unbounded wait or callback reentry deadlock; it changes concurrent direct-host imports
+from implicit waiting to an explicit busy result.
+
+`max_imports` keeps its session-import count meaning (plus the existing import-like
+fixture calls). The child checks that count on actual session-cache misses, even when
+the parent predicted reuse. Source-header imports contribute to the retained-byte budget,
+not this session-count limit. With the byte budget disabled, header churn has no count
+limit; use the byte budget to bound it. Header import counts remain available through
+host accounting and protocol events.

@@ -158,6 +158,36 @@ fn write_response(writer: &ProtocolWriter, response: Response) -> Result<(), Pro
     }
 }
 
+fn write_source_response(
+    writer: &ProtocolWriter,
+    state: Option<&HostSessionState>,
+    response: Response,
+) -> Result<(), ProtocolError> {
+    if let Some(session) = state {
+        match session.session.header_import_state() {
+            Ok(accounting) => {
+                writer.write(Message::HeaderImportState {
+                    bytes: accounting.non_memory_mapped_bytes,
+                    imports: accounting.imports,
+                    accounting_unknown: accounting.accounting_unknown,
+                })?;
+                if accounting.recycle_requested {
+                    return write_response(writer, Response::HeaderImportRecycle);
+                }
+            }
+            Err(_) => {
+                // Preserve the original result but retire before any later work.
+                writer.write(Message::HeaderImportState {
+                    bytes: 0,
+                    imports: 0,
+                    accounting_unknown: true,
+                })?;
+            }
+        }
+    }
+    write_response(writer, response)
+}
+
 fn worker_import_stats(stats: &LeanImportStats) -> LeanWorkerImportStats {
     LeanWorkerImportStats {
         direct_import_names: stats.direct_import_names.clone(),
@@ -348,6 +378,16 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     // asked for. A linear scan, not a map: `HostSessionMode` is not `Hash`,
     // and a child serves one key in practice, so the list is length 1.
     let mut anchors: Vec<&'static HostAnchor> = Vec::new();
+    let mut session_import_bytes = 0_u64;
+    let mut session_imports = 0_u64;
+    let import_count_limit = std::env::var("LEAN_RS_WORKER_MAX_IMPORTS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let header_budget = std::env::var("LEAN_RS_WORKER_IMPORT_RESIDUE_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
 
     writer.write(Message::Handshake {
         worker_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -381,6 +421,14 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         };
 
+        if let Some(state) = host_session.as_mut()
+            && let Err(err) = state
+                .session
+                .configure_header_import_budget(session_import_bytes, header_budget)
+        {
+            write_response(&writer, error_response(&err))?;
+            continue;
+        }
         match request {
             Request::Health => {
                 write_response(&writer, Response::HealthOk)?;
@@ -421,12 +469,20 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 imports,
                 import_profile,
             } => {
+                let header_bytes = host_session
+                    .as_ref()
+                    .and_then(|state| state.session.header_import_state().ok())
+                    .map_or(0, |state| state.non_memory_mapped_bytes);
+                let import_budget_exhausted = (header_budget != 0
+                    && session_import_bytes.saturating_add(header_bytes) >= header_budget)
+                    || (import_count_limit != 0 && session_imports >= import_count_limit);
                 let response = open_or_reuse_host_session(
                     runtime,
                     &mut anchors,
                     &mut host_session,
                     &mut parked,
                     session_pool_capacity,
+                    import_budget_exhausted,
                     HostSessionKey {
                         project_root,
                         mode,
@@ -434,6 +490,11 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                         import_profile,
                     },
                 );
+                if let Response::HostSessionOpened { import_stats } = &response {
+                    session_imports = session_imports.saturating_add(1);
+                    session_import_bytes =
+                        session_import_bytes.saturating_add(import_stats.non_memory_mapped_region_bytes);
+                }
                 write_response(&writer, response)?;
             }
             Request::Elaborate { source, options } => {
@@ -627,7 +688,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                write_response(&writer, response)?;
+                write_source_response(&writer, host_session.as_ref(), response)?;
             }
             Request::VerifyDeclaration {
                 request,
@@ -641,7 +702,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                write_response(&writer, response)?;
+                write_source_response(&writer, host_session.as_ref(), response)?;
             }
             Request::VerifyDeclarationBatch {
                 request,
@@ -655,7 +716,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                write_response(&writer, response)?;
+                write_source_response(&writer, host_session.as_ref(), response)?;
             }
             Request::ListDeclarationsStrings { filter, progress } => {
                 let response = match host_session.as_mut() {
@@ -685,7 +746,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                write_response(&writer, response)?;
+                write_source_response(&writer, host_session.as_ref(), response)?;
             }
             Request::ProcessModuleQueryBatch {
                 source,
@@ -700,7 +761,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     None => missing_session_response(),
                 };
-                write_response(&writer, response)?;
+                write_source_response(&writer, host_session.as_ref(), response)?;
             }
             Request::ClearModuleSnapshotCache => {
                 let response = match host_session.as_mut() {
@@ -1054,6 +1115,7 @@ fn open_or_reuse_host_session(
     host_session: &mut Option<HostSessionState>,
     parked: &mut Vec<HostSessionState>,
     capacity: usize,
+    import_budget_exhausted: bool,
     key: HostSessionKey,
 ) -> Response {
     // Before any reuse decision, and before capacity eviction: dropping dead
@@ -1089,6 +1151,10 @@ fn open_or_reuse_host_session(
         return Response::HostSessionReused { import_stats };
     }
 
+    // Only an actual cache miss can consume another session import.
+    if import_budget_exhausted {
+        return Response::HeaderImportRecycle;
+    }
     if let Some(outgoing) = host_session.take() {
         parked.push(outgoing);
     }
@@ -1112,6 +1178,7 @@ fn open_or_reuse_host_session(
         // never runs; on a project importing 50 MB at a time it runs often, and
         // there both the discarded snapshots and the re-import are cheap.
         drop(evicted.clear_module_snapshot_cache());
+        drop(evicted.session.clear_module_header_cache());
         drop(evicted);
     }
 
@@ -1197,8 +1264,14 @@ fn evict_stale_host_sessions(host_session: &mut Option<HostSessionState>, parked
     if let Some(state) = host_session.as_mut().or_else(|| parked.first_mut()) {
         drop(state.clear_module_snapshot_cache());
     }
+    for state in parked.iter_mut().filter(|state| is_stale(state)) {
+        drop(state.session.clear_module_header_cache());
+    }
     parked.retain(|state| !is_stale(state));
     if host_session.as_ref().is_some_and(is_stale) {
+        if let Some(state) = host_session.as_mut() {
+            drop(state.session.clear_module_header_cache());
+        }
         *host_session = None;
     }
 }

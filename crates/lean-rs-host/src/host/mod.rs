@@ -93,8 +93,8 @@ pub use self::process::{
 };
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
 pub use self::session::{
-    LeanDeclarationFilter, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
-    LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
+    HeaderImportState, LeanDeclarationFilter, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions,
+    LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
 };
 
 #[cfg(test)]

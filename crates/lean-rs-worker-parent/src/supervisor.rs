@@ -607,21 +607,18 @@ impl LeanWorkerRestartPolicy {
 /// child, so anything per-generation kept there would never reset.
 ///
 /// It also owns the *ordering* of the import bounds. Two places ask whether an
-/// import bound has been crossed — the admission check before a request, and
-/// the deferred-restart path for an import whose admission check a reuse
-/// prediction skipped — and if they answered differently, a cycle would be
-/// reported under the wrong cause depending on how it was reached.
-///
-/// Residue is charged only by [`Self::record_import`], from the import stats the
-/// child returns with a confirmed open. [`Self::record_request`] can also count
-/// an import-like request, but the only callers that pass `true` are the fixture
-/// capability paths, which perform no session import; every production import
-/// goes through `open_worker_session` and is charged in full.
+/// import bound has been crossed. Session opens add their confirmed private
+/// region bytes; header events add only increases in the child's cumulative
+/// count. Eviction never subtracts allocations. A failed header marks the
+/// generation unknown so the next request replaces it.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct GenerationBudget {
     requests: u64,
     imports: u64,
     import_residue_bytes: u64,
+    header_import_bytes: u64,
+    header_imports: u64,
+    accounting_unknown: bool,
 }
 
 impl GenerationBudget {
@@ -637,6 +634,15 @@ impl GenerationBudget {
         self.import_residue_bytes = self
             .import_residue_bytes
             .saturating_add(import_stats.non_memory_mapped_region_bytes);
+    }
+
+    fn record_header_imports(&mut self, bytes: u64, imports: u64, unknown: bool) {
+        self.import_residue_bytes = self
+            .import_residue_bytes
+            .saturating_add(bytes.saturating_sub(self.header_import_bytes));
+        self.header_import_bytes = self.header_import_bytes.max(bytes);
+        self.header_imports = self.header_imports.max(imports);
+        self.accounting_unknown |= unknown;
     }
 
     /// Why this generation must cycle before it performs another import, if it must.
@@ -690,6 +696,8 @@ pub enum LeanWorkerRestartReason {
     MaxImports { limit: u64 },
     /// Completed imports retained at least `limit_bytes` the child cannot reclaim.
     ImportResidue { residue_bytes: u64, limit_bytes: u64 },
+    /// A failed header import may have left allocations that cannot be measured.
+    ImportAccountingUnknown,
     /// Child resident set size reached the configured limit.
     RssCeiling {
         current_kib: u64,
@@ -745,6 +753,7 @@ impl LeanWorkerRestartReason {
             Self::MaxRequests { .. } => "max_requests",
             Self::MaxImports { .. } => "max_imports",
             Self::ImportResidue { .. } => "import_residue",
+            Self::ImportAccountingUnknown => "import_accounting_unknown",
             Self::RssCeiling { .. } => "rss_ceiling",
             Self::RssHardLimit { .. } => "rss_hard_limit",
             Self::Idle { .. } => "idle",
@@ -932,7 +941,7 @@ impl LeanWorkerStats {
             LeanWorkerRestartReason::MaxImports { .. } => {
                 self.max_import_restarts = self.max_import_restarts.saturating_add(1);
             }
-            LeanWorkerRestartReason::ImportResidue { .. } => {
+            LeanWorkerRestartReason::ImportResidue { .. } | LeanWorkerRestartReason::ImportAccountingUnknown => {
                 self.import_residue_restarts = self.import_residue_restarts.saturating_add(1);
             }
             LeanWorkerRestartReason::RssCeiling { .. } => {
@@ -1587,16 +1596,6 @@ pub struct LeanWorker {
     reuse_hint_enabled: bool,
     /// Whether this child generation has ever answered `HostSessionReused`.
     reuse_observed: bool,
-    /// A restart the previous call could not perform.
-    ///
-    /// When a reuse is predicted, `prepare_request` skips the `max_imports`
-    /// check; if the child imports anyway, the bound has been crossed with no
-    /// check having run. Recording it here and consuming it at the top of the
-    /// next `open_worker_session` bounds a parent/child capacity disagreement
-    /// to exceeding the limit by exactly one import, rather than letting
-    /// `max_imports` silently never fire — which is the 11.2 GiB `SIGKILL` this
-    /// bound exists to prevent.
-    pending_restart: Option<LeanWorkerRestartReason>,
     last_activity: Instant,
     generation: WorkerGeneration,
     next_request_id: WorkerRequestId,
@@ -1636,6 +1635,14 @@ impl LeanWorker {
         // the restart bound in unreclaimable import residue (~2–4 GiB each). Set
         // before `config.env` so an embedder that names the variable explicitly
         // still wins.
+        command.env(
+            "LEAN_RS_WORKER_MAX_IMPORTS",
+            config.restart_policy.max_imports.unwrap_or(0).to_string(),
+        );
+        command.env(
+            "LEAN_RS_WORKER_IMPORT_RESIDUE_BYTES",
+            config.restart_policy.max_import_residue_bytes.unwrap_or(0).to_string(),
+        );
         if let Some(capacity) = config.resolved_session_pool_capacity() {
             command.env("LEAN_RS_WORKER_SESSION_POOL_CAPACITY", capacity.to_string());
         }
@@ -1776,7 +1783,6 @@ impl LeanWorker {
             open_session_keys: Vec::new(),
             reuse_hint_enabled: true,
             reuse_observed: false,
-            pending_restart: None,
             last_activity: Instant::now(),
             generation: WorkerGeneration::default(),
             next_request_id: WorkerRequestId::default(),
@@ -1794,7 +1800,7 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, the protocol fails, or
     /// the child returns a typed worker error.
     pub fn health(&mut self) -> Result<(), LeanWorkerError> {
-        self.prepare_request(false)?;
+        self.prepare_host_request(false, None, None)?;
         self.send_request(Request::Health)?;
         self.record_request(false);
         match self.read_response("health")? {
@@ -2195,8 +2201,8 @@ impl LeanWorker {
     /// neither gets the child's own default; the two disagree only if the
     /// child's `LEAN_RS_WORKER_SESSION_POOL_CAPACITY` was set by hand.
     ///
-    /// Disagreement in either direction is bounded and cheap. Over-predicting
-    /// costs one deferred restart, which `pending_restart` handles. Under-
+    /// The child checks its actual cache before any new byte-budgeted import.
+    /// Over-predicting costs one recycle response and bounded retry. Under-
     /// predicting costs one admission check that was not needed — free under a
     /// byte bound, since the check is idempotent and a re-examined budget that
     /// has not moved does not restart anything.
@@ -2228,14 +2234,23 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<(), LeanWorkerError> {
+        self.open_worker_session_attempt(config, cancellation, progress, true)
+    }
+
+    fn open_worker_session_attempt(
+        &mut self,
+        config: &LeanWorkerSessionConfig,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        allow_retry: bool,
+    ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
-        let before_restarts = self.stats.restarts;
-        // A restart the previous call deferred because it had already skipped
-        // the admission check that would have performed it.
-        if let Some(reason) = self.pending_restart.take() {
-            self.restart_with_reason(reason)?;
+        // An explicit switch needs only its requested profile in the new child.
+        if self.budget.accounting_unknown {
+            self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
         }
+        let before_restarts = self.stats.restarts;
         // A hint, not a decision: it only picks which admission checks run
         // before the frame goes out. What actually happened is whichever of
         // `HostSessionOpened` / `HostSessionReused` comes back, and the import
@@ -2292,6 +2307,17 @@ impl LeanWorker {
             }
         };
         match response {
+            Response::HeaderImportRecycle if allow_retry => {
+                let reason = self
+                    .budget
+                    .import_limit_reached(&self.config.restart_policy)
+                    .unwrap_or_else(|| LeanWorkerRestartReason::ImportResidue {
+                        residue_bytes: self.budget.import_residue_bytes,
+                        limit_bytes: self.config.restart_policy.max_import_residue_bytes.unwrap_or(0),
+                    });
+                self.restart_with_reason(reason)?;
+                self.open_worker_session_attempt(config, cancellation, progress, false)
+            }
             Response::HostSessionOpened { import_stats } => {
                 if expect_reuse && !self.reuse_observed && self.open_session_keys.last() == Some(config) {
                     // Predicted a reuse, got an import, this child has never
@@ -2318,15 +2344,6 @@ impl LeanWorker {
                     self.reuse_hint_enabled = false;
                 }
                 self.record_import(&import_stats);
-                if expect_reuse {
-                    // A bound was crossed by an import whose admission check the
-                    // reuse prediction skipped. Defer the restart to the next
-                    // call rather than tearing down a child that just produced
-                    // the session this call is about to use. Same question the
-                    // admission check asks, so the cause cannot depend on which
-                    // path reached it.
-                    self.pending_restart = self.budget.import_limit_reached(&self.config.restart_policy);
-                }
                 let session_open_import_elapsed = import_started.elapsed();
                 self.stats.last_session_open_import_elapsed = Some(session_open_import_elapsed);
                 if self.stats.restarts > before_restarts
@@ -2766,7 +2783,7 @@ impl LeanWorker {
     ) -> Result<Vec<String>, LeanWorkerError> {
         const OPERATION: &str = "worker_list_declarations_strings";
         check_cancelled(OPERATION, cancellation)?;
-        self.prepare_request(false)?;
+        self.prepare_host_request(false, cancellation, progress)?;
         self.send_request_cancellable(
             Request::ListDeclarationsStrings {
                 filter,
@@ -2985,7 +3002,7 @@ impl LeanWorker {
         let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker data-stream request JSON encode failed: {err}"),
         })?;
-        self.prepare_request(false)?;
+        self.prepare_host_request(false, cancellation, progress)?;
         self.send_request_cancellable(
             Request::RunDataStream {
                 export: export.to_owned(),
@@ -3242,8 +3259,28 @@ impl LeanWorker {
         }
     }
 
+    fn prepare_host_request(
+        &mut self,
+        import_like: bool,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<(), LeanWorkerError> {
+        let config = self.open_session_keys.last().cloned();
+        let generation = self.stats.restarts;
+        self.prepare_request(import_like)?;
+        if self.stats.restarts != generation
+            && let Some(config) = config
+        {
+            self.open_worker_session(&config, cancellation, progress)?;
+        }
+        Ok(())
+    }
+
     fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
         self.ensure_running()?;
+        if self.budget.accounting_unknown {
+            self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
+        }
         if import_like {
             self.stats.import_like_admission_attempts = self.stats.import_like_admission_attempts.saturating_add(1);
             self.stats.last_import_like_rss_before_admission_kib = self.child_rss_kib();
@@ -3361,6 +3398,7 @@ impl LeanWorker {
                 | LeanWorkerRestartReason::MaxRequests { .. }
                 | LeanWorkerRestartReason::MaxImports { .. }
                 | LeanWorkerRestartReason::ImportResidue { .. }
+                | LeanWorkerRestartReason::ImportAccountingUnknown
                 | LeanWorkerRestartReason::RssCeiling { .. }
                 | LeanWorkerRestartReason::Idle { .. }
         ) {
@@ -3516,10 +3554,32 @@ impl LeanWorker {
         extract: impl FnOnce(Response, &'static str) -> Result<R, LeanWorkerError>,
     ) -> Result<R, LeanWorkerError> {
         check_cancelled(operation, cancellation)?;
-        self.prepare_request(import_like)?;
-        self.send_request_cancellable(request, operation, cancellation)?;
+        let session_config = self.open_session_keys.last().cloned();
+        self.prepare_host_request(import_like, cancellation, progress)?;
+        self.send_request_cancellable(request.clone(), operation, cancellation)?;
         self.record_request(import_like);
-        let response = self.read_response_with_progress(operation, progress, cancellation)?;
+        let mut response = self.read_response_with_progress(operation, progress, cancellation)?;
+        if matches!(response, Response::HeaderImportRecycle) {
+            let config = session_config.ok_or_else(|| LeanWorkerError::Protocol {
+                message: "header recycle requested without an active session".to_owned(),
+            })?;
+            let reason = if self.budget.accounting_unknown {
+                LeanWorkerRestartReason::ImportAccountingUnknown
+            } else {
+                LeanWorkerRestartReason::ImportResidue {
+                    residue_bytes: self.budget.import_residue_bytes,
+                    limit_bytes: self.config.restart_policy.max_import_residue_bytes.unwrap_or(0),
+                }
+            };
+            self.restart_with_reason(reason)?;
+            self.open_worker_session(&config, cancellation, progress)?;
+            // Exactly one retry: the new generation admits its first necessary
+            // header even when that header alone exceeds the byte budget.
+            check_cancelled(operation, cancellation)?;
+            self.send_request_cancellable(request, operation, cancellation)?;
+            self.record_request(import_like);
+            response = self.read_response_with_progress(operation, progress, cancellation)?;
+        }
         extract(response, operation)
     }
 
@@ -3789,6 +3849,13 @@ impl LeanWorker {
             };
 
             match message {
+                Message::HeaderImportState {
+                    bytes,
+                    imports,
+                    accounting_unknown,
+                } => {
+                    self.budget.record_header_imports(bytes, imports, accounting_unknown);
+                }
                 Message::ProgressTick(tick) => {
                     self.mark_current_request_streaming();
                     if let Err(err) =
@@ -5136,7 +5203,6 @@ mod tests {
             open_session_keys: Vec::new(),
             reuse_hint_enabled: true,
             reuse_observed: false,
-            pending_restart: None,
             last_activity: std::time::Instant::now(),
             generation: WorkerGeneration::default(),
             next_request_id: WorkerRequestId::default(),
@@ -5440,6 +5506,26 @@ mod tests {
             import_all: false,
             load_exts: true,
         }
+    }
+
+    #[test]
+    fn header_import_accounting_is_cumulative_and_unknown_is_sticky() {
+        let mut budget = GenerationBudget::default();
+        budget.record_import(&import_stats_with_residue(100));
+        budget.record_header_imports(200, 1, false);
+        budget.record_header_imports(200, 1, false);
+        assert_eq!(budget.import_residue_bytes, 300);
+        assert_eq!(budget.imports, 1, "max_imports counts session imports only");
+        assert_eq!(budget.header_imports, 1);
+        budget.record_header_imports(500, 2, false);
+        assert_eq!(budget.import_residue_bytes, 600);
+        assert_eq!(budget.imports, 1);
+        assert_eq!(budget.header_imports, 2);
+        budget.record_header_imports(0, 0, true);
+        budget.record_header_imports(500, 2, false);
+        assert_eq!(budget.import_residue_bytes, 600);
+        assert!(budget.accounting_unknown);
+        assert!(!GenerationBudget::default().accounting_unknown);
     }
 
     #[test]

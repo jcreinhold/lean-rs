@@ -63,6 +63,18 @@ fn main() {
 
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
         (
+            "stale_warm_session_keeps_import_count_backstop",
+            stale_warm_session_keeps_import_count_backstop,
+        ),
+        (
+            "failed_header_then_streaming_reopens_session",
+            failed_header_then_streaming_reopens_session,
+        ),
+        (
+            "actual_session_miss_recycles_once_but_warm_reuse_does_not",
+            actual_session_miss_recycles_once_but_warm_reuse_does_not,
+        ),
+        (
             "send_and_response_share_deadline_and_replacement_remains_usable",
             send_and_response_share_deadline_and_replacement_remains_usable,
         ),
@@ -151,6 +163,18 @@ fn main() {
             a_child_that_reports_no_region_bytes_is_counted_and_still_bounded,
         ),
         (
+            "header_budget_reuses_warm_and_retries_distinct_once",
+            header_budget_reuses_warm_and_retries_distinct_once,
+        ),
+        (
+            "failed_header_preserves_result_and_retires_next_request",
+            failed_header_preserves_result_and_retires_next_request,
+        ),
+        (
+            "header_recycle_is_retried_only_once",
+            header_recycle_is_retried_only_once,
+        ),
+        (
             "declaration_outline_batch_selector_reaches_parent_session_path",
             declaration_outline_batch_selector_reaches_parent_session_path,
         ),
@@ -196,6 +220,9 @@ fn run_fake_child(mode: &str) {
         thread::sleep(Duration::from_millis(200));
     }
 
+    let mut last_header: Option<String> = None;
+    let mut last_session: Option<Vec<String>> = None;
+    let mut reused_session = false;
     loop {
         let frame = {
             let mut stdin = io::stdin().lock();
@@ -265,6 +292,42 @@ fn run_fake_child(mode: &str) {
                 import_profile,
                 ..
             } => {
+                if mode == "session_count" {
+                    let response = if last_session.is_none() {
+                        last_session = Some(imports.clone());
+                        Response::HostSessionOpened {
+                            import_stats: fake_import_stats(imports, import_profile),
+                        }
+                    } else if !reused_session {
+                        reused_session = true;
+                        Response::HostSessionReused {
+                            import_stats: fake_import_stats(imports, import_profile),
+                        }
+                    } else {
+                        Response::HeaderImportRecycle
+                    };
+                    write_frame(&mut stdout, Message::Response(response), MAX_FRAME_BYTES)
+                        .expect("session count response");
+                    continue;
+                }
+                if mode == "session_budget" {
+                    let response = if last_session.as_ref() == Some(&imports) {
+                        Response::HostSessionReused {
+                            import_stats: fake_import_stats(imports, import_profile),
+                        }
+                    } else if last_session.is_some() {
+                        Response::HeaderImportRecycle
+                    } else {
+                        last_session = Some(imports.clone());
+                        Response::HostSessionOpened {
+                            import_stats: fake_import_stats(imports, import_profile),
+                        }
+                    };
+                    write_frame(&mut stdout, Message::Response(response), MAX_FRAME_BYTES)
+                        .expect("session budget response");
+                    continue;
+                }
+                last_session = Some(imports.clone());
                 let mut import_stats = fake_import_stats(imports, import_profile);
                 if mode == "residue_reporting" {
                     // A child whose shim *does* attribute region bytes. The
@@ -281,7 +344,44 @@ fn run_fake_child(mode: &str) {
                 )
                 .expect("fake child writes session-open response");
             }
-            Request::ProcessModuleQueryBatch { selectors, .. } => {
+            Request::ProcessModuleQueryBatch { source, selectors, .. } => {
+                if mode.starts_with("header_") {
+                    let recycle = mode == "header_always_recycle"
+                        || (mode == "header_budget" && last_header.as_ref().is_some_and(|old| old != &source));
+                    write_frame(
+                        &mut stdout,
+                        Message::HeaderImportState {
+                            bytes: 2000,
+                            imports: 1,
+                            accounting_unknown: source == "bad",
+                        },
+                        MAX_FRAME_BYTES,
+                    )
+                    .expect("write header accounting");
+                    if recycle {
+                        write_frame(
+                            &mut stdout,
+                            Message::Response(Response::HeaderImportRecycle),
+                            MAX_FRAME_BYTES,
+                        )
+                        .expect("write recycle response");
+                        continue;
+                    }
+                    if source == "bad" {
+                        write_frame(
+                            &mut stdout,
+                            Message::Response(Response::Error {
+                                code: "test.invalid_import".to_owned(),
+                                message: "original bad import diagnostic".to_owned(),
+                            }),
+                            MAX_FRAME_BYTES,
+                        )
+                        .expect("write original import error");
+                        continue;
+                    }
+                    last_header = Some(source);
+                }
+
                 let items = selectors
                     .into_iter()
                     .map(|selector| match selector {
@@ -327,6 +427,27 @@ fn run_fake_child(mode: &str) {
                     MAX_FRAME_BYTES,
                 )
                 .expect("fake child writes module query batch response");
+            }
+            Request::ListDeclarationsStrings { .. } | Request::RunDataStream { .. } if mode == "header_failure" => {
+                let response = if last_session.is_none() {
+                    Response::Error {
+                        code: "test.session_missing".to_owned(),
+                        message: "must reopen active session".to_owned(),
+                    }
+                } else if matches!(request, Request::ListDeclarationsStrings { .. }) {
+                    Response::RowsComplete { count: 0 }
+                } else {
+                    Response::StreamComplete {
+                        summary: lean_rs_worker_protocol::protocol::StreamSummary::new(
+                            0,
+                            std::collections::BTreeMap::default(),
+                            Duration::ZERO,
+                            None,
+                        ),
+                    }
+                };
+                write_frame(&mut stdout, Message::Response(response), MAX_FRAME_BYTES)
+                    .expect("write streaming response");
             }
             Request::VerifyDeclarationBatch { request, .. } => {
                 let rows = request
@@ -1421,6 +1542,147 @@ fn a_child_that_reports_no_region_bytes_is_counted_and_still_bounded() -> Result
         stats.import_stats_unusable, 4,
         "every import — the capability's own plus the three here — reported modules with no bytes attributed to them"
     );
+    Ok(())
+}
+
+fn stale_warm_session_keeps_import_count_backstop() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("session-count")?;
+    let mut capability = fixture
+        .builder("session_count", ["Init"])?
+        .request_timeout(Duration::from_secs(5))
+        .restart_policy(LeanWorkerRestartPolicy::default().max_imports(1))
+        .open()
+        .map_err(|err| err.to_string())?;
+    {
+        let _session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+    };
+    assert_eq!(capability.stats().restarts, 0, "warm reuse above count cap");
+    {
+        let _session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+    };
+    assert_eq!(
+        capability.stats().max_import_restarts,
+        1,
+        "actual stale miss still enforces count"
+    );
+    Ok(())
+}
+
+fn failed_header_then_streaming_reopens_session() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("header-streaming")?;
+    let mut capability = fixture
+        .builder("header_failure", ["Init"])?
+        .request_timeout(Duration::from_secs(5))
+        .open()
+        .map_err(|err| err.to_string())?;
+    {
+        let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+        for stream in [false, true] {
+            let error = session
+                .process_module_query_batch(
+                    "bad",
+                    &[],
+                    &LeanWorkerOutputBudgets::default(),
+                    &LeanWorkerElabOptions::default(),
+                    None,
+                    None,
+                )
+                .expect_err("invalid source");
+            assert!(error.to_string().contains("original bad import diagnostic"));
+            if stream {
+                session
+                    .run_data_stream(
+                        "fake",
+                        &serde_json::json!({}),
+                        &RecordingSink::default(),
+                        None,
+                        None,
+                        None,
+                    )
+                    .map_err(|err| err.to_string())?;
+            } else {
+                session
+                    .list_declarations_strings(
+                        &lean_rs_worker_protocol::types::LeanWorkerDeclarationFilter::default(),
+                        None,
+                        None,
+                    )
+                    .map_err(|err| err.to_string())?;
+            }
+        }
+    }
+    assert_eq!(capability.stats().restarts, 2);
+    Ok(())
+}
+
+fn actual_session_miss_recycles_once_but_warm_reuse_does_not() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("session-budget")?;
+    let mut capability = fixture
+        .builder("session_budget", ["Init"])?
+        .request_timeout(Duration::from_secs(5))
+        .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(1000))
+        .open()
+        .map_err(|err| err.to_string())?;
+    for import in ["Init", "Init", "Other", "Other"] {
+        {
+            let _session = capability
+                .open_session_with_imports([import], None, None)
+                .map_err(|err| err.to_string())?;
+        };
+    }
+    assert_eq!(capability.stats().restarts, 1);
+    Ok(())
+}
+
+fn exercise_header_sources(mode: &str, sources: &[&str]) -> Result<u64, String> {
+    let fixture = FakeCapabilityFixture::new("header-memory")?;
+    let mut capability = fixture
+        .builder(mode, ["Init"])?
+        .request_timeout(Duration::from_secs(5))
+        .restart_policy(LeanWorkerRestartPolicy::default().max_import_residue_bytes(1000))
+        .open()
+        .map_err(|err| err.to_string())?;
+    {
+        let mut session = capability.open_session(None, None).map_err(|err| err.to_string())?;
+        for source in sources {
+            let result = session.process_module_query_batch(
+                source,
+                &[],
+                &LeanWorkerOutputBudgets::default(),
+                &LeanWorkerElabOptions::default(),
+                None,
+                None,
+            );
+            if *source == "bad" {
+                let error = result.expect_err("invalid import must preserve failure");
+                assert!(error.to_string().contains("original bad import diagnostic"), "{error}");
+            } else if mode == "header_always_recycle" {
+                assert!(result.is_err(), "second recycle response must not become a pass");
+            } else {
+                assert!(
+                    matches!(result, Ok(LeanWorkerModuleQueryBatchOutcome::Ok { .. })),
+                    "original result preserved: {result:?}"
+                );
+            }
+        }
+    }
+    Ok(capability.stats().restarts)
+}
+
+fn header_budget_reuses_warm_and_retries_distinct_once() -> Result<(), String> {
+    assert_eq!(exercise_header_sources("header_budget", &["A", "A"])?, 0);
+    assert_eq!(exercise_header_sources("header_budget", &["A", "A", "B", "B"])?, 1);
+    Ok(())
+}
+
+fn failed_header_preserves_result_and_retires_next_request() -> Result<(), String> {
+    assert_eq!(exercise_header_sources("header_failure", &["bad"])?, 0);
+    assert_eq!(exercise_header_sources("header_failure", &["bad", "bad"])?, 1);
+    Ok(())
+}
+
+fn header_recycle_is_retried_only_once() -> Result<(), String> {
+    assert_eq!(exercise_header_sources("header_always_recycle", &["A"])?, 1);
     Ok(())
 }
 

@@ -3114,6 +3114,7 @@ fn cached_module_headers_match_cold_queries_after_edits() {
         .heartbeat_limit(100_000);
     for (source, name, heartbeats, label) in cases {
         session.clear_module_snapshot_cache().expect("clear prior case");
+        session.clear_module_header_cache().expect("clear prior header");
         session
             .process_module_query_batch_cached(&base, &selectors, &budgets, &baseline_opts, &policy("base"), None)
             .expect("seed snapshot");
@@ -3122,6 +3123,9 @@ fn cached_module_headers_match_cold_queries_after_edits() {
             .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
             .expect("warm query");
         session.clear_module_snapshot_cache().expect("clear warm snapshot");
+        session
+            .clear_module_header_cache()
+            .expect("force genuinely cold header");
         let cold = session
             .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
             .expect("cold query");
@@ -3158,6 +3162,7 @@ fn cached_module_headers_match_cold_queries_after_edits() {
         )
         .expect("new-session query");
     other.clear_module_snapshot_cache().expect("clear new-session snapshot");
+    other.clear_module_header_cache().expect("clear new-session header");
     let cold = other
         .process_module_query_batch_cached(
             &base,
@@ -3199,9 +3204,29 @@ fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
         "HeaderReuseProbe.lean",
         &format!("{source}\n{}", include_str!("../../tests/lean/header_reuse_probe.lean")),
     );
+    let compile = Command::new("lake")
+        .args(["env", "lean", "-R"])
+        .arg(project.path())
+        .arg("-o")
+        .arg(project.path().join("HeaderReuseProbe.olean"))
+        .arg(project.path().join("HeaderReuseProbe.lean"))
+        .current_dir(&package)
+        .output()
+        .expect("compile header probe module");
+    assert!(
+        compile.status.success(),
+        "header probe compile: {} {}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    project.write(
+        "Run.lean",
+        "import HeaderReuseProbe\n#eval LeanRsFixture.InfoTree.runHeaderReuseProbe\n",
+    );
     let result = Command::new("lake")
         .args(["env", "lean"])
-        .arg(project.path().join("HeaderReuseProbe.lean"))
+        .env("LEAN_PATH", project.path())
+        .arg(project.path().join("Run.lean"))
         .current_dir(package)
         .output()
         .expect("run header reuse probe");
@@ -3452,5 +3477,52 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
     assert!(
         !diags.diagnostics().iter().any(|d| d.severity() == LeanSeverity::Error),
         "{diags:?}"
+    );
+}
+
+#[test]
+fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
+    use crate::host::process::{ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector};
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("caps");
+    let mut session = caps.session(&["Lean"], None, None).expect("session");
+    let source = "module\nimport Lean\npublic def headerAccountingProbe : Nat := 1\n";
+    let opts = LeanElabOptions::new().file_label("header-accounting.lean");
+    session
+        .configure_header_import_budget(0, 0)
+        .expect("unlimited test budget");
+    let before = session.header_import_state().expect("initial accounting");
+    session
+        .process_module_query(source, &ModuleQuery::Diagnostics, &opts, None)
+        .expect("first query");
+    let imported = session.header_import_state().expect("fresh accounting");
+    assert_eq!(imported.imports, before.imports + 1);
+    assert!(!imported.accounting_unknown);
+    session.clear_module_snapshot_cache().expect("evict body snapshots");
+    session
+        .process_module_query_batch(
+            source,
+            &[ModuleQuerySelector::Diagnostics {
+                id: "diagnostics".to_owned(),
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &opts,
+            None,
+        )
+        .expect("other query path");
+    let reused = session.header_import_state().expect("warm accounting");
+    assert_eq!(reused.imports, imported.imports);
+    assert_eq!(reused.non_memory_mapped_bytes, imported.non_memory_mapped_bytes);
+    session.clear_module_header_cache().expect("evict session header");
+    let cleared = session.header_import_state().expect("retained accounting");
+    assert_eq!(cleared.non_memory_mapped_bytes, imported.non_memory_mapped_bytes);
+    session
+        .process_module_query(source, &ModuleQuery::Diagnostics, &opts, None)
+        .expect("reimport");
+    assert_eq!(
+        session.header_import_state().expect("reimport accounting").imports,
+        imported.imports + 1
     );
 }

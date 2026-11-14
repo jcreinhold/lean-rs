@@ -166,23 +166,50 @@ from the pool's per-worker RSS ceiling by `LeanWorkerModuleCacheLimits::verify_r
 
 ## Reusing module headers after edits
 
-A cached snapshot keeps both its input session environment and the environment produced by its header. When only the
-body changes, `buildModuleSnapshot` reuses the header environment and its messages. This avoids a fresh
-`processHeader` import and lets Lean reuse unchanged commands in the body.
+Each live session keeps at most one reusable header environment, separate from disposable body snapshots. A global
+eight-entry least-recently-used bound also limits retention for direct host callers outside the worker pool. Clearing snapshots
+because of TTL, size, or RSS no longer forces another header import. Cached queries, uncached queries, proof attempts,
+and verification use the same header resolver. Reuse never substitutes the old body's final environment.
 
 Reuse requires the same input environment object, exact header text, file label, heartbeat setting, and complete
-Lean option map. Exact text retains import order, `public import`, `import all`, and source positions. A changed session, header, or option takes
-the normal header-processing path. A header that reported errors also retries rather than reusing a failed import.
-The old body's final environment never serves as the new starting environment.
-The existing snapshot cache bounds retention; this adds no separate cache or lock.
+Lean option map. Exact text preserves import order, `public import`, `import all`, and source positions. Changing
+any of these inputs requires a fresh header. Session eviction clears its header, not the cumulative memory count.
+Changing an imported artifact requires a fresh input session or worker restart. Clearing body snapshots alone is not
+dependency invalidation: it does not change the session's imported environment.
+Host source calls and header-cache operations share the existing process-local session-import mutex. This protects
+global Lean import/cache state for direct concurrent host callers; it does not serialize separate worker processes.
 
-Tests compare warm and cold query results after body, visibility, option, file-label, and session changes. A private
-Lean probe also checks environment identity and rejects changed inputs, so the performance regression cannot pass
-merely because repeated imports produce equal answers.
+The resolver records successful fresh imports before elaborating the body. It sums non-memory-mapped compacted
+region sizes, excluding pointer-identical input-session regions and previously charged region objects. It never
+deduplicates by filename: loading the same file again can allocate a different buffer. This is conservative retained
+import accounting, not a measurement of total heap usage. Metadata copies can overcount; dropping snapshots does
+not prove that Lean freed imported regions, so eviction never subtracts bytes.
 
-This removes repeated imports while a matching snapshot remains cached. It does not remove the first header import,
-account for its memory in the supervisor, or make a C++ runtime exception recoverable. Existing process isolation and
-resource limits remain unchanged.
+Before another fresh header, a reached import budget requests a child restart. Warm header reuse remains allowed.
+The first header in a fresh child may exceed the budget, under the unchanged runtime memory ceiling; the supervisor
+retries at most once. This avoids an endless restart loop for a large but valid first profile. A failed header import
+can hide partial allocations. The resolver preserves its error and marks accounting unknown; the supervisor retires
+that child before its next request instead of silently retrying the failed import.
+
+Tests compare warm and genuinely cold results after body, visibility, option, file-label, and session changes. A
+private Lean probe checks environment identity, snapshot eviction, budget handling, and a failed import. Host API
+tests check shared accounting across single and batch queries. These checks do not make C++ exceptions recoverable;
+process isolation and the runtime memory ceiling remain necessary.
+
+### Bounded real-project check
+
+`header_cache_probe` runs three diagnostics calls on one existing source file, clearing body snapshots between calls.
+It uses one worker thread, a 4 GiB import budget, and a 14 GiB runtime ceiling. It does not build project modules.
+
+```sh
+cargo build -p lean-rs-worker-child --bin lean-rs-worker-child --example header_cache_probe
+target/debug/examples/header_cache_probe target/debug/lean-rs-worker-child /path/to/project /path/to/source.lean
+```
+
+A Mathlib-scale determinant file completed all three calls without errors or restarts: header processing took
+3.097 seconds, then 2 milliseconds twice. Recorded retained imports stayed at 3,660,081,344 bytes; RSS stayed near
+6.80 GiB and sampled physical footprint peaked at 4.45 GiB. This checks warm reuse after snapshot eviction, not every
+profile transition or an upper bound on future elaboration memory.
 
 ## File-specific Lean options
 

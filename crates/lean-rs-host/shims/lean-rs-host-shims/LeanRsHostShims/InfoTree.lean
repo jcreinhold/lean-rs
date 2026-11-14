@@ -1869,18 +1869,119 @@ private def reusableIncrementalState? (old : ModuleSnapshot) (baseEnv : Environm
   else
     none
 
+/-- Header imports live independently of disposable body snapshots. One entry per
+input environment prevents an RSS-triggered snapshot clear from importing again. -/
+private structure CachedModuleHeader where
+  inputEnv : Environment
+  headerSource : String
+  fileLabel : String
+  heartbeats : UInt64
+  optionsJson : String
+  baseEnv : Environment
+  messages : MessageLog
+
 /-- Reuse only the header, never the environment after the old body. Exact header
     text preserves import visibility, order, and source positions. The heartbeat
     value and complete caller option map determine the initial options. -/
-private def reusableHeader? (old : ModuleSnapshot) (env : Environment)
+private def reusableHeader? (old : CachedModuleHeader) (env : Environment)
     (headerSource fileLabel : String) (heartbeats : UInt64) (optionsJson : String) :
     Option (Environment × MessageLog) :=
   let sameEnv := unsafe ptrEq old.inputEnv env
   if sameEnv && old.headerSource == headerSource && old.fileLabel == fileLabel &&
-      old.heartbeats == heartbeats && old.optionsJson == optionsJson && old.missing.isEmpty && !old.headerMessages.hasErrors then
-    some (old.baseEnv, old.headerMessages)
+      old.heartbeats == heartbeats && old.optionsJson == optionsJson && !old.messages.hasErrors then
+    some (old.baseEnv, old.messages)
   else
     none
+
+private def rememberModuleHeader (headers : Array CachedModuleHeader)
+    (h : CachedModuleHeader) : Array CachedModuleHeader :=
+  let entries := (headers.filter fun (old : CachedModuleHeader) =>
+    !(unsafe ptrEq old.inputEnv h.inputEnv)).push h
+  entries.extract (entries.size - 8) entries.size
+
+private structure HeaderImportState where
+  headers : Array CachedModuleHeader := #[]
+  chargedRegions : Array CompactedRegion := #[]
+  bytes : Nat := 0
+  imports : Nat := 0
+  sessionBytes : Nat := 0
+  limitBytes : Nat := 0
+  accountingUnknown : Bool := false
+  recycleRequested : Bool := false
+  deriving Inhabited
+
+private instance : Nonempty (IO.Ref HeaderImportState) :=
+  inferInstanceAs (Nonempty (IO.Ref HeaderImportState))
+
+initialize headerImportState : IO.Ref HeaderImportState ← IO.mkRef {}
+
+@[export lean_rs_host_configure_header_import_budget]
+def configureHeaderImportBudget (sessionBytes limitBytes : UInt64) : IO Unit :=
+  headerImportState.modify fun s =>
+    { s with
+      sessionBytes := sessionBytes.toNat
+      limitBytes := limitBytes.toNat
+      recycleRequested := false }
+
+@[export lean_rs_host_header_import_state]
+def getHeaderImportState (_ : Unit) : IO String := do
+  let s ← headerImportState.get
+  return (Json.mkObj [
+    ("non_memory_mapped_bytes", toJson s.bytes), ("imports", toJson s.imports),
+    ("accounting_unknown", toJson s.accountingUnknown),
+    ("recycle_requested", toJson s.recycleRequested)]).compress
+
+@[export lean_rs_host_clear_module_header_cache]
+def clearModuleHeaderCache (env : Environment) : IO Unit :=
+  headerImportState.modify fun s => { s with headers := s.headers.filter fun h =>
+    !(unsafe ptrEq h.inputEnv env) }
+
+private def resolveModuleHeader (env : Environment) (header : Lean.Elab.HeaderSyntax)
+    (opts : Options) (messages : MessageLog) (inputCtx : Parser.InputContext)
+    (headerSource fileLabel : String) (heartbeats : UInt64) (optionsJson : String) :
+    IO (Environment × MessageLog) := do
+  let s ← headerImportState.get
+  if s.accountingUnknown then
+    headerImportState.modify fun s => { s with recycleRequested := true }
+    throw <| IO.userError "worker import accounting is incomplete; recycle required"
+  if let some h := s.headers.find? fun h =>
+      (reusableHeader? h env headerSource fileLabel heartbeats optionsJson).isSome then
+    -- Move the reused session to the end. A global bound also covers direct
+    -- host users that drop sessions without the worker pool's eviction hook.
+    headerImportState.modify fun s => { s with
+      headers := rememberModuleHeader s.headers h }
+    return (h.baseEnv, h.messages)
+  if s.imports > 0 && s.limitBytes > 0 && s.bytes + s.sessionBytes >= s.limitBytes then
+    headerImportState.modify fun s => { s with recycleRequested := true }
+    throw <| IO.userError "worker import budget reached; recycle required"
+  try
+    unsafe Lean.enableInitializersExecution
+    let (baseEnv, initialMessages) ←
+      Lean.Elab.processHeader header opts messages inputCtx (mainModule := Name.anonymous)
+    if initialMessages.hasErrors then
+      headerImportState.modify fun s => { s with accountingUnknown := true }
+      return (baseEnv, initialMessages)
+    let mut charged := s.chargedRegions
+    let mut bytes := s.bytes
+    for region in baseEnv.header.regions do
+      unless region.isMemoryMapped ||
+          env.header.regions.any (fun old => unsafe ptrEq old region) ||
+          charged.any (fun old => unsafe ptrEq old region) do
+        charged := charged.push region
+        bytes := bytes + region.size.toNat
+    let h : CachedModuleHeader := {
+      inputEnv := env
+      headerSource, fileLabel, heartbeats, optionsJson, baseEnv
+      messages := initialMessages }
+    headerImportState.set { s with
+      headers := rememberModuleHeader s.headers h
+      chargedRegions := charged
+      bytes
+      imports := s.imports + 1 }
+    return (baseEnv, initialMessages)
+  catch ex =>
+    headerImportState.modify fun s => { s with accountingUnknown := true }
+    throw ex
 
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) (policy : ModuleQueryCachePolicy)
@@ -1901,17 +2002,16 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
-        match old?.bind (fun old => reusableHeader? old env headerSource fileLabel heartbeats optionsJson) with
-        | some cached => pure cached
-        | none =>
-          unsafe Lean.enableInitializersExecution
-          Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+        resolveModuleHeader env header opts headerMessages inputCtx
+          headerSource fileLabel heartbeats optionsJson
       catch ex =>
         let elapsed ← elapsedMicrosSince headerStart
         return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
     else
       pure (env, headerMessages)
   let headerMicros ← elapsedMicrosSince headerStart
+  if initialMessages.hasErrors then
+    return .error (← failureFromMessages initialMessages diagBytes fileLabel, headerMicros)
 
   let opts ← if missing.isEmpty then LeanRsFixture.Elaboration.resolveOptions opts heartbeats else pure opts
   let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
@@ -2671,8 +2771,8 @@ def processModuleQuery
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
-        unsafe Lean.enableInitializersExecution
-        Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+        resolveModuleHeader env header opts headerMessages inputCtx
+          (String.Pos.Raw.extract source 0 parserState.pos) fileLabel heartbeats optionsJson
       catch ex =>
         return wrapOutcome (match query with
           | .diagnostics => .diagnostics (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel)
@@ -2742,8 +2842,8 @@ def processModuleQueryBatch
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
-        unsafe Lean.enableInitializersExecution
-        Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+        resolveModuleHeader env header opts headerMessages inputCtx
+          (String.Pos.Raw.extract source 0 parserState.pos) fileLabel heartbeats optionsJson
       catch ex =>
         let failure := LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel
         return wrapOutcome (batchEnvelopeFromFailure selectors failure)
