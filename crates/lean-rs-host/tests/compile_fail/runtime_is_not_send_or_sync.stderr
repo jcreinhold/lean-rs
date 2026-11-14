@@ -1230,7 +1230,7 @@ note: required because it appears within the type `alloc::raw_vec::RawVec<pool::
 note: required because it appears within the type `Vec<pool::PooledEntry<'static>>`
   --> $RUST/alloc/src/vec/mod.rs
    |
-   | pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
+   | pub struct Vec<
    |            ^^^
 note: required because it appears within the type `pool::PoolInner<'static>`
   --> src/host/pool.rs

@@ -59,19 +59,19 @@ fn shipped_template_target_dir() -> PathBuf {
         .clone()
 }
 
-fn build_shipped_template() {
+fn build_shipped_template() -> &'static [PathBuf] {
     // Memoize: see the matching note in `loader_regressions::build_template`.
     // Each invocation of `cargo build` spawns its own rustc swarm; with
     // nextest's parallel test threads and many tests calling this
     // helper, the unbounded fan-out can exhaust developer-machine RAM.
     // Cap the inner cargo's jobs and run the build at most once per
     // test process.
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    static ONCE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
             .args(["build", "--jobs", "1", "--manifest-path"])
             .arg(shipped_template_manifest())
-            .args(["--bins", "--examples"])
+            .args(["--bins", "--examples", "--message-format=json"])
             .env("CARGO_TARGET_DIR", shipped_template_target_dir())
             .output()
             .expect("template cargo build starts");
@@ -81,17 +81,29 @@ fn build_shipped_template() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
-    });
+        // Cargo owns the output layout; its JSON messages identify the build
+        // directories across toolchains without guessing paths under target/.
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|message| {
+                message.get("reason").and_then(serde_json::Value::as_str) == Some("build-script-executed")
+            })
+            .filter_map(|message| {
+                message
+                    .get("out_dir")
+                    .and_then(serde_json::Value::as_str)
+                    .map(PathBuf::from)
+            })
+            .collect()
+    })
 }
 
 fn shipped_manifest_path() -> PathBuf {
-    build_shipped_template();
-    let build_dir = shipped_template_target_dir().join("debug").join("build");
-    let mut candidates = std::fs::read_dir(&build_dir)
-        .expect("template build directory exists")
-        .filter_map(Result::ok)
-        .flat_map(|entry| {
-            std::fs::read_dir(entry.path().join("out"))
+    let mut candidates = build_shipped_template()
+        .iter()
+        .flat_map(|directory| {
+            std::fs::read_dir(directory)
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
