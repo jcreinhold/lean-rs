@@ -9,6 +9,24 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.9.9]
+
+### Fixed
+
+- Resolve private theorem names after module headers and report their actual kernel axioms. Report unavailable
+  axioms when source resolution succeeds but no matching kernel declaration exists; never substitute an empty list.
+- Reuse source headers across compatible checks and account for retained header imports per worker generation.
+  Retire before another uncached import once the budget is reached; report unavailable accounting explicitly.
+- Bound request writes and reads, drain worker logs, and stop interrupted requests without abandoning their child.
+  Track owned worker processes until their exit is confirmed, including interrupted startup and failed cleanup.
+
+### Changed
+
+- Concurrent direct-host imports wait up to 30 seconds for the active operation; same-thread recursive calls fail
+  immediately rather than deadlock. Separate worker processes remain independent.
+- Worker protocol 12 carries source-header import accounting and planned retirement. Install matching parent and
+  worker versions together. Lean's supported toolchain range is unchanged.
+
 ## [0.9.8]
 
 ### Fixed

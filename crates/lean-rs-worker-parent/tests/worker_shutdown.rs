@@ -56,6 +56,7 @@ const FAKE_IMPORT_RESIDUE_BYTES: u64 = 1_000;
 //   cargo nextest run -p lean-rs-worker-parent --profile ci
 //
 fn main() {
+    public_worker_handles_keep_unwind_safety();
     if let Ok(mode) = env::var(FAKE_CHILD_ENV) {
         run_fake_child(&mode);
         return;
@@ -2073,4 +2074,12 @@ fn process_state(pid: u32) -> Result<ProcessState, String> {
 #[cfg(not(unix))]
 fn process_state(_pid: u32) -> Result<ProcessState, String> {
     Ok(ProcessState::Unknown)
+}
+
+fn public_worker_handles_keep_unwind_safety() {
+    fn assert_unwind_safe<T: std::panic::UnwindSafe + std::panic::RefUnwindSafe>() {}
+    assert_unwind_safe::<LeanWorker>();
+    assert_unwind_safe::<lean_rs_worker_parent::LeanWorkerCapability>();
+    assert_unwind_safe::<lean_rs_worker_parent::LeanWorkerHostHandle>();
+    assert_unwind_safe::<LeanWorkerPool>();
 }

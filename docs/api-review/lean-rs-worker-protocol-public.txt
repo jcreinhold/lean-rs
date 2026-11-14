@@ -34,6 +34,10 @@ pub lean_rs_worker_protocol::protocol::Message::FatalExit(lean_rs_worker_protoco
 pub lean_rs_worker_protocol::protocol::Message::Handshake
 pub lean_rs_worker_protocol::protocol::Message::Handshake::protocol_version: u16
 pub lean_rs_worker_protocol::protocol::Message::Handshake::worker_version: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Message::HeaderImportState
+pub lean_rs_worker_protocol::protocol::Message::HeaderImportState::accounting_unknown: bool
+pub lean_rs_worker_protocol::protocol::Message::HeaderImportState::bytes: u64
+pub lean_rs_worker_protocol::protocol::Message::HeaderImportState::imports: u64
 pub lean_rs_worker_protocol::protocol::Message::ProgressTick(lean_rs_worker_protocol::protocol::ProgressTick)
 pub lean_rs_worker_protocol::protocol::Message::Request(lean_rs_worker_protocol::protocol::Request)
 pub lean_rs_worker_protocol::protocol::Message::Response(lean_rs_worker_protocol::protocol::Response)
@@ -225,6 +229,7 @@ pub lean_rs_worker_protocol::protocol::Response::Elaboration::outcome: lean_rs_w
 pub lean_rs_worker_protocol::protocol::Response::Error
 pub lean_rs_worker_protocol::protocol::Response::Error::code: alloc::string::String
 pub lean_rs_worker_protocol::protocol::Response::Error::message: alloc::string::String
+pub lean_rs_worker_protocol::protocol::Response::HeaderImportRecycle
 pub lean_rs_worker_protocol::protocol::Response::HealthOk
 pub lean_rs_worker_protocol::protocol::Response::HostSessionOpened
 pub lean_rs_worker_protocol::protocol::Response::HostSessionOpened::import_stats: lean_rs_worker_protocol::types::LeanWorkerImportStats

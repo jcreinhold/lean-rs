@@ -58,7 +58,11 @@ const STDERR_TAIL_BYTES: usize = 64 * 1024;
 struct StderrCapture {
     tail: Arc<Mutex<VecDeque<u8>>>,
     stopped: Arc<AtomicBool>,
-    reader: Option<thread::JoinHandle<()>>,
+    // The private reader returns (), invokes no user code, and shares only
+    // mutex-protected bytes and an atomic stop flag. Parent unwinding cannot
+    // expose an inconsistent value through its handle. Keep this assertion
+    // narrow; revisit it if the reader ever carries user callbacks or data.
+    reader: Option<std::panic::AssertUnwindSafe<thread::JoinHandle<()>>>,
 }
 
 impl StderrCapture {
@@ -86,7 +90,7 @@ impl StderrCapture {
         Ok(Self {
             tail,
             stopped,
-            reader: Some(reader),
+            reader: Some(std::panic::AssertUnwindSafe(reader)),
         })
     }
 
@@ -106,7 +110,7 @@ impl StderrCapture {
     fn stop(&mut self) {
         self.stopped.store(true, Ordering::Release);
         if let Some(reader) = self.reader.take() {
-            let _joined = reader.join();
+            let _joined = reader.0.join();
         }
     }
 }

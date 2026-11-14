@@ -347,11 +347,11 @@ fn an_alternation_that_fits_the_pool_never_evicts() {
 ///
 /// With the child pinned to capacity 1 and the parent still remembering both
 /// keys, an A,B,A workload mispredicts the third open: the parent skips the
-/// `max_imports` admission check, the child imports anyway, and the limit has
-/// been crossed with no check having run. The deferred restart is what keeps
-/// that bounded at exactly one import over the limit.
+/// `max_imports` admission check. The child must reject that cache miss before
+/// importing, so the parent can replace it and return a usable fresh session
+/// without overshooting the limit.
 #[test]
-fn a_mispredicted_reuse_restarts_before_the_next_import() {
+fn a_mispredicted_reuse_restarts_before_the_actual_import() {
     ensure_fixture_built();
     let narrow = elaboration_session_config();
     let wide = handles_session_config();
@@ -371,22 +371,28 @@ fn a_mispredicted_reuse_restarts_before_the_next_import() {
     assert_eq!(worker.stats().restarts, 0, "the limit is not reached yet");
 
     {
-        // Predicted a reuse (the parent remembers A), got an import: the child
-        // parks nothing at capacity 1.
-        let _a = worker.open_session(&narrow, None, None).expect("A reopens");
+        // The parent remembers A, but capacity 1 evicted it. Child-side
+        // admission requires a replacement before this session can be returned.
+        let mut a = worker.open_session(&narrow, None, None).expect("A reopens");
+        assert!(
+            a.describe("Nat", None, None)
+                .expect("replacement session is usable")
+                .is_some()
+        );
     }
     assert_eq!(
         worker.stats().restarts,
-        0,
-        "the restart is deferred, not taken out from under the session this call just opened"
+        1,
+        "the mispredicted cache miss restarts before importing, not after exposing a session"
     );
 
     {
         let _b = worker.open_session(&wide, None, None).expect("B reopens");
     }
-    assert!(
-        worker.stats().restarts >= 1,
-        "the deferred restart must be taken before the next import, or max_imports never fires at all"
+    assert_eq!(
+        worker.stats().restarts,
+        1,
+        "the second import in the replacement remains within its budget"
     );
 
     let exit = worker.shutdown().expect("worker terminates").exit;

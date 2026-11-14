@@ -2914,6 +2914,27 @@ impl core::marker::Unpin for lean_rs_host::DeclarationVerificationRequest
 impl core::marker::UnsafeUnpin for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::DeclarationVerificationRequest
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::DeclarationVerificationRequest
+pub struct lean_rs_host::host::HeaderImportState
+pub lean_rs_host::host::HeaderImportState::accounting_unknown: bool
+pub lean_rs_host::host::HeaderImportState::imports: u64
+pub lean_rs_host::host::HeaderImportState::non_memory_mapped_bytes: u64
+pub lean_rs_host::host::HeaderImportState::recycle_requested: bool
+impl core::clone::Clone for lean_rs_host::host::HeaderImportState
+pub fn lean_rs_host::host::HeaderImportState::clone(&self) -> lean_rs_host::host::HeaderImportState
+impl core::default::Default for lean_rs_host::host::HeaderImportState
+pub fn lean_rs_host::host::HeaderImportState::default() -> lean_rs_host::host::HeaderImportState
+impl core::fmt::Debug for lean_rs_host::host::HeaderImportState
+pub fn lean_rs_host::host::HeaderImportState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_rs_host::host::HeaderImportState
+impl<'de> serde_core::de::Deserialize<'de> for lean_rs_host::host::HeaderImportState
+pub fn lean_rs_host::host::HeaderImportState::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for lean_rs_host::host::HeaderImportState
+impl core::marker::Send for lean_rs_host::host::HeaderImportState
+impl core::marker::Sync for lean_rs_host::host::HeaderImportState
+impl core::marker::Unpin for lean_rs_host::host::HeaderImportState
+impl core::marker::UnsafeUnpin for lean_rs_host::host::HeaderImportState
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::HeaderImportState
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::HeaderImportState
 pub struct lean_rs_host::host::LeanBracketedDeclarationInfo
 pub lean_rs_host::host::LeanBracketedDeclarationInfo::exists: bool
 pub lean_rs_host::host::LeanBracketedDeclarationInfo::kind: core::option::Option<alloc::string::String>
@@ -3199,7 +3220,9 @@ pub struct lean_rs_host::host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::attempt_proof(&mut self, &lean_rs_host::ProofAttemptRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofAttemptOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_header_cache(&mut self) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::configure_header_import_budget(&mut self, u64, u64) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -3211,6 +3234,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::op
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::extension_registry_epoch(&self) -> u64
+pub fn lean_rs_host::LeanSession<'lean, 'c>::header_import_state(&self) -> lean_rs::error::LeanResult<lean_rs_host::host::HeaderImportState>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>
@@ -4946,7 +4970,9 @@ pub struct lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::attempt_proof(&mut self, &lean_rs_host::ProofAttemptRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofAttemptOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_header_cache(&mut self) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::configure_header_import_budget(&mut self, u64, u64) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_kind_bulk(&mut self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<alloc::string::String>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::declaration_name(&mut self, &str, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
@@ -4958,6 +4984,7 @@ pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate(&mut self, &str, core::op
 pub fn lean_rs_host::LeanSession<'lean, 'c>::elaborate_bulk(&mut self, &[&str], &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<alloc::vec::Vec<core::result::Result<lean_rs::handle::expr::LeanExpr<'lean>, lean_rs_host::LeanElabFailure>>>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::expr_to_string_raw(&mut self, &lean_rs::handle::expr::LeanExpr<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<alloc::string::String>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::extension_registry_epoch(&self) -> u64
+pub fn lean_rs_host::LeanSession<'lean, 'c>::header_import_state(&self) -> lean_rs::error::LeanResult<lean_rs_host::host::HeaderImportState>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::import_stats(&self) -> &lean_rs_host::LeanImportStats
 pub fn lean_rs_host::LeanSession<'lean, 'c>::inspect_declaration(&mut self, &lean_rs_host::host::declaration_search::DeclarationInspectionRequest, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::host::declaration_search::DeclarationInspectionResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::kernel_check(&mut self, &str, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanKernelOutcome<'lean>>

@@ -136,7 +136,7 @@
 
 use core::cell::Cell;
 use std::sync::{Mutex, TryLockError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
@@ -591,16 +591,57 @@ pub(crate) fn with_session_import_lock<T>(f: impl FnOnce() -> LeanResult<T>) -> 
     with_import_lock(&SESSION_IMPORT_LOCK, f)
 }
 
+thread_local! {
+    static IN_IMPORT_OPERATION: Cell<bool> = const { Cell::new(false) };
+}
+
+struct ImportOperationGuard;
+
+impl Drop for ImportOperationGuard {
+    fn drop(&mut self) {
+        IN_IMPORT_OPERATION.set(false);
+    }
+}
+
 fn with_import_lock<T>(lock: &Mutex<()>, f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
-    let _import_guard = match lock.try_lock() {
-        Ok(guard) => guard,
-        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-        Err(TryLockError::WouldBlock) => {
+    with_import_lock_timeout(lock, Duration::from_secs(30), f)
+}
+
+fn with_import_lock_timeout<T>(
+    lock: &Mutex<()>,
+    timeout: Duration,
+    f: impl FnOnce() -> LeanResult<T>,
+) -> LeanResult<T> {
+    if IN_IMPORT_OPERATION.get() {
+        return Err(lean_rs::__host_internals::host_resource_exhausted(
+            "recursive host import/source operation is not supported",
+        ));
+    }
+    let started = Instant::now();
+    let mut attempted = false;
+    let _import_guard = loop {
+        if attempted && started.elapsed() >= timeout {
             return Err(lean_rs::__host_internals::host_resource_exhausted(
-                "host import/source state is busy in this process; retry after the active operation returns (recursive calls are not supported)",
+                "timed out waiting for another host import/source operation in this process",
             ));
         }
+        attempted = true;
+        match lock.try_lock() {
+            Ok(guard) => break guard,
+            Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(lean_rs::__host_internals::host_resource_exhausted(
+                        "timed out waiting for another host import/source operation in this process",
+                    ));
+                }
+                std::thread::sleep(remaining.min(Duration::from_millis(10)));
+            }
+        }
     };
+    IN_IMPORT_OPERATION.set(true);
+    let _operation_guard = ImportOperationGuard;
     f()
 }
 
@@ -2639,14 +2680,15 @@ fn unsupported_meta_response<Resp>(symbol: &str) -> LeanMetaResponse<Resp> {
     reason = "test assertions fail the test on unexpected lock behavior"
 )]
 mod import_lock_tests {
-    use super::with_import_lock;
+    use super::{with_import_lock, with_import_lock_timeout};
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn import_lock_reentry_fails_without_waiting() {
         let lock = Mutex::new(());
         let error = with_import_lock(&lock, || with_import_lock(&lock, || Ok(()))).expect_err("reentry fails");
-        assert!(error.to_string().contains("busy"));
+        assert!(error.to_string().contains("recursive"));
         with_import_lock(&lock, || Ok(())).expect("outer guard released");
     }
 
@@ -2660,14 +2702,41 @@ mod import_lock_tests {
     }
 
     #[test]
-    fn import_lock_concurrent_call_is_explicitly_busy() {
+    fn import_lock_concurrent_call_waits_then_succeeds() {
         let lock = Arc::new(Mutex::new(()));
         let guard = lock.lock().expect("hold lock");
         let other = Arc::clone(&lock);
-        let busy = std::thread::spawn(move || with_import_lock(&other, || Ok(())).is_err())
-            .join()
-            .expect("join");
-        assert!(busy);
+        let (entered, received) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            with_import_lock(&other, || {
+                entered.send(()).expect("report entry");
+                Ok(())
+            })
+        });
+        assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(guard);
+        received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("waiter enters after release");
+        waiter.join().expect("join").expect("concurrent operation succeeds");
+    }
+
+    #[test]
+    #[allow(clippy::panic, reason = "assert the guarded body never runs on timeout")]
+    fn import_lock_timeout_does_not_enter_or_poison_next_call() {
+        let lock = Arc::new(Mutex::new(()));
+        let guard = lock.lock().expect("hold lock");
+        let other = Arc::clone(&lock);
+        let waiter = std::thread::spawn(move || {
+            let started = Instant::now();
+            let error = with_import_lock_timeout::<()>(&other, Duration::from_millis(20), || {
+                panic!("must not enter while another operation owns the lock")
+            })
+            .expect_err("bounded contention returns an error");
+            assert!(error.to_string().contains("timed out"));
+            assert!(started.elapsed() >= Duration::from_millis(20));
+        });
+        waiter.join().expect("join");
         drop(guard);
         with_import_lock(&lock, || Ok(())).expect("capacity available again");
     }

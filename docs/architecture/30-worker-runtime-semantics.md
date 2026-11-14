@@ -437,12 +437,14 @@ This byte budget is not a peak-memory prediction or a substitute for process iso
 
 The direct in-process host API guards imports, source elaboration, and cache/accounting
 access with one process-local mutex because Lean's extension registry and these caches
-are global. It never waits for this mutex: concurrent or recursive entry returns an
-explicit busy resource error before entering Lean. The caller may retry after the active
-operation returns. Rust unwinding releases the guard, including after a panic. Ordinary
-lookups and separate worker processes do not acquire this mutex. This deliberately avoids
-an unbounded wait or callback reentry deadlock; it changes concurrent direct-host imports
-from implicit waiting to an explicit busy result.
+are global. Calls wait up to 30 seconds for another thread to finish; timeout returns
+an explicit resource error before entering Lean. Same-thread recursive entry fails
+immediately, so a synchronous callback cannot deadlock on its own lock. A callback that
+starts another thread and waits for that thread can still encounter the bounded timeout;
+callers should not synchronously reenter the host that way. Rust unwinding releases both
+the lock and the thread-local recursion guard, including after a panic. Ordinary lookups
+and separate worker processes do not acquire this mutex. Normal concurrent direct-host
+imports retain their waiting behavior; stuck contention no longer waits indefinitely.
 
 `max_imports` keeps its session-import count meaning (plus the existing import-like
 fixture calls). The child checks that count on actual session-cache misses, even when
