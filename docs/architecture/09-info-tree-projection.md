@@ -163,3 +163,23 @@ No new status variant is introduced: `BudgetExceeded` already names "the worker 
 resource envelope," which is exactly the degraded case. `LEAN_RS_VERIFY_RSS_TAINT_KIB` is an internal env var plumbed
 from the pool's per-worker RSS ceiling by `LeanWorkerModuleCacheLimits::verify_rss_taint_kib`, mirroring
 `LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB`; it is not a public knob.
+
+## Reusing module headers after edits
+
+A cached snapshot keeps both its input session environment and the environment produced by its header. When only the
+body changes, `buildModuleSnapshot` reuses the header environment and its messages. This avoids a fresh
+`processHeader` import and lets Lean reuse unchanged commands in the body.
+
+Reuse requires the same input environment object, exact header text, file label, and heartbeat setting. Exact text
+retains import order, `public import`, `import all`, and source positions. A changed session, header, or option takes
+the normal header-processing path. A header that reported errors also retries rather than reusing a failed import.
+The old body's final environment never serves as the new starting environment.
+The existing snapshot cache bounds retention; this adds no separate cache or lock.
+
+Tests compare warm and cold query results after body, visibility, option, file-label, and session changes. A private
+Lean probe also checks environment identity and rejects changed inputs, so the performance regression cannot pass
+merely because repeated imports produce equal answers.
+
+This removes repeated imports while a matching snapshot remains cached. It does not remove the first header import,
+account for its memory in the supervisor, or make a C++ runtime exception recoverable. Existing process isolation and
+resource limits remain unchanged.

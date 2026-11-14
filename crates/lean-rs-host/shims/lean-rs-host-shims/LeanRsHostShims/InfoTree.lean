@@ -1718,6 +1718,13 @@ private structure ModuleSnapshot where
       Compared by pointer when a later build of the same file asks whether it
       may continue from this snapshot's command chain. -/
   baseEnv : Environment
+  /-- Inputs and messages for reusing a module header without importing it again.
+      Keep the session environment itself: its identity changes after imports or
+      extension state change, even when the import names stay the same. -/
+  inputEnv : Environment
+  headerSource : String
+  headerMessages : MessageLog
+  fileLabel : String
   heartbeats : UInt64
   namespaceContext : String
   /-- Lean's per-command snapshot chain from the build that produced this
@@ -1857,6 +1864,19 @@ private def reusableIncrementalState? (old : ModuleSnapshot) (baseEnv : Environm
   else
     none
 
+/-- Reuse only the header, never the environment after the old body. Exact header
+    text preserves import visibility, order, and source positions. The heartbeat
+    value is the only option supplied to `processHeader` here. -/
+private def reusableHeader? (old : ModuleSnapshot) (env : Environment)
+    (headerSource fileLabel : String) (heartbeats : UInt64) :
+    Option (Environment × MessageLog) :=
+  let sameEnv := unsafe ptrEq old.inputEnv env
+  if sameEnv && old.headerSource == headerSource && old.fileLabel == fileLabel &&
+      old.heartbeats == heartbeats && old.missing.isEmpty && !old.headerMessages.hasErrors then
+    some (old.baseEnv, old.headerMessages)
+  else
+    none
+
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (policy : ModuleQueryCachePolicy)
     (old? : Option ModuleSnapshot := none) :
@@ -1872,11 +1892,15 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
   let userImports := (Lean.Elab.headerToImports header (includeInit := false)).map (·.module.toString)
   let loadedModules := env.header.moduleNames.map (·.toString)
   let missing := userImports.filter (fun nm => ! loadedModules.contains nm)
+  let headerSource := String.Pos.Raw.extract source 0 parserState.pos
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
-        unsafe Lean.enableInitializersExecution
-        Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
+        match old?.bind (fun old => reusableHeader? old env headerSource fileLabel heartbeats) with
+        | some cached => pure cached
+        | none =>
+          unsafe Lean.enableInitializersExecution
+          Lean.Elab.processHeader header opts headerMessages inputCtx (mainModule := Name.anonymous)
       catch ex =>
         let elapsed ← elapsedMicrosSince headerStart
         return .error (LeanRsFixture.Elaboration.singleErrorFailure (toString ex) fileLabel, elapsed)
@@ -1890,7 +1914,6 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let head := commandState.scopes.headD { header := "", opts }
     commandState := { commandState with scopes := [{ head with currNamespace := namespaceContext.toName }] }
   let elabStart ← IO.monoMsNow
-  let headerSource := String.Pos.Raw.extract source 0 parserState.pos
   let bodySource := String.Pos.Raw.extract source parserState.pos source.rawEndPos
   let lineOffset := countNewlines headerSource
   let document := SourceDocument.fromSources source bodySource lineOffset
@@ -1915,6 +1938,10 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       missing
       env := commandState.env
       baseEnv := commandEnv
+      inputEnv := env
+      headerSource
+      headerMessages := initialMessages
+      fileLabel
       heartbeats
       namespaceContext
       incremental? := none
@@ -1949,6 +1976,10 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       missing
       env := finalCmdState.env
       baseEnv := commandEnv
+      inputEnv := env
+      headerSource
+      headerMessages := initialMessages
+      fileLabel
       heartbeats
       namespaceContext
       incremental? := some st

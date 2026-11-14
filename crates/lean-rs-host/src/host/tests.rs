@@ -2940,3 +2940,162 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
         "`import all` must resolve the named module, got {messages:?}",
     );
 }
+
+/// Warm module headers must preserve the same visibility and diagnostics as a
+/// fresh import, including when a caller changes the header or its options.
+#[test]
+fn cached_module_headers_match_cold_queries_after_edits() {
+    use crate::host::process::{
+        ModuleQueryBatchCachedOutcome, ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector,
+    };
+
+    let project = TempLakeProject::new("cached-module-header-host");
+    write_module_syntax_fixture(&project);
+    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
+    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let imports = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
+    let mut session = caps.session(&imports, None, None).expect("session imports fixture");
+    let header = "module\npublic import Fixture.Imported\nimport all Fixture.Internal\nimport Fixture.PrivateScope\n";
+    let base = format!("{header}\ndef foo : Nat := imported + internalSecret\n#check privateOnly\n");
+    let cases = [
+        (
+            format!("{base}\ndef bar : Nat := 3\n"),
+            "body",
+            100_000,
+            "/cache/module.lean",
+        ),
+        (
+            base.replace("import all Fixture.Internal", "import Fixture.Internal"),
+            "visibility",
+            100_000,
+            "/cache/module.lean",
+        ),
+        (
+            base.replace("import Fixture.PrivateScope", "import all Fixture.PrivateScope"),
+            "private",
+            100_000,
+            "/cache/module.lean",
+        ),
+        (
+            base.replace("public import Fixture.Imported", "import Fixture.Imported"),
+            "public",
+            100_000,
+            "/cache/module.lean",
+        ),
+        (base.clone(), "options", 200_000, "/cache/module.lean"),
+        (base.clone(), "label", 100_000, "/cache/other.lean"),
+    ];
+    let selectors = [ModuleQuerySelector::Diagnostics {
+        id: "diagnostics".to_owned(),
+    }];
+    let budgets = ModuleQueryOutputBudgets::default();
+    let policy = |key: &str| ModuleQueryCachePolicy {
+        file_identity: "module-header-test".to_owned(),
+        key: key.to_owned(),
+        max_entries: 8,
+        ttl_millis: 60_000,
+        max_bytes: 1_048_576,
+    };
+    let baseline_opts = LeanElabOptions::new()
+        .file_label("/cache/module.lean")
+        .heartbeat_limit(100_000);
+    for (source, name, heartbeats, label) in cases {
+        session.clear_module_snapshot_cache().expect("clear prior case");
+        session
+            .process_module_query_batch_cached(&base, &selectors, &budgets, &baseline_opts, &policy("base"), None)
+            .expect("seed snapshot");
+        let opts = LeanElabOptions::new().file_label(label).heartbeat_limit(heartbeats);
+        let warm = session
+            .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
+            .expect("warm query");
+        session.clear_module_snapshot_cache().expect("clear warm snapshot");
+        let cold = session
+            .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
+            .expect("cold query");
+        let (
+            ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
+            ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
+        ) = (warm, cold)
+        else {
+            panic!("expected successful envelopes for {name}");
+        };
+        assert_eq!(
+            format!("{:?}", warm.items),
+            format!("{:?}", cold.items),
+            "warm/cold mismatch: {name}"
+        );
+    }
+    // Same file and header, but a different imported environment. The global
+    // snapshot cache must not carry a header environment across sessions.
+    let mut other = caps
+        .session(
+            &["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"],
+            None,
+            None,
+        )
+        .expect("different session imports fixture");
+    let warm = other
+        .process_module_query_batch_cached(
+            &base,
+            &selectors,
+            &budgets,
+            &baseline_opts,
+            &policy("new-session"),
+            None,
+        )
+        .expect("new-session query");
+    other.clear_module_snapshot_cache().expect("clear new-session snapshot");
+    let cold = other
+        .process_module_query_batch_cached(
+            &base,
+            &selectors,
+            &budgets,
+            &baseline_opts,
+            &policy("new-session"),
+            None,
+        )
+        .expect("cold new-session query");
+    let (
+        ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
+        ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
+    ) = (warm, cold)
+    else {
+        panic!("expected successful new-session envelopes");
+    };
+    assert_eq!(format!("{:?}", warm.items), format!("{:?}", cold.items));
+}
+
+/// Check reuse by object identity, not timing. Compile the private-state probe
+/// with the shim source so no test-only symbol enters the shipped library.
+#[test]
+fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
+    let package = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shims/lean-rs-host-shims");
+    let build = Command::new("lake")
+        .args(["build", "LeanRsHostShims.Elaboration"])
+        .current_dir(&package)
+        .output()
+        .expect("build probe imports");
+    assert!(
+        build.status.success(),
+        "probe imports: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let project = TempLakeProject::new("header-reuse-private-probe");
+    let source = fs::read_to_string(package.join("LeanRsHostShims/InfoTree.lean")).expect("read shim source");
+    project.write(
+        "HeaderReuseProbe.lean",
+        &format!("{source}\n{}", include_str!("../../tests/lean/header_reuse_probe.lean")),
+    );
+    let result = Command::new("lake")
+        .args(["env", "lean"])
+        .arg(project.path().join("HeaderReuseProbe.lean"))
+        .current_dir(package)
+        .output()
+        .expect("run header reuse probe");
+    assert!(
+        result.status.success(),
+        "header reuse probe failed:\n{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr),
+    );
+}
