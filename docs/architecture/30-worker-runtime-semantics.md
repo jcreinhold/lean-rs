@@ -370,3 +370,26 @@ This document is the mathematical runtime model used by the Rust implementation.
 [`31-runtime-model-proof-home.md`](31-runtime-model-proof-home.md), and the first checked Lean skeleton lives under
 `formal/RuntimeModel/`. Mechanized proofs should preserve these labels or update this document first, then prove a
 `Step` relation and trace-refinement theorem for the worker and pool transition systems.
+
+## Worker pipe I/O (macOS and Linux)
+
+The parent uses nonblocking Unix pipe ends. Read and write loops check cancellation
+or deadlines between attempts; they wait 5 ms when a pipe is not ready. The child
+keeps blocking pipe ends. These changes do not claim Windows support.
+
+Stderr drains from startup into a 64 KiB byte tail. After exit, collection allows
+100 ms for EOF, then stops and joins its reader even if a descendant still holds
+the pipe open. Stdout readers also receive a stop signal before joining. No pipe
+thread needs a descendant to close an inherited descriptor before it can stop.
+
+Request deadlines include writing stdin and reading the response. Cancellation,
+timeout, or a write I/O error kills and reaps the child: a possibly partial frame
+is never reused. Encoding and frame-size errors before writing do not retire a
+healthy worker. Sending the shutdown request also has a deadline. Stderr is
+diagnostic output, never proof evidence.
+
+These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or
+serialization. Killing, reaping, and starting a replacement also take time after a
+request expires. If the OS cannot confirm exit, cleanup returns an error and keeps
+ownership rather than treating the child as stopped. Slot recovery after that
+failure requires the separate retained-child lifecycle work.

@@ -63,6 +63,10 @@ fn main() {
 
     let tests: &[(&str, fn() -> Result<(), String>)] = &[
         (
+            "send_and_response_share_deadline_and_replacement_remains_usable",
+            send_and_response_share_deadline_and_replacement_remains_usable,
+        ),
+        (
             "conformance_terminal_success_has_one_terminal_outcome",
             conformance_terminal_success_has_one_terminal_outcome,
         ),
@@ -188,6 +192,10 @@ fn run_fake_child(mode: &str) {
         other => panic!("expected frame-limit configuration, got {other:?}"),
     }
 
+    if mode == "slow_send_and_response" {
+        thread::sleep(Duration::from_millis(200));
+    }
+
     loop {
         let frame = {
             let mut stdin = io::stdin().lock();
@@ -218,6 +226,9 @@ fn run_fake_child(mode: &str) {
                 sleep_forever();
             }
             Request::EmitTestRows { streams } => {
+                if mode == "slow_send_and_response" {
+                    thread::sleep(Duration::from_millis(200));
+                }
                 let mut emitter = DataRowEmitter::default();
                 for stream in streams {
                     let payload = RawValue::from_string(format!(r#"{{"stream":"{stream}"}}"#))
@@ -549,6 +560,23 @@ fn assert_single_terminal(trace: &[RuntimeTraceEvent], generation: u64, request:
             "expected exactly one terminal outcome for generation {generation} request {request}, got {terminal_count}: {trace:?}"
         ))
     }
+}
+
+fn send_and_response_share_deadline_and_replacement_remains_usable() -> Result<(), String> {
+    let mut worker = fake_worker_with_config("slow_send_and_response", |config| {
+        config.request_timeout(Duration::from_millis(300))
+    })
+    .map_err(|error| error.to_string())?;
+    // Larger than the pipe buffer, so sending waits for the child to read.
+    let result = worker.__emit_test_rows(vec!["x".repeat(256 * 1024)], None, None);
+    if !matches!(result, Err(LeanWorkerError::Timeout { .. })) {
+        return Err(format!("send and response did not share deadline: {result:?}"));
+    }
+    worker
+        .health()
+        .map_err(|error| format!("replacement is not usable: {error}"))?;
+    worker.shutdown().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn fake_worker(mode: &str) -> Result<LeanWorker, LeanWorkerError> {

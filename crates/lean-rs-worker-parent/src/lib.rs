@@ -17,6 +17,7 @@
 #![deny(unsafe_code)]
 
 mod capability;
+mod pipe;
 mod planning;
 mod pool;
 mod session;

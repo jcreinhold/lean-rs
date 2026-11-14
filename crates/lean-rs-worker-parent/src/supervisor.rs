@@ -1,11 +1,13 @@
+use crate::pipe::Pipe;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{BufReader, BufWriter, Read as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -46,6 +48,87 @@ const DEFAULT_RESTART_INTENSITY_LIMIT: u64 = 16;
 /// child's own `SESSION_POOL_DEFAULT_CAPACITY`, which is what such a child uses.
 const DEFAULT_REUSE_HINT_CAPACITY: usize = 4;
 const DEFAULT_RESTART_INTENSITY_WINDOW: Duration = Duration::from_mins(1);
+
+// Drain stderr from startup onward: pipe capacity must never stop Lean. Keep
+// only the newest bytes, even when a worker writes without newlines.
+const STDERR_TAIL_BYTES: usize = 64 * 1024;
+
+#[derive(Debug)]
+struct StderrCapture {
+    tail: Arc<Mutex<VecDeque<u8>>>,
+    stopped: Arc<AtomicBool>,
+    reader: Option<thread::JoinHandle<()>>,
+}
+
+impl StderrCapture {
+    fn start(pipe: ChildStderr) -> std::io::Result<Self> {
+        let mut pipe = Pipe::new(pipe)?;
+        let stopped = Arc::clone(&pipe.stopped);
+        let tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_BYTES)));
+        let target = Arc::clone(&tail);
+        let reader = thread::spawn(move || {
+            let mut chunk = [0_u8; 8192];
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        let mut bytes = target.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let discard = bytes.len().saturating_add(count).saturating_sub(STDERR_TAIL_BYTES);
+                        bytes.drain(..discard);
+                        bytes.extend(chunk.iter().take(count));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Self {
+            tail,
+            stopped,
+            reader: Some(reader),
+        })
+    }
+
+    fn finish(mut self) -> String {
+        // Stop our own pipe read even if another process inherited its write end.
+        let started = Instant::now();
+        while self.reader.as_ref().is_some_and(|reader| !reader.is_finished())
+            && started.elapsed() < Duration::from_millis(100)
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+        self.stop();
+        let bytes = self.tail.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&bytes.iter().copied().collect::<Vec<_>>()).into_owned()
+    }
+
+    fn stop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        if let Some(reader) = self.reader.take() {
+            let _joined = reader.join();
+        }
+    }
+}
+
+impl Drop for StderrCapture {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+struct ReaderGuard {
+    stopped: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for ReaderGuard {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _joined = thread.join();
+        }
+    }
+}
 
 /// Own a newly spawned process until all pipe/handshake/config setup succeeds.
 /// `Child` itself does not terminate or reap its process when dropped.
@@ -625,7 +708,7 @@ pub enum LeanWorkerRestartReason {
     /// hard error.
     ///
     /// `status` and `diagnostics` are carried because they are otherwise
-    /// **unrecoverable**: the child's stderr pipe is drained once, at exit, by
+    /// **unrecoverable**: the child's bounded stderr tail is captured at exit by
     /// the same code path that builds this reason, and nothing else retains it.
     /// A consumer that only sees `stable_cause() == "child_abort"` cannot
     /// distinguish a Lean out-of-memory panic from a segfault from a protocol
@@ -1453,9 +1536,10 @@ impl WorkerSupervisorState {
 pub struct LeanWorker {
     config: LeanWorkerConfig,
     child: Option<Child>,
-    stdin: Option<BufWriter<ChildStdin>>,
-    stdout: Option<BufReader<ChildStdout>>,
-    stderr: Option<ChildStderr>,
+    stdin: Option<BufWriter<Pipe<ChildStdin>>>,
+    request_started: Option<Instant>,
+    stdout: Option<BufReader<Pipe<ChildStdout>>>,
+    stderr: Option<StderrCapture>,
     last_exit: Option<LeanWorkerExit>,
     /// A failed replacement's process is still owned until cleanup proves exit.
     /// Historical `last_exit` belongs to an earlier child and is not that proof.
@@ -1572,6 +1656,9 @@ impl LeanWorker {
             .child_mut()?
             .stdin
             .take()
+            .map(Pipe::new)
+            .transpose()
+            .map_err(|source| LeanWorkerError::Wait { source })?
             .map(BufWriter::new)
             .ok_or_else(|| LeanWorkerError::Setup {
                 message: "child stdin unavailable".to_owned(),
@@ -1579,7 +1666,15 @@ impl LeanWorker {
         let stdout = child.child_mut()?.stdout.take().ok_or_else(|| LeanWorkerError::Setup {
             message: "child stdout unavailable".to_owned(),
         })?;
-        let stderr = child.child_mut()?.stderr.take();
+        let stderr = child
+            .child_mut()?
+            .stderr
+            .take()
+            .map(StderrCapture::start)
+            .transpose()
+            .map_err(|source| LeanWorkerError::Wait { source })?;
+        let stdout = Pipe::new(stdout).map_err(|source| LeanWorkerError::Wait { source })?;
+        let handshake_stop = Arc::clone(&stdout.stopped);
 
         let max_frame_bytes = config.max_frame_bytes;
         let (sender, receiver) = mpsc::channel();
@@ -1607,6 +1702,7 @@ impl LeanWorker {
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                handshake_stop.store(true, Ordering::Release);
                 let _exit = wait_with_stderr(child, stderr)?;
                 return Err(LeanWorkerError::Timeout {
                     operation: "startup",
@@ -1656,6 +1752,7 @@ impl LeanWorker {
             config: config.clone(),
             child: Some(child),
             stdin: Some(stdin),
+            request_started: None,
             stdout: Some(stdout),
             stderr,
             last_exit: None,
@@ -2006,7 +2103,7 @@ impl LeanWorker {
         const OPERATION: &str = "emit_test_rows";
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
-        self.send_request(Request::EmitTestRows { streams })?;
+        self.send_request_cancellable(Request::EmitTestRows { streams }, OPERATION, cancellation)?;
         self.record_request(false);
         match self.read_response_with_events(
             OPERATION,
@@ -2034,7 +2131,7 @@ impl LeanWorker {
         const OPERATION: &str = "emit_test_rows_then_exit";
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
-        self.send_request(Request::EmitTestRowsThenExit)?;
+        self.send_request_cancellable(Request::EmitTestRowsThenExit, OPERATION, cancellation)?;
         self.record_request(false);
         let response = self.read_response_with_events(
             OPERATION,
@@ -2060,7 +2157,7 @@ impl LeanWorker {
         const OPERATION: &str = "emit_test_rows_then_panic";
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
-        self.send_request(Request::EmitTestRowsThenPanic)?;
+        self.send_request_cancellable(Request::EmitTestRowsThenPanic, OPERATION, cancellation)?;
         self.record_request(false);
         let response = self.read_response_with_events(
             OPERATION,
@@ -2146,12 +2243,16 @@ impl LeanWorker {
             },
             LeanWorkerSessionMode::ShimsOnly => HostSessionMode::ShimsOnly,
         };
-        self.send_request(Request::OpenHostSession {
-            project_root: config.project_root_string(),
-            mode,
-            imports: config.imports().to_vec(),
-            import_profile: config.import_profile(),
-        })?;
+        self.send_request_cancellable(
+            Request::OpenHostSession {
+                project_root: config.project_root_string(),
+                mode,
+                imports: config.imports().to_vec(),
+                import_profile: config.import_profile(),
+            },
+            OPERATION,
+            cancellation,
+        )?;
         self.record_request(false);
         // Every non-confirming outcome — an error response, a read failure, a
         // cancellation — leaves the child in a state the parent did not observe:
@@ -2648,10 +2749,14 @@ impl LeanWorker {
         const OPERATION: &str = "worker_list_declarations_strings";
         check_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
-        self.send_request(Request::ListDeclarationsStrings {
-            filter,
-            progress: progress.is_some(),
-        })?;
+        self.send_request_cancellable(
+            Request::ListDeclarationsStrings {
+                filter,
+                progress: progress.is_some(),
+            },
+            OPERATION,
+            cancellation,
+        )?;
         self.record_request(false);
         let collector = DeclarationNameCollector::default();
         let response = self.read_response_with_events(
@@ -2863,11 +2968,15 @@ impl LeanWorker {
             message: format!("worker data-stream request JSON encode failed: {err}"),
         })?;
         self.prepare_request(false)?;
-        self.send_request(Request::RunDataStream {
-            export: export.to_owned(),
-            request_json,
-            progress: progress.is_some(),
-        })?;
+        self.send_request_cancellable(
+            Request::RunDataStream {
+                export: export.to_owned(),
+                request_json,
+                progress: progress.is_some(),
+            },
+            OPERATION,
+            cancellation,
+        )?;
         self.record_request(false);
         self.stats.stream_requests = self.stats.stream_requests.saturating_add(1);
         match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
@@ -2977,18 +3086,107 @@ impl LeanWorker {
     }
 
     fn send_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
+        self.send_request_cancellable(request, "worker_request", None)
+    }
+
+    fn send_request_cancellable(
+        &mut self,
+        request: Request,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<(), LeanWorkerError> {
+        check_cancelled(operation, cancellation)?;
         self.ensure_running()?;
-        self.write_request(request)
+        let started = Instant::now();
+        let result = self.write_request_bounded(request, operation, cancellation, self.config.request_timeout);
+        if let Err(error) = result {
+            let reason = match &error {
+                LeanWorkerError::Cancelled { .. } => LeanWorkerRestartReason::Cancelled { operation },
+                LeanWorkerError::Timeout { .. } => LeanWorkerRestartReason::RequestTimeout {
+                    operation,
+                    duration: self.config.request_timeout,
+                },
+                _ => return Err(error),
+            };
+            self.restart_with_reason(reason)?;
+            return Err(error);
+        }
+        self.request_started = Some(started);
+        Ok(())
     }
 
     fn write_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
+        self.write_request_bounded(request, "shutdown_send", None, self.config.shutdown_timeout)
+    }
+
+    fn write_request_bounded(
+        &mut self,
+        request: Request,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        timeout: Duration,
+    ) -> Result<(), LeanWorkerError> {
         let max_frame_bytes = self.config.max_frame_bytes;
-        let Some(stdin) = self.stdin.as_mut() else {
+        let Some(mut stdin) = self.stdin.take() else {
             return Err(self.dead_error());
         };
-        write_frame(stdin, Message::Request(request), max_frame_bytes).map_err(|err| LeanWorkerError::Protocol {
-            message: err.to_string(),
-        })
+        stdin.get_mut().deadline = Instant::now().checked_add(timeout);
+        stdin.get_mut().cancellation = cancellation.cloned();
+        let result = write_frame(&mut stdin, Message::Request(request), max_frame_bytes);
+        stdin.get_mut().deadline = None;
+        stdin.get_mut().cancellation = None;
+        let cancelled = cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled);
+        match result {
+            Ok(()) => {
+                self.stdin = Some(stdin);
+                Ok(())
+            }
+            Err(lean_rs_worker_protocol::protocol::ProtocolError::Io(error)) => {
+                // Prevent BufWriter::drop from retrying a partial buffered write.
+                stdin.get_ref().stopped.store(true, Ordering::Release);
+                drop(stdin);
+                self.shutdown_child(ShutdownIntent::KillOnly)?;
+                if cancelled {
+                    Err(LeanWorkerError::Cancelled {
+                        operation,
+                        resource: Box::new(worker_resource_facts(
+                            "worker_cancelled",
+                            true,
+                            Some(operation),
+                            &self.stats,
+                            self.stats.last_rss_kib,
+                            None,
+                            None,
+                        )),
+                    })
+                } else if error.kind() == std::io::ErrorKind::TimedOut {
+                    Err(LeanWorkerError::Timeout {
+                        operation,
+                        duration: timeout,
+                        resource: Box::new(worker_resource_facts(
+                            "worker_timeout",
+                            true,
+                            Some(operation),
+                            &self.stats,
+                            self.stats.last_rss_kib,
+                            None,
+                            Some(timeout),
+                        )),
+                    })
+                } else {
+                    Err(LeanWorkerError::Protocol {
+                        message: error.to_string(),
+                    })
+                }
+            }
+            Err(error) => {
+                // Encoding/frame-size errors occur before any bytes are written.
+                self.stdin = Some(stdin);
+                Err(LeanWorkerError::Protocol {
+                    message: error.to_string(),
+                })
+            }
+        }
     }
 
     fn begin_in_flight(&mut self, operation: &'static str) -> InFlightRequest {
@@ -3301,7 +3499,7 @@ impl LeanWorker {
     ) -> Result<R, LeanWorkerError> {
         check_cancelled(operation, cancellation)?;
         self.prepare_request(import_like)?;
-        self.send_request(request)?;
+        self.send_request_cancellable(request, operation, cancellation)?;
         self.record_request(import_like);
         let response = self.read_response_with_progress(operation, progress, cancellation)?;
         extract(response, operation)
@@ -3315,12 +3513,14 @@ impl LeanWorker {
         data: Option<LeanWorkerDataSinkTarget<'_>>,
         diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
     ) -> Result<Response, LeanWorkerError> {
-        let started = Instant::now();
+        let started = self.request_started.take().unwrap_or_else(Instant::now);
         let timeout = self.config.request_timeout;
         let deadline = started.checked_add(timeout);
         let streaming = data.is_some();
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
+        let reader_stop = Arc::clone(&stdout.get_ref().stopped);
+        reader_stop.store(false, Ordering::Release);
         let max_frame_bytes = self.config.max_frame_bytes;
         let request = self.begin_in_flight(operation);
         let generation = request.generation;
@@ -3328,6 +3528,10 @@ impl LeanWorker {
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
         let reader =
             thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation, request_id));
+        let reader = ReaderGuard {
+            stopped: reader_stop,
+            thread: Some(reader),
+        };
 
         loop {
             if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
@@ -3337,7 +3541,7 @@ impl LeanWorker {
                 if let Err(err) =
                     self.restart_with_reason_before_spawn(LeanWorkerRestartReason::Cancelled { operation }, || {
                         drop(receiver);
-                        drop(reader.join());
+                        drop(reader);
                     })
                 {
                     self.finish_in_flight();
@@ -3371,7 +3575,7 @@ impl LeanWorker {
                     },
                     || {
                         drop(receiver);
-                        drop(reader.join());
+                        drop(reader);
                     },
                 ) {
                     self.finish_in_flight();
@@ -3406,7 +3610,7 @@ impl LeanWorker {
                         },
                         || {
                             drop(receiver);
-                            drop(reader.join());
+                            drop(reader);
                         },
                     ) {
                         self.finish_in_flight();
@@ -3453,7 +3657,7 @@ impl LeanWorker {
                                 },
                                 || {
                                     drop(receiver);
-                                    drop(reader.join());
+                                    drop(reader);
                                 },
                             ) {
                                 self.finish_in_flight();
@@ -3476,7 +3680,7 @@ impl LeanWorker {
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
                             self.finish_in_flight();
-                            drop(reader.join());
+                            drop(reader);
                             return Err(LeanWorkerError::Protocol {
                                 message: "worker response reader exited without a terminal response".to_owned(),
                             });
@@ -3488,7 +3692,7 @@ impl LeanWorker {
                     Err(mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
                         self.finish_in_flight();
-                        drop(reader.join());
+                        drop(reader);
                         return Err(LeanWorkerError::Protocol {
                             message: "worker response reader exited without a terminal response".to_owned(),
                         });
@@ -3498,7 +3702,7 @@ impl LeanWorker {
                     Ok(event) => event,
                     Err(_err) => {
                         self.finish_in_flight();
-                        drop(reader.join());
+                        drop(reader);
                         return Err(LeanWorkerError::Protocol {
                             message: "worker response reader exited without a terminal response".to_owned(),
                         });
@@ -3508,14 +3712,14 @@ impl LeanWorker {
             if event.generation() != self.generation {
                 let actual_generation = event.generation();
                 self.finish_in_flight();
-                drop(reader.join());
+                drop(reader);
                 return Err(stale_worker_output_error(operation, self.generation, actual_generation));
             }
             if let Some(actual_request_id) = event.request_id()
                 && self.state.current_request_id() != Some(actual_request_id)
             {
                 self.finish_in_flight();
-                drop(reader.join());
+                drop(reader);
                 return Err(stale_worker_request_output_error(
                     operation,
                     self.state.current_request_id(),
@@ -3532,7 +3736,7 @@ impl LeanWorker {
                     match message {
                         Message::Response(Response::Error { code, message }) => {
                             self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                            drop(reader.join());
+                            drop(reader);
                             return Err(LeanWorkerError::Worker { code, message });
                         }
                         Message::Response(response) => {
@@ -3542,12 +3746,12 @@ impl LeanWorker {
                                 started,
                                 request_backpressure_waits,
                             );
-                            drop(reader.join());
+                            drop(reader);
                             return Ok(response);
                         }
                         other => {
                             self.terminalize_request_failure(streaming, started, request_backpressure_waits);
-                            drop(reader.join());
+                            drop(reader);
                             return Err(LeanWorkerError::Protocol {
                                 message: format!("worker sent unexpected {operation} message: {other:?}"),
                             });
@@ -3555,11 +3759,12 @@ impl LeanWorker {
                     }
                 }
                 RequestReaderEvent::ReadError { message, eof, .. } => {
-                    drop(reader.join());
+                    drop(reader);
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
                     return if eof {
                         Err(self.record_exit_error())
                     } else {
+                        self.shutdown_child(ShutdownIntent::KillOnly)?;
                         Err(LeanWorkerError::Protocol { message })
                     };
                 }
@@ -3572,6 +3777,7 @@ impl LeanWorker {
                         report_parent_progress(progress, elapsed_event(tick.phase, tick.current, tick.total, started))
                     {
                         self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                        self.shutdown_child(ShutdownIntent::KillOnly)?;
                         return Err(err);
                     }
                     if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
@@ -3582,7 +3788,7 @@ impl LeanWorker {
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
-                                drop(reader.join());
+                                drop(reader);
                             },
                         ) {
                             self.finish_in_flight();
@@ -3608,6 +3814,7 @@ impl LeanWorker {
                     let payload_bytes = row.payload.get().len() as u64;
                     if let Err(err) = report_parent_data_row(data, row) {
                         self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                        self.shutdown_child(ShutdownIntent::KillOnly)?;
                         return Err(err);
                     }
                     self.stats.data_rows_delivered = self.stats.data_rows_delivered.saturating_add(1);
@@ -3620,7 +3827,7 @@ impl LeanWorker {
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
-                                drop(reader.join());
+                                drop(reader);
                             },
                         ) {
                             self.finish_in_flight();
@@ -3645,15 +3852,18 @@ impl LeanWorker {
                     self.mark_current_request_streaming();
                     if let Err(err) = report_parent_diagnostic(diagnostics, diagnostic.into()) {
                         self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                        self.shutdown_child(ShutdownIntent::KillOnly)?;
                         return Err(err);
                     }
                 }
                 Message::Response(response) => {
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                    self.shutdown_child(ShutdownIntent::KillOnly)?;
                     return Err(unexpected_response(operation, &response));
                 }
                 other => {
                     self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                    self.shutdown_child(ShutdownIntent::KillOnly)?;
                     return Err(LeanWorkerError::Protocol {
                         message: format!("worker sent unexpected {operation} message: {other:?}"),
                     });
@@ -3717,14 +3927,13 @@ impl LeanWorker {
     }
 
     fn wait_for_exit(&mut self) -> Result<LeanWorkerExit, LeanWorkerError> {
-        let Some(child) = self.child.as_mut() else {
-            return Err(self.dead_error());
-        };
-        self.state = WorkerSupervisorState::Reaping {
-            generation: self.generation,
-        };
-        let status = child.wait().map_err(|source| LeanWorkerError::Wait { source })?;
-        Ok(self.finalize_child_exit(status))
+        match self.wait_for_exit_bounded("stdout_closed", self.config.shutdown_timeout) {
+            Ok((exit, _)) => Ok(exit),
+            Err(LeanWorkerError::WaitTimeout { .. }) => {
+                self.shutdown_child(ShutdownIntent::KillOnly).map(|report| report.exit)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn wait_for_exit_bounded(
@@ -3843,6 +4052,13 @@ impl LeanWorker {
                         LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled,
                     );
                 }
+                Err(LeanWorkerError::Timeout { .. }) => {
+                    return self.kill_and_report(
+                        started,
+                        graceful_timeout,
+                        LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled,
+                    );
+                }
                 Err(err) => return Err(err),
             }
         }
@@ -3857,17 +4073,23 @@ impl LeanWorker {
     ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         let grace_started = Instant::now();
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
+        let reader_stop = Arc::clone(&stdout.get_ref().stopped);
+        reader_stop.store(false, Ordering::Release);
         let max_frame_bytes = self.config.max_frame_bytes;
         let generation = self.generation;
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
         let reader = thread::spawn(move || read_request_messages(stdout, sender, max_frame_bytes, generation, None));
+        let reader = ReaderGuard {
+            stopped: reader_stop,
+            thread: Some(reader),
+        };
 
         loop {
             if let Some(child) = self.child.as_mut()
                 && let Some(status) = child.try_wait().map_err(|source| LeanWorkerError::Wait { source })?
             {
                 drop(receiver);
-                drop(reader.join());
+                drop(reader);
                 let wait_elapsed = grace_started.elapsed();
                 let exit = self.finalize_child_exit(status);
                 return Ok(LeanWorkerShutdownReport {
@@ -3887,7 +4109,7 @@ impl LeanWorker {
                     child.kill().map_err(|source| LeanWorkerError::Kill { source })?;
                 }
                 drop(receiver);
-                drop(reader.join());
+                drop(reader);
                 let (exit, wait_elapsed) =
                     self.wait_for_exit_bounded("kill_wait", LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT)?;
                 return Ok(LeanWorkerShutdownReport {
@@ -3907,7 +4129,7 @@ impl LeanWorker {
                     stdout,
                     ..
                 }) => {
-                    drop(reader.join());
+                    drop(reader);
                     self.stdout = Some(stdout);
                     let remaining = graceful_timeout.saturating_sub(grace_started.elapsed());
                     match self.wait_for_exit_bounded("shutdown", remaining) {
@@ -3932,7 +4154,7 @@ impl LeanWorker {
                     }
                 }
                 Ok(RequestReaderEvent::Terminal { stdout, .. }) => {
-                    drop(reader.join());
+                    drop(reader);
                     self.stdout = Some(stdout);
                     return self.kill_and_report(
                         started,
@@ -3941,7 +4163,7 @@ impl LeanWorker {
                     );
                 }
                 Ok(RequestReaderEvent::ReadError { eof: true, .. }) => {
-                    drop(reader.join());
+                    drop(reader);
                     let remaining = graceful_timeout.saturating_sub(grace_started.elapsed());
                     match self.wait_for_exit_bounded("shutdown", remaining) {
                         Ok((exit, wait_elapsed)) => {
@@ -3965,7 +4187,7 @@ impl LeanWorker {
                     }
                 }
                 Ok(RequestReaderEvent::ReadError { .. }) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    drop(reader.join());
+                    drop(reader);
                     return self.kill_and_report(
                         started,
                         graceful_timeout,
@@ -3984,6 +4206,19 @@ impl LeanWorker {
         outcome: LeanWorkerShutdownOutcome,
     ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
         let kill_started = Instant::now();
+        if self.child.is_none()
+            && self.pending_startup.is_none()
+            && let Some(exit) = self.last_exit.clone()
+        {
+            return Ok(LeanWorkerShutdownReport {
+                outcome,
+                exit,
+                graceful_timeout,
+                elapsed: started.elapsed(),
+                kill_elapsed: Some(started.elapsed()),
+                wait_elapsed: Duration::ZERO,
+            });
+        }
         self.state = WorkerSupervisorState::Killing {
             generation: self.generation,
         };
@@ -4021,11 +4256,7 @@ impl LeanWorker {
     }
 
     fn read_stderr(&mut self) -> String {
-        let mut diagnostics = String::new();
-        if let Some(mut pipe) = self.stderr.take() {
-            drop(pipe.read_to_string(&mut diagnostics));
-        }
-        diagnostics
+        self.stderr.take().map_or_else(String::new, StderrCapture::finish)
     }
 
     fn child_rss_kib(&mut self) -> Option<u64> {
@@ -4050,7 +4281,7 @@ enum RequestReaderEvent {
         generation: WorkerGeneration,
         request_id: Option<WorkerRequestId>,
         message: Message,
-        stdout: BufReader<ChildStdout>,
+        stdout: BufReader<Pipe<ChildStdout>>,
         backpressure_waits: u64,
     },
     ReadError {
@@ -4109,17 +4340,19 @@ impl RequestReaderEvent {
     reason = "the request reader thread must own the sender"
 )]
 fn read_request_messages(
-    mut stdout: BufReader<ChildStdout>,
+    mut stdout: BufReader<Pipe<ChildStdout>>,
     sender: mpsc::SyncSender<RequestReaderEvent>,
     max_frame_bytes: u32,
     generation: WorkerGeneration,
     request_id: Option<WorkerRequestId>,
 ) {
+    let stopped = Arc::clone(&stdout.get_ref().stopped);
     loop {
         match read_frame(&mut stdout, max_frame_bytes) {
             Ok(frame) if matches!(frame.message, Message::Response(_)) => {
                 let _ = send_reader_event(
                     &sender,
+                    &stopped,
                     RequestReaderEvent::Terminal {
                         generation,
                         request_id,
@@ -4133,6 +4366,7 @@ fn read_request_messages(
             Ok(frame) => {
                 if send_reader_event(
                     &sender,
+                    &stopped,
                     RequestReaderEvent::Message {
                         generation,
                         request_id,
@@ -4148,6 +4382,7 @@ fn read_request_messages(
             Err(err) => {
                 let _ = send_reader_event(
                     &sender,
+                    &stopped,
                     RequestReaderEvent::ReadError {
                         generation,
                         request_id,
@@ -4162,14 +4397,24 @@ fn read_request_messages(
     }
 }
 
-fn send_reader_event(sender: &mpsc::SyncSender<RequestReaderEvent>, event: RequestReaderEvent) -> Result<(), ()> {
-    match sender.try_send(event) {
-        Ok(()) => Ok(()),
-        Err(mpsc::TrySendError::Full(mut event)) => {
-            event.add_backpressure_wait();
-            sender.send(event).map_err(|_| ())
+fn send_reader_event(
+    sender: &mpsc::SyncSender<RequestReaderEvent>,
+    stopped: &AtomicBool,
+    mut event: RequestReaderEvent,
+) -> Result<(), ()> {
+    loop {
+        if stopped.load(Ordering::Acquire) {
+            return Err(());
         }
-        Err(mpsc::TrySendError::Disconnected(_event)) => Err(()),
+        match sender.try_send(event) {
+            Ok(()) => return Ok(()),
+            Err(mpsc::TrySendError::Full(mut returned)) => {
+                returned.add_backpressure_wait();
+                event = returned;
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(mpsc::TrySendError::Disconnected(_event)) => return Err(()),
+        }
     }
 }
 
@@ -4184,7 +4429,7 @@ impl Drop for LeanWorker {
     reason = "Message is #[non_exhaustive] across the lean-rs-worker-protocol crate boundary; the wildcard arm uniformly rejects any non-handshake frame"
 )]
 fn expect_handshake(
-    stdout: &mut BufReader<ChildStdout>,
+    stdout: &mut BufReader<Pipe<ChildStdout>>,
     max_frame_bytes: u32,
 ) -> Result<LeanWorkerRuntimeMetadata, LeanWorkerError> {
     let frame = read_frame(stdout, max_frame_bytes).map_err(|err| {
@@ -4213,12 +4458,12 @@ fn expect_handshake(
     }
 }
 
-fn wait_with_stderr(child: &mut StartupChild, stderr: Option<ChildStderr>) -> Result<LeanWorkerExit, LeanWorkerError> {
+fn wait_with_stderr(
+    child: &mut StartupChild,
+    stderr: Option<StderrCapture>,
+) -> Result<LeanWorkerExit, LeanWorkerError> {
     let status = child.cleanup()?;
-    let mut diagnostics = String::new();
-    if let Some(mut pipe) = stderr {
-        drop(pipe.read_to_string(&mut diagnostics));
-    }
+    let diagnostics = stderr.map_or_else(String::new, StderrCapture::finish);
     Ok(LeanWorkerExit::from_status(status, diagnostics))
 }
 
@@ -4230,8 +4475,8 @@ const DISPLAY_DIAGNOSTICS_MAX_BYTES: usize = 4 * 1024;
 
 /// Carry the one record of *why* a child died into the restart reason.
 ///
-/// The child's stderr is drained exactly once, when the supervisor reaps it, and
-/// retained nowhere else. A consumer that sees only `stable_cause()` cannot tell
+/// The child's stderr is drained continuously into a bounded tail and captured
+/// when the supervisor reaps it. A consumer that sees only `stable_cause()` cannot tell
 /// a Lean out-of-memory abort from a segfault from a protocol bug — which is the
 /// difference between raising a limit and filing a bug. Truncated on the same
 /// budget as the `Display` rendering, since the reason is cloned onto every
@@ -4596,6 +4841,226 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
+    #[cfg(unix)]
+    #[test]
+    fn stderr_drain_does_not_block_a_verbose_child_and_keeps_bounded_tail() {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "head -c 1048576 /dev/zero >&2; printf finished >&2"])
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn verbose child");
+        let capture =
+            super::StderrCapture::start(child.stderr.take().expect("stderr pipe")).expect("nonblocking stderr");
+        let started = std::time::Instant::now();
+        loop {
+            if child.try_wait().expect("poll child").is_some() {
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                child.kill().expect("kill stalled child");
+                child.wait().expect("reap child");
+                panic!("stderr blocked the child");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let tail = capture.finish();
+        assert_eq!(tail.len(), super::STDERR_TAIL_BYTES);
+        assert!(tail.ends_with("finished"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stderr_capture_does_not_wait_for_inherited_pipe_to_close() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("1")
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn pipe holder");
+        let capture =
+            super::StderrCapture::start(child.stderr.take().expect("stderr pipe")).expect("nonblocking stderr");
+        let started = std::time::Instant::now();
+        assert!(capture.finish().is_empty());
+        assert!(started.elapsed() < Duration::from_millis(500));
+        child.kill().expect("kill pipe holder");
+        child.wait().expect("reap pipe holder");
+    }
+
+    #[cfg(unix)]
+    fn blocked_stdin_worker() -> super::LeanWorker {
+        let mut worker = sleeping_worker();
+        worker
+            .shutdown_child(super::ShutdownIntent::KillOnly)
+            .expect("stop initial child");
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn non-reader");
+        worker.stdin = child
+            .stdin
+            .take()
+            .map(|pipe| std::io::BufWriter::new(super::Pipe::new(pipe).expect("nonblocking stdin")));
+        worker.child = Some(child);
+        worker.last_exit = None;
+        worker.state = super::WorkerSupervisorState::Idle {
+            generation: worker.generation,
+        };
+        worker
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blocked_stdin_write_times_out_and_reaps_child() {
+        let mut worker = blocked_stdin_worker();
+        let started = std::time::Instant::now();
+        let result = worker.write_request_bounded(
+            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+                export: "unused".into(),
+                request_json: "x".repeat(256 * 1024),
+            },
+            "test_send",
+            None,
+            Duration::from_millis(100),
+        );
+        assert!(matches!(result, Err(LeanWorkerError::Timeout { .. })), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(worker.child.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blocked_stdin_write_is_cancellable_and_reaps_child() {
+        let mut worker = blocked_stdin_worker();
+        let token = crate::session::LeanWorkerCancellationToken::new();
+        let cancelling = token.clone();
+        let cancel = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            cancelling.cancel();
+        });
+        let started = std::time::Instant::now();
+        let result = worker.write_request_bounded(
+            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+                export: "unused".into(),
+                request_json: "x".repeat(256 * 1024),
+            },
+            "test_send",
+            Some(&token),
+            Duration::from_secs(30),
+        );
+        cancel.join().expect("canceller stopped");
+        assert!(matches!(result, Err(LeanWorkerError::Cancelled { .. })), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(worker.child.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graceful_shutdown_with_expired_send_returns_reaped_report() {
+        let mut worker = blocked_stdin_worker();
+        worker.config.shutdown_timeout = Duration::ZERO;
+        let report = worker
+            .shutdown_child(super::ShutdownIntent::Graceful)
+            .expect("shutdown report");
+        assert_eq!(
+            report.outcome,
+            super::LeanWorkerShutdownOutcome::GracefulProtocolFailedKilled
+        );
+        assert!(worker.child.is_none());
+        assert!(worker.last_exit.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopped_stdout_reader_joins_while_pipe_holder_remains_alive() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn pipe holder");
+        let pipe = super::Pipe::new(child.stdout.take().expect("stdout pipe")).expect("nonblocking pipe");
+        let stop = std::sync::Arc::clone(&pipe.stopped);
+        let reader = std::thread::spawn(move || {
+            let mut pipe = pipe;
+            std::io::Read::read(&mut pipe, &mut [0_u8; 1])
+        });
+        let started = std::time::Instant::now();
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        assert!(reader.join().expect("reader joined").is_err());
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(child.try_wait().expect("poll holder").is_none());
+        child.kill().expect("kill holder");
+        child.wait().expect("reap holder");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdout_eof_wait_is_bounded_for_a_child_that_stays_alive() {
+        let mut worker = blocked_stdin_worker();
+        worker.config.shutdown_timeout = Duration::from_millis(20);
+        let started = std::time::Instant::now();
+        worker.wait_for_exit().expect("kill and reap after bounded EOF wait");
+        assert!(worker.child.is_none());
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn reader_guard_stops_a_full_event_channel_without_receiver_drop() {
+        let (sender, _receiver) = std::sync::mpsc::sync_channel(1);
+        let event = || super::RequestReaderEvent::ReadError {
+            generation: WorkerGeneration::default(),
+            request_id: None,
+            message: "test".into(),
+            eof: false,
+            backpressure_waits: 0,
+        };
+        sender.send(event()).expect("fill event channel");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let thread_stop = std::sync::Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let _sent = super::send_reader_event(&sender, &thread_stop, event());
+        });
+        let guard = super::ReaderGuard {
+            stopped: stop,
+            thread: Some(thread),
+        };
+        let started = std::time::Instant::now();
+        drop(guard);
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reader_guard_stops_a_partial_frame_without_pipe_eof() {
+        let mut child = std::process::Command::new("python3")
+            .args(["-c", "import os,time; os.write(1,b'x'); time.sleep(60)"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn partial frame holder");
+        let pipe = super::Pipe::new(child.stdout.take().expect("stdout pipe")).expect("nonblocking pipe");
+        let stop = std::sync::Arc::clone(&pipe.stopped);
+        let (sender, _receiver) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            super::read_request_messages(
+                std::io::BufReader::new(pipe),
+                sender,
+                MAX_FRAME_BYTES,
+                WorkerGeneration::default(),
+                None,
+            );
+        });
+        let guard = super::ReaderGuard {
+            stopped: stop,
+            thread: Some(thread),
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let started = std::time::Instant::now();
+        drop(guard);
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(child.try_wait().expect("poll holder").is_none());
+        child.kill().expect("kill holder");
+        child.wait().expect("reap holder");
+    }
+
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
     }
@@ -4610,6 +5075,7 @@ mod tests {
             config: dummy_config(),
             child: Some(child),
             stdin: None,
+            request_started: None,
             stdout: None,
             stderr: None,
             last_exit: None,
