@@ -170,8 +170,8 @@ A cached snapshot keeps both its input session environment and the environment p
 body changes, `buildModuleSnapshot` reuses the header environment and its messages. This avoids a fresh
 `processHeader` import and lets Lean reuse unchanged commands in the body.
 
-Reuse requires the same input environment object, exact header text, file label, and heartbeat setting. Exact text
-retains import order, `public import`, `import all`, and source positions. A changed session, header, or option takes
+Reuse requires the same input environment object, exact header text, file label, heartbeat setting, and complete
+Lean option map. Exact text retains import order, `public import`, `import all`, and source positions. A changed session, header, or option takes
 the normal header-processing path. A header that reported errors also retries rather than reusing a failed import.
 The old body's final environment never serves as the new starting environment.
 The existing snapshot cache bounds retention; this adds no separate cache or lock.
@@ -183,3 +183,28 @@ merely because repeated imports produce equal answers.
 This removes repeated imports while a matching snapshot remains cached. It does not remove the first header import,
 account for its memory in the supervisor, or make a C++ runtime exception recoverable. Existing process isolation and
 resource limits remain unchanged.
+
+## File-specific Lean options
+
+The caller supplies Lake's effective per-file option map through `LeanElabOptions::lean_options`
+(or `LeanWorkerElabOptions::lean_options`). Boolean, natural-number, and string values retain their types.
+Lean decodes the map with its own `LeanOptions` decoder before processing the header or body. Malformed
+values fail the request; they never silently select defaults. Natural numbers in this wire format must
+fit in `u64`. After imports load, Lean resolves `weak` option prefixes and checks registered names,
+just as its normal frontend does. An empty map preserves normal Lean defaults. Source-local `set_option` commands
+still work.
+
+The host's heartbeat limit overrides the map's `maxHeartbeats`. This resource override is separate from
+semantic options such as `autoImplicit` and `maxSynthPendingDepth`, which must match the build.
+All source elaboration entry points, proof overlays, and explicit verification use the map. The worker
+cache key, module snapshot lookup, incremental reuse, and header reuse all distinguish option changes.
+Worker protocol version 11 prevents an old child from silently ignoring the new map.
+
+Resolving Lake configuration belongs to the caller, not the Lean runtime bridge. The host does not read
+or build a project merely to discover options. A caller that omits build options cannot claim that its
+result matches that project's build configuration.
+
+The separate `LeanMetaOptions` API still controls standalone MetaM operations such as weak-head
+normalization and expression pretty-printing. Those operations do not receive this new map after
+their input source has been elaborated. This change establishes build-option parity for source
+elaboration and verification, not for every standalone MetaM rendering operation.

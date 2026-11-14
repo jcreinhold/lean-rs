@@ -101,3 +101,6 @@ mod tests {
         assert!(LEAN_HEADER_DIGEST.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }
+
+mod lean_options;
+pub use lean_options::{LeanOptionValue, lean_options_json};

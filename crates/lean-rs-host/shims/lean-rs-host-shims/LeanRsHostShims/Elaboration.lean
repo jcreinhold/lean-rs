@@ -123,11 +123,18 @@ def serializeMessages
     bytes := bytes + body.utf8ByteSize.toUSize
   pure (out, trunc)
 
-/-- Construct a `Lean.Options` value carrying the heartbeat limit
-    requested by the host. `heartbeats = 0` selects Lean's "no limit"
-    semantics via [`Lean.maxHeartbeats`]. -/
-private def buildOptions (heartbeats : UInt64) : Options :=
-  Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+/-- Decode caller-supplied typed Lean options and set the host heartbeat limit. -/
+def buildOptions (heartbeats : UInt64) (optionsJson : String) : IO Options := do
+  let json ← IO.ofExcept (Json.parse optionsJson)
+  let configured ← IO.ofExcept (fromJson? json : Except String Lean.LeanOptions)
+  return Lean.maxHeartbeats.set configured.toOptions heartbeats.toNat
+
+/-- Resolve options after imports load, then enforce the host heartbeat limit
+    again so `weak.maxHeartbeats` cannot replace it during normalization. -/
+def resolveOptions (opts : Options) (heartbeats : UInt64) : IO Options := do
+  let opts ← Lean.Language.Lean.reparseOptions opts
+  return Lean.maxHeartbeats.set opts heartbeats.toNat
+
 
 /-- Parse and elaborate a single Lean term. The boundary is explicit:
     Rust passes the source text, namespace context, file label, and
@@ -136,9 +143,9 @@ private def buildOptions (heartbeats : UInt64) : Options :=
     `ElabFailure` carrying typed diagnostics. -/
 @[export lean_rs_host_elaborate]
 def hostElaborate (env : Environment) (src : String) (expectedType : Option Expr)
-    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize) (optionsJson : String)
     : IO (Except ElabFailure Expr) := do
-  let opts := buildOptions heartbeats
+  let opts ← resolveOptions (← buildOptions heartbeats optionsJson) heartbeats
   let inputCtx := Parser.mkInputContext src fileLabel
   match Parser.runParserCategory env `term src fileLabel with
   | .error err =>
@@ -186,19 +193,19 @@ def hostElaborate (env : Environment) (src : String) (expectedType : Option Expr
     fold over `hostElaborate` with `expectedType := none`. -/
 @[export lean_rs_host_elaborate_bulk]
 def hostElaborateBulk (env : Environment) (sources : Array String)
-    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize) (optionsJson : String)
     : IO (Array (Except ElabFailure Expr)) := do
   sources.mapM fun src =>
-    hostElaborate env src none ns fileLabel heartbeats diagByteLimit
+    hostElaborate env src none ns fileLabel heartbeats diagByteLimit optionsJson
 
 @[export lean_rs_host_elaborate_bulk_progress]
 def hostElaborateBulkProgress (env : Environment) (sources : Array String)
-    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize) (optionsJson : String)
     (handle trampoline : USize) : IO (Except UInt8 (Array (Except ElabFailure Expr))) := do
   let mut out := #[]
   let mut idx := 0
   for src in sources do
-    let result ← hostElaborate env src none ns fileLabel heartbeats diagByteLimit
+    let result ← hostElaborate env src none ns fileLabel heartbeats diagByteLimit optionsJson
     out := out.push result
     idx := idx + 1
     if let some status ← reportProgress? handle trampoline idx sources.size then
@@ -214,9 +221,9 @@ def hostElaborateBulkProgress (env : Environment) (sources : Array String)
     environment and whether the message log carries errors. -/
 @[export lean_rs_host_kernel_check]
 def hostKernelCheck (env : Environment) (src : String)
-    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize) (optionsJson : String)
     : IO KernelOutcome := do
-  let opts := buildOptions heartbeats
+  let opts ← resolveOptions (← buildOptions heartbeats optionsJson) heartbeats
   let prelude := if ns.isEmpty then "" else s!"namespace {ns}\n"
   let fullSrc := prelude ++ src
   try
@@ -250,11 +257,11 @@ def hostKernelCheck (env : Environment) (src : String)
 
 @[export lean_rs_host_kernel_check_progress]
 def hostKernelCheckProgress (env : Environment) (src : String)
-    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize)
+    (ns : String) (fileLabel : String) (heartbeats : UInt64) (diagByteLimit : USize) (optionsJson : String)
     (handle trampoline : USize) : IO (Except UInt8 KernelOutcome) := do
   if let some status ← reportProgress? handle trampoline 0 1 then
     return .error status
-  let outcome ← hostKernelCheck env src ns fileLabel heartbeats diagByteLimit
+  let outcome ← hostKernelCheck env src ns fileLabel heartbeats diagByteLimit optionsJson
   if let some status ← reportProgress? handle trampoline 1 1 then
     return .error status
   return .ok outcome

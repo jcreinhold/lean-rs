@@ -7,7 +7,7 @@
 //! byte limit keeps a chatty failure path from monopolising memory) and
 //! callers should not have to write `.map_err` around configuration.
 //!
-//! The four fields are documented per-setter on [`LeanElabOptions`]; the
+//! The fields are documented per-setter on [`LeanElabOptions`]; the
 //! crate-internal accessors used by the dispatch site live alongside them
 //! as `pub(crate)`.
 
@@ -37,6 +37,7 @@ const DEFAULT_FILE_LABEL: &str = "<elaborate>";
 /// ```
 #[derive(Clone, Debug)]
 pub struct LeanElabOptions {
+    lean_options: std::collections::BTreeMap<String, lean_toolchain::LeanOptionValue>,
     namespace_context: String,
     file_label: String,
     heartbeat_limit: u64,
@@ -51,6 +52,7 @@ impl LeanElabOptions {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            lean_options: std::collections::BTreeMap::new(),
             namespace_context: String::new(),
             file_label: DEFAULT_FILE_LABEL.to_owned(),
             heartbeat_limit: LEAN_HEARTBEAT_LIMIT_DEFAULT,
@@ -95,6 +97,21 @@ impl LeanElabOptions {
     pub fn file_label(mut self, label: &str) -> Self {
         self.file_label = bound_message(label.to_owned());
         self
+    }
+
+    /// Apply file-specific Lean options. The host heartbeat limit takes precedence
+    /// over `maxHeartbeats`; all other options retain their supplied values.
+    #[must_use]
+    pub fn lean_options(
+        mut self,
+        options: std::collections::BTreeMap<String, lean_toolchain::LeanOptionValue>,
+    ) -> Self {
+        self.lean_options = options;
+        self
+    }
+
+    pub(crate) fn lean_options_json(&self) -> String {
+        lean_toolchain::lean_options_json(&self.lean_options)
     }
 
     // -- crate-internal accessors used by the dispatch site -----------

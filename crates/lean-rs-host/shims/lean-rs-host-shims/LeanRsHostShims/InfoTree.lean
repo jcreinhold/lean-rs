@@ -1726,6 +1726,7 @@ private structure ModuleSnapshot where
   headerMessages : MessageLog
   fileLabel : String
   heartbeats : UInt64
+  optionsJson : String
   namespaceContext : String
   /-- Lean's per-command snapshot chain from the build that produced this
       entry. A later build of the same file hands it to
@@ -1857,32 +1858,32 @@ private def incrementalCommandApproxBytes : Nat := 2048
     re-import is a different environment), the same heartbeat budget, and the
     same namespace scope. -/
 private def reusableIncrementalState? (old : ModuleSnapshot) (baseEnv : Environment) (heartbeats : UInt64)
-    (namespaceContext : String) : Option Lean.Elab.IncrementalState :=
+    (namespaceContext optionsJson : String) : Option Lean.Elab.IncrementalState :=
   let sameEnv := unsafe ptrEq old.baseEnv baseEnv
-  if sameEnv && old.heartbeats == heartbeats && old.namespaceContext == namespaceContext then
+  if sameEnv && old.heartbeats == heartbeats && old.namespaceContext == namespaceContext && old.optionsJson == optionsJson then
     old.incremental?
   else
     none
 
 /-- Reuse only the header, never the environment after the old body. Exact header
     text preserves import visibility, order, and source positions. The heartbeat
-    value is the only option supplied to `processHeader` here. -/
+    value and complete caller option map determine the initial options. -/
 private def reusableHeader? (old : ModuleSnapshot) (env : Environment)
-    (headerSource fileLabel : String) (heartbeats : UInt64) :
+    (headerSource fileLabel : String) (heartbeats : UInt64) (optionsJson : String) :
     Option (Environment × MessageLog) :=
   let sameEnv := unsafe ptrEq old.inputEnv env
   if sameEnv && old.headerSource == headerSource && old.fileLabel == fileLabel &&
-      old.heartbeats == heartbeats && old.missing.isEmpty && !old.headerMessages.hasErrors then
+      old.heartbeats == heartbeats && old.optionsJson == optionsJson && old.missing.isEmpty && !old.headerMessages.hasErrors then
     some (old.baseEnv, old.headerMessages)
   else
     none
 
 private def buildModuleSnapshot (env : Environment) (source namespaceContext fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize) (policy : ModuleQueryCachePolicy)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String) (policy : ModuleQueryCachePolicy)
     (old? : Option ModuleSnapshot := none) :
     IO (Except (LeanRsFixture.Elaboration.ElabFailure × Nat) (ModuleSnapshot × ModuleQueryTimings)) := do
   let headerStart ← IO.monoMsNow
-  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let opts ← LeanRsFixture.Elaboration.buildOptions heartbeats optionsJson
   let inputCtx := Parser.mkInputContext source fileLabel
   let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
@@ -1896,7 +1897,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
   let (commandEnv, initialMessages) ←
     if Lean.Elab.HeaderSyntax.isModule header && missing.isEmpty then
       try
-        match old?.bind (fun old => reusableHeader? old env headerSource fileLabel heartbeats) with
+        match old?.bind (fun old => reusableHeader? old env headerSource fileLabel heartbeats optionsJson) with
         | some cached => pure cached
         | none =>
           unsafe Lean.enableInitializersExecution
@@ -1908,6 +1909,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       pure (env, headerMessages)
   let headerMicros ← elapsedMicrosSince headerStart
 
+  let opts ← if missing.isEmpty then LeanRsFixture.Elaboration.resolveOptions opts heartbeats else pure opts
   let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
   commandState := { commandState with infoState.enabled := true }
   if !namespaceContext.isEmpty then
@@ -1943,6 +1945,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       headerMessages := initialMessages
       fileLabel
       heartbeats
+      optionsJson
       namespaceContext
       incremental? := none
       approxBytes := approxSnapshotBytes source commandState.messages commandState.infoState.trees #[]
@@ -1956,7 +1959,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     })
   try
     let bodyInputCtx := Parser.mkInputContext bodySource fileLabel
-    let reusable? := old?.bind fun old => reusableIncrementalState? old commandEnv heartbeats namespaceContext
+    let reusable? := old?.bind fun old => reusableIncrementalState? old commandEnv heartbeats namespaceContext optionsJson
     let st ← Lean.Elab.IO.processCommandsIncrementally bodyInputCtx { : Parser.ModuleParserState } commandState
       reusable?
     let elabMicros ← elapsedMicrosSince elabStart
@@ -1981,6 +1984,7 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
       headerMessages := initialMessages
       fileLabel
       heartbeats
+      optionsJson
       namespaceContext
       incremental? := some st
       approxBytes
@@ -2284,7 +2288,8 @@ private def attemptCandidate
         downstreamDiagnostics := emptyFailure,
         goals := #[], declaration, proofPosition, outputTruncated := candidateText.truncated
       }
-  match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes (oneShotPolicy overlay fileLabel)
+  match ← buildModuleSnapshot env overlay namespaceContext fileLabel heartbeats diagBytes
+      (base?.map (·.optionsJson) |>.getD "{}") (oneShotPolicy overlay fileLabel)
       base? with
   | .error (failure, _) =>
     let (localFailure, downstreamFailure) := document.splitFailureAtBodySpan site.insertedBodySpan failure
@@ -2634,9 +2639,9 @@ private def parseCachePolicy (raw : String) : ModuleQueryCachePolicy :=
 def processModuleQuery
     (env : Environment) (source : String) (query : ModuleQuery)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO ModuleQueryOutcome := do
-  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let opts ← LeanRsFixture.Elaboration.buildOptions heartbeats optionsJson
   let inputCtx := Parser.mkInputContext source fileLabel
   let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
@@ -2677,6 +2682,7 @@ def processModuleQuery
       | _ => pure (emptyResultFor query)
     return wrapOutcome result
 
+  let opts ← if missing.isEmpty then LeanRsFixture.Elaboration.resolveOptions opts heartbeats else pure opts
   let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
   commandState := { commandState with infoState.enabled := true }
   if !namespaceContext.isEmpty then
@@ -2705,9 +2711,9 @@ def processModuleQueryBatch
     (env : Environment) (source : String) (selectors : Array ModuleQuerySelector)
     (budgets : ModuleQueryOutputBudgets)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (_diagBytes : USize)
+    (heartbeats : UInt64) (_diagBytes : USize) (optionsJson : String)
     : IO ModuleQueryBatchOutcome := do
-  let opts : Options := Lean.maxHeartbeats.set ({} : Options) heartbeats.toNat
+  let opts ← LeanRsFixture.Elaboration.buildOptions heartbeats optionsJson
   let inputCtx := Parser.mkInputContext source fileLabel
   let (header, parserState, headerMessages) ← Lean.Parser.parseHeader inputCtx
   if headerMessages.hasErrors then
@@ -2741,6 +2747,7 @@ def processModuleQueryBatch
     let failure ← failureFromMessages initialMessages budgets.perFieldBytes.toUSize fileLabel
     return wrapOutcome (batchEnvelopeFromFailure selectors failure)
 
+  let opts ← if missing.isEmpty then LeanRsFixture.Elaboration.resolveOptions opts heartbeats else pure opts
   let mut commandState : Command.State := Command.mkState commandEnv initialMessages opts
   commandState := { commandState with infoState.enabled := true }
   if !namespaceContext.isEmpty then
@@ -2783,10 +2790,11 @@ def processModuleQueryBatchCached
     (env : Environment) (source : String) (selectors : Array ModuleQuerySelector)
     (budgets : ModuleQueryOutputBudgets)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     (policyRaw : String)
     : IO ModuleQueryBatchCachedOutcome := do
-  let policy := parseCachePolicy policyRaw
+  let rawPolicy := parseCachePolicy policyRaw
+  let policy := { rawPolicy with key := rawPolicy.key ++ "\noptions:" ++ optionsJson }
   let nowMs ← IO.monoMsNow
   let cache0 ← moduleSnapshotCache.get
   let (cache1, evictedBeforeLookup) := pruneCache policy nowMs cache0
@@ -2806,7 +2814,7 @@ def processModuleQueryBatchCached
       else if evictedBeforeLookup then .evicted
       else .miss
     let old? := newestSameFileSnapshot? policy.fileIdentity cache1.entries
-    match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes policy old? with
+    match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes optionsJson policy old? with
     | .error (failure, headerMicros) =>
       moduleSnapshotCache.set cache1
       pure <| headerFailureCachedOutcome failure status headerMicros cache1
@@ -2826,10 +2834,10 @@ def processModuleQueryBatchCached
 def attemptProof
     (env : Environment) (request : ProofAttemptRequest)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO ProofAttemptOutcome := do
   let old? ← cachedSameFileSnapshot? fileLabel
-  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
@@ -2843,10 +2851,10 @@ def attemptProof
 def verifyDeclaration
     (env : Environment) (request : DeclarationVerificationRequest)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO DeclarationVerificationOutcome := do
   let old? ← cachedSameFileSnapshot? fileLabel
-  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>
@@ -2885,10 +2893,10 @@ def verifyDeclaration
 def verifyDeclarationBatch
     (env : Environment) (request : DeclarationVerificationBatchRequest)
     (namespaceContext : String) (fileLabel : String)
-    (heartbeats : UInt64) (diagBytes : USize)
+    (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO DeclarationVerificationBatchOutcome := do
   let old? ← cachedSameFileSnapshot? fileLabel
-  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes
+  match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
   | .ok (snapshot, _) =>

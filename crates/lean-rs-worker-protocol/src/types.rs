@@ -104,6 +104,9 @@ impl LeanWorkerSessionImportProfile {
 /// the values here are caller intent, not post-clamp guarantees.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerElabOptions {
+    /// Effective Lean options for this source file, before host resource overrides.
+    #[serde(default)]
+    pub lean_options: std::collections::BTreeMap<String, lean_toolchain::LeanOptionValue>,
     pub namespace_context: String,
     pub file_label: String,
     pub heartbeat_limit: u64,
@@ -111,6 +114,16 @@ pub struct LeanWorkerElabOptions {
 }
 
 impl LeanWorkerElabOptions {
+    /// Set effective file options obtained from the build configuration.
+    #[must_use]
+    pub fn lean_options(
+        mut self,
+        options: std::collections::BTreeMap<String, lean_toolchain::LeanOptionValue>,
+    ) -> Self {
+        self.lean_options = options;
+        self
+    }
+
     /// Create worker elaboration options with host defaults.
     #[must_use]
     pub fn new() -> Self {
@@ -149,6 +162,7 @@ impl LeanWorkerElabOptions {
 impl Default for LeanWorkerElabOptions {
     fn default() -> Self {
         Self {
+            lean_options: std::collections::BTreeMap::new(),
             namespace_context: String::new(),
             file_label: "<elaborate>".to_owned(),
             heartbeat_limit: lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT,

@@ -3099,3 +3099,245 @@ fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
         String::from_utf8_lossy(&result.stderr),
     );
 }
+
+#[test]
+fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
+    use crate::host::process::{
+        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
+        DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
+        DeclarationVerificationTarget, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem,
+        ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryCachePolicy, ModuleQueryOutcome,
+        ModuleQueryOutputBudgets, ModuleQueryResult, ModuleQuerySelector, SorryPolicy,
+    };
+    use lean_toolchain::LeanOptionValue;
+
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let source = "module\n@[expose] public section\nuniverse u\ndef before (A : Type u) := A\nend\n@[expose] public section\ndef after (A : Type u) := A\nend\n";
+    let default = LeanElabOptions::new().file_label("option-regression.lean");
+    let strict = default.clone().lean_options(
+        [
+            ("autoImplicit".to_owned(), LeanOptionValue::Bool(false)),
+            ("maxSynthPendingDepth".to_owned(), LeanOptionValue::Nat(3)),
+            ("pp.unicode.fun".to_owned(), LeanOptionValue::Bool(true)),
+        ]
+        .into(),
+    );
+    let weak_strict = default.clone().lean_options(
+        [
+            (
+                "weak.autoImplicit".to_owned(),
+                LeanOptionValue::String("false".to_owned()),
+            ),
+            (
+                "weak.unregistered.regression.option".to_owned(),
+                LeanOptionValue::Bool(true),
+            ),
+        ]
+        .into(),
+    );
+    let selectors = [ModuleQuerySelector::Diagnostics {
+        id: "diagnostics".to_owned(),
+    }];
+    let budgets = ModuleQueryOutputBudgets::default();
+    // Deliberately identical key: the host must not reuse a snapshot with other options.
+    let policy = ModuleQueryCachePolicy {
+        file_identity: "option-regression.lean".to_owned(),
+        key: "same-source".to_owned(),
+        max_entries: 8,
+        ttl_millis: 60_000,
+        max_bytes: 1_048_576,
+    };
+    let request = DeclarationVerificationRequest {
+        source: source.to_owned(),
+        target: DeclarationVerificationTarget::Name {
+            name: "after".to_owned(),
+        },
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: budgets.clone(),
+    };
+    for (options, should_error) in [
+        (&default, false),
+        (&strict, true),
+        (&default, false),
+        (&strict, true),
+        (&weak_strict, true),
+    ] {
+        let ModuleQueryOutcome::Ok {
+            result: ModuleQueryResult::Diagnostics(diags),
+            ..
+        } = session
+            .process_module_query(source, &ModuleQuery::Diagnostics, options, None)
+            .expect("query")
+        else {
+            panic!("expected source diagnostics");
+        };
+        assert_eq!(
+            diags
+                .diagnostics()
+                .iter()
+                .any(|d| d.message().contains("unknown universe level")),
+            should_error
+        );
+        let ModuleQueryBatchCachedOutcome::Ok { result, .. } = session
+            .process_module_query_batch_cached(source, &selectors, &budgets, options, &policy, None)
+            .expect("cached query")
+        else {
+            panic!("expected cached diagnostics");
+        };
+        let ModuleQueryBatchItem::Ok { result, .. } = result.items.first().expect("one selector result") else {
+            panic!("expected selector result")
+        };
+        let ModuleQueryBatchResult::Diagnostics(diags) = result.as_ref() else {
+            panic!("expected diagnostics")
+        };
+        assert_eq!(
+            diags
+                .diagnostics()
+                .iter()
+                .any(|d| d.message().contains("unknown universe level")),
+            should_error
+        );
+        let DeclarationVerificationOutcome::Ok { status, .. } = session
+            .verify_declaration(&request, options, None)
+            .expect("verification")
+        else {
+            panic!("expected verification")
+        };
+        assert_eq!(status == DeclarationVerificationStatus::Accepted, !should_error);
+        let batch = DeclarationVerificationBatchRequest {
+            source: source.to_owned(),
+            targets: vec![DeclarationVerificationBatchItem {
+                id: "after".to_owned(),
+                target: request.target.clone(),
+            }],
+            sorry_policy: SorryPolicy::Deny,
+            report_axioms: true,
+            budgets: budgets.clone(),
+        };
+        let DeclarationVerificationBatchOutcome::Ok { results, .. } = session
+            .verify_declaration_batch(&batch, options, None)
+            .expect("batch verification")
+        else {
+            panic!("expected batch verification");
+        };
+        assert_eq!(
+            results.first().expect("one row").status == DeclarationVerificationStatus::Accepted,
+            !should_error
+        );
+        let ModuleQueryBatchOutcome::Ok { result, .. } = session
+            .process_module_query_batch(source, &selectors, &budgets, options, None)
+            .expect("uncached batch")
+        else {
+            panic!("expected batch diagnostics");
+        };
+        let ModuleQueryBatchItem::Ok { result, .. } = result.items.first().expect("one selector") else {
+            panic!("expected diagnostics")
+        };
+        let ModuleQueryBatchResult::Diagnostics(diags) = result.as_ref() else {
+            panic!("expected diagnostics")
+        };
+        assert_eq!(
+            diags
+                .diagnostics()
+                .iter()
+                .any(|d| d.message().contains("unknown universe level")),
+            should_error
+        );
+    }
+    // A source-local option must still override initial project defaults.
+    let local = source.replace(
+        "@[expose] public section",
+        "set_option autoImplicit true\n@[expose] public section",
+    );
+    let ModuleQueryOutcome::Ok {
+        result: ModuleQueryResult::Diagnostics(diags),
+        ..
+    } = session
+        .process_module_query(&local, &ModuleQuery::Diagnostics, &strict, None)
+        .expect("local option")
+    else {
+        panic!("expected source diagnostics");
+    };
+    assert!(!diags.diagnostics().iter().any(|d| d.severity() == LeanSeverity::Error));
+}
+
+#[test]
+fn module_options_reach_trials_and_reject_unknown_configuration() {
+    use crate::host::process::{
+        ModuleQuery, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult, ProofAttemptOutcome,
+        ProofAttemptRequest, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
+    };
+    use lean_toolchain::LeanOptionValue;
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let strict =
+        LeanElabOptions::new().lean_options([("autoImplicit".to_owned(), LeanOptionValue::Bool(false))].into());
+    let request = ProofAttemptRequest {
+        source: "theorem trialOptions : True := by\n  trivial\n".to_owned(),
+        edit: ProofEditTarget::Declaration {
+            name: "trialOptions".to_owned(),
+            position: ProofPositionSelector::Entry,
+        },
+        candidates: vec![ProofCandidate {
+            id: "candidate".to_owned(),
+            text: "have f (A : Type missingUniverse) := A\ntrivial".to_owned(),
+        }],
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let ProofAttemptOutcome::Ok { result, .. } = session.attempt_proof(&request, &strict, None).expect("trial") else {
+        panic!("expected trial result");
+    };
+    let row = result.candidates.first().expect("one candidate");
+    assert_eq!(row.status, ProofAttemptStatus::Failed);
+    assert!(
+        row.diagnostics
+            .diagnostics()
+            .iter()
+            .any(|d| d.message().contains("unknown universe level"))
+    );
+    let kernel = session
+        .kernel_check("def undeclaredUniverse (A : Type u) := A", &strict, None, None)
+        .expect("kernel check");
+    assert!(matches!(kernel, LeanKernelOutcome::Rejected(_)));
+    let invalid = LeanElabOptions::new()
+        .lean_options([("unregistered.regression.option".to_owned(), LeanOptionValue::Bool(true))].into());
+    assert!(
+        session
+            .process_module_query("def x := 1", &ModuleQuery::Diagnostics, &invalid, None)
+            .is_err()
+    );
+    // Weak options must not override the host's explicit heartbeat budget.
+    let bounded = LeanElabOptions::new().heartbeat_limit(12345).lean_options(
+        [
+            ("weak.maxHeartbeats".to_owned(), LeanOptionValue::Nat(0)),
+            ("maxSynthPendingDepth".to_owned(), LeanOptionValue::Nat(3)),
+            (
+                "trace.profiler.output".to_owned(),
+                LeanOptionValue::String("option-test.json".to_owned()),
+            ),
+        ]
+        .into(),
+    );
+    let source = "import Lean\nrun_cmd do\n  let opts ← Lean.MonadOptions.getOptions\n  unless opts.get `maxHeartbeats (0 : Nat) == 12345 do throwError \"wrong heartbeat limit\"\n  unless opts.get `maxSynthPendingDepth (0 : Nat) == 3 do throwError \"wrong natural option\"\n  unless opts.get `trace.profiler.output \"\" == \"option-test.json\" do throwError \"wrong string option\"\n";
+    let ModuleQueryOutcome::Ok {
+        result: ModuleQueryResult::Diagnostics(diags),
+        ..
+    } = session
+        .process_module_query(source, &ModuleQuery::Diagnostics, &bounded, None)
+        .expect("bounded query")
+    else {
+        panic!("expected diagnostics");
+    };
+    assert!(
+        !diags.diagnostics().iter().any(|d| d.severity() == LeanSeverity::Error),
+        "{diags:?}"
+    );
+}

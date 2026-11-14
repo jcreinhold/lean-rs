@@ -2120,6 +2120,7 @@ struct RowCallbackProgress {
 
 fn elab_options_to_host(options: &LeanWorkerElabOptions) -> LeanElabOptions {
     LeanElabOptions::new()
+        .lean_options(options.lean_options.clone())
         .namespace_context(&options.namespace_context)
         .file_label(&options.file_label)
         .heartbeat_limit(options.heartbeat_limit)
@@ -2652,6 +2653,8 @@ fn module_query_cache_key(
     hasher.update(b"\0");
     hasher.update(toolchain.host_triple.as_bytes());
     hasher.update(b"\0options\0");
+    hasher.update(lean_toolchain::lean_options_json(&options.lean_options).as_bytes());
+    hasher.update(b"\0");
     hasher.update(options.namespace_context.as_bytes());
     hasher.update(b"\0");
     hasher.update(options.file_label.as_bytes());
@@ -3533,6 +3536,21 @@ mod tests {
             "the whole mode is keyed, not just which variant it is"
         );
         assert_eq!(base, key("/a", &shims, LeanWorkerSessionImportProfile::Private));
+        let configured = options
+            .clone()
+            .lean_options([("autoImplicit".to_owned(), lean_toolchain::LeanOptionValue::Bool(false))].into());
+        assert_ne!(
+            base,
+            module_query_cache_key(
+                "/a",
+                &shims,
+                "theorem t : True := trivial",
+                &imports,
+                LeanWorkerSessionImportProfile::Private,
+                &configured,
+                "f.lean",
+            )
+        );
     }
 
     #[test]

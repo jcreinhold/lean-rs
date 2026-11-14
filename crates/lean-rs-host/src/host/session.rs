@@ -1690,6 +1690,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(0, t.elapsed());
         result
@@ -1749,6 +1750,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
         result
@@ -1805,6 +1807,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
             policy_text,
         );
         self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
@@ -1850,6 +1853,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(u64::try_from(request.candidates.len()).unwrap_or(u64::MAX), t.elapsed());
         result
@@ -1894,6 +1898,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(1, t.elapsed());
         result
@@ -1940,6 +1945,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(u64::try_from(request.targets.len()).unwrap_or(u64::MAX), t.elapsed());
         result
@@ -2018,6 +2024,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             options.file_label_str().to_owned(),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
+            options.lean_options_json(),
         );
         self.record_call(0, t.elapsed());
         result
@@ -2069,6 +2076,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
                 handle,
                 trampoline,
             );
@@ -2083,6 +2091,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
             );
             self.record_call(0, t.elapsed());
             result
@@ -2403,6 +2412,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
                 handle,
                 trampoline,
             );
@@ -2418,6 +2428,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
                 options.file_label_str().to_owned(),
                 options.heartbeats(),
                 options.diagnostic_byte_limit_usize(),
+                options.lean_options_json(),
             );
             let batch_len = u64::try_from(sources.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());

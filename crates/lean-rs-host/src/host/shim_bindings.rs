@@ -85,17 +85,17 @@ macro_rules! host_shim_exports {
             mandatory env_expr_to_string_raw => "lean_rs_host_env_expr_to_string_raw"
                 => [(LeanExpr<'lean>,)] => [String];
             mandatory elaborate => "lean_rs_host_elaborate"
-                => [(Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize)]
+                => [(Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize, String)]
                 => [LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>];
             mandatory elaborate_bulk => "lean_rs_host_elaborate_bulk"
-                => [(Obj<'lean>, Vec<String>, String, String, u64, usize)]
+                => [(Obj<'lean>, Vec<String>, String, String, u64, usize, String)]
                 => [LeanIo<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>];
             mandatory elaborate_bulk_progress => "lean_rs_host_elaborate_bulk_progress"
-                => [(Obj<'lean>, Vec<String>, String, String, u64, usize, usize, usize)] => [LeanIo<Obj<'lean>>];
+                => [(Obj<'lean>, Vec<String>, String, String, u64, usize, String, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory kernel_check => "lean_rs_host_kernel_check"
-                => [(Obj<'lean>, String, String, String, u64, usize)] => [LeanIo<LeanKernelOutcome<'lean>>];
+                => [(Obj<'lean>, String, String, String, u64, usize, String)] => [LeanIo<LeanKernelOutcome<'lean>>];
             mandatory kernel_check_progress => "lean_rs_host_kernel_check_progress"
-                => [(Obj<'lean>, String, String, String, u64, usize, usize, usize)] => [LeanIo<Obj<'lean>>];
+                => [(Obj<'lean>, String, String, String, u64, usize, String, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory check_evidence => "lean_rs_host_check_evidence"
                 => [(Obj<'lean>, LeanEvidence<'lean>)] => [LeanIo<EvidenceStatus>];
             mandatory evidence_summary => "lean_rs_host_evidence_summary"
@@ -112,7 +112,7 @@ macro_rules! host_shim_exports {
             optional meta_pp_expr => "lean_rs_host_meta_pp_expr"
                 => [(Obj<'lean>, LeanExpr<'lean>, u64, usize, u8)] => [LeanIo<LeanMetaResponse<String>>];
             optional process_module_query => "lean_rs_host_process_module_query"
-                => [(Obj<'lean>, String, ModuleQuery, String, String, u64, usize)] => [LeanIo<ModuleQueryOutcome>];
+                => [(Obj<'lean>, String, ModuleQuery, String, String, u64, usize, String)] => [LeanIo<ModuleQueryOutcome>];
             optional process_module_query_batch => "lean_rs_host_process_module_query_batch"
                 => [(
                     Obj<'lean>,
@@ -123,6 +123,7 @@ macro_rules! host_shim_exports {
                     String,
                     u64,
                     usize,
+                    String,
                 )] => [LeanIo<ModuleQueryBatchOutcome>];
             optional process_module_query_batch_cached => "lean_rs_host_process_module_query_batch_cached"
                 => [(
@@ -135,15 +136,16 @@ macro_rules! host_shim_exports {
                     u64,
                     usize,
                     String,
+                    String,
                 )] => [LeanIo<ModuleQueryBatchCachedOutcome>];
             optional attempt_proof => "lean_rs_host_attempt_proof"
-                => [(Obj<'lean>, ProofAttemptRequest, String, String, u64, usize)]
+                => [(Obj<'lean>, ProofAttemptRequest, String, String, u64, usize, String)]
                 => [LeanIo<ProofAttemptOutcome>];
             optional verify_declaration => "lean_rs_host_verify_declaration"
-                => [(Obj<'lean>, DeclarationVerificationRequest, String, String, u64, usize)]
+                => [(Obj<'lean>, DeclarationVerificationRequest, String, String, u64, usize, String)]
                 => [LeanIo<DeclarationVerificationOutcome>];
             optional verify_declaration_batch => "lean_rs_host_verify_declaration_batch"
-                => [(Obj<'lean>, DeclarationVerificationBatchRequest, String, String, u64, usize)]
+                => [(Obj<'lean>, DeclarationVerificationBatchRequest, String, String, u64, usize, String)]
                 => [LeanIo<DeclarationVerificationBatchOutcome>];
             optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
                 => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
