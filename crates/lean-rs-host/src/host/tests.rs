@@ -2830,6 +2830,52 @@ fn private_declaration_verification_reports_real_axioms() {
 }
 
 #[test]
+fn declaration_without_kernel_constant_has_unavailable_axioms() {
+    use crate::host::process::{
+        DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
+        DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
+    };
+    let host = fixture_host();
+    let caps = host
+        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
+        .expect("load caps");
+    let mut session = session_over_elaboration(&caps);
+    let request = DeclarationVerificationBatchRequest {
+        // The source declaration resolves, but Lean cannot add a theorem
+        // whose type is not a proposition to the kernel environment.
+        source: "theorem absent : Nat := 0\n".to_owned(),
+        targets: vec![DeclarationVerificationBatchItem {
+            id: "absent".to_owned(),
+            target: DeclarationVerificationTarget::Name {
+                name: "absent".to_owned(),
+            },
+        }],
+        sorry_policy: SorryPolicy::Deny,
+        report_axioms: true,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let outcome = session
+        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
+        .expect("verify");
+    let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
+        panic!("{outcome:?}")
+    };
+    let [row] = results.as_slice() else {
+        panic!("{results:?}")
+    };
+    assert_eq!(row.status, DeclarationVerificationStatus::Rejected);
+    assert!(
+        row.facts.target.is_some(),
+        "must exercise axiom lookup for a resolved source declaration"
+    );
+    assert!(
+        !row.facts.axioms_available,
+        "missing kernel constant is not axiom-free: {row:?}"
+    );
+    assert!(row.facts.axioms.is_empty());
+}
+
+#[test]
 fn declaration_verification_batch_empty_targets_still_reports_missing_imports() {
     use crate::host::process::{
         DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, ModuleQueryOutputBudgets, SorryPolicy,
