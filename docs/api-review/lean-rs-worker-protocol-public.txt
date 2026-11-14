@@ -2116,11 +2116,13 @@ pub struct lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::diagnostic_byte_limit: usize
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::file_label: alloc::string::String
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::heartbeat_limit: u64
+pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::lean_options: alloc::collections::btree::map::BTreeMap<alloc::string::String, lean_toolchain::lean_options::LeanOptionValue>
 pub lean_rs_worker_protocol::types::LeanWorkerElabOptions::namespace_context: alloc::string::String
 impl lean_rs_worker_protocol::types::LeanWorkerElabOptions
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::diagnostic_byte_limit(self, usize) -> Self
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::file_label(self, &str) -> Self
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::heartbeat_limit(self, u64) -> Self
+pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::lean_options(self, alloc::collections::btree::map::BTreeMap<alloc::string::String, lean_toolchain::lean_options::LeanOptionValue>) -> Self
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::namespace_context(self, &str) -> Self
 pub fn lean_rs_worker_protocol::types::LeanWorkerElabOptions::new() -> Self
 impl core::clone::Clone for lean_rs_worker_protocol::types::LeanWorkerElabOptions

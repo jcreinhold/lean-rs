@@ -9,6 +9,20 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+## [0.9.8]
+
+### Fixed
+
+- Carry effective Lean options through file diagnostics, proof trials, declaration verification, and term elaboration.
+  Checks can now use the same `autoImplicit` and other settings as the project's build instead of Lean defaults.
+- Invalidate cached results and incremental state when options change. Resolve imported and `weak` options using
+  Lean's normal frontend behavior, then apply the host heartbeat budget.
+
+### Changed
+
+- Worker protocol 11 requires a matching parent and child so old workers cannot silently ignore compilation options.
+  Install both together. Standalone MetaM rendering still uses its separate `LeanMetaOptions` settings.
+
 ## [0.9.7]
 
 ### Fixed
