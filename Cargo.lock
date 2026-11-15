@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.9.9"
+version = "0.9.10"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
