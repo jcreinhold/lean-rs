@@ -1005,6 +1005,60 @@ impl LeanWorkerExit {
     }
 }
 
+/// An opaque checkpoint taken before a synchronous worker operation.
+///
+/// Checkpoints belong to one supervisor instance and remain valid across its
+/// replacements. They are in-process correlation tokens, not durable process
+/// identities or permission to signal a PID.
+#[derive(Clone, Debug)]
+pub struct LeanWorkerRequestCheckpoint {
+    supervisor: Arc<()>,
+    next_request_id: WorkerRequestId,
+}
+
+/// Confirmed exit of the direct child that handled one worker request.
+///
+/// This is evidence that the named request can no longer execute in that child.
+/// It does not prove a successful result, absence of earlier side effects, or
+/// termination of descendants or a subsequently spawned replacement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeanWorkerRequestStopReceipt {
+    request: InFlightRequest,
+    exit: LeanWorkerExit,
+}
+
+impl LeanWorkerRequestStopReceipt {
+    /// Monotone request identifier within the checkpoint's supervisor instance.
+    #[must_use]
+    pub fn request_id(&self) -> u64 {
+        self.request.id.0
+    }
+
+    /// Generation of the child whose exit was confirmed.
+    #[must_use]
+    pub fn worker_generation(&self) -> u64 {
+        self.request.generation.0
+    }
+
+    /// Operation being sent or awaited when this request was recorded.
+    #[must_use]
+    pub fn operation(&self) -> &'static str {
+        self.request.operation
+    }
+
+    /// PID of the owned, reaped direct child; diagnostic identity only.
+    #[must_use]
+    pub fn process_id(&self) -> u32 {
+        self.request.process_id
+    }
+
+    /// Exit status obtained from the owned child's `try_wait`.
+    #[must_use]
+    pub fn exit(&self) -> &LeanWorkerExit {
+        &self.exit
+    }
+}
+
 /// Structured result of shutting down a worker child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerShutdownReport {
@@ -1481,8 +1535,8 @@ fn worker_resource_facts(
 struct WorkerGeneration(u64);
 
 impl WorkerGeneration {
-    fn next(self) -> Self {
-        Self(self.0.saturating_add(1))
+    fn next(self) -> Option<Self> {
+        self.0.checked_add(1).map(Self)
     }
 }
 
@@ -1490,8 +1544,8 @@ impl WorkerGeneration {
 struct WorkerRequestId(u64);
 
 impl WorkerRequestId {
-    fn next(self) -> Self {
-        Self(self.0.saturating_add(1))
+    fn next(self) -> Option<Self> {
+        self.0.checked_add(1).map(Self)
     }
 }
 
@@ -1500,6 +1554,7 @@ struct InFlightRequest {
     id: WorkerRequestId,
     operation: &'static str,
     generation: WorkerGeneration,
+    process_id: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1564,6 +1619,9 @@ pub struct LeanWorker {
     stdout: Option<BufReader<Pipe<ChildStdout>>>,
     stderr: Option<StderrCapture>,
     last_exit: Option<LeanWorkerExit>,
+    request_scope: Arc<()>,
+    last_request: Option<InFlightRequest>,
+    last_request_stop: Option<LeanWorkerRequestStopReceipt>,
     /// A failed replacement's process is still owned until cleanup proves exit.
     /// Historical `last_exit` belongs to an earlier child and is not that proof.
     pending_startup: Option<Box<StartupChild>>,
@@ -1777,6 +1835,9 @@ impl LeanWorker {
             stdout: Some(stdout),
             stderr,
             last_exit: None,
+            request_scope: Arc::new(()),
+            last_request: None,
+            last_request_stop: None,
             pending_startup: None,
             runtime_metadata,
             stats: LeanWorkerStats {
@@ -1805,7 +1866,7 @@ impl LeanWorker {
     /// the child returns a typed worker error.
     pub fn health(&mut self) -> Result<(), LeanWorkerError> {
         self.prepare_host_request(false, None, None)?;
-        self.send_request(Request::Health)?;
+        self.send_request("health", Request::Health)?;
         self.record_request(false);
         match self.read_response("health")? {
             Response::HealthOk => Ok(()),
@@ -1826,9 +1887,12 @@ impl LeanWorker {
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
         let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
-        self.send_request(Request::LoadFixtureCapability {
-            manifest_path: path_string(&manifest_path),
-        })?;
+        self.send_request(
+            "load_fixture_capability",
+            Request::LoadFixtureCapability {
+                manifest_path: path_string(&manifest_path),
+            },
+        )?;
         self.record_request(true);
         match self.read_response("load_fixture_capability")? {
             Response::CapabilityLoaded => Ok(()),
@@ -1850,11 +1914,14 @@ impl LeanWorker {
     ) -> Result<u64, LeanWorkerError> {
         let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
-        self.send_request(Request::CallFixtureMul {
-            manifest_path: path_string(&manifest_path),
-            lhs,
-            rhs,
-        })?;
+        self.send_request(
+            "call_fixture_mul",
+            Request::CallFixtureMul {
+                manifest_path: path_string(&manifest_path),
+                lhs,
+                rhs,
+            },
+        )?;
         self.record_request(true);
         match self.read_response("call_fixture_mul")? {
             Response::U64 { value } => Ok(value),
@@ -1890,16 +1957,7 @@ impl LeanWorker {
         };
         match child.try_wait().map_err(|source| LeanWorkerError::Wait { source })? {
             Some(status) => {
-                let diagnostics = self.read_stderr();
-                let exit = LeanWorkerExit::from_status(status, diagnostics);
-                self.last_exit = Some(exit.clone());
-                self.child = None;
-                self.stdin = None;
-                self.stdout = None;
-                self.stats.exits = self.stats.exits.saturating_add(1);
-                self.state = WorkerSupervisorState::Exited {
-                    generation: self.generation,
-                };
+                let exit = self.finalize_child_exit(status);
                 Ok(LeanWorkerStatus::Exited(exit))
             }
             None => Ok(LeanWorkerStatus::Running),
@@ -1958,6 +2016,33 @@ impl LeanWorker {
             self.budget.import_residue_bytes,
             self.config.restart_policy.max_import_residue_bytes,
         )
+    }
+
+    /// Correlate a subsequent synchronous operation with confirmed child exit.
+    #[must_use]
+    pub fn request_checkpoint(&self) -> LeanWorkerRequestCheckpoint {
+        LeanWorkerRequestCheckpoint {
+            supervisor: Arc::clone(&self.request_scope),
+            next_request_id: self.next_request_id,
+        }
+    }
+
+    /// Return stop evidence for the latest request attempted since `checkpoint`.
+    ///
+    /// Returns `None` for a different supervisor, an older receipt, a later
+    /// request without confirmed exit, or failed kill/reap. A receipt may remain
+    /// available while replacement startup has failed: it certifies only the
+    /// original request's direct child, never replacement cleanup or pool capacity.
+    #[must_use]
+    pub fn confirmed_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<&LeanWorkerRequestStopReceipt> {
+        let receipt = self.last_request_stop.as_ref()?;
+        (Arc::ptr_eq(&self.request_scope, &checkpoint.supervisor)
+            && receipt.request.id.0 >= checkpoint.next_request_id.0
+            && self.last_request.as_ref() == Some(&receipt.request))
+        .then_some(receipt)
     }
 
     /// Return protocol/runtime facts reported by the worker child.
@@ -2104,9 +2189,12 @@ impl LeanWorker {
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
         let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
         self.prepare_request(true)?;
-        self.send_request(Request::TriggerLeanPanic {
-            manifest_path: path_string(&manifest_path),
-        })?;
+        self.send_request(
+            "trigger_lean_panic",
+            Request::TriggerLeanPanic {
+                manifest_path: path_string(&manifest_path),
+            },
+        )?;
         self.record_request(true);
         match self.read_response("trigger_lean_panic") {
             Ok(response) => Err(unexpected_response("trigger_lean_panic", &response)),
@@ -3124,8 +3212,8 @@ impl LeanWorker {
         )
     }
 
-    fn send_request(&mut self, request: Request) -> Result<(), LeanWorkerError> {
-        self.send_request_cancellable(request, "worker_request", None)
+    fn send_request(&mut self, operation: &'static str, request: Request) -> Result<(), LeanWorkerError> {
+        self.send_request_cancellable(request, operation, None)
     }
 
     fn send_request_cancellable(
@@ -3136,6 +3224,7 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         check_cancelled(operation, cancellation)?;
         self.ensure_running()?;
+        self.begin_in_flight(operation)?;
         let started = Instant::now();
         let result = self.write_request_bounded(request, operation, cancellation, self.config.request_timeout);
         if let Err(error) = result {
@@ -3145,7 +3234,10 @@ impl LeanWorker {
                     operation,
                     duration: self.config.request_timeout,
                 },
-                _ => return Err(error),
+                _ => {
+                    self.finish_in_flight();
+                    return Err(error);
+                }
             };
             self.restart_with_reason(reason)?;
             return Err(error);
@@ -3228,17 +3320,44 @@ impl LeanWorker {
         }
     }
 
-    fn begin_in_flight(&mut self, operation: &'static str) -> InFlightRequest {
+    fn begin_in_flight(&mut self, operation: &'static str) -> Result<InFlightRequest, LeanWorkerError> {
+        let next_request_id = self.next_request_id.next().ok_or_else(|| LeanWorkerError::Protocol {
+            message: "worker request identifier space exhausted before dispatch".to_owned(),
+        })?;
+        let process_id = self
+            .child
+            .as_ref()
+            .map(|child| child.id())
+            .ok_or_else(|| self.dead_error())?;
         let request = InFlightRequest {
             id: self.next_request_id,
             operation,
             generation: self.generation,
+            process_id,
         };
-        self.next_request_id = self.next_request_id.next();
+        self.next_request_id = next_request_id;
         self.state = WorkerSupervisorState::Busy {
             request: request.clone(),
         };
-        request
+        self.last_request = Some(request.clone());
+        Ok(request)
+    }
+
+    fn await_in_flight(&mut self, operation: &'static str) -> Result<InFlightRequest, LeanWorkerError> {
+        let mut request = match &self.state {
+            WorkerSupervisorState::Busy { request } => request.clone(),
+            _ => {
+                return Err(LeanWorkerError::Protocol {
+                    message: format!("cannot await {operation} without a dispatched request"),
+                });
+            }
+        };
+        request.operation = operation;
+        self.last_request = Some(request.clone());
+        self.state = WorkerSupervisorState::Busy {
+            request: request.clone(),
+        };
+        Ok(request)
     }
 
     fn mark_current_request_streaming(&mut self) {
@@ -3423,7 +3542,9 @@ impl LeanWorker {
             return Err(err);
         }
         self.stats.replacement_budget_admitted = self.stats.replacement_budget_admitted.saturating_add(1);
-        let next_generation = self.generation.next();
+        let next_generation = self.generation.next().ok_or_else(|| LeanWorkerError::Protocol {
+            message: "worker generation identifier space exhausted before replacement".to_owned(),
+        })?;
         self.stats.record_restart(reason);
         self.budget = GenerationBudget::default();
         let reason = self
@@ -3461,6 +3582,9 @@ impl LeanWorker {
             replacement_budget_status: "synchronous-no-overlap".to_owned(),
         });
         next.stats = stats;
+        next.request_scope = Arc::clone(&self.request_scope);
+        next.last_request.clone_from(&self.last_request);
+        next.last_request_stop.clone_from(&self.last_request_stop);
         next.generation = next_generation;
         next.next_request_id = next_request_id;
         next.state = WorkerSupervisorState::Idle {
@@ -3604,7 +3728,7 @@ impl LeanWorker {
         let reader_stop = Arc::clone(&stdout.get_ref().stopped);
         reader_stop.store(false, Ordering::Release);
         let max_frame_bytes = self.config.max_frame_bytes;
-        let request = self.begin_in_flight(operation);
+        let request = self.await_in_flight(operation)?;
         let generation = request.generation;
         let request_id = Some(request.id);
         let (sender, receiver) = mpsc::sync_channel(WORKER_EVENT_BUFFER_CAPACITY);
@@ -4054,6 +4178,15 @@ impl LeanWorker {
     fn finalize_child_exit(&mut self, status: ExitStatus) -> LeanWorkerExit {
         let diagnostics = self.read_stderr();
         let exit = LeanWorkerExit::from_status(status, diagnostics);
+        if let (Some(child), Some(request)) = (&self.child, &self.last_request)
+            && request.generation == self.generation
+            && request.process_id == child.id()
+        {
+            self.last_request_stop = Some(LeanWorkerRequestStopReceipt {
+                request: request.clone(),
+                exit: exit.clone(),
+            });
+        }
         self.last_exit = Some(exit.clone());
         self.child = None;
         self.stdin = None;
@@ -5044,6 +5177,103 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn partial_write_stop_receipt_survives_failed_replacement() {
+        let mut worker = blocked_stdin_worker();
+        worker.config.request_timeout = Duration::from_millis(100);
+        let checkpoint = worker.request_checkpoint();
+        let pid = worker.child.as_ref().expect("owned child").id();
+        let result = worker.send_request_cancellable(
+            lean_rs_worker_protocol::protocol::Request::JsonCommand {
+                export: "unused".into(),
+                request_json: "x".repeat(256 * 1024),
+            },
+            "partial_write",
+            None,
+        );
+        // The old child was reaped; only replacement fails (dummy executable).
+        assert!(matches!(result, Err(LeanWorkerError::Spawn { .. })), "{result:?}");
+        let receipt = worker
+            .confirmed_request_stop_since(&checkpoint)
+            .expect("confirmed partial-write stop");
+        assert_eq!(receipt.process_id(), pid);
+        assert_eq!(receipt.worker_generation(), 0);
+        assert_eq!(receipt.operation(), "partial_write");
+        assert!(!child_exists(pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exhausted_request_identifiers_reject_before_dispatch() {
+        let mut worker = sleeping_worker();
+        worker.next_request_id = WorkerRequestId(u64::MAX);
+        let checkpoint = worker.request_checkpoint();
+        assert!(matches!(
+            worker.begin_in_flight("exhausted"),
+            Err(LeanWorkerError::Protocol { .. })
+        ));
+        assert!(worker.confirmed_request_stop_since(&checkpoint).is_none());
+        assert!(worker.last_request.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn newer_unreaped_request_cannot_reuse_older_stop_receipt() {
+        let mut worker = sleeping_worker();
+        let checkpoint = worker.request_checkpoint();
+        worker.begin_in_flight("old_request").expect("record old request");
+        worker
+            .restart_with_reason_before_spawn_using(
+                LeanWorkerRestartReason::Cancelled {
+                    operation: "old_request",
+                },
+                || {},
+                |_| Ok(sleeping_worker()),
+            )
+            .expect("replace reaped old child");
+        assert!(worker.confirmed_request_stop_since(&checkpoint).is_some());
+        worker.begin_in_flight("new_request").expect("record new request");
+        assert!(
+            worker
+                .child
+                .as_mut()
+                .expect("new child")
+                .try_wait()
+                .expect("poll new child")
+                .is_none()
+        );
+        assert!(worker.confirmed_request_stop_since(&checkpoint).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_reap_produces_only_matching_request_receipt() {
+        let mut worker = sleeping_worker();
+        let checkpoint = worker.request_checkpoint();
+        worker.begin_in_flight("status_reap").expect("record request");
+        let pid = worker.child.as_ref().expect("owned child").id();
+        worker.child.as_mut().expect("owned child").kill().expect("stop child");
+        let started = std::time::Instant::now();
+        while matches!(
+            worker.status().expect("observe child"),
+            super::LeanWorkerStatus::Running
+        ) {
+            assert!(started.elapsed() < Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let receipt = worker
+            .confirmed_request_stop_since(&checkpoint)
+            .expect("status observed exit");
+        assert_eq!(receipt.process_id(), pid);
+        assert_eq!(receipt.operation(), "status_reap");
+        assert!(
+            worker
+                .confirmed_request_stop_since(&worker.request_checkpoint())
+                .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn graceful_shutdown_with_expired_send_returns_reaped_report() {
         let mut worker = blocked_stdin_worker();
         worker.config.shutdown_timeout = Duration::ZERO;
@@ -5196,6 +5426,9 @@ mod tests {
             stdout: None,
             stderr: None,
             last_exit: None,
+            request_scope: std::sync::Arc::new(()),
+            last_request: None,
+            last_request_stop: None,
             pending_startup: None,
             runtime_metadata: crate::session::LeanWorkerRuntimeMetadata {
                 worker_version: "test".to_owned(),
@@ -5231,6 +5464,8 @@ mod tests {
     #[test]
     fn failed_replacement_retains_unconfirmed_child_instead_of_reusing_old_exit() {
         let mut worker = sleeping_worker();
+        let checkpoint = worker.request_checkpoint();
+        worker.begin_in_flight("test_replacement").expect("record request");
         let old_pid = worker.child.as_ref().expect("old child").id();
         let replacement_pid = std::cell::Cell::new(0);
         let error = worker
@@ -5262,11 +5497,17 @@ mod tests {
             .expect_err("replacement setup must fail");
         assert!(matches!(error, LeanWorkerError::Setup { .. }));
         assert!(worker.last_exit.is_some(), "old exit remains historical evidence");
+        let receipt = worker
+            .confirmed_request_stop_since(&checkpoint)
+            .expect("original child exit")
+            .clone();
+        assert_eq!(receipt.process_id(), old_pid);
         assert!(
             worker.pending_startup.is_some(),
             "failed replacement ownership must survive the error"
         );
         assert!(child_exists(replacement_pid.get()));
+        assert_eq!(worker.confirmed_request_stop_since(&checkpoint), Some(&receipt));
         assert!(worker.status().is_err(), "the old exit cannot prove replacement exit");
         assert!(
             worker.health().is_err(),
@@ -5281,12 +5522,18 @@ mod tests {
         assert!(worker.pending_startup.is_some());
         assert!(worker.status().is_err());
         assert!(child_exists(replacement_pid.get()));
+        assert_eq!(worker.confirmed_request_stop_since(&checkpoint), Some(&receipt));
         let confirmed = worker
             .shutdown_child(super::ShutdownIntent::Graceful)
             .expect("retry cleanup and reap replacement");
         assert_eq!(confirmed.outcome, super::LeanWorkerShutdownOutcome::KillOnly);
         assert!(!child_exists(replacement_pid.get()));
         assert!(worker.pending_startup.is_none());
+        assert_eq!(
+            worker.confirmed_request_stop_since(&checkpoint),
+            Some(&receipt),
+            "startup cleanup must not replace the original request's process identity"
+        );
         assert_eq!(worker.stats.exits, 2);
         let repeated = worker
             .shutdown_child(super::ShutdownIntent::Graceful)

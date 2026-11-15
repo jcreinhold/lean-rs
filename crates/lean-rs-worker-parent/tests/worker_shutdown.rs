@@ -132,6 +132,14 @@ fn main() {
             conformance_timeout_kill_reap_restarts_next_generation,
         ),
         (
+            "request_stop_receipt_matches_checkpoint_across_replacement",
+            request_stop_receipt_matches_checkpoint_across_replacement,
+        ),
+        (
+            "newer_request_shadows_older_stop_receipt",
+            newer_request_shadows_older_stop_receipt,
+        ),
+        (
             "conformance_child_crash_terminalizes_in_flight_request",
             conformance_child_crash_terminalizes_in_flight_request,
         ),
@@ -1001,6 +1009,7 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
     let mut unrelated = fake_worker("normal").map_err(|err| err.to_string())?;
     let old_pid = worker.__child_pid_for_test().ok_or("missing worker pid")?;
     let unrelated_pid = unrelated.__child_pid_for_test();
+    let checkpoint = worker.request_checkpoint();
     let cancellation = LeanWorkerCancellationToken::new();
     let token = cancellation.clone();
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -1032,6 +1041,11 @@ fn conformance_silent_worker_cancellation_reaps_only_owned_child() -> Result<(),
         "silent cancellation waited for request timeout"
     );
     assert_reaped(old_pid)?;
+    let receipt = worker
+        .confirmed_request_stop_since(&checkpoint)
+        .ok_or("cancellation lost direct-worker exit")?;
+    assert_eq!(receipt.process_id(), old_pid);
+    assert_eq!(receipt.operation(), "emit_test_rows");
     assert_ne!(worker.__child_pid_for_test(), Some(old_pid));
     assert_eq!(worker.stats().cancelled_restarts, 1);
     worker.health().map_err(|err| err.to_string())?;
@@ -1168,6 +1182,71 @@ fn conformance_timeout_kill_reap_restarts_next_generation() -> Result<(), String
     assert_single_terminal(&trace, generation, "health")?;
     drop(worker);
     assert_reaped(new_pid)
+}
+
+fn request_stop_receipt_matches_checkpoint_across_replacement() -> Result<(), String> {
+    let mut worker = fake_worker("request_hang").map_err(|err| err.to_string())?;
+    let other = fake_worker("normal").map_err(|err| err.to_string())?;
+    let checkpoint = worker.request_checkpoint();
+    let other_checkpoint = other.request_checkpoint();
+    let generation = worker.lifecycle_snapshot().worker_generation;
+    let old_pid = worker.__child_pid_for_test().ok_or("missing worker child")?;
+    assert!(worker.confirmed_request_stop_since(&checkpoint).is_none());
+    assert!(matches!(worker.health(), Err(LeanWorkerError::Timeout { .. })));
+    let receipt = worker
+        .confirmed_request_stop_since(&checkpoint)
+        .ok_or("timeout lost its confirmed direct-worker exit")?;
+    assert_eq!(receipt.worker_generation(), generation);
+    assert_eq!(receipt.process_id(), old_pid);
+    assert_eq!(receipt.operation(), "health");
+    assert!(!receipt.exit().success);
+    assert_reaped(old_pid)?;
+    assert_eq!(
+        worker.lifecycle_snapshot().worker_generation,
+        generation.saturating_add(1)
+    );
+    assert!(worker.lifecycle_snapshot().last_exit.is_none(), "replacement is live");
+    assert!(worker.confirmed_request_stop_since(&other_checkpoint).is_none());
+    let stopped_request_id = receipt.request_id();
+    let next_checkpoint = worker.request_checkpoint();
+    assert!(
+        worker
+            .confirmed_request_stop_since(&worker.request_checkpoint())
+            .is_none()
+    );
+    assert!(matches!(worker.health(), Err(LeanWorkerError::Timeout { .. })));
+    let next = worker
+        .confirmed_request_stop_since(&next_checkpoint)
+        .ok_or("second timeout lost exit")?;
+    assert_eq!(next.request_id(), stopped_request_id.saturating_add(1));
+    assert_eq!(next.worker_generation(), generation.saturating_add(1));
+    assert_ne!(next.process_id(), old_pid);
+    Ok(())
+}
+
+fn newer_request_shadows_older_stop_receipt() -> Result<(), String> {
+    let mut worker = fake_worker_with_config("slow_send_and_response", |config| {
+        config.request_timeout(Duration::from_millis(300))
+    })
+    .map_err(|error| error.to_string())?;
+    let checkpoint = worker.request_checkpoint();
+    assert!(matches!(
+        worker.__emit_test_rows(vec!["x".repeat(256 * 1024)], None, None),
+        Err(LeanWorkerError::Timeout { .. })
+    ));
+    assert!(worker.confirmed_request_stop_since(&checkpoint).is_some());
+    worker.health().map_err(|error| error.to_string())?;
+    assert!(
+        worker.confirmed_request_stop_since(&checkpoint).is_none(),
+        "a newer live generation's request cannot use the old exit receipt"
+    );
+    let idle_checkpoint = worker.request_checkpoint();
+    worker.cycle().map_err(|error| error.to_string())?;
+    assert!(
+        worker.confirmed_request_stop_since(&idle_checkpoint).is_none(),
+        "an idle cycle must not invent a post-checkpoint request"
+    );
+    Ok(())
 }
 
 fn conformance_child_crash_terminalizes_in_flight_request() -> Result<(), String> {

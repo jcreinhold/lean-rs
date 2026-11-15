@@ -31,6 +31,12 @@ be reaped, and returns a structured `LeanWorkerShutdownReport`.
 The older `terminate()` methods are deprecated compatibility wrappers that return only the final exit status. Dropping a
 worker handle runs best-effort bounded cleanup, but Rust `Drop` cannot report kill or wait failures.
 
+To distinguish a failed operation whose direct worker has stopped from unconfirmed execution, take
+`request_checkpoint()` before the synchronous operation and then query `confirmed_request_stop_since(&checkpoint)`. The
+receipt binds the latest attempted request to its generation, PID and observed exit, and survives replacement. It does
+not establish a successful result, absence of earlier effects, descendant cleanup, replacement cleanup, or permission to
+replay the request. Capacity remains governed by the process tracker and stopped-owner contract.
+
 ## License
 
 Dual-licensed under MIT or Apache-2.0 at your option.

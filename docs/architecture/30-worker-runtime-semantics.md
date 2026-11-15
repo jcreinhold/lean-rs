@@ -151,10 +151,10 @@ RestartExhausted
 current request, and `c` is an observed child exit or fatal condition. The current implementation keeps process handles,
 stdio pipes, and stats as separate fields, but its private `WorkerSupervisorState` records the model-facing phases:
 idle, busy, streaming, stopping, killing, reaping, crashed, restart-exhausted, and exited. Spawn-time `Starting` remains
-inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor.
-An armed startup guard owns the child through pipe setup, handshake, and frame-limit negotiation. Any early error
-before ownership transfers to the supervisor kills and polls for reaping of that child within the normal kill-wait
-deadline. Successful startup disarms the guard without disturbing the child.
+inside `LeanWorker::spawn` rather than as a stored state on a constructed supervisor. An armed startup guard owns the
+child through pipe setup, handshake, and frame-limit negotiation. Any early error before ownership transfers to the
+supervisor kills and polls for reaping of that child within the normal kill-wait deadline. Successful startup disarms
+the guard without disturbing the child.
 
 The core transitions are:
 
@@ -223,10 +223,9 @@ record a structured result.
 
 **Cleanup terminalization.** Explicit shutdown, policy cycle, timeout, cancellation-triggered cycle, hard-RSS kill,
 fatal exit, and `Drop` all drive the child toward a terminal reaped state as far as the parent process is alive and
-Tokio/Rust cleanup can run.
-For requests carrying a cancellation token, the IPC wait checks that token at intervals of at most 50 ms even when
-the worker emits no events. This does not renew the request deadline, and excludes caller sink execution and OS
-scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement.
+Tokio/Rust cleanup can run. For requests carrying a cancellation token, the IPC wait checks that token at intervals of
+at most 50 ms even when the worker emits no events. This does not renew the request deadline, and excludes caller sink
+execution and OS scheduling delays. The cancellation result follows child kill/reap, reader drain, and replacement.
 
 **Restart intensity.** Replacement attempts are bounded by a moving window. The default policy admits at most 16
 restarts per 60 seconds; exhaustion returns `RestartLimitExceeded`, leaves the supervisor not accepting more work, and
@@ -254,11 +253,25 @@ compatibility wrapper over this structured path.
 
 **Failed replacement startup.** A reaped generation's exit does not prove that a subsequently spawned replacement has
 exited. Every replacement path uses the same tracked startup: if setup fails and bounded cleanup cannot confirm exit,
-the supervisor retains that replacement's process handle. Status and new requests fail rather than treating the old
-exit as current proof. Structured shutdown retries bounded cleanup of the retained process and reports success only
-after it is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child
-and can still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation, timeout,
-and crash-triggered replacement; it is independent of the host's capacity policy.
+the supervisor retains that replacement's process handle. Status and new requests fail rather than treating the old exit
+as current proof. Structured shutdown retries bounded cleanup of the retained process and reports success only after it
+is reaped. A failure before spawn, or setup failure followed by confirmed cleanup, leaves no unconfirmed child and can
+still report an already-exited service. This applies to explicit, idle, memory-policy, cancellation, timeout, and
+crash-triggered replacement; it is independent of the host's capacity policy.
+
+**Request-bound stop evidence.** Take `request_checkpoint()` immediately before a synchronous worker operation and query
+`confirmed_request_stop_since(&checkpoint)` afterward. A receipt identifies the latest attempted protocol request, its
+operation, generation, direct-child PID and confirmed exit. The opaque checkpoint belongs to one supervisor and survives
+its replacements; another supervisor cannot use it. Attempts are identified before the first request write, so a
+partially written frame is covered. A newer attempt without a stop receipt shadows any older receipt. Request and
+generation counters reject exhaustion rather than reuse an identity.
+
+The receipt survives successful replacement and errors after the original child's confirmed exit. It is separate from
+`lifecycle_snapshot().last_exit`, which describes the current lifecycle state and may be cleared by replacement. Cleanup
+of a failed replacement does not change the original request receipt. The receipt proves only that this request cannot
+continue in its named direct child. It proves neither a usable result nor absence of earlier effects, descendant exit,
+replacement exit, retry safety, or releasable pool capacity. A host persists its own server/actor identity alongside
+receipt fields; the in-process checkpoint is not a durable process handle.
 
 **Drop semantics.** `Drop for LeanWorker` invokes the same bounded shutdown machinery. Rust `Drop` cannot return
 protocol, kill, or wait failures, so callers needing status must call `shutdown`. Drop is a cleanup obligation, not a
@@ -373,82 +386,67 @@ This document is the mathematical runtime model used by the Rust implementation.
 
 ## Worker pipe I/O (macOS and Linux)
 
-The parent uses nonblocking Unix pipe ends. Read and write loops check cancellation
-or deadlines between attempts; they wait 5 ms when a pipe is not ready. The child
-keeps blocking pipe ends. These changes do not claim Windows support.
+The parent uses nonblocking Unix pipe ends. Read and write loops check cancellation or deadlines between attempts; they
+wait 5 ms when a pipe is not ready. The child keeps blocking pipe ends. These changes do not claim Windows support.
 
-Stderr drains from startup into a 64 KiB byte tail. After exit, collection allows
-100 ms for EOF, then stops and joins its reader even if a descendant still holds
-the pipe open. Stdout readers also receive a stop signal before joining. No pipe
-thread needs a descendant to close an inherited descriptor before it can stop.
+Stderr drains from startup into a 64 KiB byte tail. After exit, collection allows 100 ms for EOF, then stops and joins
+its reader even if a descendant still holds the pipe open. Stdout readers also receive a stop signal before joining. No
+pipe thread needs a descendant to close an inherited descriptor before it can stop.
 
-Request deadlines include writing stdin and reading the response. Cancellation,
-timeout, or a write I/O error kills and reaps the child: a possibly partial frame
-is never reused. Encoding and frame-size errors before writing do not retire a
-healthy worker. Sending the shutdown request also has a deadline. Stderr is
-diagnostic output, never proof evidence.
+Request deadlines include writing stdin and reading the response. Cancellation, timeout, or a write I/O error kills and
+reaps the child: a possibly partial frame is never reused. Encoding and frame-size errors before writing do not retire a
+healthy worker. Sending the shutdown request also has a deadline. Stderr is diagnostic output, never proof evidence.
 
-These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or
-serialization. Killing, reaping, and starting a replacement also take time after a
-request expires. If the OS cannot confirm exit, cleanup returns an error and keeps
-ownership rather than treating the child as stopped. The process tracker below keeps that child counted until cleanup confirms exit.
+These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or serialization. Killing, reaping, and
+starting a replacement also take time after a request expires. If the OS cannot confirm exit, cleanup returns an error
+and keeps ownership rather than treating the child as stopped. The process tracker below keeps that child counted until
+cleanup confirms exit.
 
 
 ## Confirmed child exit and capacity
 
-`LeanWorkerProcessTracker` counts child processes across startup and replacement.
-Pass one shared tracker to every worker builder covered by a capacity slot. After
-the actor stops and cannot spawn again, release its slot only when
-`active_processes()` returns zero. The count decreases only after `try_wait`
-confirms exit, not when the owner drops, a request expires, or a PID disappears.
+`LeanWorkerProcessTracker` counts child processes across startup and replacement. Pass one shared tracker to every
+worker builder covered by a capacity slot. After the actor stops and cannot spawn again, release its slot only when
+`active_processes()` returns zero. The count decreases only after `try_wait` confirms exit, not when the owner drops, a
+request expires, or a PID disappears.
 
-`try_shutdown(&mut self)` allows cleanup retries without consuming the owner.
-Dropping an owner moves any unconfirmed child into the tracker's cleanup registry.
-At most one cleanup thread per tracker retries every 100 ms, then stops when the
-registry is empty. A poll also retries cleanup and thread creation if needed. Keep
-the tracker until its count reaches zero, especially if cleanup-thread creation
-fails. Dropping the last tracker after a thread-start failure can discard pending
-handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill only after
-`try_wait` reports the owned child still running; a wait error keeps the handle and
-count without risking a signal to a reused PID. OS wait errors can therefore keep
-capacity unavailable indefinitely (including `ECHILD`, which means another party
-may have reaped the process). A normal stopped child recovers automatically.
+`try_shutdown(&mut self)` allows cleanup retries without consuming the owner. Dropping an owner moves any unconfirmed
+child into the tracker's cleanup registry. At most one cleanup thread per tracker retries every 100 ms, then stops when
+the registry is empty. A poll also retries cleanup and thread creation if needed. Keep the tracker until its count
+reaches zero, especially if cleanup-thread creation fails. Dropping the last tracker after a thread-start failure can
+discard pending handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill only after `try_wait`
+reports the owned child still running; a wait error keeps the handle and count without risking a signal to a reused PID.
+OS wait errors can therefore keep capacity unavailable indefinitely (including `ECHILD`, which means another party may
+have reaped the process). A normal stopped child recovers automatically.
 
 ## Source-header imports and retained memory
 
-Protocol 12 reports cumulative successful source-header import bytes before each source
-response. The child excludes memory-mapped regions and regions already charged to the
-input session. The parent adds only increases to its generation budget. Evicting a
-snapshot, a reusable header, or a session never subtracts this charge: these operations
-do not free Lean's imported regions.
+Protocol 12 reports cumulative successful source-header import bytes before each source response. The child excludes
+memory-mapped regions and regions already charged to the input session. The parent adds only increases to its generation
+budget. Evicting a snapshot, a reusable header, or a session never subtracts this charge: these operations do not free
+Lean's imported regions.
 
-Source headers have a separate bounded cache. The RSS snapshot guard can discard large
-elaboration snapshots without forcing another header import. Matching warm headers and
-sessions remain usable after the byte budget is reached. A fresh generation may perform
-its first necessary session and header import even if they exceed that budget. A later
-actual cache miss is declined before importing; the parent recycles, reopens the session,
-and retries once. A second recycle response fails rather than looping.
+Source headers have a separate bounded cache. The RSS snapshot guard can discard large elaboration snapshots without
+forcing another header import. Matching warm headers and sessions remain usable after the byte budget is reached. A
+fresh generation may perform its first necessary session and header import even if they exceed that budget. A later
+actual cache miss is declined before importing; the parent recycles, reopens the session, and retries once. A second
+recycle response fails rather than looping.
 
-A failed header import can leave allocations whose size is unknown. Its original result
-and diagnostics are returned without retry. Before the next request, the parent replaces
-the child and reopens the required session. A missing accounting response due to a child
-crash remains a failed request under the ordinary process-failure rules, never a pass.
-This byte budget is not a peak-memory prediction or a substitute for process isolation.
+A failed header import can leave allocations whose size is unknown. Its original result and diagnostics are returned
+without retry. Before the next request, the parent replaces the child and reopens the required session. A missing
+accounting response due to a child crash remains a failed request under the ordinary process-failure rules, never a
+pass. This byte budget is not a peak-memory prediction or a substitute for process isolation.
 
-The direct in-process host API guards imports, source elaboration, and cache/accounting
-access with one process-local mutex because Lean's extension registry and these caches
-are global. Calls wait up to 30 seconds for another thread to finish; timeout returns
-an explicit resource error before entering Lean. Same-thread recursive entry fails
-immediately, so a synchronous callback cannot deadlock on its own lock. A callback that
-starts another thread and waits for that thread can still encounter the bounded timeout;
-callers should not synchronously reenter the host that way. Rust unwinding releases both
-the lock and the thread-local recursion guard, including after a panic. Ordinary lookups
-and separate worker processes do not acquire this mutex. Normal concurrent direct-host
-imports retain their waiting behavior; stuck contention no longer waits indefinitely.
+The direct in-process host API guards imports, source elaboration, and cache/accounting access with one process-local
+mutex because Lean's extension registry and these caches are global. Calls wait up to 30 seconds for another thread to
+finish; timeout returns an explicit resource error before entering Lean. Same-thread recursive entry fails immediately,
+so a synchronous callback cannot deadlock on its own lock. A callback that starts another thread and waits for that
+thread can still encounter the bounded timeout; callers should not synchronously reenter the host that way. Rust
+unwinding releases both the lock and the thread-local recursion guard, including after a panic. Ordinary lookups and
+separate worker processes do not acquire this mutex. Normal concurrent direct-host imports retain their waiting
+behavior; stuck contention no longer waits indefinitely.
 
-`max_imports` keeps its session-import count meaning (plus the existing import-like
-fixture calls). The child checks that count on actual session-cache misses, even when
-the parent predicted reuse. Source-header imports contribute to the retained-byte budget,
-not this session-count limit. With the byte budget disabled, header churn has no count
-limit; use the byte budget to bound it. Header import counts remain available through
-host accounting and protocol events.
+`max_imports` keeps its session-import count meaning (plus the existing import-like fixture calls). The child checks
+that count on actual session-cache misses, even when the parent predicted reuse. Source-header imports contribute to the
+retained-byte budget, not this session-count limit. With the byte budget disabled, header churn has no count limit; use
+the byte budget to bound it. Header import counts remain available through host accounting and protocol events.

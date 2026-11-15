@@ -47,8 +47,9 @@ pub use session::{
 pub use supervisor::{
     LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT, LeanWorker, LeanWorkerConfig,
-    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
-    LeanWorkerShutdownOutcome, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
+    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerRequestCheckpoint,
+    LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerShutdownOutcome,
+    LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
 };
 
 // Curated re-exports of the wire types that appear on this crate's public

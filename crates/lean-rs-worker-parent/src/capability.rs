@@ -34,8 +34,8 @@ use crate::session::{
 };
 use crate::supervisor::{
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LeanWorker, LeanWorkerConfig, LeanWorkerError,
-    LeanWorkerLifecycleSnapshot, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerShutdownReport,
-    LeanWorkerStats, LeanWorkerStatus,
+    LeanWorkerLifecycleSnapshot, LeanWorkerRequestCheckpoint, LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy,
+    LeanWorkerRestartReason, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
 };
 
 const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
@@ -1184,6 +1184,24 @@ impl LeanWorkerCapability {
         self.worker.lifecycle_snapshot()
     }
 
+    /// Checkpoint the request stream before a synchronous capability operation.
+    #[must_use]
+    pub fn request_checkpoint(&self) -> LeanWorkerRequestCheckpoint {
+        self.worker.request_checkpoint()
+    }
+
+    /// Confirm exit of the latest request's direct child since this checkpoint.
+    ///
+    /// See [`LeanWorker::confirmed_request_stop_since`] for the scope and limits
+    /// of this evidence, including failed replacement startup.
+    #[must_use]
+    pub fn confirmed_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<&LeanWorkerRequestStopReceipt> {
+        self.worker.confirmed_request_stop_since(checkpoint)
+    }
+
     /// Return the current worker lifecycle status.
     ///
     /// # Errors
@@ -1497,6 +1515,24 @@ impl LeanWorkerHostHandle {
     #[must_use]
     pub fn lifecycle_snapshot(&self) -> LeanWorkerLifecycleSnapshot {
         self.worker.lifecycle_snapshot()
+    }
+
+    /// Checkpoint the request stream before a synchronous host operation.
+    #[must_use]
+    pub fn request_checkpoint(&self) -> LeanWorkerRequestCheckpoint {
+        self.worker.request_checkpoint()
+    }
+
+    /// Confirm exit of the latest request's direct child since this checkpoint.
+    ///
+    /// See [`LeanWorker::confirmed_request_stop_since`] for the scope and limits
+    /// of this evidence, including failed replacement startup.
+    #[must_use]
+    pub fn confirmed_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<&LeanWorkerRequestStopReceipt> {
+        self.worker.confirmed_request_stop_since(checkpoint)
     }
 
     /// Return the current worker lifecycle status.
