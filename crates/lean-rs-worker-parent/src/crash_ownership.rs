@@ -9,7 +9,7 @@ pub use lean_toolchain::native_guardian::{
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt as _, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -17,6 +17,47 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 pub(crate) const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
 pub(crate) const NONCE_ENV: &str = "LEAN_RS_WORKER_PARENT_NONCE";
+fn read_startup_hello(stream: &mut UnixStream, deadline: Instant) -> io::Result<String> {
+    // Darwin accepted sockets can inherit O_NONBLOCK. Normalize explicitly and
+    // use the absolute startup budget rather than restarting a timeout after
+    // every byte of a partial HELLO.
+    stream.set_nonblocking(true)?;
+    let mut line = Vec::new();
+    loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "native startup HELLO deadline elapsed",
+            ));
+        }
+        let mut byte = [0_u8; 1];
+        match stream.read(&mut byte) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "native startup HELLO closed",
+                ));
+            }
+            Ok(_) => {
+                line.extend_from_slice(&byte);
+                if line.len() > 16384 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "native startup HELLO exceeds limit",
+                    ));
+                }
+                if byte == *b"\n" {
+                    stream.set_nonblocking(false)?;
+                    return String::from_utf8(line).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
+                }
+            }
+            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
+                std::thread::sleep(Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 fn running() -> String {
     "running".to_owned()
 }
@@ -64,6 +105,13 @@ impl LeanWorkerNativeScope {
         ParentLifetime::prepare_guarded_with_slot(registry, timeout, slot).map(Self)
     }
 
+    /// Create the private input directory owned by this preparing generation.
+    /// # Errors
+    /// Refuses aliased or invalid owned directories.
+    pub fn input_directory(&self) -> io::Result<PathBuf> {
+        native_guardian::create_generation_inputs(&self.0.directory)
+    }
+
     /// Bind the controlled bootstrap to this exact private lifetime.
     pub fn configure(&self, command: &mut Command) {
         self.0.configure(command);
@@ -80,6 +128,36 @@ impl LeanWorkerNativeScope {
 }
 
 impl LeanWorkerNativeScopeLease {
+    /// Return this generation's existing private inputs without creating them.
+    /// # Errors
+    /// Refuses missing, aliased or invalid owned directories.
+    pub fn input_directory(&self) -> io::Result<PathBuf> {
+        native_guardian::generation_inputs(
+            self.0
+                .record
+                .parent()
+                .ok_or_else(|| io::Error::other("owner directory missing"))?,
+        )
+    }
+
+    /// Remove only owned inputs after the payload group and guardian closed.
+    /// # Errors
+    /// Returns pending custody or bounded no-follow cleanup failure.
+    pub fn cleanup_inputs(&self) -> io::Result<()> {
+        if !self.custody_closed()? {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "native input custody still active",
+            ));
+        }
+        native_guardian::cleanup_generation_inputs(
+            self.0
+                .record
+                .parent()
+                .ok_or_else(|| io::Error::other("owner directory missing"))?,
+        )
+    }
+
     /// Release only this admitted bootstrap after its durable owner publication.
     ///
     /// # Errors
@@ -237,18 +315,22 @@ impl ParentLifetime {
             .checked_add(timeout)
             .filter(|_| !timeout.is_zero())
             .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "worker startup deadline elapsed"))?;
-        let (stream, _) = loop {
+        let (mut stream, _) = loop {
             match self.listener.accept() {
                 Ok(pair) => break pair,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(5));
                 }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "native startup connection deadline elapsed",
+                    ));
+                }
                 Err(error) => return Err(error),
             }
         };
-        stream.set_read_timeout(Some(deadline.saturating_duration_since(Instant::now())))?;
-        let mut line = String::new();
-        BufReader::new(&stream).take(16384).read_line(&mut line)?;
+        let line = read_startup_hello(&mut stream, deadline)?;
         let guardian_pid = if self.guarded {
             let hello: serde_json::Value = serde_json::from_str(&line).map_err(io::Error::other)?;
             if hello.get("protocol").and_then(serde_json::Value::as_u64) != Some(u64::from(native_guardian::PROTOCOL))
@@ -401,6 +483,11 @@ impl Drop for ParentLifetime {
                 })
             {
                 let _cleanup = (|| -> io::Result<()> {
+                    // Persist undispatched retirement before bounded cleanup.
+                    // A partial deletion must not pin the one utility slot to
+                    // this still-live parent until process exit.
+                    native_guardian::retire_preparing_owner_record(&record, &self.nonce)?;
+                    native_guardian::cleanup_generation_inputs(&self.directory)?;
                     for name in ["owner.write", "owner.guardian-write"] {
                         match fs::remove_file(self.directory.join(name)) {
                             Ok(()) => {}

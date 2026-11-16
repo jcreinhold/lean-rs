@@ -49,10 +49,13 @@ pub const MAX_OWNER_BYTES: usize = 256 * 1024;
 const MAX_FRAME: usize = 16 * 1024;
 const POLL: Duration = Duration::from_millis(5);
 
+mod inputs;
+#[doc(hidden)]
+pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
 mod ownership;
 pub use ownership::{
     NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, registry_directory, reserve_owner_record,
-    reserve_owner_record_with_slot,
+    reserve_owner_record_with_slot, retire_preparing_owner_record,
 };
 
 /// One actual shared lock and epoch protected by a native generation.

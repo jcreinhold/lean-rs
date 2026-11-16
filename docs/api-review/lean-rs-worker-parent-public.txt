@@ -931,6 +931,7 @@ pub struct lean_rs_worker_parent::LeanWorkerNativeScope(_)
 impl lean_rs_worker_parent::LeanWorkerNativeScope
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::accept(self, u32, core::time::Duration) -> std::io::error::Result<lean_rs_worker_parent::LeanWorkerNativeScopeLease>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::configure(&self, &mut std::process::Command)
+pub fn lean_rs_worker_parent::LeanWorkerNativeScope::input_directory(&self) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::prepare(&std::path::Path, core::time::Duration, core::option::Option<&lean_toolchain::native_guardian::ownership::NativeCapacitySlot>) -> std::io::error::Result<Self>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativeScope
 pub fn lean_rs_worker_parent::LeanWorkerNativeScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -944,9 +945,11 @@ impl core::panic::unwind_safe::UnwindSafe for lean_rs_worker_parent::LeanWorkerN
 pub struct lean_rs_worker_parent::LeanWorkerNativeScopeLease(_)
 impl lean_rs_worker_parent::LeanWorkerNativeScopeLease
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::acknowledge(&mut self) -> std::io::error::Result<()>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::cleanup_inputs(&self) -> std::io::error::Result<()>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::custody_closed(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::group_absent(&self) -> std::io::error::Result<bool>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::guardian_alive(&self) -> std::io::error::Result<bool>
+pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::input_directory(&self) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::owner(&self) -> &lean_toolchain::native_guardian::ownership::NativeProcessIdentity
 pub fn lean_rs_worker_parent::LeanWorkerNativeScopeLease::request_stop(&self) -> std::io::error::Result<()>
 impl core::fmt::Debug for lean_rs_worker_parent::LeanWorkerNativeScopeLease

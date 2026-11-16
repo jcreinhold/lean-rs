@@ -85,7 +85,10 @@ command ran, a child exited, or a proof succeeded.
 or runs a host operation. Generic library configuration defaults to false; the server's main and semantic worker
 builders opt in. The configured helper owns the one read/write admission algorithm. The actual worker receives shared
 lock descriptors through a private Unix socket and makes them inheritable only in that controlled process. The broker
-uses a helper proxy for its own cache reads, so a concurrent broker spawn cannot inherit a shared lock descriptor.
+uses atomic close-on-exec file opens for its pure-Rust cache and index reads; native children use guardian-owned loans.
+Multithreaded embedders may instead use the helper proxy, without receiving a lock descriptor. Canonical sibling lock
+files also admit a genuinely cold root without creating `.lake`; an existing `.lake` must remain an unaliased directory
+in that root.
 
 The worker binary has two runtime-free preparation entries. `--lean-rs-ready-host-artifacts` takes shared helper custody
 and checks existing host/interop build keys and the exact manifests without materializing, building, loading or

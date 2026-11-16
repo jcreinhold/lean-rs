@@ -500,6 +500,17 @@ was not permitted before initial Preparing publication committed, or collection 
 Writers perform that reconciliation too, so interrupted initial publication cannot block the preparation that precedes
 the next reservation. Unknown files and malformed committed records are not collected.
 
+Preparation source files live only in the literal private `inputs` child of that same generation directory. Public
+scope creation exposes it before body admission; an admitted lease returns the existing directory and permits cleanup
+only after custody closes. Registry collection removes inputs before owner metadata. Cleanup uses descriptor-relative
+no-follow operations, unlinks symlinks themselves, and is bounded by 4096 entries, depth 32 and a two-second userspace
+budget. Unknown generation children, excessive depth and special files preserve the parseable owner record and fail
+closed. Partial count-budget deletion can resume on the next admission. A cancelled exact Preparing reservation first
+publishes `preparing_closed` in the same record: Running publication always precedes startup ACK, so no native body
+could have been admitted. This permits cleanup retry and utility-capacity recovery while the original caller remains
+alive, without retiring a Running or uncertain payload. Already collected generations make post-closure cleanup a
+no-op. The existing pre-ACK physical-child caveat still applies; no additional cleanup process or journal is created.
+
 If another waiter has revoked the actual parent's wait authority (`ECHILD`), confirmed whole-group absence may release
 resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
 Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize

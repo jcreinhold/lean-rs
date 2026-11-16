@@ -249,7 +249,21 @@ fn fake_child_bootstrap() -> std::io::Result<()> {
     let socket = std::env::var_os(SOCKET_ENV).ok_or_else(|| std::io::Error::other("missing fixture parent socket"))?;
     let nonce = std::env::var(NONCE_ENV).map_err(std::io::Error::other)?;
     let mut stream = std::os::unix::net::UnixStream::connect(socket)?;
-    stream.write_all(format!("{nonce} {}\n", std::process::id()).as_bytes())?;
+    let hello = format!("{nonce} {}\n", std::process::id());
+    let root = PathBuf::from(std::env::var_os("PROOFS_LIFELINE_CHILD").unwrap());
+    if root.join("trickle-hello").exists() {
+        for byte in hello.as_bytes() {
+            stream.write_all(&[*byte])?;
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    } else if root.join("fragment-hello").exists() {
+        let (first, rest) = hello.as_bytes().split_first().unwrap();
+        stream.write_all(&[*first])?;
+        std::thread::sleep(Duration::from_millis(80));
+        stream.write_all(rest)?;
+    } else {
+        stream.write_all(hello.as_bytes())?;
+    }
     let mut ready = String::new();
     std::io::BufReader::new(&stream).take(64).read_line(&mut ready)?;
     if ready != "durable-owner-ready\n" {
@@ -562,5 +576,97 @@ fn guardian_failure_parent_recovery(defer: bool) {
     let before = fs::metadata(root.join("native-heartbeat")).unwrap().len();
     std::thread::sleep(Duration::from_millis(40));
     assert_eq!(before, fs::metadata(root.join("native-heartbeat")).unwrap().len());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn preparing_scope_owns_one_private_input_directory_and_cleans_it_on_cancel() {
+    use std::os::unix::fs::MetadataExt as _;
+    let root = directory().canonicalize().unwrap();
+    let scope = LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(1), None).unwrap();
+    let inputs = scope.input_directory().unwrap();
+    assert_eq!(inputs, scope.input_directory().unwrap());
+    assert_eq!(fs::metadata(&inputs).unwrap().mode() & 0o777, 0o700);
+    fs::create_dir(inputs.join("lake-cache")).unwrap();
+    fs::write(inputs.join("lake-cache").join("source.lean"), b"owned source").unwrap();
+    let generation = inputs.parent().unwrap().to_path_buf();
+    assert!(generation.join("owner.json").exists());
+    drop(scope);
+    assert!(!generation.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cancelled_preparation_budget_failure_can_recover_while_parent_stays_alive() {
+    let root = directory().canonicalize().unwrap();
+    let registry = root.join("owners");
+    let slot = lean_toolchain::native_guardian::NativeCapacitySlot {
+        key: "utility".to_owned(),
+        scope: "preparation".to_owned(),
+        limit: 1,
+    };
+    let scope = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(1), Some(&slot)).unwrap();
+    let inputs = scope.input_directory().unwrap();
+    let record = inputs.parent().unwrap().join("owner.json");
+    for index in 0..4097 {
+        fs::write(inputs.join(format!("{index:04}")), []).unwrap();
+    }
+    drop(scope);
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+    assert_eq!(
+        value.get("phase").and_then(serde_json::Value::as_str),
+        Some("preparing_closed")
+    );
+    assert!(value.get("process").is_some_and(serde_json::Value::is_null));
+    assert!(
+        LeanWorkerOwnedProcess::capture(std::process::id())
+            .unwrap()
+            .unwrap()
+            .is_live()
+            .unwrap()
+    );
+    let next = lean_toolchain::native_guardian::NativeCapacitySlot {
+        key: "next".to_owned(),
+        ..slot
+    };
+    let replacement = LeanWorkerNativeScope::prepare(&registry, Duration::from_secs(1), Some(&next)).unwrap();
+    assert!(!record.exists());
+    assert!(!inputs.exists());
+    drop(replacement);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fragmented_late_hello_waits_without_inherited_nonblocking_failure() {
+    let root = directory();
+    fs::write(root.join("fragment-hello"), []).unwrap();
+    let (lifetime, child) = child(&root);
+    let tracker = process::LeanWorkerProcessTracker::new();
+    let mut owned = tracker.own(child);
+    let started = Instant::now();
+    let lease = lifetime.accept(owned.id(), Duration::from_secs(1)).unwrap();
+    assert!(started.elapsed() >= Duration::from_millis(60));
+    assert!(!root.join("body").exists());
+    owned.attach_lifetime(lease).unwrap();
+    owned.acknowledge_lifetime().unwrap();
+    wait_for(|| root.join("body").exists());
+    owned.kill().unwrap();
+    wait_for(|| owned.try_wait().unwrap().is_some());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn trickled_hello_cannot_restart_the_absolute_startup_budget() {
+    let root = directory();
+    fs::write(root.join("trickle-hello"), []).unwrap();
+    let (lifetime, child) = child(&root);
+    let tracker = process::LeanWorkerProcessTracker::new();
+    let mut owned = tracker.own(child);
+    let started = Instant::now();
+    let error = lifetime.accept(owned.id(), Duration::from_millis(90)).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(started.elapsed() < Duration::from_millis(350));
+    assert!(!root.join("body").exists());
+    owned.kill().unwrap();
+    wait_for(|| owned.try_wait().unwrap().is_some());
     fs::remove_dir_all(root).unwrap();
 }

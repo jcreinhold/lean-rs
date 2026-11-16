@@ -475,3 +475,6 @@ fn concurrent_preparation_admission_permits_exactly_one_global_utility() {
         1
     );
 }
+
+#[path = "input_tests.rs"]
+mod input_tests;

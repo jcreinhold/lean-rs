@@ -174,7 +174,7 @@ fn validate_owner_header(value: &Value) -> io::Result<()> {
             .validate()?;
     }
     let phase = field(value, "phase");
-    if phase == "preparing" {
+    if phase == "preparing" || phase == "preparing_closed" {
         if version != 2
             || !field(value, "process").is_null()
             || !field(value, "guardian").is_null()
@@ -223,12 +223,44 @@ fn validate_owner_header(value: &Value) -> io::Result<()> {
 }
 pub(super) fn owner_closed(value: &Value) -> io::Result<bool> {
     validate_owner_header(value)?;
+    if field(value, "phase") == "preparing_closed" {
+        return Ok(true);
+    }
     if field(value, "phase") == "preparing" {
         return checked_identity(field(value, "parent"))?.is_live().map(|live| !live);
     }
     let process = checked_identity(field(value, "process"))?;
     crate::process_group::group_present(process.process_group).map(|present| !present)
 }
+/// Retire only this caller's exact undispatched Preparing reservation.
+///
+/// Running publication always precedes the native startup ACK. A retired
+/// Preparing record therefore cannot have admitted native body work; keeping
+/// it parseable permits bounded input cleanup retries while this caller lives.
+/// # Errors
+/// Refuses another owner, a running generation or failed durable publication.
+#[doc(hidden)]
+pub fn retire_preparing_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
+    let mut value = read_owner(record)?;
+    validate_owner_header(&value)?;
+    let parent =
+        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native parent identity absent"))?;
+    if field(&value, "generation_id") != nonce || checked_identity(field(&value, "parent"))? != parent {
+        return Err(invalid("preparing retirement belongs to another exact owner"));
+    }
+    if field(&value, "phase") == "preparing_closed" {
+        return Ok(());
+    }
+    if field(&value, "phase") != "preparing" {
+        return Err(invalid("only undispatched preparation can retire"));
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("phase".to_owned(), json!("preparing_closed"));
+    persist_owner(record, &value)
+}
+
 // Called only under .admission.lock. A native spawn is permitted only AFTER
 // initial Preparing publication commits owner.json. Missing committed ownership
 // therefore means pre-spawn publication, or GC of an already closed group.
@@ -464,7 +496,8 @@ pub fn reserve_owner_record_with_slot(
             Err(error) => return Err(error),
         };
         if owner_closed(&value)? {
-            fs::remove_file(record)?;
+            // Keep the committed record parseable through partial asset cleanup.
+            super::cleanup_generation_inputs(&entry.path())?;
             for name in ["owner.write", "owner.guardian-write"] {
                 match fs::remove_file(entry.path().join(name)) {
                     Ok(()) => {}
@@ -472,6 +505,7 @@ pub fn reserve_owner_record_with_slot(
                     Err(error) => return Err(error),
                 }
             }
+            fs::remove_file(record)?;
             fs::remove_dir(entry.path())?;
         } else {
             occupied.push(value);

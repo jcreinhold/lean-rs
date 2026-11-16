@@ -331,3 +331,67 @@ fn real_thin_writer_controller_excludes_both_read_clients() -> io::Result<()> {
     fs::remove_file(fixture.root().join("pending-writer-helper"))?;
     wait_unlocked(&lock)
 }
+
+#[test]
+fn cold_reader_roots_do_not_require_or_create_a_lake_directory() -> io::Result<()> {
+    let (directory, _) = SocketDirectory::new()?;
+    validate_lake_if_present(&directory.0)?;
+    assert!(!directory.0.join(".lake").exists());
+    fs::create_dir(directory.0.join(".lake"))?;
+    validate_lake_if_present(&directory.0)?;
+    fs::remove_dir(directory.0.join(".lake"))?;
+    Ok(())
+}
+
+#[test]
+fn existing_aliased_or_non_directory_lake_roots_are_rejected() -> io::Result<()> {
+    let (directory, _) = SocketDirectory::new()?;
+    let (other, _) = SocketDirectory::new()?;
+    let lake = directory.0.join(".lake");
+    fs::write(&lake, b"not a directory")?;
+    assert_eq!(
+        validate_lake_if_present(&directory.0)
+            .err()
+            .ok_or_else(|| invalid("accepted file"))?
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    fs::remove_file(&lake)?;
+    std::os::unix::fs::symlink(&other.0, &lake)?;
+    assert_eq!(
+        validate_lake_if_present(&directory.0)
+            .err()
+            .ok_or_else(|| invalid("accepted alias"))?
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    fs::remove_file(&lake)?;
+    std::os::unix::fs::symlink(other.0.join("missing"), &lake)?;
+    assert_eq!(
+        validate_lake_if_present(&directory.0)
+            .err()
+            .ok_or_else(|| invalid("accepted dangling alias"))?
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    fs::remove_file(lake)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires explicit LEAN_TOOLCHAIN_READER_TEST_HELPER; run with one test thread"]
+fn real_descriptor_and_proxy_readers_lock_cold_roots_without_build_writes() -> io::Result<()> {
+    let fixture = Fixture::new()?;
+    fs::remove_dir(fixture.root().join(".lake"))?;
+    let direct = SharedReader::acquire(&helper()?, fixture.root(), Duration::from_secs(2))?;
+    let mut proxy = SharedReadProxy::acquire(&helper()?, fixture.root(), Duration::from_secs(2))?;
+    proxy.validate()?;
+    let writer = fixture.file()?;
+    assert!(blocked(&writer));
+    drop(direct);
+    assert!(blocked(&writer));
+    drop(proxy);
+    wait_unlocked(&writer)?;
+    assert!(!fixture.root().join(".lake").exists());
+    Ok(())
+}

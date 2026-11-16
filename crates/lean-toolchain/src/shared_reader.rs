@@ -62,6 +62,22 @@ fn timed_out() -> io::Error {
     io::Error::new(io::ErrorKind::TimedOut, "shared reader acquisition deadline elapsed")
 }
 
+// Lock authority is the canonical sibling file, so a cold root needs no .lake
+// directory. Existing build trees must still be directories in this same domain.
+fn validate_lake_if_present(root: &Path) -> io::Result<()> {
+    let lake = root.join(".lake");
+    match lake.canonicalize() {
+        Ok(canonical) if canonical == lake && lake.is_dir() => Ok(()),
+        Ok(_) => Err(invalid("existing .lake directory is aliased or not a directory")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::symlink_metadata(&lake) {
+            Err(missing) if missing.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+            Ok(_) => Err(invalid("existing .lake directory is aliased or not a directory")),
+        },
+        Err(error) => Err(error),
+    }
+}
+
 struct SocketDirectory(PathBuf);
 impl SocketDirectory {
     fn new() -> io::Result<(Self, String)> {
@@ -163,7 +179,8 @@ impl Drop for Helper {
 impl SharedReader {
     /// Acquire one descriptor from the trusted helper within one admission deadline.
     ///
-    /// The canonical root and its `.lake` directory must already exist. On
+    /// The canonical root must exist; a missing `.lake` stays untouched. An
+    /// existing `.lake` must be an unaliased directory in that root. On
     /// Darwin this belongs only in a worker pre-body scope with no concurrent
     /// process spawning; the parent cache path must use the EOF proxy.
     ///
@@ -179,10 +196,7 @@ impl SharedReader {
         if !helper.is_absolute() || !helper.is_file() || !root.is_absolute() || root.canonicalize()? != root {
             return Err(invalid("explicit helper and canonical reader root required"));
         }
-        let lake = root.join(".lake");
-        if lake.canonicalize()? != lake || !lake.is_dir() {
-            return Err(invalid("canonical prepared .lake directory required"));
-        }
+        validate_lake_if_present(root)?;
         let lock = crate::shared_writer::project_lock_path(root)?;
         let (directory, nonce) = SocketDirectory::new()?;
         let socket = directory.0.join("fd.sock");
@@ -384,10 +398,7 @@ impl SharedReadProxy {
         if !helper.is_absolute() || !helper.is_file() || !root.is_absolute() || root.canonicalize()? != root {
             return Err(invalid("explicit helper and canonical proxy root required"));
         }
-        let lake = root.join(".lake");
-        if lake.canonicalize()? != lake || !lake.is_dir() {
-            return Err(invalid("canonical prepared .lake directory required"));
-        }
+        validate_lake_if_present(root)?;
         let lock = crate::shared_writer::project_lock_path(root)?;
         let (directory, nonce) = SocketDirectory::new()?;
         let fifo = directory.0.join("control.fifo");

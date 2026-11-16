@@ -4,6 +4,7 @@
 //! Opt in with `LEAN_TOOLCHAIN_READER_TEST_HELPER` and a canonical, private
 //! `LEAN_RS_WORKER_OWNERS_DIRECTORY` (0700), then run this suite serially.
 use std::fs;
+use std::os::unix::fs::MetadataExt as _;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc;
@@ -37,7 +38,34 @@ impl Fixture {
             &source,
             r#"#include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
 __attribute__((constructor)) static void mark_load(void) {
+  const char *report=getenv("LEAN_PRELOAD_CUSTODY_REPORT");
+  if(report) {
+    /* Capture the FIRST constructor's observation; later libraries cannot
+       overwrite evidence of premature loading with a later complete record. */
+    int fd=open(report,O_WRONLY|O_CREAT|O_EXCL,0600);
+    if(fd>=0) {
+      FILE *output=fdopen(fd,"w");
+      if(output) {
+        const char *registry=getenv("LEAN_RS_WORKER_OWNERS_DIRECTORY");
+        const char *nonce=getenv("LEAN_RS_WORKER_PARENT_NONCE");
+        char record[8192];
+        int length=snprintf(record,sizeof(record),"%s/worker-%s/owner.json",registry?registry:"",nonce?nonce:"");
+        fprintf(output,"{\"constructor_pid\":%ld,\"nonce\":\"%s\",\"owner\":",(long)getpid(),nonce?nonce:"");
+        FILE *input=(length>0 && (size_t)length<sizeof(record))?fopen(record,"r"):NULL;
+        if(input) {
+          char bytes[4096];size_t count,total=0;
+          while(total<262144 && (count=fread(bytes,1,sizeof(bytes)<262144-total?sizeof(bytes):262144-total,input))>0) {
+            fwrite(bytes,1,count,output);total+=count;
+          }
+          fclose(input);
+        } else { fputs("null",output); }
+        fputs("}\n",output);fclose(output);
+      } else { close(fd); }
+    }
+  }
   const char *path=getenv("LEAN_PRELOAD_MARKER");
   if(path) { FILE *f=fopen(path,"w"); if(f) { fputs("loaded",f); fclose(f); } }
 }
@@ -89,6 +117,10 @@ void *initialize_lean__rs__host__shims_LeanRsHostShims(unsigned char builtin) { 
                 serde_json::to_string(&self.descriptor).unwrap(),
             )
             .env("LEAN_PRELOAD_MARKER", self.root.join("constructor-marker"))
+            .env(
+                "LEAN_PRELOAD_CUSTODY_REPORT",
+                self.root.join("constructor-custody.json"),
+            )
             .request_timeout(Duration::from_secs(5));
         let config = if guardian {
             config.lifetime_directory(&self.registry).native_guardian(&self.helper)
@@ -166,104 +198,113 @@ fn regression_absent_guardian_refuses_before_constructor() {
     worker.try_shutdown().expect("pure worker reaped");
 }
 
-struct PausedGuardian(u32);
-impl PausedGuardian {
-    fn new(registry: &std::path::Path) -> Self {
-        let entry = fs::read_dir(registry)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| path.is_dir())
-            .expect("owned generation");
-        let owner: serde_json::Value = serde_json::from_slice(&fs::read(entry.join("owner.json")).unwrap()).unwrap();
-        let pid = u32::try_from(owner.get("guardian").unwrap().get("pid").unwrap().as_u64().unwrap()).unwrap();
-        assert!(
-            Command::new("kill")
-                .args(["-STOP", &pid.to_string()])
-                .status()
-                .unwrap()
-                .success()
-        );
-        // No Open has been dispatched: the worker owns the guardian's actual
-        // unreaped Child. After STOP the live stopped process itself pins its
-        // PID. Native deadline cleanup kills only the payload group, while the
-        // guardian has its own group; closing its controls cannot wake STOP.
-        // Thus panic/timeout cleanup below still resumes the same live guardian.
-        let paused = Self(pid);
-        let started = std::time::Instant::now();
-        loop {
-            let state = Command::new("ps")
-                .args(["-o", "stat=", "-p", &pid.to_string()])
-                .output()
-                .unwrap();
-            if String::from_utf8_lossy(&state.stdout).contains('T') {
-                return paused;
-            }
-            assert!(started.elapsed() < Duration::from_secs(2), "guardian did not stop");
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
-}
-impl Drop for PausedGuardian {
-    fn drop(&mut self) {
-        let _resume = Command::new("kill").args(["-CONT", &self.0.to_string()]).status();
-    }
-}
-
 #[test]
 #[ignore = "requires current H helper plus canonical private ownership registry; run serially"]
-fn regression_authenticated_guardian_must_ack_before_constructor() {
-    let fixture = Fixture::new();
-    let mut worker = fixture.worker(true);
-    // Bootstrap's authenticated durable-owner ACK is complete. Pause that exact
-    // live guardian before the first FD loan; no retain ACK can be published.
-    let pause = PausedGuardian::new(&fixture.registry);
-    let session = fixture.session();
-    let (sender, receiver) = mpsc::channel();
-    let child = std::thread::spawn(move || {
-        let result = worker
-            .open_session(&session, None, None)
-            .map(|_| ())
-            .map_err(|error| error.to_string());
-        let shutdown = worker.try_shutdown().map(|_| ()).map_err(|error| error.to_string());
-        sender.send((result, shutdown)).unwrap();
+fn regression_first_constructor_observes_durable_complete_guardian_custody() {
+    let mut fixture = Fixture::new();
+    let dependency = fixture.root.join("dependency");
+    fs::create_dir_all(dependency.join(".lake/build/lib")).unwrap();
+    let mut manifest: serde_json::Value = serde_json::from_str(&fixture.descriptor.shim_manifest_json).unwrap();
+    let primary = manifest.get("primary_dylib").unwrap().as_str().unwrap();
+    let library = dependency.join(if cfg!(target_os = "macos") {
+        ".lake/build/lib/libdep.dylib"
+    } else {
+        ".lake/build/lib/libdep.so"
     });
-    let lock = lean_toolchain::shared_writer::project_lock_path(&fixture.root).unwrap();
-    let started = std::time::Instant::now();
-    loop {
-        if let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(&lock)
-            && file.try_lock().is_err()
-        {
-            break;
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "worker never acquired shared custody"
-        );
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    assert!(
-        receiver.recv_timeout(Duration::from_millis(200)).is_err(),
-        "worker proceeded without retain ACK"
-    );
-    assert!(
-        !fixture.marker().exists(),
-        "constructor ran after SH but before durable guardian ACK"
-    );
-    drop(pause);
-    let (result, shutdown) = receiver
-        .recv_timeout(Duration::from_secs(5))
-        .expect("resume permits ACK and terminal load result");
-    assert!(
-        fixture.marker().exists(),
-        "constructor must run once genuine guardian ACK resumes"
-    );
+    fs::copy(primary, &library).unwrap();
+    manifest
+        .as_object_mut()
+        .unwrap()
+        .insert("dependencies".to_owned(), serde_json::json!([{"dylib_path": library}]));
+    fixture.descriptor.shim_manifest_json = serde_json::to_string(&manifest).unwrap();
+    fs::write(
+        &fixture.descriptor.shim_manifest_path,
+        &fixture.descriptor.shim_manifest_json,
+    )
+    .unwrap();
+    fixture
+        .descriptor
+        .artifact_roots
+        .push(dependency.to_str().unwrap().to_owned());
+    fixture.descriptor.artifact_roots.sort();
+
+    let mut worker = fixture.worker(true);
+    let result = worker
+        .open_session(&fixture.session(), None, None)
+        .map(|_| ())
+        .map_err(|error| error.to_string());
     assert!(
         result
             .expect_err("deliberately null initializer")
             .contains("null IO result")
     );
-    shutdown.expect("owned generation reaped");
-    child.join().unwrap();
+    assert!(fixture.marker().exists(), "the native constructor must actually run");
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("constructor-custody.json")).unwrap()).unwrap();
+    let owner = report.get("owner").expect("constructor's exact persisted owner record");
+    assert_eq!(owner.get("version").and_then(serde_json::Value::as_u64), Some(2));
+    assert_eq!(owner.get("phase").and_then(serde_json::Value::as_str), Some("running"));
+    assert_eq!(owner.get("generation_id"), report.get("nonce"));
+    let pid = report
+        .get("constructor_pid")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
+    assert!(pid > 1);
+    let process = owner.get("process").unwrap();
+    for field in ["pid", "process_group", "session"] {
+        assert_eq!(process.get(field).and_then(serde_json::Value::as_u64), Some(pid));
+    }
+    let guardian = owner.get("guardian").unwrap();
+    assert_eq!(guardian.get("session").and_then(serde_json::Value::as_u64), Some(pid));
+    assert_ne!(guardian.get("pid").and_then(serde_json::Value::as_u64), Some(pid));
+
+    let observed: Vec<lean_toolchain::native_guardian::NativeReadDomain> =
+        serde_json::from_value(owner.get("protected_domains").unwrap().clone()).unwrap();
+    let mut expected_roots = vec![fixture.root.clone(), dependency];
+    expected_roots.sort();
+    let mut observed_roots: Vec<_> = observed.iter().map(|domain| domain.project_root.clone()).collect();
+    observed_roots.sort();
+    assert_eq!(
+        observed_roots, expected_roots,
+        "the FIRST loaded library requires the full union"
+    );
+    let mut lock_files = Vec::new();
+    for root in expected_roots {
+        let domain = observed.iter().find(|domain| domain.project_root == root).unwrap();
+        let lock = lean_toolchain::shared_writer::project_lock_path(&root).unwrap();
+        assert_eq!(domain.lock_path, lock);
+        let file = fs::OpenOptions::new().read(true).write(true).open(&lock).unwrap();
+        let metadata = file.metadata().unwrap();
+        assert_eq!((domain.device, domain.inode), (metadata.dev(), metadata.ino()));
+        assert!(!domain.epoch.is_empty());
+        lock_files.push(file);
+    }
+    // The known initializer refusal dropped the worker's request aliases.
+    // Explicit logical release still cannot release the guardian's generation FDs.
+    worker.release_host_read().expect("logical read release");
+    for file in &lock_files {
+        assert!(
+            matches!(file.try_lock(), Err(fs::TryLockError::WouldBlock)),
+            "guardian must retain the actual shared descriptions"
+        );
+    }
+    worker.try_shutdown().expect("owned generation reaped");
+    for file in lock_files {
+        let started = std::time::Instant::now();
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) => {
+                    assert!(
+                        started.elapsed() < Duration::from_secs(2),
+                        "guardian custody did not close"
+                    );
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("exclusive lock probe failed: {error}"),
+            }
+        }
+    }
 }
 
 #[test]
