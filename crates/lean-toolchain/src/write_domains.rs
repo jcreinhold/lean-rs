@@ -230,3 +230,6 @@ pub(crate) fn workspace_union(primary: &Path, prepared: &[PathBuf]) -> io::Resul
     }
     workspace_roots(&workspaces)
 }
+
+#[cfg(test)]
+mod tests;
