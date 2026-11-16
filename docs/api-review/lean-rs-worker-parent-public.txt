@@ -515,6 +515,7 @@ pub fn lean_rs_worker_parent::LeanWorkerCapability::confirmed_request_stop_since
 pub fn lean_rs_worker_parent::LeanWorkerCapability::cumulative_cpu_millis(&mut self) -> core::option::Option<u64>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::cycle(&mut self) -> core::result::Result<(), lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::dylib_path(&self) -> &std::path::Path
+pub fn lean_rs_worker_parent::LeanWorkerCapability::host_runtime_metadata(&self) -> core::option::Option<&lean_rs_worker_protocol::types::LeanWorkerHostRuntimeMetadata>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::host_session_refusal_since(&self, &lean_rs_worker_parent::LeanWorkerRequestCheckpoint) -> core::option::Option<&'static str>
 pub fn lean_rs_worker_parent::LeanWorkerCapability::lifecycle_snapshot(&self) -> lean_rs_worker_parent::LeanWorkerLifecycleSnapshot
 pub fn lean_rs_worker_parent::LeanWorkerCapability::open_session(&mut self, core::option::Option<&lean_rs_worker_parent::LeanWorkerCancellationToken>, core::option::Option<&dyn lean_rs_worker_parent::LeanWorkerProgressSink>) -> core::result::Result<lean_rs_worker_parent::LeanWorkerSession<'_>, lean_rs_worker_parent::LeanWorkerError>

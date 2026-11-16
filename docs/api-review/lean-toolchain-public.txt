@@ -357,6 +357,31 @@ pub fn lean_toolchain::shared_writer::project_artifact_roots_with_domains(&[std:
 pub fn lean_toolchain::shared_writer::project_lock_path(&std::path::Path) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::shared_writer::run_shared_writer(&std::path::Path, &std::path::Path, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
 pub fn lean_toolchain::shared_writer::writer_lock_receipt(&[(std::path::PathBuf, std::fs::File)]) -> std::io::error::Result<serde_json::value::Value>
+pub mod lean_toolchain::writer_demand
+pub struct lean_toolchain::writer_demand::ReadAdmission
+impl lean_toolchain::writer_demand::ReadAdmission
+pub fn lean_toolchain::writer_demand::ReadAdmission::try_acquire(&[std::path::PathBuf]) -> std::io::error::Result<core::option::Option<Self>>
+impl core::fmt::Debug for lean_toolchain::writer_demand::ReadAdmission
+pub fn lean_toolchain::writer_demand::ReadAdmission::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::writer_demand::ReadAdmission
+impl core::marker::Send for lean_toolchain::writer_demand::ReadAdmission
+impl core::marker::Sync for lean_toolchain::writer_demand::ReadAdmission
+impl core::marker::Unpin for lean_toolchain::writer_demand::ReadAdmission
+impl core::marker::UnsafeUnpin for lean_toolchain::writer_demand::ReadAdmission
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::writer_demand::ReadAdmission
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::writer_demand::ReadAdmission
+pub struct lean_toolchain::writer_demand::WriterDemand
+impl lean_toolchain::writer_demand::WriterDemand
+pub fn lean_toolchain::writer_demand::WriterDemand::announce(&[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<Self>
+impl core::fmt::Debug for lean_toolchain::writer_demand::WriterDemand
+pub fn lean_toolchain::writer_demand::WriterDemand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::writer_demand::WriterDemand
+impl core::marker::Send for lean_toolchain::writer_demand::WriterDemand
+impl core::marker::Sync for lean_toolchain::writer_demand::WriterDemand
+impl core::marker::Unpin for lean_toolchain::writer_demand::WriterDemand
+impl core::marker::UnsafeUnpin for lean_toolchain::writer_demand::WriterDemand
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::writer_demand::WriterDemand
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::writer_demand::WriterDemand
 pub enum lean_toolchain::BuiltCapabilityArtifact
 pub lean_toolchain::BuiltCapabilityArtifact::Dylib
 pub lean_toolchain::BuiltCapabilityArtifact::Manifest

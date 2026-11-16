@@ -15,6 +15,12 @@ const POLL: Duration = Duration::from_millis(20);
 pub(crate) struct WriterLock {
     file: File,
     path: PathBuf,
+    #[cfg(unix)]
+    #[allow(
+        dead_code,
+        reason = "every returned artifact guard retains the complete compatible writer demand"
+    )]
+    demand: Option<std::sync::Arc<crate::writer_demand::WriterDemand>>,
 }
 
 impl WriterLock {
@@ -25,6 +31,31 @@ impl WriterLock {
     ) -> io::Result<Self> {
         Self::acquire_inner(path, timeout, cancelled)
             .map_err(|error| crate::shared_writer::failure(crate::shared_writer::WriterDisposition::NotStarted, error))
+    }
+
+    /// Single project-domain admission for source publication. Cache-entry
+    /// locks continue to use acquire directly and never announce project demand.
+    pub(crate) fn acquire_project(
+        path: &Path,
+        timeout: Duration,
+        cancelled: &(impl Fn() -> bool + ?Sized),
+    ) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            let started = Instant::now();
+            let demand = std::sync::Arc::new(
+                crate::writer_demand::WriterDemand::announce(&[path.to_path_buf()], timeout, cancelled).map_err(
+                    |error| crate::shared_writer::failure(crate::shared_writer::WriterDisposition::NotStarted, error),
+                )?,
+            );
+            let guard = Self::acquire(path, timeout.saturating_sub(started.elapsed()), cancelled)?;
+            Ok(Self {
+                demand: Some(demand),
+                ..guard
+            })
+        }
+        #[cfg(not(unix))]
+        Self::acquire(path, timeout, cancelled)
     }
 
     pub(crate) fn acquire_projects(
@@ -42,13 +73,29 @@ impl WriterLock {
                 .collect::<io::Result<Vec<_>>>()?;
             paths.sort();
             paths.dedup();
-            let mut guards = Vec::new();
-            for path in paths {
-                guards.push(Self::acquire(
-                    &path,
+            // Publish compatible SH demand on the entire union before taking
+            // even the first artifact EX. Multiple waiting writers never hold
+            // mutually exclusive intent locks while waiting on one another.
+            #[cfg(unix)]
+            let demand = std::sync::Arc::new(
+                crate::writer_demand::WriterDemand::announce(
+                    &paths,
                     timeout.saturating_sub(started.elapsed()),
                     cancelled,
-                )?);
+                )
+                .map_err(|error| {
+                    crate::shared_writer::failure(crate::shared_writer::WriterDisposition::NotStarted, error)
+                })?,
+            );
+            let mut guards = Vec::new();
+            for path in paths {
+                let guard = Self::acquire(&path, timeout.saturating_sub(started.elapsed()), cancelled)?;
+                #[cfg(unix)]
+                let guard = Self {
+                    demand: Some(std::sync::Arc::clone(&demand)),
+                    ..guard
+                };
+                guards.push(guard);
             }
             if crate::write_domains::workspace_union(root, prepared)? == roots {
                 let primary = crate::shared_writer::project_lock_path(root)?;
@@ -124,6 +171,8 @@ impl WriterLock {
                     return Ok(Self {
                         file,
                         path: path.to_path_buf(),
+                        #[cfg(unix)]
+                        demand: None,
                     });
                 }
                 Err(fs4::TryLockError::Error(error)) => return Err(error),

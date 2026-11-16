@@ -1204,6 +1204,13 @@ impl LeanWorkerCapability {
         self.worker.runtime_metadata()
     }
 
+    /// Actual read-domain and loaded-host metadata of the current generation.
+    /// This cached receipt performs no worker operation.
+    #[must_use]
+    pub fn host_runtime_metadata(&self) -> Option<&LeanWorkerHostRuntimeMetadata> {
+        self.worker.host_runtime_metadata()
+    }
+
     /// Return a snapshot of worker lifecycle counters.
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {

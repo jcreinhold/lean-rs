@@ -132,6 +132,17 @@ copied dependencies and Git layouts whose cleanup could unlink a nested domain i
 GO. A plain non-Lake fixture or proven zero-dependency payload needs only its primary domain. The immutable Lean sysroot
 is a separate provider, outside these managed Lake domains.
 
+Before any project EX attempt, managed writers announce compatible shared demand on stable sibling files for their
+complete physical-domain union. Source publication announces only its project domain, never a cache-entry lock. Readers
+briefly take exclusive admission gates before nonblocking artifact SH acquisition and release all gates before any
+artifact wait. A writer-demand observation refuses a partial reader before its body rather than waiting while an earlier
+SH remains held. Another transient reader gate permits bounded retry; a narrow release/probe race can conservatively
+refuse a fresh reader. Neither demand nor its disappearance is evidence that any actual writer or native child stopped.
+The configured helper retains its own compatible demand through writer cleanup; artifact EX aliases and the existing
+process fences remain authoritative after helper or caller loss. Demand files are private, close-only kernel locks and
+are never unlinked as recovery. Embedders retaining warm readers must fence matching new admissions and retire those
+readers only after their admitted calls finish; the MCP broker performs this automatically without a manual pool drain.
+
 Writers acquire all project locks in globally sorted path order, revalidate the graph under those locks, and retry a
 changed graph only before launch within the original admission budget. The helper validates every borrowed domain before
 ACK and rechecks graph coverage and inode identity before each GO. Loan order still names the primary project first,

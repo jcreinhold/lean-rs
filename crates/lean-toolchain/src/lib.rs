@@ -44,6 +44,8 @@ pub mod shared_reader;
 pub mod shared_writer;
 mod source_package;
 mod write_domains;
+#[cfg(unix)]
+pub mod writer_demand;
 mod writer_lock;
 
 pub use build_helpers::{

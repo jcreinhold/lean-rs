@@ -357,7 +357,7 @@ fn lock_project(
         path: root.to_path_buf(),
         source,
     })?;
-    WriterLock::acquire(&path, timeout, cancelled).map_err(|source| SourcePackageError::Io {
+    WriterLock::acquire_project(&path, timeout, cancelled).map_err(|source| SourcePackageError::Io {
         action: "lock source package writer domain",
         path,
         source,
