@@ -560,6 +560,7 @@ pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::num_threads(self, u32
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::open(self) -> core::result::Result<lean_rs_worker_parent::LeanWorkerCapability, lean_rs_worker_parent::LeanWorkerError>
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::process_tracker(self, lean_rs_worker_parent::LeanWorkerProcessTracker) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::request_timeout(self, core::time::Duration) -> Self
+pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::require_host_runtime(self, lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::restart_policy(self, lean_rs_worker_parent::LeanWorkerRestartPolicy) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::rss_hard_limit(self, u64, core::time::Duration) -> Self
 pub fn lean_rs_worker_parent::LeanWorkerCapabilityBuilder::session_key(&self) -> lean_rs_worker_parent::LeanWorkerSessionKey

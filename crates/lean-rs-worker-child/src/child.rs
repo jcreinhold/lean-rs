@@ -737,17 +737,12 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                 .checked_binding_signatures
                                 .into_iter()
                                 .map(|(name, signature)| {
-                                    let bytes = serde_json::to_vec(&signature)
-                                        .map_err(|error| std::io::Error::other(error.to_string()))?;
-                                    let digest = Sha256::digest(bytes);
-                                    let mut fingerprint = String::with_capacity(64);
-                                    for byte in digest {
-                                        use std::fmt::Write as _;
-                                        let _ = write!(fingerprint, "{byte:02x}");
-                                    }
-                                    Ok((name, fingerprint))
+                                    (
+                                        name,
+                                        lean_toolchain::host_shim_abi::checked_binding_fingerprint(&signature),
+                                    )
                                 })
-                                .collect::<Result<std::collections::BTreeMap<_, _>, std::io::Error>>()?;
+                                .collect();
                             Response::HostRuntimeMetadata {
                                 metadata: LeanWorkerHostRuntimeMetadata {
                                     compiled_lean_version: lean_toolchain::LEAN_VERSION.to_owned(),

@@ -23,6 +23,22 @@ bindings to GC-hosted languages—depend on `lean-rs` directly and skip this cra
 Reusable interop machinery belongs below this crate; see [`08-reusable-interop.md`](08-reusable-interop.md). The
 `lean_rs_host_*` shim contract remains the standard service contract, not the generic callback or build substrate.
 
+## Shared host ABI declaration metadata
+
+The standard host export rows live once in `lean-toolchain::host_shim_exports!`. The macro passes the same Rust
+argument/return type tokens and symbols to the actual host typed-binding generator and to a closed ABI-only metadata
+projection. The latter uses private marker types, never a Lean runtime, loaded manifest or cached receipt. An all-row
+host test independently computes `LeanArgs`/`DecodeCallResult` signatures and compares them with the projection.
+Unknown argument shapes have no marker trait implementation, so adding a new shape requires an explicit projection
+change rather than silently assuming a boxed object.
+
+`lean_toolchain::host_shim_abi::expected_checked_bindings()` selects the three proof-workflow requirements by generated
+field access, making missing required rows a compile error. Actual loaded binding receipts and compiled expectations
+use one canonical JSON/SHA encoder, with recursive key sorting independent of `serde_json` map features. The parent can
+therefore enforce the expected ABI on its first host session and every replacement while remaining free of
+`libleanshared`. Header and runtime-version checks remain separate requirements. Only static declaration metadata moves
+below the host layer; host runtime operations and semantic types remain in `lean-rs-host`.
+
 ## Curated crate-root surface
 
 ```rust

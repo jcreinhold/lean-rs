@@ -2557,16 +2557,21 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         self.host_runtime_metadata = None;
         self.last_host_session_refusal = None;
+        let mut observed_pre_body_refusal = None;
         let result = (|| {
             self.open_worker_session_attempt(config, cancellation, progress, true)?;
             if config.host_runtime_expectation().is_some() || self.config.shared_artifact_reads {
                 let actual = self.worker_host_runtime_metadata(cancellation, progress)?;
-                if let Some(expected) = config.host_runtime_expectation() {
-                    expected
-                        .validate(&actual)
-                        .map_err(|message| LeanWorkerError::Protocol {
-                            message: format!("host runtime compatibility: {message}"),
-                        })?;
+                if let Some(expected) = config.host_runtime_expectation()
+                    && let Err(message) = expected.validate(&actual)
+                {
+                    // This exact metadata response was consumed. It is a
+                    // pre-body refusal, unlike a transport/protocol failure
+                    // while waiting for the response.
+                    observed_pre_body_refusal.clone_from(&self.last_request);
+                    return Err(LeanWorkerError::Protocol {
+                        message: format!("host runtime compatibility: {message}"),
+                    });
                 }
                 if self.config.shared_artifact_reads
                     && !actual.artifact_read_epochs.as_ref().is_some_and(|epochs| {
@@ -2577,6 +2582,7 @@ impl LeanWorker {
                             })
                     })
                 {
+                    observed_pre_body_refusal.clone_from(&self.last_request);
                     return Err(LeanWorkerError::Protocol {
                         message: "worker did not report actual project artifact read custody".to_owned(),
                     });
@@ -2588,9 +2594,12 @@ impl LeanWorker {
         if result.is_err() {
             // Preserve the exact framed pre-body refusal before cleanup sends
             // another request or replaces the generation. It is no exit claim.
-            let refusal = matches!(&result, Err(LeanWorkerError::Worker { .. }))
-                .then(|| self.last_request.clone())
-                .flatten()
+            let refusal = observed_pre_body_refusal
+                .or_else(|| {
+                    matches!(&result, Err(LeanWorkerError::Worker { .. }))
+                        .then(|| self.last_request.clone())
+                        .flatten()
+                })
                 .filter(|request| {
                     matches!(
                         request.operation,

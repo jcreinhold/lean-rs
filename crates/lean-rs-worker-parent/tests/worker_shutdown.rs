@@ -97,6 +97,22 @@ fn main() {
             host_metadata_accepts_compatible_extra_bindings,
         ),
         (
+            "host_metadata_unobserved_protocol_failure_has_no_terminal_refusal",
+            host_metadata_unobserved_protocol_failure_has_no_terminal_refusal,
+        ),
+        (
+            "capability_builder_requires_host_metadata_before_first_export",
+            capability_builder_requires_host_metadata_before_first_export,
+        ),
+        (
+            "capability_builder_revalidates_host_metadata_after_replacement",
+            capability_builder_revalidates_host_metadata_after_replacement,
+        ),
+        (
+            "capability_pool_does_not_reuse_unguarded_session_for_required_contract",
+            capability_pool_does_not_reuse_unguarded_session_for_required_contract,
+        ),
+        (
             "stale_warm_session_keeps_import_count_backstop",
             stale_warm_session_keeps_import_count_backstop,
         ),
@@ -557,7 +573,31 @@ fn run_fake_child(mode: &str) {
                 )
                 .expect("fake read alias release");
             }
+            Request::CapabilityMetadata { .. } if mode.starts_with("host_metadata_") => {
+                if let Some(root) = env::var_os("LEAN_SYSROOT") {
+                    std::fs::write(PathBuf::from(root).join("capability-export-dispatched"), b"dispatched")
+                        .expect("record fake capability export body");
+                }
+                write_frame(
+                    &mut stdout,
+                    Message::Response(Response::CapabilityMetadata {
+                        metadata: lean_rs_worker_protocol::types::LeanWorkerCapabilityMetadata {
+                            commands: Vec::new(),
+                            capabilities: Vec::new(),
+                            lean_version: None,
+                            extra: None,
+                        },
+                    }),
+                    MAX_FRAME_BYTES,
+                )
+                .expect("fake capability metadata body response");
+            }
             Request::HostRuntimeMetadata => {
+                if mode == "host_metadata_wrong_response" {
+                    write_frame(&mut stdout, Message::Response(Response::HealthOk), MAX_FRAME_BYTES)
+                        .expect("fake unobserved metadata response");
+                    continue;
+                }
                 let fingerprint = if mode == "host_metadata_bad" { "c" } else { "a" };
                 let metadata = LeanWorkerHostRuntimeMetadata {
                     artifact_read_epochs: mode.starts_with("host_read_").then(|| {
@@ -2256,24 +2296,32 @@ fn public_worker_handles_keep_unwind_safety() {
     assert_unwind_safe::<LeanWorkerPool>();
 }
 
+fn expected_host_runtime() -> LeanWorkerHostRuntimeExpectation {
+    LeanWorkerHostRuntimeExpectation {
+        compiled_header_sha256: Some("b".repeat(64)),
+        runtime_lean_version: Some("4.35.0".into()),
+        checked_host_bindings: std::collections::BTreeMap::from([("verify_declaration_batch".into(), "a".repeat(64))]),
+    }
+}
 fn host_metadata_config() -> LeanWorkerSessionConfig {
-    LeanWorkerSessionConfig::shims_only("/fake-metadata-project", ["Init"]).with_host_runtime_expectation(
-        LeanWorkerHostRuntimeExpectation {
-            compiled_header_sha256: Some("b".repeat(64)),
-            runtime_lean_version: Some("4.35.0".into()),
-            checked_host_bindings: std::collections::BTreeMap::from([(
-                "verify_declaration_batch".into(),
-                "a".repeat(64),
-            )]),
-        },
-    )
+    LeanWorkerSessionConfig::shims_only("/fake-metadata-project", ["Init"])
+        .with_host_runtime_expectation(expected_host_runtime())
 }
 fn host_metadata_is_checked_before_session_is_exposed() -> Result<(), String> {
     let mut worker = fake_worker("host_metadata_bad").map_err(|e| e.to_string())?;
+    let checkpoint = worker.request_checkpoint();
     let result = worker.open_session(&host_metadata_config(), None, None);
     assert!(result.is_err());
     drop(result);
     assert!(worker.host_runtime_metadata().is_none());
+    assert_eq!(
+        worker.host_session_refusal_since(&checkpoint),
+        Some("worker_host_runtime_metadata")
+    );
+    assert!(
+        worker.confirmed_request_stop_since(&checkpoint).is_none(),
+        "metadata refusal is not an exit receipt"
+    );
     worker.try_shutdown().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -2299,6 +2347,94 @@ fn host_metadata_is_revalidated_after_recycle() -> Result<(), String> {
     worker.try_shutdown().map_err(|e| e.to_string())?;
     Ok(())
 }
+fn capability_builder_requires_host_metadata_before_first_export() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("capability-first-host-metadata")?;
+    let result = fixture
+        .builder("host_metadata_bad", ["Init"])?
+        .require_host_runtime(expected_host_runtime())
+        .validate_metadata("fake_capability_metadata", serde_json::json!({}))
+        .open();
+    let error = result.err().ok_or("mismatched host runtime exposed a capability")?;
+    assert!(error.to_string().contains("host runtime compatibility"), "{error}");
+    assert!(
+        !fixture.root.join("capability-export-dispatched").exists(),
+        "no downstream export after cold ABI refusal"
+    );
+    Ok(())
+}
+
+fn capability_builder_revalidates_host_metadata_after_replacement() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("capability-replacement-host-metadata")?;
+    let mut capability = fixture
+        .builder("host_metadata_ok", ["Init"])?
+        .require_host_runtime(expected_host_runtime())
+        .open()
+        .map_err(|error| error.to_string())?;
+    let wrapper = fixture.root.join(wrapper_name("host_metadata_ok"));
+    write_fake_child_wrapper(
+        &wrapper,
+        &env::current_exe().map_err(|error| error.to_string())?,
+        "host_metadata_bad",
+    )?;
+    capability.cycle().map_err(|error| error.to_string())?;
+    let checkpoint = capability.request_checkpoint();
+    let result = capability
+        .open_session_with_imports(["Std"], None, None)
+        .and_then(|mut session| {
+            session.capability_metadata("fake_capability_metadata", &serde_json::json!({}), None, None)
+        });
+    let error = result.err().ok_or("replacement bypassed required host runtime")?;
+    assert!(error.to_string().contains("host runtime compatibility"), "{error}");
+    assert!(
+        !fixture.root.join("capability-export-dispatched").exists(),
+        "no export after replacement ABI refusal"
+    );
+    assert_eq!(
+        capability.host_session_refusal_since(&checkpoint),
+        Some("worker_host_runtime_metadata")
+    );
+    assert!(
+        capability.confirmed_request_stop_since(&checkpoint).is_none(),
+        "pre-body refusal does not claim process exit"
+    );
+    capability.try_shutdown().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn capability_pool_does_not_reuse_unguarded_session_for_required_contract() -> Result<(), String> {
+    let fixture = FakeCapabilityFixture::new("capability-host-metadata-reuse")?;
+    let mut pool = LeanWorkerPool::new(LeanWorkerPoolConfig::new(1));
+    drop(
+        pool.acquire_lease(fixture.builder("normal", ["Init"])?)
+            .map_err(|error| error.to_string())?,
+    );
+    let result = pool.acquire_lease(
+        fixture
+            .builder("host_metadata_bad", ["Init"])?
+            .require_host_runtime(expected_host_runtime()),
+    );
+    assert!(
+        matches!(result, Err(LeanWorkerError::WorkerPoolExhausted { .. })),
+        "required contract must not reuse an unguarded warm slot"
+    );
+    Ok(())
+}
+
+fn host_metadata_unobserved_protocol_failure_has_no_terminal_refusal() -> Result<(), String> {
+    let mut worker = fake_worker("host_metadata_wrong_response").map_err(|error| error.to_string())?;
+    let checkpoint = worker.request_checkpoint();
+    let result = worker.open_session(&host_metadata_config(), None, None);
+    let error = result.err().ok_or("wrong metadata frame exposed a host session")?;
+    assert!(matches!(error, LeanWorkerError::Protocol { .. }));
+    assert!(
+        worker.host_session_refusal_since(&checkpoint).is_none(),
+        "no typed metadata result was observed"
+    );
+    assert!(worker.host_runtime_metadata().is_none());
+    worker.try_shutdown().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn host_metadata_accepts_compatible_extra_bindings() -> Result<(), String> {
     let mut worker = fake_worker("host_metadata_ok").map_err(|e| e.to_string())?;
     {

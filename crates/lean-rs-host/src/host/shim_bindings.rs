@@ -1,10 +1,10 @@
 //! Checked typed bindings for the bundled `lean-rs-host` shim exports.
 //!
-//! This module is the single Rust source of truth for the standard host
-//! shim C-ABI surface. The same `host_shim_exports!` rows generate the
-//! artifact-manifest signatures and the cached typed call handles used by
-//! `LeanSession`, so adding or changing a shim symbol updates both sides
-//! together.
+//! The shared `lean_toolchain::host_shim_exports!` declaration rows are the
+//! single Rust source of truth for this C-ABI surface. They generate this
+//! module's artifact-manifest signatures and cached typed call handles, plus
+//! link-free cold-start expectations. All-row tests compare the independent
+//! real typed traits with that ABI-only projection.
 
 use lean_rs::module::{
     DecodeCallResult, LeanArgs, LeanCapability, LeanCheckedExportError, LeanExportSignature, LeanExported, LeanIo,
@@ -24,142 +24,6 @@ use crate::host::process::{
     ProofAttemptOutcome, ProofAttemptRequest,
 };
 use crate::host::session::{LeanDeclarationFilter, LeanImportStats, LeanSourceRange};
-
-macro_rules! host_shim_exports {
-    ($m:ident) => {
-        $m! {
-            mandatory session_import => "lean_rs_host_session_import"
-                => [(Vec<String>, Vec<String>)] => [LeanIo<Obj<'lean>>];
-            mandatory session_import_progress => "lean_rs_host_session_import_progress"
-                => [(Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory session_import_profile => "lean_rs_host_session_import_profile"
-                => [(Vec<String>, Vec<String>, bool, u8, bool, bool, bool, String)] => [LeanIo<Obj<'lean>>];
-            mandatory session_import_profile_progress => "lean_rs_host_session_import_profile_progress"
-                => [(Vec<String>, Vec<String>, bool, u8, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_import_stats => "lean_rs_host_env_import_stats"
-                => [(Obj<'lean>, String, bool)] => [LeanIo<LeanImportStats>];
-            mandatory extension_registry_epoch => "lean_rs_host_extension_registry_epoch"
-                => [()] => [LeanIo<u64>];
-            mandatory bracketed_import_query => "lean_rs_host_bracketed_import_query"
-                => [(Vec<String>, Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory name_from_string => "lean_rs_host_name_from_string"
-                => [(Obj<'lean>,)] => [LeanName<'lean>];
-            mandatory name_to_string => "lean_rs_host_name_to_string"
-                => [(LeanName<'lean>,)] => [String];
-            mandatory env_query_declaration => "lean_rs_host_env_query_declaration"
-                => [(Obj<'lean>, LeanName<'lean>)] => [LeanIo<Option<LeanDeclaration<'lean>>>];
-            mandatory env_query_declarations_bulk => "lean_rs_host_env_query_declarations_bulk"
-                => [(Obj<'lean>, Vec<LeanName<'lean>>)] => [LeanIo<Vec<Option<LeanDeclaration<'lean>>>>];
-            mandatory env_query_declarations_bulk_progress => "lean_rs_host_env_query_declarations_bulk_progress"
-                => [(Obj<'lean>, Vec<LeanName<'lean>>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_list_declarations => "lean_rs_host_env_list_declarations"
-                => [(Obj<'lean>,)] => [LeanIo<Vec<Obj<'lean>>>];
-            mandatory env_list_declarations_filtered => "lean_rs_host_env_list_declarations_filtered"
-                => [(Obj<'lean>, LeanDeclarationFilter)] => [LeanIo<Vec<Obj<'lean>>>];
-            mandatory env_list_declarations_filtered_progress => "lean_rs_host_env_list_declarations_filtered_progress"
-                => [(Obj<'lean>, LeanDeclarationFilter, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_declaration_source_range => "lean_rs_host_env_declaration_source_range"
-                => [(Obj<'lean>, LeanName<'lean>, Vec<String>)] => [LeanIo<Option<LeanSourceRange>>];
-            mandatory env_declaration_type => "lean_rs_host_env_declaration_type"
-                => [(Obj<'lean>, LeanName<'lean>)] => [LeanIo<Option<LeanExpr<'lean>>>];
-            mandatory env_declaration_type_bulk => "lean_rs_host_env_declaration_type_bulk"
-                => [(Obj<'lean>, Vec<String>)] => [LeanIo<Vec<Option<LeanExpr<'lean>>>>];
-            mandatory env_declaration_type_bulk_progress => "lean_rs_host_env_declaration_type_bulk_progress"
-                => [(Obj<'lean>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_declaration_kind => "lean_rs_host_env_declaration_kind"
-                => [(Obj<'lean>, LeanName<'lean>)] => [LeanIo<String>];
-            mandatory env_declaration_kind_bulk => "lean_rs_host_env_declaration_kind_bulk"
-                => [(Obj<'lean>, Vec<String>)] => [LeanIo<Vec<Obj<'lean>>>];
-            mandatory env_declaration_kind_bulk_progress => "lean_rs_host_env_declaration_kind_bulk_progress"
-                => [(Obj<'lean>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_declaration_name => "lean_rs_host_env_declaration_name"
-                => [(Obj<'lean>, LeanName<'lean>)] => [LeanIo<String>];
-            mandatory env_declaration_name_bulk => "lean_rs_host_env_declaration_name_bulk"
-                => [(Obj<'lean>, Vec<String>)] => [LeanIo<Vec<Obj<'lean>>>];
-            mandatory env_declaration_name_bulk_progress => "lean_rs_host_env_declaration_name_bulk_progress"
-                => [(Obj<'lean>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory env_search_declarations => "lean_rs_host_env_search_declarations"
-                => [(Obj<'lean>, DeclarationSearchRequest, Vec<String>)] => [LeanIo<DeclarationSearchResult>];
-            optional env_inspect_declaration => "lean_rs_host_env_inspect_declaration"
-                => [(Obj<'lean>, DeclarationInspectionRequest, Vec<String>, u64)] => [LeanIo<DeclarationInspectionResult>];
-            mandatory env_expr_to_string_raw => "lean_rs_host_env_expr_to_string_raw"
-                => [(LeanExpr<'lean>,)] => [String];
-            mandatory elaborate => "lean_rs_host_elaborate"
-                => [(Obj<'lean>, String, Option<LeanExpr<'lean>>, String, String, u64, usize, String)]
-                => [LeanIo<Result<LeanExpr<'lean>, LeanElabFailure>>];
-            mandatory elaborate_bulk => "lean_rs_host_elaborate_bulk"
-                => [(Obj<'lean>, Vec<String>, String, String, u64, usize, String)]
-                => [LeanIo<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>];
-            mandatory elaborate_bulk_progress => "lean_rs_host_elaborate_bulk_progress"
-                => [(Obj<'lean>, Vec<String>, String, String, u64, usize, String, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory kernel_check => "lean_rs_host_kernel_check"
-                => [(Obj<'lean>, String, String, String, u64, usize, String)] => [LeanIo<LeanKernelOutcome<'lean>>];
-            mandatory kernel_check_progress => "lean_rs_host_kernel_check_progress"
-                => [(Obj<'lean>, String, String, String, u64, usize, String, usize, usize)] => [LeanIo<Obj<'lean>>];
-            mandatory check_evidence => "lean_rs_host_check_evidence"
-                => [(Obj<'lean>, LeanEvidence<'lean>)] => [LeanIo<EvidenceStatus>];
-            mandatory evidence_summary => "lean_rs_host_evidence_summary"
-                => [(Obj<'lean>, LeanEvidence<'lean>)] => [LeanIo<ProofSummary>];
-            optional meta_infer_type => "lean_rs_host_meta_infer_type"
-                => [(Obj<'lean>, LeanExpr<'lean>, u64, usize, u8)] => [LeanIo<LeanMetaResponse<LeanExpr<'lean>>>];
-            optional meta_whnf => "lean_rs_host_meta_whnf"
-                => [(Obj<'lean>, LeanExpr<'lean>, u64, usize, u8)] => [LeanIo<LeanMetaResponse<LeanExpr<'lean>>>];
-            optional meta_heartbeat_burn => "lean_rs_host_meta_heartbeat_burn"
-                => [(Obj<'lean>, LeanExpr<'lean>, u64, usize, u8)] => [LeanIo<LeanMetaResponse<LeanExpr<'lean>>>];
-            optional meta_is_def_eq => "lean_rs_host_meta_is_def_eq"
-                => [(Obj<'lean>, (LeanExpr<'lean>, LeanExpr<'lean>, LeanMetaTransparency), u64, usize, u8)]
-                => [LeanIo<LeanMetaResponse<bool>>];
-            optional meta_pp_expr => "lean_rs_host_meta_pp_expr"
-                => [(Obj<'lean>, LeanExpr<'lean>, u64, usize, u8)] => [LeanIo<LeanMetaResponse<String>>];
-            optional process_module_query => "lean_rs_host_process_module_query"
-                => [(Obj<'lean>, String, ModuleQuery, String, String, u64, usize, String)] => [LeanIo<ModuleQueryOutcome>];
-            optional process_module_query_batch => "lean_rs_host_process_module_query_batch"
-                => [(
-                    Obj<'lean>,
-                    String,
-                    Vec<ModuleQuerySelector>,
-                    ModuleQueryOutputBudgets,
-                    String,
-                    String,
-                    u64,
-                    usize,
-                    String,
-                )] => [LeanIo<ModuleQueryBatchOutcome>];
-            optional process_module_query_batch_cached => "lean_rs_host_process_module_query_batch_cached"
-                => [(
-                    Obj<'lean>,
-                    String,
-                    Vec<ModuleQuerySelector>,
-                    ModuleQueryOutputBudgets,
-                    String,
-                    String,
-                    u64,
-                    usize,
-                    String,
-                    String,
-                )] => [LeanIo<ModuleQueryBatchCachedOutcome>];
-            optional attempt_proof => "lean_rs_host_attempt_proof"
-                => [(Obj<'lean>, ProofAttemptRequest, String, String, u64, usize, String)]
-                => [LeanIo<ProofAttemptOutcome>];
-            optional verify_declaration => "lean_rs_host_verify_declaration"
-                => [(Obj<'lean>, DeclarationVerificationRequest, String, String, u64, usize, String)]
-                => [LeanIo<DeclarationVerificationOutcome>];
-            optional verify_declaration_batch => "lean_rs_host_verify_declaration_batch"
-                => [(Obj<'lean>, DeclarationVerificationBatchRequest, String, String, u64, usize, String)]
-                => [LeanIo<DeclarationVerificationBatchOutcome>];
-            optional configure_header_import_budget => "lean_rs_host_configure_header_import_budget"
-                => [(u64, u64)] => [LeanIo<()>];
-            optional header_import_state => "lean_rs_host_header_import_state"
-                => [()] => [LeanIo<String>];
-            optional clear_module_header_cache => "lean_rs_host_clear_module_header_cache"
-                => [(Obj<'lean>,)] => [LeanIo<()>];
-            optional runtime_version => "lean_rs_host_runtime_version"
-                => [()] => [LeanIo<String>];
-            optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
-                => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
-        }
-    };
-}
 
 macro_rules! binding_type {
     (mandatory, $args:ty, $ret:ty) => {
@@ -230,7 +94,7 @@ macro_rules! define_host_shim_bindings {
     };
 }
 
-host_shim_exports!(define_host_shim_bindings);
+lean_toolchain::host_shim_exports!(define_host_shim_bindings);
 
 /// Checked binding resolution failure.
 #[derive(Debug)]
@@ -325,6 +189,23 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn compiled_link_free_projection_matches_every_real_typed_host_signature() {
+        let actual = signatures_by_symbol(host_shim_export_signatures());
+        let projected = lean_toolchain::host_shim_abi::compiled_host_binding_signatures();
+        let projected_by_symbol = signatures_by_symbol(projected.values().cloned().collect());
+        assert_eq!(actual, projected_by_symbol);
+        let expected = lean_toolchain::host_shim_abi::expected_checked_bindings();
+        for (operation, fingerprint) in expected {
+            let signature = projected.get(&operation).expect("required operation is generated");
+            let typed = actual.get(signature.symbol()).expect("real typed signature exists");
+            assert_eq!(
+                fingerprint,
+                lean_toolchain::host_shim_abi::checked_binding_fingerprint(&typed.to_json())
+            );
+        }
+    }
 
     fn shim_source_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

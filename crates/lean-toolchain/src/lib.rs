@@ -27,6 +27,7 @@ mod built_capability;
 mod diagnostics;
 mod discover;
 mod fingerprint;
+pub mod host_shim_abi;
 mod lakefile_toml;
 mod limits;
 mod loader;

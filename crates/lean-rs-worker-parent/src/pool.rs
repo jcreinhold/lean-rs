@@ -55,6 +55,7 @@ pub struct LeanWorkerSessionKey {
     imports: Vec<String>,
     import_profile: LeanWorkerSessionImportProfile,
     metadata_expectation: Option<LeanWorkerMetadataExpectationKey>,
+    host_runtime_expectation: Option<lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation>,
     toolchain_fingerprint: lean_toolchain::ToolchainFingerprint,
     restart_policy_class: LeanWorkerRestartPolicyClass,
 }
@@ -82,6 +83,7 @@ impl LeanWorkerSessionKey {
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: LeanWorkerSessionImportProfile::default(),
             metadata_expectation: None,
+            host_runtime_expectation: None,
             toolchain_fingerprint: lean_toolchain::ToolchainFingerprint::current(),
             restart_policy_class: LeanWorkerRestartPolicyClass::Default,
         }
@@ -99,6 +101,14 @@ impl LeanWorkerSessionKey {
 
     pub(crate) fn with_import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
         self.import_profile = profile;
+        self
+    }
+
+    pub(crate) fn with_host_runtime_expectation(
+        mut self,
+        expected: lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation,
+    ) -> Self {
+        self.host_runtime_expectation = Some(expected);
         self
     }
 

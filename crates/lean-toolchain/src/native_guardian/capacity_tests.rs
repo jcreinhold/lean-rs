@@ -478,3 +478,53 @@ fn concurrent_preparation_admission_permits_exactly_one_global_utility() {
 
 #[path = "input_tests.rs"]
 mod input_tests;
+
+#[test]
+fn atomic_owner_publication_never_misclassifies_a_replaced_inode_as_malformed() {
+    let fixture = Fixture::new();
+    let record = reserve(&fixture, 1, &slot("actor", "main", 1)).unwrap();
+    let expected = read_owner(&record).unwrap();
+    let writer_record = record.clone();
+    let writer_value = expected.clone();
+    let writer = thread::spawn(move || {
+        for _ in 0..100 {
+            persist_owner(&writer_record, &writer_value).unwrap();
+        }
+    });
+    let mut success = 0_usize;
+    for _ in 0..500 {
+        match read_owner(&record) {
+            Ok(value) => {
+                assert_eq!(value, expected);
+                success += 1;
+            }
+            Err(error) => assert_eq!(
+                error.kind(),
+                io::ErrorKind::WouldBlock,
+                "only demonstrated replacement may backpressure: {error}"
+            ),
+        }
+    }
+    writer.join().unwrap();
+    assert!(success > 0);
+    assert_eq!(read_owner(&record).unwrap(), expected);
+    fs::write(&record, b"{stable malformed").unwrap();
+    assert_ne!(read_owner(&record).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+}
+
+#[test]
+fn malformed_fifo_owner_is_rejected_without_waiting_for_a_writer() {
+    let fixture = Fixture::new();
+    let record = reserve(&fixture, 1, &slot("actor", "main", 1)).unwrap();
+    fs::remove_file(&record).unwrap();
+    nix::unistd::mkfifo(
+        record.as_path(),
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
+    let started = Instant::now();
+    let error = read_owner(&record).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(started.elapsed() < Duration::from_millis(300));
+    assert!(reserve(&fixture, 2, &slot("other", "main", 1)).is_err());
+}

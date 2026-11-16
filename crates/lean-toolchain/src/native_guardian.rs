@@ -344,25 +344,58 @@ impl Incoming {
 }
 
 fn read_owner(record: &Path) -> io::Result<Value> {
-    let metadata = fs::symlink_metadata(record)?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.len() > u64::try_from(MAX_OWNER_BYTES).map_err(io::Error::other)?
-    {
-        return Err(invalid("native owner record identity or size invalid"));
+    // Atomic owner publication replaces the inode. A path stat followed by a
+    // separate open can observe the old vnode with nlink=0 during rename. Only
+    // demonstrated replacement retries; a stable malformed owner stays an error.
+    for _attempt in 0..8 {
+        let descriptor = rustix::fs::open(
+            record,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )?;
+        let mut file = File::from(descriptor);
+        let opened = file.metadata()?;
+        let named = fs::symlink_metadata(record)?;
+        if (opened.dev(), opened.ino()) != (named.dev(), named.ino()) || opened.nlink() == 0 || named.nlink() == 0 {
+            thread::yield_now();
+            continue;
+        }
+        if !opened.is_file()
+            || !named.is_file()
+            || opened.nlink() != 1
+            || named.nlink() != 1
+            || opened.len() > u64::try_from(MAX_OWNER_BYTES).map_err(io::Error::other)?
+        {
+            return Err(invalid("native owner record identity or size invalid"));
+        }
+        let mut bytes = Vec::new();
+        (&mut file)
+            .take(
+                u64::try_from(MAX_OWNER_BYTES)
+                    .map_err(io::Error::other)?
+                    .saturating_add(1),
+            )
+            .read_to_end(&mut bytes)?;
+        let after = fs::symlink_metadata(record)?;
+        if (opened.dev(), opened.ino()) != (after.dev(), after.ino()) || after.nlink() == 0 {
+            thread::yield_now();
+            continue;
+        }
+        if !after.is_file() || after.nlink() != 1 || bytes.len() > MAX_OWNER_BYTES {
+            return Err(invalid("native owner record changed shape or exceeded its bound"));
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        return validate_owner_record_path(record, value);
     }
-    let mut bytes = Vec::new();
-    File::open(record)?
-        .take(
-            u64::try_from(MAX_OWNER_BYTES)
-                .map_err(io::Error::other)?
-                .saturating_add(1),
-        )
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_OWNER_BYTES {
-        return Err(invalid("native owner record oversized"));
-    }
-    let value: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    Err(io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "native owner publication changed during bounded read",
+    ))
+}
+fn validate_owner_record_path(record: &Path, value: Value) -> io::Result<Value> {
     let nonce = field(&value, "generation_id")
         .as_str()
         .filter(|nonce| valid_nonce(nonce))

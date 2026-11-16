@@ -24,7 +24,12 @@ fn wait_for(mut predicate: impl FnMut() -> bool) {
     }
 }
 fn child(root: &Path) -> (crash_ownership::ParentLifetime, Child) {
-    let lifetime = crash_ownership::ParentLifetime::prepare(root).unwrap();
+    let owner_root = if root.join("input-custody-mode").exists() {
+        root.join("owners")
+    } else {
+        root.to_path_buf()
+    };
+    let lifetime = crash_ownership::ParentLifetime::prepare(&owner_root).unwrap();
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
         .args([
@@ -56,7 +61,34 @@ fn fixture_child_entry() {
         fs::write(Path::new(&root).join("forked"), descendant_pid.to_string()).unwrap();
         return;
     }
-    let mut descendant = Command::new("/bin/sleep").arg("0.8").spawn().unwrap();
+    let mut command = if Path::new(&root).join("input-custody-mode").exists() {
+        let mut command = Command::new("python3");
+        command
+            .args([
+                "-c",
+                r"
+import os,pathlib,sys,time
+root=pathlib.Path(sys.argv[1])
+for fd in range(3,4096):
+    try: os.close(fd)
+    except OSError: pass
+source=pathlib.Path((root/'input-path').read_text())/'source.lean'
+with (root/'input-reading').open('ab',buffering=0) as output:
+    until=time.monotonic()+3
+    while time.monotonic()<until:
+        assert source.read_bytes()==b'owned generation input'
+        output.write(b'x')
+        time.sleep(.01)
+",
+            ])
+            .arg(&root);
+        command
+    } else {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("0.8");
+        command
+    };
+    let mut descendant = command.spawn().unwrap();
     let descendant_pid = descendant.id();
     std::thread::spawn(move || {
         let _exit = descendant.wait();
@@ -80,12 +112,21 @@ fn fixture_broker_entry() {
     let tracker = process::LeanWorkerProcessTracker::new();
     let mut owned = tracker.own(child);
     let lease = lifetime.accept(owned.id(), Duration::from_secs(2)).unwrap();
+    if root.join("input-custody-mode").exists() {
+        let inputs = lean_toolchain::native_guardian::create_generation_inputs(lease.record.parent().unwrap()).unwrap();
+        fs::write(inputs.join("source.lean"), b"owned generation input").unwrap();
+        fs::write(root.join("input-path"), inputs.to_string_lossy().as_bytes()).unwrap();
+    }
     owned.attach_lifetime(lease).unwrap();
     owned.acknowledge_lifetime().unwrap();
     wait_for(|| root.join("body").exists());
     fs::write(root.join("broker-ready"), owned.id().to_string()).unwrap();
+    let started = Instant::now();
     loop {
-        std::thread::sleep(Duration::from_secs(1));
+        if root.join("input-custody-mode").exists() && started.elapsed() > Duration::from_secs(6) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 #[test]
@@ -668,5 +709,50 @@ fn trickled_hello_cannot_restart_the_absolute_startup_budget() {
     assert!(!root.join("body").exists());
     owned.kill().unwrap();
     wait_for(|| owned.try_wait().unwrap().is_some());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn actual_server_death_keeps_inputs_for_live_descendant_then_next_gc_removes_them() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = directory().canonicalize().unwrap();
+    let registry = root.join("owners");
+    fs::create_dir(&registry).unwrap();
+    fs::set_permissions(&registry, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(root.join("input-custody-mode"), []).unwrap();
+    let mut server = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "crash_ownership::lifecycle_tests::fixture_broker_entry",
+            "--nocapture",
+        ])
+        .env("PROOFS_LIFELINE_BROKER", &root)
+        .env_remove("PROOFS_LIFELINE_CHILD")
+        .spawn()
+        .unwrap();
+    wait_for(|| {
+        root.join("broker-ready").exists()
+            && fs::metadata(root.join("input-reading")).is_ok_and(|metadata| metadata.len() > 0)
+    });
+    let group: u32 = fs::read_to_string(root.join("broker-ready")).unwrap().parse().unwrap();
+    let inputs = PathBuf::from(fs::read_to_string(root.join("input-path")).unwrap());
+    let record = inputs.parent().unwrap().join("owner.json");
+    assert!(lean_toolchain::process_group::group_present(group).unwrap());
+    assert!(inputs.join("source.lean").exists());
+    server.kill().unwrap();
+    server.wait().unwrap(); // signal only our actual owned C.
+    lean_toolchain::native_guardian::reserve_owner_record(&registry, &format!("{:048x}", 1), Duration::from_secs(1))
+        .unwrap();
+    if lean_toolchain::process_group::group_present(group).unwrap() {
+        assert!(record.exists());
+        assert!(inputs.join("source.lean").exists());
+        let before = fs::metadata(root.join("input-reading")).unwrap().len();
+        wait_for(|| fs::metadata(root.join("input-reading")).unwrap().len() > before);
+    }
+    wait_for(|| !lean_toolchain::process_group::group_present(group).unwrap());
+    lean_toolchain::native_guardian::reserve_owner_record(&registry, &format!("{:048x}", 2), Duration::from_secs(1))
+        .unwrap();
+    assert!(!record.exists());
+    assert!(!inputs.exists());
     fs::remove_dir_all(root).unwrap();
 }

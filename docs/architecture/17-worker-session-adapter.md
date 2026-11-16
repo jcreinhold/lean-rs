@@ -65,8 +65,11 @@ optional absent symbols omitted. It reports the running child's compiled Lean ve
 Lean version read through the loaded `lean_rs_host_runtime_version` shim. This remains the cooperative library trust
 boundary, not a certificate against library substitution or hostile metaprograms.
 
-`LeanWorkerHostHandleBuilder::require_host_runtime` and `LeanWorkerSessionConfig::with_host_runtime_expectation` enforce
+`LeanWorkerHostHandleBuilder::require_host_runtime`, `LeanWorkerCapabilityBuilder::require_host_runtime`, and
+`LeanWorkerSessionConfig::with_host_runtime_expectation` enforce
 a required subset before exposing each host session, including session opens after an internal recycle.
+Capability builders also include the requirement in their pool reuse key, so an existing unguarded or differently
+constrained session cannot satisfy a newly required contract.
 `LeanWorkerHostHandle::set_host_runtime_expectation` installs the broker's one current contract on an existing actor
 without replacing its worker. It validates any cached actual metadata before changing the configuration. Extra
 compatible bindings do not invalidate the subset. The parent retains metadata only after successful validation and

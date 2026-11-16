@@ -61,6 +61,7 @@ const WORKER_CHILD_ENV: &str = "LEAN_RS_WORKER_CHILD";
 /// keeps working when unrelated user modules break the shared library build.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerCapabilityBuilder {
+    host_runtime_expectation: Option<LeanWorkerHostRuntimeExpectation>,
     project_root: PathBuf,
     import_workspace_root: Option<PathBuf>,
     package: String,
@@ -103,6 +104,7 @@ impl LeanWorkerCapabilityBuilder {
         imports: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
+            host_runtime_expectation: None,
             project_root: project_root.into(),
             import_workspace_root: None,
             package: package.into(),
@@ -152,6 +154,7 @@ impl LeanWorkerCapabilityBuilder {
         let artifact = WorkerCapabilityArtifact::from_built_capability(spec)?;
         let project_root = infer_lake_project_root_from_dylib(&artifact.dylib_path)?;
         Ok(Self {
+            host_runtime_expectation: None,
             project_root,
             import_workspace_root: None,
             package: artifact.package,
@@ -176,6 +179,17 @@ impl LeanWorkerCapabilityBuilder {
             max_frame_bytes: None,
             worker_export_signatures: Vec::new(),
         })
+    }
+
+    /// Enforce required actual host-runtime metadata before exposing any session.
+    ///
+    /// The requirement is installed before this builder's initial session open
+    /// and retained for every subsequent open, including replacement workers.
+    /// The worker pool also treats different requirements as distinct reuse keys.
+    #[must_use]
+    pub fn require_host_runtime(mut self, expected: LeanWorkerHostRuntimeExpectation) -> Self {
+        self.host_runtime_expectation = Some(expected);
+        self
     }
 
     /// Use an explicit `lean-rs-worker-child` executable.
@@ -450,6 +464,9 @@ impl LeanWorkerCapabilityBuilder {
         if let Some(check) = &self.metadata_check {
             key = key.metadata_expectation(check.export.clone(), check.request.clone(), check.expected.clone());
         }
+        if let Some(expected) = &self.host_runtime_expectation {
+            key = key.with_host_runtime_expectation(expected.clone());
+        }
         key
     }
 
@@ -567,7 +584,7 @@ impl LeanWorkerCapabilityBuilder {
             self.lean_max_memory_kib,
         )?;
 
-        let session_config = LeanWorkerSessionConfig::manifest_backed(
+        let mut session_config = LeanWorkerSessionConfig::manifest_backed(
             import_workspace_root,
             self.package.clone(),
             self.lib_name.clone(),
@@ -575,6 +592,9 @@ impl LeanWorkerCapabilityBuilder {
             self.imports.clone(),
         )
         .with_import_profile(self.import_profile);
+        if let Some(expected) = self.host_runtime_expectation {
+            session_config = session_config.with_host_runtime_expectation(expected);
+        }
 
         // Opened when this builder was told what to import — so the session it
         // prepares is the one the caller's commands then reuse — or when there
@@ -2531,6 +2551,33 @@ mod tests {
             capability_builder()
                 .import_workspace_root(workspace_root())
                 .session_key(),
+        );
+    }
+
+    #[test]
+    fn host_runtime_expectation_separates_pool_reuse_keys() {
+        let expected = lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation {
+            runtime_lean_version: Some("4.35.0".to_owned()),
+            ..Default::default()
+        };
+        let unguarded = capability_builder().session_key();
+        let guarded = capability_builder()
+            .require_host_runtime(expected.clone())
+            .session_key();
+        assert_ne!(unguarded, guarded);
+        assert_eq!(
+            guarded,
+            capability_builder()
+                .require_host_runtime(expected.clone())
+                .session_key()
+        );
+        let different = lean_rs_worker_protocol::types::LeanWorkerHostRuntimeExpectation {
+            runtime_lean_version: Some("different".to_owned()),
+            ..expected
+        };
+        assert_ne!(
+            guarded,
+            capability_builder().require_host_runtime(different).session_key()
         );
     }
 
