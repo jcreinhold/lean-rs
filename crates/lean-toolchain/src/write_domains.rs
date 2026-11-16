@@ -15,8 +15,21 @@ fn invalid(message: impl Into<String>) -> io::Error {
 }
 
 fn read_json(path: &Path) -> io::Result<Value> {
+    // Opening a FIFO must not wait for a producer before we can reject it.
+    // Validate the opened descriptor, preserving symlinks to regular metadata.
+    #[cfg(unix)]
+    let file = File::from(rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )?);
+    #[cfg(not(unix))]
+    let file = File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("Lake dependency metadata must be a regular file"));
+    }
     let mut bytes = Vec::new();
-    File::open(path)?.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err(invalid("Lake dependency metadata exceeds its byte bound"));
     }
