@@ -9,6 +9,9 @@
 //! the leader they only observe group absence, never signal the stored PGID.
 //! A surviving or late-forked descendant may therefore retain custody forever.
 
+mod measured_child;
+pub use measured_child::{MeasuredChild, WaitedChildUsage};
+
 use std::io;
 use std::os::fd::BorrowedFd;
 use std::os::unix::process::CommandExt as _;

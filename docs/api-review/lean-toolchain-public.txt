@@ -6,6 +6,8 @@ pub use lean_toolchain::supported_for
 pub mod lean_toolchain::host_shim_abi
 pub fn lean_toolchain::host_shim_abi::checked_binding_fingerprint(&serde_json::value::Value) -> alloc::string::String
 pub fn lean_toolchain::host_shim_abi::expected_checked_bindings() -> alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub mod lean_toolchain::inherited_pipe
+pub fn lean_toolchain::inherited_pipe::duplicate_inherited_read_pipe(std::os::fd::raw::RawFd) -> std::io::error::Result<std::os::fd::owned::OwnedFd>
 pub mod lean_toolchain::manifest_validation
 pub struct lean_toolchain::manifest_validation::CapabilityManifest
 pub lean_toolchain::manifest_validation::CapabilityManifest::dependencies: alloc::vec::Vec<lean_toolchain::LeanLibraryDependency>
@@ -169,6 +171,24 @@ pub fn lean_toolchain::native_guardian::reserve_owner_record(&std::path::Path, &
 pub fn lean_toolchain::native_guardian::reserve_owner_record_with_slot(&std::path::Path, &str, core::time::Duration, core::option::Option<&lean_toolchain::native_guardian::NativeCapacitySlot>) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::native_guardian::run_guardian_cli() -> std::io::error::Result<()>
 pub mod lean_toolchain::process_group
+pub struct lean_toolchain::process_group::MeasuredChild
+impl lean_toolchain::process_group::MeasuredChild
+pub fn lean_toolchain::process_group::MeasuredChild::id(&self) -> u32
+pub fn lean_toolchain::process_group::MeasuredChild::kill(&mut self) -> std::io::error::Result<()>
+pub fn lean_toolchain::process_group::MeasuredChild::spawn(std::process::Command) -> std::io::error::Result<Self>
+pub fn lean_toolchain::process_group::MeasuredChild::take_stderr(&mut self) -> core::option::Option<std::process::ChildStderr>
+pub fn lean_toolchain::process_group::MeasuredChild::take_stdout(&mut self) -> core::option::Option<std::process::ChildStdout>
+pub fn lean_toolchain::process_group::MeasuredChild::try_wait(&mut self) -> std::io::error::Result<core::option::Option<std::process::ExitStatus>>
+pub fn lean_toolchain::process_group::MeasuredChild::usage(&self) -> core::option::Option<&lean_toolchain::process_group::WaitedChildUsage>
+impl core::fmt::Debug for lean_toolchain::process_group::MeasuredChild
+pub fn lean_toolchain::process_group::MeasuredChild::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_toolchain::process_group::MeasuredChild
+impl core::marker::Send for lean_toolchain::process_group::MeasuredChild
+impl core::marker::Sync for lean_toolchain::process_group::MeasuredChild
+impl core::marker::Unpin for lean_toolchain::process_group::MeasuredChild
+impl core::marker::UnsafeUnpin for lean_toolchain::process_group::MeasuredChild
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::MeasuredChild
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::MeasuredChild
 pub struct lean_toolchain::process_group::OwnedCommandGroup
 impl lean_toolchain::process_group::OwnedCommandGroup
 pub fn lean_toolchain::process_group::OwnedCommandGroup::adopt_private_session(std::process::Child, &lean_toolchain::native_guardian::NativeProcessIdentity) -> core::result::Result<Self, (std::io::error::Error, std::process::Child)>
@@ -191,6 +211,27 @@ impl core::marker::Unpin for lean_toolchain::process_group::OwnedCommandGroup
 impl core::marker::UnsafeUnpin for lean_toolchain::process_group::OwnedCommandGroup
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::OwnedCommandGroup
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::OwnedCommandGroup
+pub struct lean_toolchain::process_group::WaitedChildUsage
+pub lean_toolchain::process_group::WaitedChildUsage::max_rss_bytes: core::option::Option<u64>
+pub lean_toolchain::process_group::WaitedChildUsage::system_cpu_micros: u64
+pub lean_toolchain::process_group::WaitedChildUsage::user_cpu_micros: u64
+pub lean_toolchain::process_group::WaitedChildUsage::wall_millis: u64
+impl core::clone::Clone for lean_toolchain::process_group::WaitedChildUsage
+pub fn lean_toolchain::process_group::WaitedChildUsage::clone(&self) -> lean_toolchain::process_group::WaitedChildUsage
+impl core::cmp::Eq for lean_toolchain::process_group::WaitedChildUsage
+impl core::cmp::PartialEq for lean_toolchain::process_group::WaitedChildUsage
+pub fn lean_toolchain::process_group::WaitedChildUsage::eq(&self, &lean_toolchain::process_group::WaitedChildUsage) -> bool
+impl core::fmt::Debug for lean_toolchain::process_group::WaitedChildUsage
+pub fn lean_toolchain::process_group::WaitedChildUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::StructuralPartialEq for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::Freeze for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::Send for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::Sync for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::Unpin for lean_toolchain::process_group::WaitedChildUsage
+impl core::marker::UnsafeUnpin for lean_toolchain::process_group::WaitedChildUsage
+impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::process_group::WaitedChildUsage
+impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::process_group::WaitedChildUsage
 pub fn lean_toolchain::process_group::current_group_is_singleton() -> std::io::error::Result<bool>
 pub fn lean_toolchain::process_group::group_present(u32) -> std::io::error::Result<bool>
 pub mod lean_toolchain::shared_reader

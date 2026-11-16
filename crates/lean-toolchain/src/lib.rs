@@ -28,6 +28,8 @@ mod diagnostics;
 mod discover;
 mod fingerprint;
 pub mod host_shim_abi;
+#[cfg(unix)]
+pub mod inherited_pipe;
 mod lakefile_toml;
 mod limits;
 mod loader;
