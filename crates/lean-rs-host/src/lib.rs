@@ -44,10 +44,10 @@ pub use crate::host::{
     DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
     DeclarationVerificationTarget, LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult,
     LeanBracketedRejectedOperation, LeanCapabilities, LeanDeclarationFilter, LeanDerivedWorkFacts, LeanHost,
-    LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats, LeanSession,
-    LeanSessionImportProfile, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope, ProofAttemptOutcome,
-    ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
-    ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason, SessionPoolMemoryPolicy,
-    SessionStats,
+    LeanHostRuntimeMetadata, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions, LeanImportStats,
+    LeanSession, LeanSessionImportProfile, LeanSourceRange, PoolStats, PooledSession, ProofAttemptEnvelope,
+    ProofAttemptOutcome, ProofAttemptRequest, ProofAttemptRow, ProofAttemptStatus, ProofCandidate, ProofEditTarget,
+    ProofPositionSelector, ProofPositionSummary, SessionPool, SessionPoolConfig, SessionPoolKeyMissReason,
+    SessionPoolMemoryPolicy, SessionStats,
 };
 pub use crate::host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink};

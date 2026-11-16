@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::artifact_reads::ArtifactReadScope;
+use crate::host_artifacts::SessionAdmission;
 
 use lean_rs::error::host_internal;
 use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanCheckedExportError, LeanExported, LeanIo};
@@ -55,9 +58,9 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
     LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
     LeanWorkerDiagnostic, LeanWorkerDoctorReport, LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerGoalAtResult, LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerKernelStatus,
-    LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
-    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerGoalAtResult, LeanWorkerHostRuntimeMetadata, LeanWorkerImportStats, LeanWorkerKernelResult,
+    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,
@@ -363,12 +366,23 @@ fn install_parent_death_signal() -> bool {
     reason = "the child owns stdin/stdout for the full protocol loop"
 )]
 fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    let mut guardian = crate::parent_watchdog::install_parent_watchdog()?;
+    let shared_reads = std::env::var_os("LEAN_RS_WORKER_SHARED_ARTIFACT_READS").is_some_and(|value| value == "1");
+    let prepared_host = if shared_reads {
+        Some(crate::host_artifacts::from_environment()?)
+    } else {
+        None
+    };
     let runtime = LeanRuntime::init()?;
     configure_lean_runtime_memory_limit_from_env();
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let writer = ProtocolWriter::new();
     let mut host_session: Option<HostSessionState> = None;
+    let mut host_read: Option<ArtifactReadScope> = None;
+    let mut read_admission_failed = false;
+    let mut artifact_epochs: Option<Vec<lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch>> = None;
     // Imported environments this child holds but is not currently serving, MRU
     // at the back. Bounded by `session_pool_capacity` together with
     // `host_session`; a linear scan for the same reason `anchors` is one.
@@ -421,6 +435,40 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         };
 
+        if shared_reads
+            && matches!(
+                &request,
+                Request::LoadFixtureCapability { .. }
+                    | Request::CallFixtureMul { .. }
+                    | Request::TriggerLeanPanic { .. }
+            )
+        {
+            write_response(
+                &writer,
+                Response::Error {
+                    code: "lean_rs.worker.artifact_read_required".to_owned(),
+                    message: "direct fixture loaders are unavailable in a guarded host worker".to_owned(),
+                },
+            )?;
+            continue;
+        }
+        if shared_reads
+            && host_read.is_none()
+            && !matches!(
+                &request,
+                Request::Health | Request::Terminate | Request::OpenHostSession { .. } | Request::ReleaseHostRead
+            )
+        {
+            write_response(
+                &writer,
+                Response::Error {
+                    code: "lean_rs.worker.artifact_read_required".to_owned(),
+                    message: "host body requires actual shared artifact read custody".to_owned(),
+                },
+            )?;
+            continue;
+        }
+
         if let Some(state) = host_session.as_mut()
             && let Err(err) = state
                 .session
@@ -432,6 +480,11 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
         match request {
             Request::Health => {
                 write_response(&writer, Response::HealthOk)?;
+            }
+            Request::ReleaseHostRead => {
+                // Closing aliases leaves inherited body descriptors locked.
+                host_read = None;
+                write_response(&writer, Response::HostReadReleased)?;
             }
             Request::LoadFixtureCapability { manifest_path } => {
                 let response = match load_fixture_capability(runtime, Path::new(&manifest_path)) {
@@ -469,6 +522,111 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                 imports,
                 import_profile,
             } => {
+                if read_admission_failed {
+                    // A failed guardian exchange may already have retained
+                    // custody. Retire this generation before another admission.
+                    write_response(&writer, Response::HostArtifactEpochChanged)?;
+                    continue;
+                }
+                if host_read.is_some() {
+                    write_response(
+                        &writer,
+                        Response::Error {
+                            code: "lean_rs.worker.artifact_read_active".to_owned(),
+                            message: "finish the previous host read scope before reopening".to_owned(),
+                        },
+                    )?;
+                    continue;
+                }
+                // Capture storage facts only. No dylib/initializer may run
+                // before the actual FD union is ACKed by the independent guardian.
+                let admission = match prepared_host
+                    .as_ref()
+                    .map(|prepared| SessionAdmission::capture(&project_root, &mode, prepared.clone()))
+                    .transpose()
+                {
+                    Ok(admission) => admission,
+                    Err(error) => {
+                        write_response(
+                            &writer,
+                            Response::Error {
+                                code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
+                                message: error.to_string(),
+                            },
+                        )?;
+                        continue;
+                    }
+                };
+                if let (Some(previous), Some(admission)) = (&artifact_epochs, &admission) {
+                    let previous_roots: std::collections::BTreeSet<_> = previous
+                        .iter()
+                        .map(|entry: &lean_rs_worker_protocol::types::LeanWorkerArtifactReadEpoch| {
+                            PathBuf::from(&entry.project_root)
+                        })
+                        .collect();
+                    if previous_roots != admission.roots().iter().cloned().collect() {
+                        // Guardians retain this generation's whole union. Never
+                        // expand it while another writer could hold a later lock.
+                        write_response(&writer, Response::HostArtifactEpochChanged)?;
+                        continue;
+                    }
+                }
+                if shared_reads {
+                    let read = std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE")
+                        .ok_or_else(|| std::io::Error::other("shared artifact helper is not configured"))
+                        .and_then(|helper| {
+                            ArtifactReadScope::acquire(
+                                Path::new(&helper),
+                                admission.as_ref().map_or(&[], SessionAdmission::roots),
+                                Duration::from_secs(30),
+                                guardian.as_mut(),
+                            )
+                        });
+                    let read = match read {
+                        Ok(read) => read,
+                        Err(error) => {
+                            read_admission_failed = true;
+                            write_response(
+                                &writer,
+                                Response::Error {
+                                    code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
+                                    message: error.to_string(),
+                                },
+                            )?;
+                            continue;
+                        }
+                    };
+                    if artifact_epochs
+                        .as_ref()
+                        .is_some_and(|previous| previous != read.epochs())
+                    {
+                        drop(read);
+                        write_response(&writer, Response::HostArtifactEpochChanged)?;
+                        continue;
+                    }
+                    artifact_epochs = Some(read.epochs().to_vec());
+                    host_read = Some(read);
+                }
+                if let Some(admission) = &admission
+                    && let Err(error) = admission.validate_after_admission()
+                {
+                    read_admission_failed = true;
+                    host_read = None;
+                    write_response(
+                        &writer,
+                        Response::Error {
+                            code: "lean_rs.worker.artifact_read_unavailable".to_owned(),
+                            message: error.to_string(),
+                        },
+                    )?;
+                    continue;
+                }
+                if let Err(error) = ready_host_anchor(runtime, &mut anchors, &project_root, &mode, admission.as_ref()) {
+                    read_admission_failed = shared_reads;
+                    host_read = None;
+                    write_response(&writer, error_response(&error))?;
+                    continue;
+                }
                 let header_bytes = host_session
                     .as_ref()
                     .and_then(|state| state.session.header_import_state().ok())
@@ -477,8 +635,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     && session_import_bytes.saturating_add(header_bytes) >= header_budget)
                     || (import_count_limit != 0 && session_imports >= import_count_limit);
                 let response = open_or_reuse_host_session(
-                    runtime,
-                    &mut anchors,
+                    &anchors,
                     &mut host_session,
                     &mut parked,
                     session_pool_capacity,
@@ -490,6 +647,14 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                         import_profile,
                     },
                 );
+                if !matches!(
+                    &response,
+                    Response::HostSessionOpened { .. } | Response::HostSessionReused { .. }
+                ) {
+                    // A known import refusal ran no later body. Unknown exits
+                    // never reach this point and retain their actual FD custody.
+                    host_read = None;
+                }
                 if let Response::HostSessionOpened { import_stats } = &response {
                     session_imports = session_imports.saturating_add(1);
                     session_import_bytes =
@@ -559,6 +724,41 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                             description: status.description().to_owned(),
                         },
                         Err(StreamRunError::MalformedRow(message)) => Response::StreamRowMalformed { message },
+                    },
+                    None => missing_session_response(),
+                };
+                write_response(&writer, response)?;
+            }
+            Request::HostRuntimeMetadata => {
+                let response = match host_session.as_ref() {
+                    Some(state) => match state.session.checked_host_runtime_metadata() {
+                        Ok(actual) => {
+                            let checked_host_bindings = actual
+                                .checked_binding_signatures
+                                .into_iter()
+                                .map(|(name, signature)| {
+                                    let bytes = serde_json::to_vec(&signature)
+                                        .map_err(|error| std::io::Error::other(error.to_string()))?;
+                                    let digest = Sha256::digest(bytes);
+                                    let mut fingerprint = String::with_capacity(64);
+                                    for byte in digest {
+                                        use std::fmt::Write as _;
+                                        let _ = write!(fingerprint, "{byte:02x}");
+                                    }
+                                    Ok((name, fingerprint))
+                                })
+                                .collect::<Result<std::collections::BTreeMap<_, _>, std::io::Error>>()?;
+                            Response::HostRuntimeMetadata {
+                                metadata: LeanWorkerHostRuntimeMetadata {
+                                    compiled_lean_version: lean_toolchain::LEAN_VERSION.to_owned(),
+                                    compiled_header_sha256: lean_toolchain::LEAN_HEADER_DIGEST.to_owned(),
+                                    runtime_lean_version: actual.runtime_lean_version,
+                                    checked_host_bindings,
+                                    artifact_read_epochs: host_read.as_ref().map(|read| read.epochs().to_vec()),
+                                },
+                            }
+                        }
+                        Err(error) => error_response(&error),
                     },
                     None => missing_session_response(),
                 };
@@ -1110,8 +1310,7 @@ impl From<LeanError> for WorkerCallError {
 /// already handles, retrying on `worker_session_missing` — but `parked` survives
 /// it, so the retry may still land on a pooled key.
 fn open_or_reuse_host_session(
-    runtime: &'static LeanRuntime,
-    anchors: &mut Vec<&'static HostAnchor>,
+    anchors: &[&'static HostAnchor],
     host_session: &mut Option<HostSessionState>,
     parked: &mut Vec<HostSessionState>,
     capacity: usize,
@@ -1187,13 +1386,11 @@ fn open_or_reuse_host_session(
         .find(|anchor| anchor.matches(&key.project_root, &key.mode))
     {
         Some(anchor) => *anchor,
-        None => match HostAnchor::build(runtime, &key.project_root, &key.mode) {
-            Ok(anchor) => {
-                anchors.push(anchor);
-                anchor
-            }
-            Err(err) => return error_response(&err),
-        },
+        None => {
+            return error_response(&host_internal(
+                "host anchor was not admitted before session import".to_owned(),
+            ));
+        }
     };
 
     match HostSessionState::open(anchor, key) {
@@ -1276,34 +1473,85 @@ fn evict_stale_host_sessions(host_session: &mut Option<HostSessionState>, parked
     }
 }
 
+fn ready_host_anchor(
+    runtime: &'static LeanRuntime,
+    anchors: &mut Vec<&'static HostAnchor>,
+    project_root: &str,
+    mode: &HostSessionMode,
+    admission: Option<&SessionAdmission>,
+) -> LeanResult<&'static HostAnchor> {
+    if let Some(anchor) = anchors.iter().find(|anchor| anchor.matches(project_root, mode)) {
+        return Ok(*anchor);
+    }
+    let anchor = HostAnchor::build(runtime, project_root, mode, admission)?;
+    anchors.push(anchor);
+    Ok(anchor)
+}
+
 impl HostAnchor {
-    fn build(runtime: &'static LeanRuntime, project_root: &str, mode: &HostSessionMode) -> LeanResult<&'static Self> {
+    #[allow(
+        clippy::wildcard_enum_match_arm,
+        reason = "all future guarded mode variants must refuse before loading"
+    )]
+    fn build(
+        runtime: &'static LeanRuntime,
+        project_root: &str,
+        mode: &HostSessionMode,
+        admission: Option<&SessionAdmission>,
+    ) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let (capabilities, worker_capability) = match mode {
-            HostSessionMode::Capability {
-                package,
-                lib_name,
-                manifest_path,
-            } => {
-                let worker_capability = match manifest_path {
-                    Some(path) => Some(&*Box::leak(Box::new(LeanCapability::from_build_manifest(
-                        runtime,
-                        LeanBuiltCapability::manifest_path(path),
-                    )?))),
-                    None => None,
-                };
-                let capabilities = if worker_capability.is_some() {
-                    Box::leak(Box::new(host.load_shims_only()?))
-                } else {
-                    Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
-                };
-                (capabilities, worker_capability)
-            }
-            HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None),
-            _ => {
-                return Err(host_internal(
-                    "worker child received an unsupported host session loading mode".to_owned(),
-                ));
+        let (capabilities, worker_capability): (
+            &'static LeanCapabilities<'static, 'static>,
+            Option<&'static LeanCapability<'static>>,
+        ) = if let Some(admission) = admission {
+            let worker_capability = admission
+                .capability
+                .as_ref()
+                .map(|snapshot| {
+                    LeanCapability::from_manifest_snapshot(runtime, snapshot.path(), snapshot.bytes())
+                        .map(|capability| &*Box::leak(Box::new(capability)))
+                })
+                .transpose()?;
+            let capabilities = match mode {
+                HostSessionMode::Capability {
+                    package,
+                    lib_name,
+                    manifest_path: None,
+                } => LeanCapabilities::from_prepared_capability(host, &admission.prepared, package, lib_name)?,
+                HostSessionMode::Capability {
+                    manifest_path: Some(_), ..
+                }
+                | HostSessionMode::ShimsOnly => LeanCapabilities::from_prepared(host, &admission.prepared)?,
+                _ => return Err(host_internal("unsupported guarded host mode".to_owned())),
+            };
+            (&*Box::leak(Box::new(capabilities)), worker_capability)
+        } else {
+            match mode {
+                HostSessionMode::Capability {
+                    package,
+                    lib_name,
+                    manifest_path,
+                } => {
+                    let worker_capability = match manifest_path {
+                        Some(path) => Some(&*Box::leak(Box::new(LeanCapability::from_build_manifest(
+                            runtime,
+                            LeanBuiltCapability::manifest_path(path),
+                        )?))),
+                        None => None,
+                    };
+                    let capabilities = if worker_capability.is_some() {
+                        Box::leak(Box::new(host.load_shims_only()?))
+                    } else {
+                        Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
+                    };
+                    (capabilities, worker_capability)
+                }
+                HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None),
+                _ => {
+                    return Err(host_internal(
+                        "worker child received an unsupported host session loading mode".to_owned(),
+                    ));
+                }
             }
         };
         Ok(Box::leak(Box::new(Self {

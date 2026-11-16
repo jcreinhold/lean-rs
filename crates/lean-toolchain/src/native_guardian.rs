@@ -1,0 +1,777 @@
+//! A link-free guardian for one fixed native worker process group.
+//!
+//! The worker remains its parent's actual `Child`. This independent helper is
+//! the worker's child, in its own process group but the worker's private session.
+//! Its live session membership pins the payload group number on macOS. A surviving
+//! original parent also retains its actual child unreaped for group-stop fallback.
+//! Serialized identities never authorize signals. Payloads must neither regroup nor detach.
+//!
+//! Read descriptors and their published domains are retained for the generation,
+//! including after logical request release. A dead guardian is never closure:
+//! managed writers must check the same durable owner records after obtaining EX.
+
+use std::fs::{self, File};
+use std::io::{self, IoSlice, IoSliceMut, Read, Write};
+use std::mem::MaybeUninit;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use rustix::io::{FdFlags, fcntl_setfd};
+use rustix::net::{
+    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, SendAncillaryBuffer, SendAncillaryMessage,
+    SendFlags, recvmsg, sendmsg,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+/// Private guardian protocol; it is independent of the worker body protocol.
+pub const PROTOCOL: u32 = 1;
+/// Explicit, link-free helper selected by the spawning host.
+pub const EXECUTABLE_ENV: &str = "LEAN_RS_WORKER_GUARDIAN_EXECUTABLE";
+/// One authoritative owner namespace shared by native workers and managed writers.
+pub const OWNERS_DIRECTORY_ENV: &str = "LEAN_RS_WORKER_OWNERS_DIRECTORY";
+const CONTROL_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_CONTROL_FD";
+const WORKER_ENV: &str = "LEAN_RS_NATIVE_GUARDIAN_WORKER_PID";
+const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
+const NONCE_ENV: &str = "LEAN_RS_WORKER_PARENT_NONCE";
+/// A generation never retains more than this many distinct artifact domains.
+pub const MAX_READ_DOMAINS: usize = 32;
+/// Owner admission and writer checks refuse a larger namespace.
+pub const MAX_OWNER_RECORDS: usize = 128;
+/// Every owner record has a fixed maximum, including the bounded read union.
+pub const MAX_OWNER_BYTES: usize = 256 * 1024;
+const MAX_FRAME: usize = 16 * 1024;
+const POLL: Duration = Duration::from_millis(5);
+
+mod ownership;
+pub use ownership::{
+    NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, registry_directory, reserve_owner_record,
+    reserve_owner_record_with_slot,
+};
+
+/// One actual shared lock and epoch protected by a native generation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeReadDomain {
+    pub project_root: PathBuf,
+    pub lock_path: PathBuf,
+    pub device: u64,
+    pub inode: u64,
+    pub epoch: String,
+}
+
+/// A close-only loan of a descriptor already acquired by `SharedReader`.
+pub struct GuardianReadLoan<'a> {
+    pub domain: NativeReadDomain,
+    pub descriptor: BorrowedFd<'a>,
+}
+
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+fn expired() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "native guardian deadline elapsed")
+}
+fn deadline(timeout: Duration) -> io::Result<Instant> {
+    Instant::now()
+        .checked_add(timeout)
+        .filter(|_| !timeout.is_zero())
+        .ok_or_else(expired)
+}
+fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
+    value.get(name).unwrap_or(&Value::Null)
+}
+fn valid_nonce(nonce: &str) -> bool {
+    nonce.len() == 48 && nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+fn pid(value: &Value) -> Option<u32> {
+    u32::try_from(value.as_u64()?)
+        .ok()
+        .filter(|pid| *pid > 1 && i32::try_from(*pid).is_ok())
+}
+
+fn frame(value: &Value) -> io::Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+    if bytes.len() >= MAX_FRAME {
+        return Err(invalid("native guardian frame exceeds limit"));
+    }
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+fn write_bytes(stream: &mut UnixStream, bytes: &[u8], until: Instant) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if Instant::now() >= until {
+            return Err(expired());
+        }
+        match stream.write(bytes.get(offset..).ok_or_else(|| invalid("guardian write offset"))?) {
+            Ok(0) => return Err(invalid("guardian channel accepted no bytes")),
+            Ok(written) => {
+                offset = offset
+                    .checked_add(written)
+                    .ok_or_else(|| invalid("guardian write overflow"))?;
+            }
+            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
+                thread::sleep(POLL);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+fn write_frame(stream: &mut UnixStream, value: &Value, until: Instant) -> io::Result<()> {
+    write_bytes(stream, &frame(value)?, until)
+}
+fn read_frame(stream: &mut UnixStream, until: Instant) -> io::Result<Value> {
+    let mut bytes = Vec::new();
+    loop {
+        if Instant::now() >= until {
+            return Err(expired());
+        }
+        // One byte prevents consuming a following control frame into a reader
+        // that is about to hand the same stream to the lifecycle loop.
+        let mut byte = [0_u8; 1];
+        match stream.read(&mut byte) {
+            Ok(0) => return Err(invalid("guardian channel closed before ACK")),
+            Ok(_) => {
+                bytes.extend_from_slice(&byte);
+                if bytes.len() > MAX_FRAME {
+                    return Err(invalid("guardian frame exceeds limit"));
+                }
+                if byte == *b"\n" {
+                    return serde_json::from_slice(&bytes).map_err(io::Error::other);
+                }
+            }
+            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
+                thread::sleep(POLL);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Worker-side connection. It carries one outstanding bounded descriptor loan.
+pub struct GuardianHandle {
+    control: UnixStream,
+    child: Child,
+    nonce: String,
+    next_sequence: u64,
+}
+impl GuardianHandle {
+    /// Start the explicit guardian after this worker established its session.
+    /// The guardian cannot release runtime startup before the parent durable ACK.
+    ///
+    /// # Errors
+    /// Fails closed on spawn, protocol, descriptor or startup deadline failures.
+    pub fn spawn(executable: &Path, socket: &Path, nonce: &str, timeout: Duration) -> io::Result<Self> {
+        if !executable.is_absolute() || !executable.is_file() || !valid_nonce(nonce) {
+            return Err(invalid("explicit native guardian and valid nonce required"));
+        }
+        let until = deadline(timeout)?;
+        let (mut control, guardian_control) = UnixStream::pair()?;
+        control.set_nonblocking(true)?;
+        let mut command = Command::new(executable);
+        command
+            .arg("native-guardian")
+            .env(CONTROL_ENV, guardian_control.as_raw_fd().to_string())
+            .env(WORKER_ENV, std::process::id().to_string())
+            .env(SOCKET_ENV, socket)
+            .env(NONCE_ENV, nonce)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let child = crate::process_group::spawn_inheriting(command, &[guardian_control.as_fd()])?;
+        drop(guardian_control);
+        let ready = read_frame(&mut control, until)?;
+        if field(&ready, "state") != "ready"
+            || field(&ready, "protocol") != PROTOCOL
+            || field(&ready, "nonce") != nonce
+            || pid(field(&ready, "guardian_pid")) != Some(child.id())
+        {
+            return Err(invalid("native guardian READY differs"));
+        }
+        Ok(Self {
+            control,
+            child,
+            nonce: nonce.to_owned(),
+            next_sequence: 0,
+        })
+    }
+
+    /// Transfer close-only custody and wait for its durable generation-bound ACK.
+    /// A failure never authorizes a body; callers retire the generation.
+    ///
+    /// # Errors
+    /// Rejects excessive domains, dead guardian, ambiguous transfers and deadlines.
+    pub fn retain_reads(&mut self, loans: &[GuardianReadLoan<'_>], timeout: Duration) -> io::Result<()> {
+        let result = self.retain_reads_inner(loans, timeout);
+        if result.is_err() {
+            let _stop = self.control.shutdown(std::net::Shutdown::Both);
+        }
+        result
+    }
+    fn retain_reads_inner(&mut self, loans: &[GuardianReadLoan<'_>], timeout: Duration) -> io::Result<()> {
+        if loans.len() > MAX_READ_DOMAINS {
+            return Err(invalid("native read batch exceeds limit"));
+        }
+        let until = deadline(timeout)?;
+        for loan in loans {
+            if self.child.try_wait()?.is_some() {
+                return Err(invalid("native guardian exited"));
+            }
+            let sequence = self.next_sequence;
+            self.next_sequence = sequence
+                .checked_add(1)
+                .ok_or_else(|| invalid("native read sequence exhausted"))?;
+            let value = json!({"op":"retain","nonce":self.nonce,"sequence":sequence,"domain":loan.domain});
+            let bytes = frame(&value)?;
+            let descriptors = [loan.descriptor];
+            let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+            let mut ancillary = SendAncillaryBuffer::new(&mut space);
+            if !ancillary.push(SendAncillaryMessage::ScmRights(&descriptors)) {
+                return Err(invalid("native read descriptor exceeds frame"));
+            }
+            let count = loop {
+                if Instant::now() >= until {
+                    return Err(expired());
+                }
+                match sendmsg(
+                    &self.control,
+                    &[IoSlice::new(&bytes)],
+                    &mut ancillary,
+                    SendFlags::DONTWAIT,
+                ) {
+                    Ok(count) => break count,
+                    Err(error) if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::INTR => {
+                        thread::sleep(POLL);
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            };
+            if count == 0 {
+                return Err(invalid("native read transfer accepted no bytes"));
+            }
+            write_bytes(
+                &mut self.control,
+                bytes.get(count..).ok_or_else(|| invalid("native transfer count"))?,
+                until,
+            )?;
+            let ack = read_frame(&mut self.control, until)?;
+            if field(&ack, "state") != "retained"
+                || field(&ack, "nonce") != self.nonce.as_str()
+                || field(&ack, "sequence").as_u64() != Some(sequence)
+                || field(&ack, "domain") != &serde_json::to_value(&loan.domain).map_err(io::Error::other)?
+            {
+                return Err(invalid("native guardian custody ACK differs"));
+            }
+        }
+        Ok(())
+    }
+}
+impl Drop for GuardianHandle {
+    fn drop(&mut self) {
+        // EOF requests cleanup. The guardian owns its own cleanup lifetime; a
+        // worker cannot wait for it while the worker itself keeps the group live.
+        let _shutdown = self.control.shutdown(std::net::Shutdown::Both);
+        let _status = self.child.try_wait();
+    }
+}
+
+#[derive(Default)]
+struct Incoming {
+    bytes: Vec<u8>,
+    descriptors: Vec<OwnedFd>,
+}
+impl Incoming {
+    fn poll(&mut self, stream: &UnixStream) -> io::Result<Option<(Value, Vec<OwnedFd>)>> {
+        let mut bytes = vec![0_u8; MAX_FRAME + 1];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(2))];
+        let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+        #[cfg(target_os = "linux")]
+        let flags = RecvFlags::DONTWAIT | RecvFlags::CMSG_CLOEXEC;
+        #[cfg(not(target_os = "linux"))]
+        let flags = RecvFlags::DONTWAIT;
+        let received = match recvmsg(stream, &mut [IoSliceMut::new(&mut bytes)], &mut ancillary, flags) {
+            Ok(received) => received,
+            Err(error) if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::INTR => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        for message in ancillary.drain() {
+            let RecvAncillaryMessage::ScmRights(rights) = message else {
+                return Err(invalid("unexpected guardian ancillary data"));
+            };
+            for descriptor in rights {
+                fcntl_setfd(&descriptor, FdFlags::CLOEXEC)?;
+                self.descriptors.push(descriptor);
+            }
+        }
+        if received.bytes == 0 {
+            return Err(invalid("native worker control closed"));
+        }
+        if received.flags.intersects(ReturnFlags::TRUNC | ReturnFlags::CTRUNC) || self.descriptors.len() > 1 {
+            return Err(invalid("truncated or extra native read descriptors"));
+        }
+        self.bytes.extend_from_slice(
+            bytes
+                .get(..received.bytes)
+                .ok_or_else(|| invalid("native read count"))?,
+        );
+        if self.bytes.len() > MAX_FRAME {
+            return Err(invalid("native read frame exceeds limit"));
+        }
+        let Some(newline) = self.bytes.iter().position(|byte| *byte == b'\n') else {
+            return Ok(None);
+        };
+        if newline.checked_add(1) != Some(self.bytes.len()) {
+            return Err(invalid("multiple native read frames"));
+        }
+        let value = serde_json::from_slice(&self.bytes).map_err(io::Error::other)?;
+        self.bytes.clear();
+        Ok(Some((value, std::mem::take(&mut self.descriptors))))
+    }
+}
+
+fn read_owner(record: &Path) -> io::Result<Value> {
+    let metadata = fs::symlink_metadata(record)?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.len() > u64::try_from(MAX_OWNER_BYTES).map_err(io::Error::other)?
+    {
+        return Err(invalid("native owner record identity or size invalid"));
+    }
+    let mut bytes = Vec::new();
+    File::open(record)?
+        .take(
+            u64::try_from(MAX_OWNER_BYTES)
+                .map_err(io::Error::other)?
+                .saturating_add(1),
+        )
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_OWNER_BYTES {
+        return Err(invalid("native owner record oversized"));
+    }
+    let value: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    let nonce = field(&value, "generation_id")
+        .as_str()
+        .filter(|nonce| valid_nonce(nonce))
+        .ok_or_else(|| invalid("native owner generation missing"))?;
+    let expected = format!("worker-{nonce}");
+    if record.file_name().and_then(|name| name.to_str()) != Some("owner.json")
+        || record.parent().and_then(Path::file_name).and_then(|name| name.to_str()) != Some(expected.as_str())
+    {
+        return Err(invalid("native owner record generation path differs"));
+    }
+    Ok(value)
+}
+fn persist_owner(record: &Path, value: &Value) -> io::Result<()> {
+    let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
+    if bytes.len() > MAX_OWNER_BYTES {
+        return Err(invalid("native owner union exceeds limit"));
+    }
+    let temporary = record.with_extension("guardian-write");
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    fs::rename(&temporary, record)?;
+    File::open(
+        record
+            .parent()
+            .ok_or_else(|| invalid("native owner has no directory"))?,
+    )?
+    .sync_all()
+}
+fn validate_domain(domain: &NativeReadDomain, file: &File) -> io::Result<()> {
+    if domain.epoch.is_empty()
+        || domain.epoch.len() > 4096
+        || !domain.project_root.is_absolute()
+        || domain.project_root.canonicalize()? != domain.project_root
+        || crate::shared_writer::project_lock_path(&domain.project_root)? != domain.lock_path
+    {
+        return Err(invalid("native read domain binding differs"));
+    }
+    let actual = file.metadata()?;
+    let named = fs::symlink_metadata(&domain.lock_path)?;
+    if !actual.is_file()
+        || actual.nlink() != 1
+        || !named.is_file()
+        || named.nlink() != 1
+        || (actual.dev(), actual.ino()) != (domain.device, domain.inode)
+        || (named.dev(), named.ino()) != (domain.device, domain.inode)
+    {
+        return Err(invalid("native read lock identity differs"));
+    }
+    Ok(())
+}
+
+struct Guardian {
+    worker: u32,
+    nonce: String,
+    control: UnixStream,
+    parent: Option<UnixStream>,
+    parent_identity: Option<NativeProcessIdentity>,
+    record: Option<PathBuf>,
+    next_sequence: u64,
+    loans: Vec<(NativeReadDomain, File)>,
+    incoming: Incoming,
+}
+impl Guardian {
+    fn run(&mut self, socket: &Path, timeout: Duration) -> io::Result<()> {
+        let until = deadline(timeout)?;
+        let mut parent = UnixStream::connect(socket)?;
+        parent.set_nonblocking(true)?;
+        write_frame(
+            &mut parent,
+            &json!({"protocol":PROTOCOL,"nonce":self.nonce,
+            "worker_pid":self.worker,"guardian_pid":std::process::id()}),
+            until,
+        )?;
+        let ack = read_frame(&mut parent, until)?;
+        if field(&ack, "state") != "durable-owner-ready" || field(&ack, "nonce") != self.nonce.as_str() {
+            return Err(invalid("durable native guardian ACK missing"));
+        }
+        let record = PathBuf::from(
+            field(&ack, "record")
+                .as_str()
+                .ok_or_else(|| invalid("native owner path missing"))?,
+        );
+        let value = read_owner(&record)?;
+        if field(&value, "version") != 2
+            || field(&value, "generation_id") != self.nonce.as_str()
+            || pid(field(field(&value, "process"), "pid")) != Some(self.worker)
+            || pid(field(field(&value, "guardian"), "pid")) != Some(std::process::id())
+            || field(&value, "phase") != "running"
+            || field(&value, "protected_domains")
+                .as_array()
+                .is_none_or(|domains| !domains.is_empty())
+        {
+            return Err(invalid("durable native guardian record differs"));
+        }
+        self.parent_identity = Some(serde_json::from_value(field(&value, "parent").clone()).map_err(io::Error::other)?);
+        self.record = Some(record);
+        self.parent = Some(parent);
+        write_frame(
+            &mut self.control,
+            &json!({"state":"ready","protocol":PROTOCOL,
+            "nonce":self.nonce,"guardian_pid":std::process::id()}),
+            until,
+        )?;
+        loop {
+            // The server endpoint exists only in the server, never in payloads.
+            // getppid also detects root death when fork-only children retained
+            // copies of the worker-control endpoint despite CLOEXEC.
+            if native::parent_pid() != self.worker
+                || self.parent_closed()?
+                || !self
+                    .parent_identity
+                    .as_ref()
+                    .ok_or_else(|| invalid("native server identity missing"))?
+                    .is_live()?
+            {
+                return Ok(());
+            }
+            if let Some((request, descriptors)) = self.incoming.poll(&self.control)? {
+                self.retain(&request, descriptors)?;
+            }
+            thread::sleep(POLL);
+        }
+    }
+    fn parent_closed(&mut self) -> io::Result<bool> {
+        let Some(parent) = &mut self.parent else {
+            return Ok(true);
+        };
+        let mut byte = [0_u8; 1];
+        match parent.read(&mut byte) {
+            Ok(0) => Ok(true),
+            Ok(_) => Err(invalid("unexpected parent guardian control")),
+            Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+    fn retain(&mut self, request: &Value, mut descriptors: Vec<OwnedFd>) -> io::Result<()> {
+        if field(request, "op") != "retain"
+            || field(request, "nonce") != self.nonce.as_str()
+            || field(request, "sequence").as_u64() != Some(self.next_sequence)
+            || descriptors.len() != 1
+        {
+            return Err(invalid("native read request binding differs"));
+        }
+        let domain: NativeReadDomain =
+            serde_json::from_value(field(request, "domain").clone()).map_err(io::Error::other)?;
+        let file = File::from(
+            descriptors
+                .pop()
+                .ok_or_else(|| invalid("native read descriptor missing"))?,
+        );
+        validate_domain(&domain, &file)?;
+        if let Some((previous, _)) = self
+            .loans
+            .iter()
+            .find(|(previous, _)| previous.lock_path == domain.lock_path)
+        {
+            if previous != &domain {
+                return Err(invalid("native read domain changed within generation"));
+            }
+        } else {
+            if self.loans.len() >= MAX_READ_DOMAINS {
+                return Err(invalid("native generation read union full"));
+            }
+            // Store first: any publication/ACK failure retains the actual loan
+            // until the common shutdown drain confirms payload-group closure.
+            self.loans.push((domain.clone(), file));
+            let record = self
+                .record
+                .as_ref()
+                .ok_or_else(|| invalid("native owner record missing"))?;
+            let mut value = read_owner(record)?;
+            let domains: Vec<_> = self.loans.iter().map(|(domain, _)| domain).collect();
+            value
+                .as_object_mut()
+                .ok_or_else(|| invalid("native owner record must be object"))?
+                .insert(
+                    "protected_domains".to_owned(),
+                    serde_json::to_value(domains).map_err(io::Error::other)?,
+                );
+            persist_owner(record, &value)?;
+        }
+        let sequence = self.next_sequence;
+        self.next_sequence = sequence
+            .checked_add(1)
+            .ok_or_else(|| invalid("native sequence exhausted"))?;
+        write_frame(
+            &mut self.control,
+            &json!({"state":"retained","nonce":self.nonce,
+            "sequence":sequence,"domain":domain}),
+            deadline(Duration::from_secs(2))?,
+        )
+    }
+    fn drain(&self) {
+        loop {
+            match crate::process_group::group_present(self.worker) {
+                Ok(false) => return,
+                Ok(true) => {
+                    let _requested = native::kill_payload(self.worker);
+                }
+                Err(_) => {}
+            }
+            // No failed kill/observation releases loans or erases ownership.
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+/// Run the hidden link-free helper mode. Inputs arrive only through the private
+/// bootstrap environment/descriptor; ordinary stdout is never used.
+///
+/// # Errors
+/// Reports malformed bootstrap or failed setup only after owned work has drained.
+pub fn run_guardian_cli() -> io::Result<()> {
+    let worker = std::env::var(WORKER_ENV)
+        .map_err(io::Error::other)?
+        .parse::<u32>()
+        .map_err(io::Error::other)?;
+    native::validate_pin(worker)?;
+    let descriptor = std::env::var(CONTROL_ENV)
+        .map_err(io::Error::other)?
+        .parse::<i32>()
+        .map_err(io::Error::other)?;
+    let control = native::adopt_control(descriptor)?;
+    control.set_nonblocking(true)?;
+    let nonce = std::env::var(NONCE_ENV).map_err(io::Error::other)?;
+    let socket = std::env::var_os(SOCKET_ENV)
+        .map(PathBuf::from)
+        .ok_or_else(|| invalid("native parent socket missing"))?;
+    let mut guardian = Guardian {
+        worker,
+        nonce,
+        control,
+        parent: None,
+        parent_identity: None,
+        record: None,
+        next_sequence: 0,
+        loans: Vec::new(),
+        incoming: Incoming::default(),
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !valid_nonce(&guardian.nonce) {
+            return Err(invalid("native guardian nonce invalid"));
+        }
+        guardian.run(&socket, Duration::from_secs(30))
+    }));
+    guardian.drain();
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other("native guardian panicked; owned group drained")),
+    }
+}
+
+/// Check recorded native read protection after acquiring the exclusive lock.
+///
+/// Match the canonical stable lock path before checking inode identity. Unknown,
+/// malformed, oversized, inaccessible or excessive records never grant admission.
+/// This passively observes groups and never signals a recorded numeric identity.
+///
+/// # Errors
+/// Returns an unavailable record/observation or a boundedness/identity violation.
+pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identity: (u64, u64)) -> io::Result<bool> {
+    let entries = match fs::read_dir(registry) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    ownership::validate_registry(registry)?;
+    let mut count = 0_usize;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == ".admission.lock" {
+            continue;
+        }
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| invalid("native owner count overflow"))?;
+        if count > MAX_OWNER_RECORDS {
+            return Err(invalid("native owner namespace exceeds limit"));
+        }
+        if !entry.file_type()?.is_dir() {
+            return Err(invalid("unexpected native owner namespace entry"));
+        }
+        let record = entry.path().join("owner.json");
+        let value = match read_owner(&record) {
+            Ok(value) => value,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match ownership::read_or_collect_unpublished(registry, &entry.path()) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => continue,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        };
+        let version = field(&value, "version").as_u64();
+        if !matches!(version, Some(1 | 2)) {
+            return Err(invalid("unknown native owner record version"));
+        }
+        // Prove physical closure before consulting former artifact paths. A
+        // closed generation can outlive a deleted checkout or renamed package.
+        if ownership::owner_closed(&value)? || field(&value, "phase") == "preparing" {
+            continue;
+        }
+        let process = field(&value, "process");
+        let group =
+            pid(field(process, "process_group")).ok_or_else(|| invalid("native owner process group missing"))?;
+        if pid(field(process, "pid")) != Some(group) || pid(field(process, "session")) != Some(group) {
+            return Err(invalid("native owner process scope differs"));
+        }
+        // Legacy lifelines have no independent FD custodian. Optional empty
+        // fields written by a newer serializer cannot weaken their fence.
+        if version == Some(1) {
+            if crate::process_group::group_present(group)? {
+                return Ok(false);
+            }
+            continue;
+        }
+        let domains: Vec<NativeReadDomain> = match value.get("protected_domains") {
+            Some(domains) => serde_json::from_value(domains.clone()).map_err(io::Error::other)?,
+            None if version == Some(1) => {
+                if crate::process_group::group_present(group)? {
+                    return Ok(false);
+                }
+                continue;
+            }
+            None => return Err(invalid("native owner protected domains missing")),
+        };
+        if domains.len() > MAX_READ_DOMAINS {
+            return Err(invalid("native owner domain union exceeds limit"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for domain in domains {
+            if domain.epoch.is_empty()
+                || domain.epoch.len() > 4096
+                || !domain.project_root.is_absolute()
+                || domain.project_root.canonicalize()? != domain.project_root
+                || crate::shared_writer::project_lock_path(&domain.project_root)? != domain.lock_path
+                || !seen.insert(domain.lock_path.clone())
+            {
+                return Err(invalid("invalid native protected domain"));
+            }
+            if domain.lock_path == lock_path && crate::process_group::group_present(group)? {
+                if (domain.device, domain.inode) != identity {
+                    return Err(invalid("protected native lock inode changed"));
+                }
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+mod native {
+    #![allow(
+        unsafe_code,
+        reason = "narrow scalar process/session operations and unique inherited descriptor adoption"
+    )]
+    use super::{FdFlags, FromRawFd, UnixStream, fcntl_setfd, invalid, io};
+    pub(super) fn parent_pid() -> u32 {
+        // SAFETY: getppid is a scalar query with no memory or ownership effects.
+        unsafe { libc::getppid() as u32 }
+    }
+    pub(super) fn validate_pin(worker: u32) -> io::Result<()> {
+        let worker = i32::try_from(worker).map_err(io::Error::other)?;
+        // SAFETY: scalar queries inspect this guardian's current session/group.
+        let session = unsafe { libc::getsid(0) };
+        // SAFETY: getpgrp observes only the current process's group.
+        let group = unsafe { libc::getpgrp() };
+        if worker <= 1 || session != worker || group != std::process::id() as i32 || group == worker {
+            return Err(invalid("native guardian does not pin the worker private session"));
+        }
+        Ok(())
+    }
+    pub(super) fn kill_payload(worker: u32) -> io::Result<()> {
+        validate_pin(worker)?;
+        let target = i32::try_from(worker)
+            .map_err(io::Error::other)?
+            .checked_neg()
+            .ok_or_else(|| invalid("native group invalid"))?;
+        // SAFETY: this live guardian's same-SID membership pins the numeric
+        // payload group. Managed payloads never regroup; this guardian never
+        // joins that group. Its exact scope was checked before every signal.
+        if unsafe { libc::kill(target, libc::SIGKILL) } == 0 {
+            return Ok(());
+        }
+        Err(io::Error::last_os_error())
+    }
+    pub(super) fn adopt_control(descriptor: i32) -> io::Result<UnixStream> {
+        if descriptor <= 2 {
+            return Err(invalid("native guardian control descriptor invalid"));
+        }
+        // SAFETY: numeric fcntl safely rejects invalid integers. It returns a
+        // fresh descriptor owned only here; the supplied descriptor is never
+        // closed or assigned fabricated Rust ownership.
+        let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 3) };
+        if duplicate < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: this successful duplication created one unique owned handle.
+        let stream = unsafe { UnixStream::from_raw_fd(duplicate) };
+        stream.peer_addr()?;
+        fcntl_setfd(&stream, FdFlags::CLOEXEC)?;
+        Ok(stream)
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "native_guardian/tests.rs"]
+mod tests;

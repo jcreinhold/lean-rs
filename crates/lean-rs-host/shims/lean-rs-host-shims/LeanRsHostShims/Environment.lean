@@ -13,6 +13,10 @@ namespace LeanRsFixture.Environment
 
 open Lean
 
+/-- Read Lean's version through the loaded shim and runtime version getters. -/
+@[export lean_rs_host_runtime_version]
+def runtimeVersion : IO String := pure Lean.versionString
+
 private def reportProgress? (handle trampoline : USize) (current total : Nat) : IO (Option UInt8) := do
   let status ← LeanRsInterop.Callback.Tick.call handle trampoline (UInt64.ofNat current) (UInt64.ofNat total)
   if status == 0 then

@@ -72,9 +72,14 @@ impl LeanRuntimePreflight {
             Err(check) => return LeanLoaderReport::new(Some(manifest_path), vec![check]),
         };
 
+        Self::check_manifest(&manifest_path, &manifest)
+    }
+
+    /// Inspect precisely the parsed metadata that will be consumed by loading.
+    pub(crate) fn check_manifest(manifest_path: &std::path::Path, manifest: &CapabilityManifest) -> LeanLoaderReport {
         let mut checks = Vec::new();
-        lean_toolchain::manifest_validation::check_fingerprint(&manifest, &mut checks);
-        lean_toolchain::manifest_validation::check_staleness(&manifest_path, &manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_fingerprint(manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_staleness(manifest_path, manifest, &mut checks);
 
         let mut dependency_exports = HashSet::new();
         for dependency in &manifest.dependencies {
@@ -88,13 +93,13 @@ impl LeanRuntimePreflight {
 
         match inspect_artifact(&manifest.primary_dylib, ArtifactRole::Primary) {
             Ok(info) => {
-                check_initializer(&manifest, &info, &mut checks);
-                check_imported_symbols(&manifest, &info, &dependency_exports, &mut checks);
+                check_initializer(manifest, &info, &mut checks);
+                check_imported_symbols(manifest, &info, &dependency_exports, &mut checks);
             }
             Err(check) => checks.push(check),
         }
 
-        LeanLoaderReport::new(Some(manifest_path), checks)
+        LeanLoaderReport::new(Some(manifest_path.to_path_buf()), checks)
     }
 }
 

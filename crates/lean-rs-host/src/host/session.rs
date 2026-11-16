@@ -568,6 +568,13 @@ pub struct LeanSession<'lean, 'c> {
     stats: Cell<SessionStats>,
 }
 
+/// Actual metadata from a live host session's checked loaded bindings.
+#[derive(Debug)]
+pub struct LeanHostRuntimeMetadata {
+    pub runtime_lean_version: Option<String>,
+    pub checked_binding_signatures: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
 /// Cumulative source-header import allocations in this Lean process.
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 pub struct HeaderImportState {
@@ -646,24 +653,20 @@ fn with_import_lock_timeout<T>(
 }
 
 impl<'lean, 'c> LeanSession<'lean, 'c> {
-    pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> LeanResult<Vec<String>> {
+    pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> Vec<String> {
         let project = capabilities.host().project();
         let mut search_paths: Vec<String> = project
             .olean_search_paths()
             .into_iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect();
-        search_paths.push(
-            crate::host::lake::LakeProject::interop_olean_search_path()?
-                .to_string_lossy()
-                .into_owned(),
+        search_paths.extend(
+            capabilities
+                .shim_search_paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned()),
         );
-        search_paths.push(
-            crate::host::lake::LakeProject::shim_olean_search_path()?
-                .to_string_lossy()
-                .into_owned(),
-        );
-        Ok(search_paths)
+        search_paths
     }
 
     /// Import the named modules into a fresh Lean environment and wrap
@@ -704,7 +707,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let search_paths = Self::import_search_paths(capabilities)?;
+        let search_paths = Self::import_search_paths(capabilities);
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
         // Lean 4.30 strictly enforces `enableInitializersExecution` before
         // `importModules (loadExts := true)`. The flag is process-global,
@@ -786,7 +789,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             imports_len = imports.len(),
         )
         .entered();
-        let search_paths = Self::import_search_paths(capabilities)?;
+        let search_paths = Self::import_search_paths(capabilities);
         let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
         with_session_import_lock(|| {
             let shims = HostShimBindings::resolve(capabilities.shim_capability())
@@ -2051,6 +2054,24 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let result = with_session_import_lock(|| call.call());
         self.record_call(0, t.elapsed());
         result
+    }
+
+    /// Inspect checked bindings retained by this live session. No source is
+    /// elaborated and no user capability export is called.
+    ///
+    /// # Errors
+    /// Returns the loaded runtime-version shim's IO or ABI conversion failure.
+    pub fn checked_host_runtime_metadata(&self) -> LeanResult<LeanHostRuntimeMetadata> {
+        let version = self
+            .shims
+            .runtime_version
+            .as_ref()
+            .map(|call| with_session_import_lock(|| call.call()))
+            .transpose()?;
+        Ok(LeanHostRuntimeMetadata {
+            runtime_lean_version: version,
+            checked_binding_signatures: self.shims.checked_signatures(),
+        })
     }
 
     /// Set the cumulative session-import charge and source-header budget.

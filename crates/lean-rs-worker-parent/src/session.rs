@@ -25,10 +25,11 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchRequest,
     LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDoctorReport, LeanWorkerElabOptions, LeanWorkerElabResult,
-    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
-    LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
-    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts, LeanWorkerSessionImportProfile,
+    LeanWorkerHostRuntimeExpectation, LeanWorkerHostRuntimeMetadata, LeanWorkerKernelResult, LeanWorkerMetaResult,
+    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome,
+    LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts,
+    LeanWorkerSessionImportProfile,
 };
 
 use crate::supervisor::{LeanWorker, LeanWorkerError};
@@ -40,6 +41,7 @@ pub struct LeanWorkerSessionConfig {
     mode: LeanWorkerSessionMode,
     imports: Vec<String>,
     import_profile: LeanWorkerSessionImportProfile,
+    host_runtime_expectation: Option<LeanWorkerHostRuntimeExpectation>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,6 +71,7 @@ impl LeanWorkerSessionConfig {
             },
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: LeanWorkerSessionImportProfile::default(),
+            host_runtime_expectation: None,
         }
     }
 
@@ -90,6 +93,7 @@ impl LeanWorkerSessionConfig {
             },
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: LeanWorkerSessionImportProfile::default(),
+            host_runtime_expectation: None,
         }
     }
 
@@ -101,6 +105,7 @@ impl LeanWorkerSessionConfig {
             mode: LeanWorkerSessionMode::ShimsOnly,
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: LeanWorkerSessionImportProfile::default(),
+            host_runtime_expectation: None,
         }
     }
 
@@ -109,6 +114,17 @@ impl LeanWorkerSessionConfig {
     pub fn with_import_profile(mut self, profile: LeanWorkerSessionImportProfile) -> Self {
         self.import_profile = profile;
         self
+    }
+
+    /// Require actual metadata on every session open, including after recycling.
+    #[must_use]
+    pub fn with_host_runtime_expectation(mut self, expected: LeanWorkerHostRuntimeExpectation) -> Self {
+        self.host_runtime_expectation = Some(expected);
+        self
+    }
+
+    pub(crate) fn host_runtime_expectation(&self) -> Option<&LeanWorkerHostRuntimeExpectation> {
+        self.host_runtime_expectation.as_ref()
     }
 
     pub(crate) fn project_root_string(&self) -> String {
@@ -138,6 +154,7 @@ impl LeanWorkerSessionConfig {
             mode: self.mode.clone(),
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: self.import_profile,
+            host_runtime_expectation: self.host_runtime_expectation.clone(),
         }
     }
 }
@@ -456,6 +473,9 @@ pub struct LeanWorkerTypedStreamSummary<Summary> {
 /// Dropping this value does not stop the worker. If a request is cancelled
 /// while in flight, the supervisor cycles the child process and this session is
 /// invalidated; open a fresh session before issuing more host requests.
+/// With shared artifact reads enabled, finish the known scope through
+/// [`LeanWorker::release_host_read`] after dropping this borrow. An unknown
+/// in-flight operation must retain custody and retire through the supervisor.
 pub struct LeanWorkerSession<'worker> {
     worker: &'worker mut LeanWorker,
     open: bool,
@@ -1073,6 +1093,18 @@ impl LeanWorkerSession<'_> {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
         self.with_session(|worker| worker.worker_capability_metadata(export, request, cancellation, progress))
+    }
+
+    /// Inspect actual checked host bindings without calling a downstream export.
+    ///
+    /// # Errors
+    /// Returns a worker/session, timeout, protocol, or loaded-shim metadata error.
+    pub fn host_runtime_metadata(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerHostRuntimeMetadata, LeanWorkerError> {
+        self.with_session(|worker| worker.worker_host_runtime_metadata(cancellation, progress))
     }
 
     /// Run a generic doctor check from a downstream capability export.

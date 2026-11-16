@@ -710,6 +710,7 @@ pub fn lean_rs::LeanCapability<'lean>::export_signatures(&self) -> impl core::it
 pub fn lean_rs::LeanCapability<'lean>::exported<Args, R>(&self, &str) -> core::result::Result<lean_rs::LeanExported<'lean, '_, Args, R>, lean_rs::LeanCheckedExportError> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_manifest_snapshot(&'lean lean_rs::LeanRuntime, &std::path::Path, &[u8]) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str
@@ -1303,6 +1304,7 @@ pub fn lean_rs::LeanCapability<'lean>::export_signatures(&self) -> impl core::it
 pub fn lean_rs::LeanCapability<'lean>::exported<Args, R>(&self, &str) -> core::result::Result<lean_rs::LeanExported<'lean, '_, Args, R>, lean_rs::LeanCheckedExportError> where Args: lean_rs::LeanArgs<'lean>, R: lean_rs::DecodeCallResult<'lean>
 pub fn lean_rs::LeanCapability<'lean>::from_build_env(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::from_build_manifest(&'lean lean_rs::LeanRuntime, lean_toolchain::built_capability::LeanBuiltCapability) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs::LeanCapability<'lean>::from_manifest_snapshot(&'lean lean_rs::LeanRuntime, &std::path::Path, &[u8]) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs::LeanCapability<'lean>::library(&self) -> &lean_rs::LeanLibrary<'lean>
 pub fn lean_rs::LeanCapability<'lean>::module(&self) -> lean_rs::error::LeanResult<lean_rs::LeanModule<'lean, '_>>
 pub fn lean_rs::LeanCapability<'lean>::module_name(&self) -> &str

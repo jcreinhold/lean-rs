@@ -400,31 +400,34 @@ healthy worker. Sending the shutdown request also has a deadline. Stderr is diag
 These deadlines bound pipe waits, not arbitrary synchronous caller callbacks or serialization. Killing, reaping, and
 starting a replacement also take time after a request expires. If the OS cannot confirm exit, cleanup returns an error
 and keeps ownership rather than treating the child as stopped. The process tracker below keeps that child counted until
-cleanup confirms exit.
-
+cleanup confirms its owned scope is closed.
 
 ## Confirmed child exit and capacity
 
 `LeanWorkerProcessTracker` counts child processes across startup and replacement. Pass one shared tracker to every
 worker builder covered by a capacity slot. After the actor stops and cannot spawn again, release its slot only when
-`active_processes()` returns zero. The count decreases only after `try_wait` confirms exit, not when the owner drops, a
-request expires, or a PID disappears.
+`active_processes()` returns zero. The count decreases after `try_wait` confirms exit and any attached inherited group
+has closed, not merely when the owner drops, a request expires, or a PID disappears. If `ECHILD` revokes wait authority,
+an attached lifetime's confirmed whole-group absence can instead release capacity without an exit-status receipt.
 
 `try_shutdown(&mut self)` allows cleanup retries without consuming the owner. Dropping an owner moves any unconfirmed
 child into the tracker's cleanup registry. At most one cleanup thread per tracker retries every 100 ms, then stops when
 the registry is empty. A poll also retries cleanup and thread creation if needed. Keep the tracker until its count
 reaches zero, especially if cleanup-thread creation fails. Dropping the last tracker after a thread-start failure can
 discard pending handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill only after `try_wait`
-reports the owned child still running; a wait error keeps the handle and count without risking a signal to a reused PID.
-OS wait errors can therefore keep capacity unavailable indefinitely (including `ECHILD`, which means another party may
-have reaped the process). A normal stopped child recovers automatically.
+reports the owned child still running; a wait error never authorizes a signal to a reused PID. Other wait errors keep
+the actual child and count for retry. `ECHILD` without an attached whole-group absence witness can still keep capacity
+unavailable indefinitely. A normally stopped child, or a closed attached group after `ECHILD`, recovers automatically;
+resource-only recovery leaves the request's missing exit status unresolved.
+`LeanWorkerExitObservation::scope_closed_without_status()` separately marks that terminal resource recovery, allowing
+retained-request lifecycle watchers to stop and retention to expire while preserving the unknown proof outcome.
 
 ## Source-header imports and retained memory
 
-Protocol 12 reports cumulative successful source-header import bytes before each source response. The child excludes
-memory-mapped regions and regions already charged to the input session. The parent adds only increases to its generation
-budget. Evicting a snapshot, a reusable header, or a session never subtracts this charge: these operations do not free
-Lean's imported regions.
+The worker protocol reports cumulative successful source-header import bytes before each source response. The child
+excludes memory-mapped regions and regions already charged to the input session. The parent adds only increases to its
+generation budget. Evicting a snapshot, a reusable header, or a session never subtracts this charge: these operations do
+not free Lean's imported regions.
 
 Source headers have a separate bounded cache. The RSS snapshot guard can discard large elaboration snapshots without
 forcing another header import. Matching warm headers and sessions remain usable after the byte budget is reached. A
@@ -450,3 +453,64 @@ behavior; stuck contention no longer waits indefinitely.
 that count on actual session-cache misses, even when the parent predicted reuse. Source-header imports contribute to the
 retained-byte budget, not this session-count limit. With the byte budget disabled, header churn has no count limit; use
 the byte budget to bound it. Header import counts remain available through host accounting and protocol events.
+
+
+## Optional native guardian ownership
+
+On Unix, a configured `native_guardian` plus `lifetime_directory` establishes a private worker session before the Lean
+runtime starts. The original parent keeps the actual `Child` in the common `OwnedCommandGroup`, which preserves its
+unreaped root pin until a complete group census permits reaping. One independent link-free helper joins that session in
+a separate process group, keeping the session number pinned while it signals and drains the worker's inherited process
+group. Server EOF, the exact server birth becoming absent or zombie, root-parent death, and malformed control all
+request the same group drain. Failure to signal or observe closure retains read custody; it never establishes a
+successful proof result. Managed payloads must not change process group or detach into another session. This is process
+lifecycle ownership, not a sandbox against arbitrary native code.
+
+A generation's single bounded `owner.json` moves from Preparing to Running before the guardian acknowledges runtime
+startup. Each acquired artifact SH descriptor is transferred to the guardian and its canonical lock domain is durably
+published before admission returns. The union is retained until that whole generation closes, including after logical
+request release. All multi-domain readers and writers acquire locks in stable lock-path order. Managed writers check the
+same registry after taking EX: a guardian's death can close its descriptors while a payload descendant is still alive,
+so successful EX alone does not grant write admission. Live legacy records without an independent descriptor custodian
+fence every domain. Closed valid records need no filesystem access to former artifact roots; malformed committed records
+remain unavailable.
+
+When the original parent survives a guardian failure, its existing idle/request/cleanup polls observe the exact guardian
+birth becoming absent or zombie and request the same owned-group stop primitive used for external native readers. Root
+wait authority is checked without reaping before each macOS group signal. A request being awaited polls this lifetime at
+a bounded interval and returns no proof result after guardian intervention. There is no replacement watcher or alternate
+numeric-PID recovery path. All failed signal or closure observations retain actual ownership.
+
+Optional `NativeCapacitySlot` admission bounds actor keys in that same registry. A key belongs to one exact server
+incarnation while occupied and permits one main and one semantic generation. All occupied keys agree on the configured
+limit; existing generations survive server restart in the count until whole-group absence is observed. One global
+`preparation` utility group may coexist without consuming a resident actor key, allowing configuration discovery at a
+full resident quota. It uses a disjoint fresh key and the same configured limit agreement, owner record and admission
+mutex; a second preparation group gets backpressure. Main/semantic actor limits are unchanged. Admission returns
+immediate bounded backpressure when slots are occupied, rather than waiting or redispatching a request. The registry
+also has a 128-record backstop, 32 artifact domains per generation and 256 KiB per owner record. The admission mutex and
+scans use the original remaining startup budget; filesystem syscalls themselves cannot be preempted by this userspace
+deadline.
+
+Preparing means no runtime, artifact load or request body was admitted. If its exact parent dies, that reservation may
+be collected; a child paused before its startup ACK can still physically exist. The actor bound consequently covers
+admitted native generations, not a hard operating-system PID quota over arbitrary paused bootstrap children. A missing
+committed record with only known bounded protocol temporary files can be collected under the same admission mutex: spawn
+was not permitted before initial Preparing publication committed, or collection had already proved group absence.
+Writers perform that reconciliation too, so interrupted initial publication cannot block the preparation that precedes
+the next reservation. Unknown files and malformed committed records are not collected.
+
+If another waiter has revoked the actual parent's wait authority (`ECHILD`), confirmed whole-group absence may release
+resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
+Physical capacity recovery never changes an unknown request into a proof result. A failed guardian does not authorize
+signaling a serialized numeric PID: a surviving parent uses only its still-owned unreaped child pin. If both the server
+and guardian disappear, no such signaling authority remains and surviving descendants must close before passive recovery
+can proceed. macOS session pinning and group observation are covered by real-process fault tests; Linux observations
+have weaker atomicity and do not gain an identical platform guarantee from those tests.
+
+Managed MCP binds its ownership namespace through `registry_directory()`, whose lookup is read-only; only reservation
+creates it. An explicit `LEAN_RS_WORKER_OWNERS_DIRECTORY` selects that canonical private namespace; otherwise the
+per-user local-data default is used. The validated writer contract and every cooperating helper must carry the same
+binding. Protected native spawn refuses a lifetime directory different from the caller's resolved writer registry. An
+upstream embedder choosing a custom lifetime directory must likewise configure every cooperating managed writer to check
+that namespace. Registries in unrelated directories cannot discover each other's ownership automatically.

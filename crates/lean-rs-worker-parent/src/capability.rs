@@ -15,10 +15,10 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerCapabilityMetadata, LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult,
     LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationVerificationBatchRequest,
     LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationRequest,
-    LeanWorkerDeclarationVerificationResult, LeanWorkerElabOptions, LeanWorkerModuleQuery,
-    LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
-    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult,
-    LeanWorkerSessionImportProfile,
+    LeanWorkerDeclarationVerificationResult, LeanWorkerElabOptions, LeanWorkerHostRuntimeExpectation,
+    LeanWorkerHostRuntimeMetadata, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector, LeanWorkerOutputBudgets,
+    LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerSessionImportProfile,
 };
 use lean_rs_worker_protocol::worker_exports::{
     doctor_signature, json_command_signature, metadata_signature, streaming_command_signature,
@@ -623,6 +623,7 @@ impl LeanWorkerCapabilityBuilder {
 /// `@[export]` dylib is built or opened.
 #[derive(Clone, Debug)]
 pub struct LeanWorkerHostHandleBuilder {
+    host_runtime_expectation: Option<LeanWorkerHostRuntimeExpectation>,
     project_root: PathBuf,
     imports: Vec<String>,
     import_profile: LeanWorkerSessionImportProfile,
@@ -718,6 +719,7 @@ impl LeanWorkerHostHandleBuilder {
     #[must_use]
     pub fn shims_only(project_root: impl Into<PathBuf>, imports: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
+            host_runtime_expectation: None,
             project_root: project_root.into(),
             imports: imports.into_iter().map(Into::into).collect(),
             import_profile: LeanWorkerSessionImportProfile::default(),
@@ -734,6 +736,13 @@ impl LeanWorkerHostHandleBuilder {
             lean_max_memory_kib: None,
             max_frame_bytes: None,
         }
+    }
+
+    /// Enforce actual checked host-session metadata before every body command.
+    #[must_use]
+    pub fn require_host_runtime(mut self, expected: LeanWorkerHostRuntimeExpectation) -> Self {
+        self.host_runtime_expectation = Some(expected);
+        self
     }
 
     /// Use an explicit `lean-rs-worker-child` executable.
@@ -935,8 +944,11 @@ impl LeanWorkerHostHandleBuilder {
             self.num_threads,
             self.lean_max_memory_kib,
         )?;
-        let session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports)
+        let mut session_config = LeanWorkerSessionConfig::shims_only(self.project_root, self.imports)
             .with_import_profile(self.import_profile);
+        if let Some(expected) = self.host_runtime_expectation {
+            session_config = session_config.with_host_runtime_expectation(expected);
+        }
         if !session_config.imports().is_empty() {
             let _session = worker.open_session(&session_config, None, None)?;
         }
@@ -1190,6 +1202,15 @@ impl LeanWorkerCapability {
         self.worker.request_checkpoint()
     }
 
+    /// Retain an exact request's eventual owned-exit observation.
+    #[must_use]
+    pub fn pending_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<crate::supervisor::LeanWorkerPendingRequestStop> {
+        self.worker.pending_request_stop_since(checkpoint)
+    }
+
     /// Confirm exit of the latest request's direct child since this checkpoint.
     ///
     /// See [`LeanWorker::confirmed_request_stop_since`] for the scope and limits
@@ -1209,6 +1230,26 @@ impl LeanWorkerCapability {
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
         self.worker.status()
+    }
+
+    /// Whether owned cleanup is pending; see [`LeanWorker::cleanup_pending`].
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.worker.cleanup_pending()
+    }
+
+    /// Finish an observed host read scope by closing only child FD aliases.
+    ///
+    /// # Errors
+    /// Refuses unknown active work or a failed release acknowledgement.
+    pub fn release_host_read(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.release_host_read()
+    }
+
+    /// Exact pre-body terminal refusal, preserved before resource cleanup.
+    #[must_use]
+    pub fn host_session_refusal_since(&self, checkpoint: &LeanWorkerRequestCheckpoint) -> Option<&'static str> {
+        self.worker.host_session_refusal_since(checkpoint)
     }
 
     /// Measure the current child RSS in KiB when supported by the platform.
@@ -1493,6 +1534,25 @@ impl LeanWorkerHostHandle {
         })
     }
 
+    /// Install the broker's current contract for all subsequent session opens.
+    /// A cached actual observation is checked before changing the configuration.
+    ///
+    /// # Errors
+    /// Returns a protocol error if the current loaded bindings do not satisfy
+    /// the new requirement. The previous configuration remains unchanged.
+    pub fn set_host_runtime_expectation(
+        &mut self,
+        expected: LeanWorkerHostRuntimeExpectation,
+    ) -> Result<(), LeanWorkerError> {
+        if let Some(actual) = self.worker.host_runtime_metadata() {
+            expected.validate(actual).map_err(|message| LeanWorkerError::Protocol {
+                message: format!("host runtime compatibility: {message}"),
+            })?;
+        }
+        self.session_config = self.session_config.clone().with_host_runtime_expectation(expected);
+        Ok(())
+    }
+
     /// Return the session configuration used by this host handle.
     #[must_use]
     pub fn session_config(&self) -> &LeanWorkerSessionConfig {
@@ -1503,6 +1563,13 @@ impl LeanWorkerHostHandle {
     #[must_use]
     pub fn runtime_metadata(&self) -> LeanWorkerRuntimeMetadata {
         self.worker.runtime_metadata()
+    }
+
+    /// Actual metadata last validated in this child generation, never a cold
+    /// status or a configured worker-sidecar claim.
+    #[must_use]
+    pub fn host_runtime_metadata(&self) -> Option<&LeanWorkerHostRuntimeMetadata> {
+        self.worker.host_runtime_metadata()
     }
 
     /// Return a snapshot of worker lifecycle counters.
@@ -1521,6 +1588,15 @@ impl LeanWorkerHostHandle {
     #[must_use]
     pub fn request_checkpoint(&self) -> LeanWorkerRequestCheckpoint {
         self.worker.request_checkpoint()
+    }
+
+    /// Retain an exact request's eventual owned-exit observation.
+    #[must_use]
+    pub fn pending_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<crate::supervisor::LeanWorkerPendingRequestStop> {
+        self.worker.pending_request_stop_since(checkpoint)
     }
 
     /// Confirm exit of the latest request's direct child since this checkpoint.
@@ -1542,6 +1618,26 @@ impl LeanWorkerHostHandle {
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
         self.worker.status()
+    }
+
+    /// Whether owned cleanup is pending; see [`LeanWorker::cleanup_pending`].
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.worker.cleanup_pending()
+    }
+
+    /// Finish an observed host read scope by closing only child FD aliases.
+    ///
+    /// # Errors
+    /// Refuses unknown active work or a failed release acknowledgement.
+    pub fn release_host_read(&mut self) -> Result<(), LeanWorkerError> {
+        self.worker.release_host_read()
+    }
+
+    /// Exact pre-body terminal refusal, preserved before resource cleanup.
+    #[must_use]
+    pub fn host_session_refusal_since(&self, checkpoint: &LeanWorkerRequestCheckpoint) -> Option<&'static str> {
+        self.worker.host_session_refusal_since(checkpoint)
     }
 
     /// Measure the current child RSS in KiB when supported by the platform.
@@ -1730,7 +1826,35 @@ fn spawn_checked_worker(
     validate_worker_child_path(&worker_executable)?;
     let lean_sysroot = worker_child.resolve_lean_sysroot()?;
 
-    let mut config = LeanWorkerConfig::new(worker_executable).env("LEAN_SYSROOT", lean_sysroot.as_os_str());
+    let mut config = LeanWorkerConfig::new(worker_executable)
+        .env("LEAN_SYSROOT", lean_sysroot.as_os_str())
+        .shared_artifact_reads(worker_child.shared_artifact_reads);
+    if let Some(executable) = &worker_child.shared_writer_executable {
+        config = config.env("LEAN_HOST_MCP_WRITER_EXECUTABLE", executable.as_os_str());
+    }
+    if let Some(artifacts) = &worker_child.prepared_host_artifacts {
+        let encoded = serde_json::to_string(artifacts).map_err(|error| LeanWorkerError::Setup {
+            message: format!("could not encode prepared host artifacts: {error}"),
+        })?;
+        if encoded.len() > 64 * 1024 {
+            return Err(LeanWorkerError::Setup {
+                message: "prepared host artifacts exceed the 64 KiB launch limit".to_owned(),
+            });
+        }
+        config = config.env("LEAN_RS_PREPARED_HOST_ARTIFACTS", encoded);
+    }
+    #[cfg(unix)]
+    if let Some(directory) = &worker_child.lifetime_directory {
+        config = config.lifetime_directory(directory);
+    }
+    #[cfg(unix)]
+    if let Some(executable) = &worker_child.native_guardian_executable {
+        config = config.native_guardian(executable);
+    }
+    #[cfg(unix)]
+    if let Some(slot) = &worker_child.native_capacity_slot {
+        config = config.native_capacity_slot(slot.key.clone(), slot.scope.clone(), slot.limit);
+    }
     if let Some(tracker) = process_tracker {
         config = config.process_tracker(tracker);
     }
@@ -1858,6 +1982,15 @@ pub struct LeanWorkerChild {
     explicit_path: Option<PathBuf>,
     env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
+    shared_writer_executable: Option<PathBuf>,
+    prepared_host_artifacts: Option<lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts>,
+    shared_artifact_reads: bool,
+    #[cfg(unix)]
+    lifetime_directory: Option<PathBuf>,
+    #[cfg(unix)]
+    native_guardian_executable: Option<PathBuf>,
+    #[cfg(unix)]
+    native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
 }
 
 impl LeanWorkerChild {
@@ -1877,6 +2010,15 @@ impl LeanWorkerChild {
             explicit_path: None,
             env_var: None,
             lean_sysroot: None,
+            shared_writer_executable: None,
+            prepared_host_artifacts: None,
+            shared_artifact_reads: false,
+            #[cfg(unix)]
+            lifetime_directory: None,
+            #[cfg(unix)]
+            native_guardian_executable: None,
+            #[cfg(unix)]
+            native_capacity_slot: None,
         }
     }
 
@@ -1888,6 +2030,15 @@ impl LeanWorkerChild {
             explicit_path: Some(path.into()),
             env_var: None,
             lean_sysroot: None,
+            shared_writer_executable: None,
+            prepared_host_artifacts: None,
+            shared_artifact_reads: false,
+            #[cfg(unix)]
+            lifetime_directory: None,
+            #[cfg(unix)]
+            native_guardian_executable: None,
+            #[cfg(unix)]
+            native_capacity_slot: None,
         }
     }
 
@@ -1905,6 +2056,15 @@ impl LeanWorkerChild {
             explicit_path: Some(path.into()),
             env_var: None,
             lean_sysroot: Some(sysroot.into()),
+            shared_writer_executable: None,
+            prepared_host_artifacts: None,
+            shared_artifact_reads: false,
+            #[cfg(unix)]
+            lifetime_directory: None,
+            #[cfg(unix)]
+            native_guardian_executable: None,
+            #[cfg(unix)]
+            native_capacity_slot: None,
         }
     }
 
@@ -1915,6 +2075,72 @@ impl LeanWorkerChild {
     #[must_use]
     pub fn lean_sysroot(mut self, sysroot: impl Into<PathBuf>) -> Self {
         self.lean_sysroot = Some(sysroot.into());
+        self
+    }
+
+    /// Bind the process-bound helper used for host-side Lake shared writes.
+    ///
+    /// The worker receives the explicit helper path rather than searching PATH.
+    #[must_use]
+    pub fn shared_writer_executable(mut self, executable: impl Into<PathBuf>) -> Self {
+        self.shared_writer_executable = Some(executable.into());
+        self
+    }
+
+    /// Supply a runtime-free descriptor prepared before guarded generation startup.
+    ///
+    /// The child validates and acquires the listed read domains before loading
+    /// from the exact manifest snapshot. Actual loaded checks remain separate.
+    #[must_use]
+    pub fn prepared_host_artifacts(
+        mut self,
+        artifacts: lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts,
+    ) -> Self {
+        self.prepared_host_artifacts = Some(artifacts);
+        self
+    }
+
+    /// Enable the worker's authenticated, durable parent startup lifeline.
+    ///
+    /// See [`LeanWorkerConfig::lifetime_directory`] for the inherited-group
+    /// lifecycle boundary. This is opt-in and does not recover old proof results.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn lifetime_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.lifetime_directory = Some(directory.into());
+        self
+    }
+
+    /// Bind a link-free independent guardian for this worker generation.
+    ///
+    /// Use the same ownership registry for the guardian and all managed
+    /// writers; MCP supplies the shared default registry explicitly.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn native_guardian(mut self, executable: impl Into<PathBuf>) -> Self {
+        self.native_guardian_executable = Some(executable.into());
+        self
+    }
+
+    /// Bind this generation to a bounded actor slot shared with a companion.
+    ///
+    /// The registry keeps occupied slots across broker death until their actual
+    /// groups close. Each slot permits one main and one companion scope.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn native_capacity_slot(mut self, key: impl Into<String>, scope: impl Into<String>, limit: usize) -> Self {
+        self.native_capacity_slot = Some(lean_toolchain::native_guardian::NativeCapacitySlot {
+            key: key.into(),
+            scope: scope.into(),
+            limit,
+        });
+        self
+    }
+
+    /// Require actual read custody in every opened host session.
+    #[must_use]
+    pub fn shared_artifact_reads(mut self, required: bool) -> Self {
+        self.shared_artifact_reads = required;
         self
     }
 

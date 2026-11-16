@@ -58,11 +58,12 @@ Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/
 
    ```sh
    for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
-     cargo public-api -p "$c" --simplified > "docs/api-review/${c}-public.txt"
+     cargo +nightly-2026-06-18 public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
    done
    ```
 
-   The workflow re-runs `cargo public-api --simplified` for each crate and `diff`s against
+   Use `cargo-public-api@0.52.0` with the pinned nightly, as required by [the API review instructions](api-review.md).
+   The workflow re-runs that pinned `cargo public-api --simplified` for each crate and `diff`s against
    these baselines. Drift fails the workflow before any publish.
 
 ## Step 3—PR and merge

@@ -51,3 +51,6 @@ crates/*/fuzz/target/
 .pi/node_modules/
 .pi/sessions/
 .pi/tasks/
+
+# Stable artifact-domain synchronization files; preserve their inodes locally.
+**/.lean-rs-writer-*.lock

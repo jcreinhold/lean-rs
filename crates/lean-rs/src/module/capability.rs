@@ -141,6 +141,33 @@ impl<'lean> LeanCapability<'lean> {
         )
     }
 
+    /// Open and initialize exactly one captured capability-manifest snapshot.
+    ///
+    /// Unlike [`Self::from_build_manifest`], this method never rereads the
+    /// manifest path. Schema, fingerprint and symbol preflight inspect the same
+    /// parsed bytes that provide library paths and checked ABI signatures.
+    /// Artifact coordination must span this call, including all initializers;
+    /// a captured manifest is storage metadata, not evidence of a loaded ABI.
+    ///
+    /// # Errors
+    /// Returns [`LeanError`] for malformed metadata, preflight failure, or a
+    /// dependency/primary load or module-initialization failure.
+    pub fn from_manifest_snapshot(runtime: &'lean LeanRuntime, manifest_path: &Path, bytes: &[u8]) -> LeanResult<Self> {
+        let manifest = CapabilityManifest::from_bytes(manifest_path, bytes).map_err(manifest_error_to_lean_error)?;
+        let report = LeanRuntimePreflight::check_manifest(manifest_path, &manifest);
+        if !report.is_ok() {
+            return Err(report_into_error(report));
+        }
+        Self::open_with_dependencies_and_exports(
+            runtime,
+            manifest.primary_dylib,
+            manifest.package,
+            manifest.module,
+            manifest.dependencies,
+            manifest.exports,
+        )
+    }
+
     /// Open and initialize a build-script produced Lean capability from a
     /// direct dylib path.
     ///

@@ -745,6 +745,11 @@ impl LeanWorkerPool {
             message: "worker pool entry disappeared during liveness check".to_owned(),
         })?;
         match entry.capability.status()? {
+            LeanWorkerStatus::Running if entry.capability.cleanup_pending() => {
+                Err(LeanWorkerError::ShutdownInProgress {
+                    operation: "pool_acquire_lease",
+                })
+            }
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(_exit) => {
                 entry.capability = entry.builder.clone().open()?;

@@ -12,7 +12,11 @@
 //! filename matches the host application) can wrap [`run_worker_child_stdio`]
 //! in a one-line `main`.
 
+mod artifact_reads;
 mod child;
+mod host_artifacts;
+#[cfg(unix)]
+mod parent_watchdog;
 
 /// Run the worker child process on stdin/stdout.
 ///
@@ -29,5 +33,8 @@ mod child;
 /// `LeanWorkerPool`). This function is only the child-side binary entry
 /// point.
 pub fn run_worker_child_stdio() -> std::process::ExitCode {
+    if let Some(exit) = host_artifacts::preparation_mode() {
+        return exit;
+    }
     child::run_stdio()
 }

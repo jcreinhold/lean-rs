@@ -28,7 +28,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{self, Write as _};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -130,8 +130,15 @@ fn emit_lean_link_directives_checked_with_options(opts: &DiscoverOptions) -> Res
 /// - the maximum modification timestamp of `lakefile.lean`, `lakefile.toml`, `lean-toolchain`,
 ///   and every `*.lean` file below `project_root` excluding `.lake/`;
 /// - the counted source-set size;
-/// - the target name and Lake package name.
+/// - the target name and Lake package name;
+/// - content SHA-256 of supported owned source trees across the bounded
+///   declared workspace closure, including C/header/resource inputs and
+///   excluding `.lake` and `.git` artifacts;
+/// - content SHA-256 of configured dependent shared libraries.
 ///
+/// Version 2 invalidates earlier keys. Inputs are fingerprinted before and after
+/// a build; a changed input set refuses cache/manifest publication. Output hashes
+/// are recorded after a successful build, allowing Lake to build dependencies.
 /// A cache hit skips the Lake command only when the cache key matches and the dylib exists.
 /// The helper always emits `cargo:rerun-if-changed=...` directives for the Lake files and
 /// source files it scans. If `lake-manifest.json` is absent, the helper lets
@@ -146,7 +153,7 @@ fn emit_lean_link_directives_checked_with_options(opts: &DiscoverOptions) -> Res
 /// unsuccessfully, and [`LinkDiagnostics::LakeOutputUnresolved`] for unreadable manifests,
 /// source-set traversal failures, cache write failures, or missing built dylibs.
 pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
-    let mut runner = RealLakeRunner;
+    let mut runner = RealLakeRunner::default();
     build_lake_target_with_runner_and_options(
         project_root,
         target_name,
@@ -167,7 +174,7 @@ pub fn build_lake_target(project_root: &Path, target_name: &str) -> Result<PathB
 ///
 /// Returns the same [`LinkDiagnostics`] variants as [`build_lake_target`].
 pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result<PathBuf, LinkDiagnostics> {
-    let mut runner = RealLakeRunner;
+    let mut runner = RealLakeRunner::default();
     build_lake_target_with_runner_and_options(
         project_root,
         target_name,
@@ -175,6 +182,23 @@ pub fn build_lake_target_quiet(project_root: &Path, target_name: &str) -> Result
         CargoMetadata::Suppress,
         &LakeBuildOptions::default(),
     )
+}
+
+/// Build only the bundled package named by an explicit private bootstrap token.
+///
+/// # Errors
+/// Returns the ordinary Lake build/cache diagnostics for that package.
+pub fn build_private_lake_target_quiet(
+    bootstrap: crate::shared_writer::PrivateLakeBootstrap,
+    target_name: &str,
+) -> Result<PathBuf, LinkDiagnostics> {
+    let root = bootstrap.project_root().to_path_buf();
+    let options = LakeBuildOptions {
+        private_bootstrap: Some(bootstrap),
+        ..LakeBuildOptions::default()
+    };
+    let mut runner = RealLakeRunner::default();
+    build_lake_target_with_runner_and_options(&root, target_name, &mut runner, CargoMetadata::Suppress, &options)
 }
 
 /// Build-script helper for shipping a Rust crate with bundled Lean code.
@@ -203,6 +227,8 @@ pub struct CargoLeanCapability {
     manifest_env_var: Option<String>,
     lean_sysroot: Option<PathBuf>,
     lean_num_threads: Option<u32>,
+    private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
+    writer_executable: Option<PathBuf>,
     export_signatures: Vec<LeanExportSignature>,
     dependencies: Vec<LeanLibraryDependency>,
 }
@@ -220,9 +246,25 @@ impl CargoLeanCapability {
             manifest_env_var: None,
             lean_sysroot: None,
             lean_num_threads: None,
+            private_bootstrap: None,
+            writer_executable: None,
             export_signatures: Vec::new(),
             dependencies: Vec::new(),
         }
+    }
+
+    /// Permit only a typed package-local bootstrap when no helper exists.
+    #[must_use]
+    pub fn private_bootstrap(mut self, bootstrap: crate::shared_writer::PrivateLakeBootstrap) -> Self {
+        self.private_bootstrap = Some(bootstrap);
+        self
+    }
+
+    /// Bind the shared-writer helper explicitly for parent-side builds.
+    #[must_use]
+    pub fn writer_executable(mut self, executable: impl Into<PathBuf>) -> Self {
+        self.writer_executable = Some(executable.into());
+        self
     }
 
     /// Set the Lake package name used by the module initializer.
@@ -325,7 +367,7 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lean cannot be discovered, Lake cannot
     /// build the target, or the target output cannot be resolved.
     pub fn build(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Emit)
+        self.build_with_runner(&mut RealLakeRunner::default(), CargoMetadata::Emit)
     }
 
     /// Same as [`Self::build`] without printing Cargo directives.
@@ -338,7 +380,165 @@ impl CargoLeanCapability {
     /// Returns [`LinkDiagnostics`] if Lake cannot build the target or the
     /// target output cannot be resolved.
     pub fn build_quiet(self) -> Result<BuiltLeanCapability, LinkDiagnostics> {
-        self.build_with_runner(&mut RealLakeRunner, CargoMetadata::Suppress)
+        self.build_with_runner(&mut RealLakeRunner::default(), CargoMetadata::Suppress)
+    }
+
+    /// Probe the existing build cache and exact capability manifest without writes.
+    ///
+    /// The caller must retain shared custody for the complete artifact-root union
+    /// throughout this probe and subsequent loading. A miss never starts Lake or
+    /// publishes metadata. Dependencies need their own cache probes when prepared
+    /// independently; this probe also requires their recorded dylibs to exist.
+    ///
+    /// # Errors
+    /// Returns malformed project, source traversal, toolchain or manifest errors.
+    pub fn probe_ready(&self) -> Result<Option<BuiltLeanCapability>, LinkDiagnostics> {
+        let root = match self.project_root.canonicalize() {
+            Ok(root) => root,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(self.probe_error(&error)),
+        };
+        let Some(lakefile) = existing_lakefile(&root) else {
+            return Ok(None);
+        };
+        if !target_declared_in_lakefile(&lakefile, &self.target_name)? {
+            return Ok(None);
+        }
+        let manifest_path = root.join("lake-manifest.json");
+        let bytes = match fs::read(&manifest_path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(self.probe_error(&error)),
+        };
+        let inferred = package_name_from_manifest(&root, &self.target_name, &manifest_path, &bytes)?;
+        let options = LakeBuildOptions {
+            lean_sysroot: self.lean_sysroot.clone(),
+            lean_num_threads: self.lean_num_threads,
+            private_bootstrap: self.private_bootstrap.clone(),
+            writer_executable: self.writer_executable.clone(),
+            dependencies: self.dependencies.clone(),
+        };
+        let key = cache_key(
+            &self.target_name,
+            &inferred,
+            &sha256_hex(&bytes),
+            &scan_source_set(&root, &self.target_name)?,
+            &options,
+            &build_inputs_fingerprint(&root, &self.target_name)?,
+            &dependency_artifact_fingerprint(&root, &self.target_name, &options)?,
+        );
+        if !fs::read_to_string(cache_path(&root, &self.target_name)).is_ok_and(|cached| cached == key) {
+            return Ok(None);
+        }
+        let dylib_path = resolve_dylib_path(&root, &inferred, &self.target_name);
+        if !dylib_path.is_file() {
+            return Ok(None);
+        }
+        // Explicit discovery consults only the supplied sysroot, never PATH,
+        // elan or Lake. With no explicit root build_quiet uses this fingerprint.
+        let selected = if self.lean_sysroot.is_some() {
+            Some(discover_toolchain(&self.discover_options())?)
+        } else {
+            None
+        };
+        let package = self.package.clone().unwrap_or(inferred);
+        let module = self.module.clone().unwrap_or_else(|| self.target_name.clone());
+        let env_var = self
+            .env_var
+            .clone()
+            .unwrap_or_else(|| capability_env_var(&self.target_name));
+        let manifest_env_var = self
+            .manifest_env_var
+            .clone()
+            .unwrap_or_else(|| capability_manifest_env_var(&self.target_name));
+        let expected = capability_manifest_value(
+            &root,
+            &self.target_name,
+            &package,
+            &module,
+            &dylib_path,
+            &manifest_env_var,
+            &self.export_signatures,
+            &self.dependencies,
+            selected.as_ref(),
+        )?;
+        let manifest_path = capability_manifest_path(&root, &self.target_name, &self.export_signatures);
+        let actual: serde_json::Value = match fs::read(&manifest_path) {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(_) => return Ok(None),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(self.probe_error(&error)),
+        };
+        if actual != expected
+            || expected
+                .get("dependencies")
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(|deps| {
+                    deps.iter().any(|dep| {
+                        dep.get("dylib_path")
+                            .and_then(serde_json::Value::as_str)
+                            .is_none_or(|path| !Path::new(path).is_file())
+                    })
+                })
+        {
+            return Ok(None);
+        }
+        Ok(Some(BuiltLeanCapability {
+            dylib_path,
+            env_var,
+            manifest_path,
+            manifest_env_var,
+            package,
+            module,
+            target_name: self.target_name.clone(),
+            project_root: root,
+        }))
+    }
+
+    fn probe_error(&self, error: &io::Error) -> LinkDiagnostics {
+        LinkDiagnostics::LakeOutputUnresolved {
+            project_root: self.project_root.clone(),
+            target_name: self.target_name.clone(),
+            reason: format!("read-only cache probe failed ({error})"),
+        }
+    }
+
+    /// Build using existing writer custody through cache and manifest publication.
+    ///
+    /// # Errors
+    /// Returns cancellation, build, custody, or publication errors. Unknown work
+    /// seals the supplied writer and never authorizes another command.
+    #[cfg(unix)]
+    pub fn build_quiet_with_writer(
+        self,
+        writer: &mut crate::shared_writer::SharedWriter,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let mut runner = RealLakeRunner {
+            borrowed: Some(writer),
+            cancelled: Some(&cancelled),
+            ..RealLakeRunner::default()
+        };
+        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
+    }
+
+    /// Build with bounded cancellable lock acquisition.
+    ///
+    /// # Errors
+    /// Returns acquisition, cancellation, build, or publication diagnostics.
+    pub fn build_quiet_with_lock_wait(
+        self,
+        timeout: std::time::Duration,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<BuiltLeanCapability, LinkDiagnostics> {
+        let mut runner = RealLakeRunner {
+            lock_timeout: Some(timeout),
+            cancelled: Some(&cancelled),
+            ..RealLakeRunner::default()
+        };
+        self.build_with_runner(&mut runner, CargoMetadata::Suppress)
     }
 
     fn build_with_runner(
@@ -355,6 +555,9 @@ impl CargoLeanCapability {
         let lake_options = LakeBuildOptions {
             lean_sysroot: self.lean_sysroot.clone(),
             lean_num_threads: self.lean_num_threads,
+            private_bootstrap: self.private_bootstrap.clone(),
+            writer_executable: self.writer_executable.clone(),
+            dependencies: self.dependencies.clone(),
         };
         let dylib_path = build_lake_target_with_runner_and_options(
             &self.project_root,
@@ -534,6 +737,9 @@ fn emit_rerun_triggers(info: Option<&ToolchainInfo>) {
 }
 
 trait LakeRunner {
+    fn prepare(&mut self, _root: &Path, _options: &LakeBuildOptions) -> Result<(), std::io::Error> {
+        Ok(())
+    }
     fn build_shared(
         &mut self,
         project_root: &Path,
@@ -542,9 +748,109 @@ trait LakeRunner {
     ) -> Result<LakeRun, std::io::Error>;
 }
 
-struct RealLakeRunner;
+fn writer_diagnostic(project_root: &Path, target_name: &str, error: &io::Error, admission: bool) -> LinkDiagnostics {
+    if let Some(failure) = crate::shared_writer::WriterFailure::from_io(error) {
+        return LinkDiagnostics::LakeWriterFailure {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            failure: Box::new(failure.clone()),
+        };
+    }
+    if admission {
+        LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("could not acquire shared Lake writer: {error}"),
+        }
+    } else {
+        LinkDiagnostics::LakeUnavailable {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            detail: error.to_string(),
+        }
+    }
+}
 
-impl LakeRunner for RealLakeRunner {
+fn never_cancelled() -> bool {
+    false
+}
+
+#[derive(Default)]
+struct RealLakeRunner<'a> {
+    root: Option<PathBuf>,
+    writer: Option<crate::shared_writer::SharedWriter>,
+    borrowed: Option<&'a mut crate::shared_writer::SharedWriter>,
+    cancelled: Option<&'a dyn Fn() -> bool>,
+    lock_timeout: Option<std::time::Duration>,
+    private_locks: Vec<crate::writer_lock::WriterLock>,
+}
+
+impl LakeRunner for RealLakeRunner<'_> {
+    fn prepare(&mut self, project_root: &Path, options: &LakeBuildOptions) -> Result<(), std::io::Error> {
+        let root = project_root.canonicalize()?;
+        if let Some(existing) = &self.root {
+            return if existing == &root {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "one Lake build runner cannot cross writer roots",
+                ))
+            };
+        }
+        let cancelled: &dyn Fn() -> bool = self.cancelled.unwrap_or(&never_cancelled);
+        let timeout = self.lock_timeout.unwrap_or(crate::writer_lock::DEFAULT_LOCK_TIMEOUT);
+        if cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "Lake build cancelled",
+            ));
+        }
+        if let Some(writer) = &self.borrowed {
+            if !writer.covers_project(&root)? {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "borrowed writer does not cover this project",
+                ));
+            }
+        } else if let Some(executable) = options
+            .writer_executable
+            .clone()
+            .or_else(|| env::var_os(crate::shared_writer::SHARED_WRITER_EXECUTABLE_ENV).map(PathBuf::from))
+        {
+            self.writer = Some(crate::shared_writer::SharedWriter::open_cancellable(
+                &executable,
+                &root,
+                timeout,
+                cancelled,
+            )?);
+        } else if options
+            .private_bootstrap
+            .as_ref()
+            .is_some_and(|mode| mode.project_root() == root)
+        {
+            let (locks, roots) = crate::writer_lock::WriterLock::acquire_projects(&root, &[], timeout, cancelled)?;
+            if options
+                .private_bootstrap
+                .as_ref()
+                .is_none_or(|mode| !mode.covers_roots(&roots))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "private bootstrap dependency escaped its Cargo owner",
+                ));
+            }
+            self.private_locks = locks;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "shared Lake writes require the configured writer helper; only typed package-local bootstraps are exempt",
+            ));
+        }
+        self.root = Some(root);
+        Ok(())
+    }
+
     fn build_shared(
         &mut self,
         project_root: &Path,
@@ -565,11 +871,18 @@ impl LakeRunner for RealLakeRunner {
         if let Some(threads) = options.lean_num_threads {
             command.env("LEAN_NUM_THREADS", threads.to_string());
         }
-        let output = command
+        command
             .arg("build")
             .arg(format!("{target_name}:shared"))
-            .current_dir(project_root)
-            .output()?;
+            .current_dir(project_root);
+        self.prepare(project_root, options)?;
+        let cancelled: &dyn Fn() -> bool = self.cancelled.unwrap_or(&never_cancelled);
+        let output = if let Some(writer) = self.borrowed.as_deref_mut().or(self.writer.as_mut()) {
+            writer.run_cancellable(&command, std::time::Duration::from_secs(120), cancelled)?
+        } else {
+            // A typed token proves this cwd is below its Rust package owner.
+            command.output()?
+        };
         Ok(LakeRun {
             success: output.status.success(),
             status: output.status.to_string(),
@@ -585,6 +898,9 @@ struct LakeBuildOptions {
     /// Value for `LEAN_NUM_THREADS` on the spawned `lake` command. `None` leaves Lake's default
     /// (hardware-concurrency) parallelism, which can fork-storm a machine; `Some(n)` caps it.
     lean_num_threads: Option<u32>,
+    private_bootstrap: Option<crate::shared_writer::PrivateLakeBootstrap>,
+    writer_executable: Option<PathBuf>,
+    dependencies: Vec<LeanLibraryDependency>,
 }
 
 struct LakeRun {
@@ -642,6 +958,9 @@ fn build_lake_target_with_runner_and_options(
         target_name: target_name.to_owned(),
         reason: format!("could not canonicalize project root {} ({err})", project_root.display()),
     })?;
+    runner
+        .prepare(&project_root, options)
+        .map_err(|error| writer_diagnostic(&project_root, target_name, &error, true))?;
     let lakefile_lean = project_root.join("lakefile.lean");
     cargo_metadata.println(format_args!("cargo:rerun-if-changed={}", lakefile_lean.display()));
     let lakefile_toml = project_root.join("lakefile.toml");
@@ -695,7 +1014,21 @@ fn build_lake_target_with_runner_and_options(
     }
 
     let dylib = resolve_dylib_path(&project_root, &package_name, target_name);
-    let initial_cache_key = cache_key(target_name, &package_name, &manifest_digest, &source_set, options);
+    // All declared domains are already held by the runner. Normalize standard
+    // output directories for the entire closure before source observation.
+    for root in build_input_roots(&project_root, target_name)? {
+        fs::create_dir_all(root.join(".lake")).map_err(|e| input_diagnostic(&project_root, target_name, &e))?;
+    }
+    let initial_inputs = build_inputs_fingerprint(&project_root, target_name)?;
+    let initial_cache_key = cache_key(
+        target_name,
+        &package_name,
+        &manifest_digest,
+        &source_set,
+        options,
+        &initial_inputs,
+        &dependency_artifact_fingerprint(&project_root, target_name, options)?,
+    );
     let cache_path = cache_path(&project_root, target_name);
     if dylib.is_file() && fs::read_to_string(&cache_path).is_ok_and(|cached| cached == initial_cache_key) {
         cargo_metadata.trace(format_args!(
@@ -712,11 +1045,7 @@ fn build_lake_target_with_runner_and_options(
 
     let run = runner
         .build_shared(&project_root, target_name, options)
-        .map_err(|err| LinkDiagnostics::LakeUnavailable {
-            project_root: project_root.clone(),
-            target_name: target_name.to_owned(),
-            detail: err.to_string(),
-        })?;
+        .map_err(|error| writer_diagnostic(&project_root, target_name, &error, false))?;
     if !run.success {
         return Err(LinkDiagnostics::LakeBuildFailed {
             project_root,
@@ -726,6 +1055,14 @@ fn build_lake_target_with_runner_and_options(
         });
     }
 
+    let final_inputs = build_inputs_fingerprint(&project_root, target_name)?;
+    if initial_inputs != final_inputs {
+        return Err(LinkDiagnostics::LakeOutputUnresolved {
+            project_root,
+            target_name: target_name.to_owned(),
+            reason: "Lake build inputs changed during execution; cache publication refused".to_owned(),
+        });
+    }
     let (final_manifest_digest, final_package_name) = match fs::read(&manifest_path) {
         Ok(manifest_bytes) => (
             sha256_hex(&manifest_bytes),
@@ -739,6 +1076,8 @@ fn build_lake_target_with_runner_and_options(
         &final_manifest_digest,
         &source_set,
         options,
+        &final_inputs,
+        &dependency_artifact_fingerprint(&project_root, target_name, options)?,
     );
 
     let dylib = resolve_dylib_path(&project_root, &final_package_name, target_name);
@@ -1001,6 +1340,51 @@ fn write_capability_manifest(
     selected_toolchain: Option<&ToolchainInfo>,
 ) -> Result<PathBuf, LinkDiagnostics> {
     let manifest_path = capability_manifest_path(project_root, target_name, export_signatures);
+    let manifest = capability_manifest_value(
+        project_root,
+        target_name,
+        package,
+        module,
+        dylib_path,
+        manifest_env_var,
+        export_signatures,
+        explicit_dependencies,
+        selected_toolchain,
+    )?;
+    let bytes = serde_json::to_vec_pretty(&manifest).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!("could not encode Lean capability manifest ({err})"),
+    })?;
+    if let Some(parent) = manifest_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+            project_root: project_root.to_path_buf(),
+            target_name: target_name.to_owned(),
+            reason: format!("could not create manifest directory {} ({err})", parent.display()),
+        })?;
+    }
+    write_atomic(&manifest_path, &bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
+        project_root: project_root.to_path_buf(),
+        target_name: target_name.to_owned(),
+        reason: format!(
+            "could not atomically write Lean capability manifest {} ({err})",
+            manifest_path.display()
+        ),
+    })?;
+    Ok(manifest_path)
+}
+
+fn capability_manifest_value(
+    project_root: &Path,
+    target_name: &str,
+    package: &str,
+    module: &str,
+    dylib_path: &Path,
+    manifest_env_var: &str,
+    export_signatures: &[LeanExportSignature],
+    explicit_dependencies: &[LeanLibraryDependency],
+    selected_toolchain: Option<&ToolchainInfo>,
+) -> Result<serde_json::Value, LinkDiagnostics> {
     let mut dependencies = capability_dependencies(project_root, target_name)?;
     dependencies.extend(explicit_dependencies.iter().map(lean_library_dependency_to_json));
     let fingerprint = manifest_toolchain_fingerprint(project_root, target_name, selected_toolchain)?;
@@ -1013,7 +1397,7 @@ fn write_capability_manifest(
             "lean_binary": info.lean_binary.as_ref().map(|path| path.display().to_string()),
         })
     });
-    let manifest = serde_json::json!({
+    Ok(serde_json::json!({
         "schema_version": CAPABILITY_MANIFEST_SCHEMA_VERSION,
         "target_name": target_name,
         "package": package,
@@ -1040,28 +1424,7 @@ fn write_capability_manifest(
             .iter()
             .map(LeanExportSignature::to_json)
             .collect::<Vec<_>>(),
-    });
-    let bytes = serde_json::to_vec_pretty(&manifest).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
-        project_root: project_root.to_path_buf(),
-        target_name: target_name.to_owned(),
-        reason: format!("could not encode Lean capability manifest ({err})"),
-    })?;
-    if let Some(parent) = manifest_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
-            project_root: project_root.to_path_buf(),
-            target_name: target_name.to_owned(),
-            reason: format!("could not create manifest directory {} ({err})", parent.display()),
-        })?;
-    }
-    write_atomic(&manifest_path, &bytes).map_err(|err| LinkDiagnostics::LakeOutputUnresolved {
-        project_root: project_root.to_path_buf(),
-        target_name: target_name.to_owned(),
-        reason: format!(
-            "could not atomically write Lean capability manifest {} ({err})",
-            manifest_path.display()
-        ),
-    })?;
-    Ok(manifest_path)
+    }))
 }
 
 struct ManifestToolchainFingerprint {
@@ -1341,19 +1704,230 @@ fn screaming_snake(input: &str) -> String {
     if out.is_empty() { "CAPABILITY".to_owned() } else { out }
 }
 
+fn file_observation(metadata: &fs::Metadata) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes.extend(metadata.len().to_le_bytes());
+    bytes.extend(
+        metadata
+            .modified()?
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_nanos()
+            .to_le_bytes(),
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        bytes.extend(metadata.dev().to_le_bytes());
+        bytes.extend(metadata.ino().to_le_bytes());
+        bytes.extend(metadata.ctime().to_le_bytes());
+        bytes.extend(metadata.ctime_nsec().to_le_bytes());
+    }
+    Ok(bytes)
+}
+
+fn content_digest(path: &Path) -> io::Result<[u8; 32]> {
+    let mut file = fs::File::open(path)?;
+    let before = file_observation(&file.metadata()?)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(chunk.get(..read).ok_or_else(|| io::Error::other("invalid read size"))?);
+    }
+    if before != file_observation(&file.metadata()?)? || before != file_observation(&fs::metadata(path)?)? {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "build input changed while being fingerprinted",
+        ));
+    }
+    Ok(hasher.finalize().into())
+}
+
+fn hash_path(hasher: &mut Sha256, path: &Path) {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    hasher.update(bytes.len().to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn input_diagnostic(root: &Path, target: &str, error: &io::Error) -> LinkDiagnostics {
+    LinkDiagnostics::LakeOutputUnresolved {
+        project_root: root.to_path_buf(),
+        target_name: target.to_owned(),
+        reason: format!("could not fingerprint Lake build inputs ({error})"),
+    }
+}
+
+fn collect_build_inputs(root: &Path, paths: &mut Vec<PathBuf>, directories: &mut Vec<PathBuf>) -> io::Result<()> {
+    directories.push(root.to_path_buf());
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        if matches!(entry.file_name().to_str(), Some(".lake" | ".git")) {
+            continue;
+        }
+        let path = entry.path();
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            if !fs::metadata(&path)?.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "source aliases must resolve to regular files; directory aliases require a declared canonical workspace root",
+                ));
+            }
+            paths.push(path);
+        } else if kind.is_dir() {
+            collect_build_inputs(&path, paths, directories)?;
+        } else if kind.is_file() {
+            paths.push(path);
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Lake source inputs must be regular files",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn build_input_roots(root: &Path, target: &str) -> Result<Vec<PathBuf>, LinkDiagnostics> {
+    Ok(
+        if root
+            .join("lake-manifest.json")
+            .try_exists()
+            .map_err(|e| input_diagnostic(root, target, &e))?
+        {
+            crate::shared_writer::project_artifact_roots(root).map_err(|e| input_diagnostic(root, target, &e))?
+        } else {
+            vec![root.to_path_buf()]
+        },
+    )
+}
+
+fn build_inputs_fingerprint(root: &Path, target: &str) -> Result<String, LinkDiagnostics> {
+    // The direct build-script helper historically lets Lake create a missing
+    // manifest. Runtime writer admission separately requires one; if creation
+    // changes this input set during a build, publication is refused below.
+    let roots = build_input_roots(root, target)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"lean-rs-content-inputs-v2");
+    for dependency in roots {
+        hash_path(&mut hasher, &dependency);
+        let mut paths = Vec::new();
+        let mut directories = Vec::new();
+        collect_build_inputs(&dependency, &mut paths, &mut directories)
+            .map_err(|e| input_diagnostic(root, target, &e))?;
+        directories.sort();
+        let observations = directories
+            .into_iter()
+            .map(|path| {
+                let observed = file_observation(&fs::metadata(&path)?)?;
+                Ok((path, observed))
+            })
+            .collect::<io::Result<Vec<_>>>()
+            .map_err(|e| input_diagnostic(root, target, &e))?;
+        for name in ["lake-manifest.json", ".lake/package-overrides.json"] {
+            let path = dependency.join(name);
+            if path.try_exists().map_err(|e| input_diagnostic(root, target, &e))? {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        for path in paths {
+            hash_path(
+                &mut hasher,
+                path.strip_prefix(&dependency)
+                    .map_err(|e| input_diagnostic(root, target, &io::Error::other(e)))?,
+            );
+            let before = file_observation(&fs::metadata(&path).map_err(|e| input_diagnostic(root, target, &e))?)
+                .map_err(|e| input_diagnostic(root, target, &e))?;
+            hasher.update(content_digest(&path).map_err(|e| input_diagnostic(root, target, &e))?);
+            let after = file_observation(&fs::metadata(&path).map_err(|e| input_diagnostic(root, target, &e))?)
+                .map_err(|e| input_diagnostic(root, target, &e))?;
+            if before != after {
+                return Err(input_diagnostic(
+                    root,
+                    target,
+                    &io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "build source changed while being fingerprinted",
+                    ),
+                ));
+            }
+            hasher.update(after);
+        }
+        for (path, observed) in observations {
+            if file_observation(&fs::metadata(&path).map_err(|e| input_diagnostic(root, target, &e))?)
+                .map_err(|e| input_diagnostic(root, target, &e))?
+                != observed
+            {
+                return Err(input_diagnostic(
+                    root,
+                    target,
+                    &io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        "source directory changed while being fingerprinted",
+                    ),
+                ));
+            }
+            hash_path(
+                &mut hasher,
+                path.strip_prefix(&dependency)
+                    .map_err(|e| input_diagnostic(root, target, &io::Error::other(e)))?,
+            );
+            hasher.update(observed);
+        }
+        hasher.update([0xff]);
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
+fn dependency_artifact_fingerprint(
+    root: &Path,
+    target: &str,
+    options: &LakeBuildOptions,
+) -> Result<String, LinkDiagnostics> {
+    let mut dependencies = capability_dependencies(root, target)?;
+    dependencies.extend(options.dependencies.iter().map(lean_library_dependency_to_json));
+    let mut paths = std::collections::BTreeSet::new();
+    for dependency in dependencies {
+        if let Some(path) = dependency.get("dylib_path").and_then(serde_json::Value::as_str) {
+            paths.insert(PathBuf::from(path));
+        }
+    }
+    let mut hasher = Sha256::new();
+    for path in paths {
+        hash_path(&mut hasher, &path);
+        match content_digest(&path) {
+            Ok(digest) => {
+                hasher.update([1]);
+                hasher.update(digest);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => hasher.update([0]),
+            Err(error) => return Err(input_diagnostic(root, target, &error)),
+        }
+    }
+    Ok(hex(&hasher.finalize()))
+}
+
 fn cache_key(
     target_name: &str,
     package_name: &str,
     manifest_digest: &str,
     source_set: &SourceSet,
     options: &LakeBuildOptions,
+    inputs: &str,
+    dependency_artifacts: &str,
 ) -> String {
     let sysroot = options
         .lean_sysroot
         .as_deref()
         .map_or("ambient", |path| path.to_str().unwrap_or("<non-utf8-sysroot>"));
     format!(
-        "target={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\n",
+        "cache_version=2\ntarget={target_name}\npackage={package_name}\nmanifest={manifest_digest}\nsource_count={}\nsource_max_mtime_ns={}\nlean_sysroot={sysroot}\ninputs_sha256={inputs}\ndependency_artifacts_sha256={dependency_artifacts}\n",
         source_set.paths.len(),
         source_set.max_mtime_ns
     )
@@ -1466,6 +2040,13 @@ mod tests {
             self.calls.set(self.calls.get().saturating_add(1));
             self.seen_sysroots.borrow_mut().push(options.lean_sysroot.clone());
             self.seen_threads.borrow_mut().push(options.lean_num_threads);
+            // Model cold Lake dependency output creation. Existing dependency
+            // cache regressions must survive this excluded-output mutation.
+            if project_root.join("lake-manifest.json").is_file() {
+                for root in super::build_input_roots(project_root, target_name).map_err(std::io::Error::other)? {
+                    fs::create_dir_all(root.join(".lake"))?;
+                }
+            }
             match self.mode {
                 FakeMode::SuccessModern => {
                     let dylib = project_root
@@ -1735,13 +2316,16 @@ mod tests {
     #[test]
     fn cache_hit_skips_lake_invocation_for_interop_dependency_shape() {
         let root = make_project("interop-cache-hit", "InteropConsumer");
+        let dependency = root.join("interop");
+        write_file(&dependency.join("lake-manifest.json"), r#"{"packages":[]}"#);
+        write_file(&dependency.join("Interop.lean"), "def interop := 1");
         write_file(
             &root.join("lakefile.lean"),
             "import Lake\nopen Lake DSL\npackage «my_pkg»\nrequire «lean_rs_interop_shims» from \"../../crates/lean-rs/shims/lean-rs-interop-shims\"\n@[default_target]\nlean_lib «InteropConsumer» where\n  defaultFacets := #[LeanLib.sharedFacet]\n",
         );
         write_file(
             &root.join("lake-manifest.json"),
-            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"../../crates/lean-rs/shims/lean-rs-interop-shims","configFile":"lakefile.lean"}],"name":"my_pkg","lakeDir":".lake"}"#,
+            r#"{"version":"1.1.0","packagesDir":".lake/packages","packages":[{"type":"path","scope":"","name":"lean_rs_interop_shims","manifestFile":"lake-manifest.json","inherited":false,"dir":"interop","configFile":"lakefile.lean"}],"name":"my_pkg","lakeDir":".lake"}"#,
         );
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
 
@@ -1820,6 +2404,204 @@ mod tests {
     }
 
     #[test]
+    fn dependency_content_changes_invalidate_build_and_probe_with_preserved_mtime() {
+        let root = make_project("dependency-content-cache", "MyCapability");
+        let dependency = make_project("dependency-content-input", "Dependency");
+        let callback = dependency.join("c/callback.c");
+        write_file(&callback, "int callback(void) { return 1; }\n");
+        write_file(
+            &root.join("lake-manifest.json"),
+            &serde_json::json!({
+                "version":"1.3.0", "packagesDir":".lake/packages", "name":"my_pkg",
+                "packages":[{"type":"path","name":"dependency","dir":dependency,"manifestFile":"lake-manifest.json"}]
+            })
+            .to_string(),
+        );
+        let builder = CargoLeanCapability::new(&root, "MyCapability");
+        let mut runner = FakeLake::new(FakeMode::SuccessModern);
+        builder
+            .clone()
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("first build");
+        assert!(builder.probe_ready().expect("warm dependency cache").is_some());
+        let source = dependency.join("Dependency.lean");
+        let before = fs::metadata(&source)
+            .expect("dependency metadata")
+            .modified()
+            .expect("mtime");
+        fs::write(&source, "def hello : Nat := 2\n").expect("same-length source rewrite");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .expect("source handle")
+            .set_times(fs::FileTimes::new().set_modified(before))
+            .expect("preserve timestamp");
+        assert!(
+            builder
+                .probe_ready()
+                .expect("content changed under old timestamp")
+                .is_none()
+        );
+        builder
+            .clone()
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("rebuild after dependency change");
+        assert_eq!(runner.calls(), 2);
+        assert!(builder.probe_ready().expect("new dependency content cached").is_some());
+        let dependency_builder = CargoLeanCapability::new(&dependency, "Dependency");
+        dependency_builder
+            .clone()
+            .build_with_runner(&mut runner, CargoMetadata::Suppress)
+            .expect("dependency cache");
+        assert!(dependency_builder.probe_ready().expect("warm dependency").is_some());
+        let before = fs::metadata(&callback)
+            .expect("C input metadata")
+            .modified()
+            .expect("C input mtime");
+        fs::write(&callback, "int callback(void) { return 2; }\n").expect("same-length C input rewrite");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&callback)
+            .expect("C input handle")
+            .set_times(fs::FileTimes::new().set_modified(before))
+            .expect("preserve C timestamp");
+        assert!(
+            dependency_builder
+                .probe_ready()
+                .expect("C content invalidates B")
+                .is_none()
+        );
+        assert!(builder.probe_ready().expect("C content invalidates A").is_none());
+    }
+
+    #[test]
+    fn source_change_during_build_refuses_cache_and_manifest_publication() {
+        struct MutatingLake {
+            lake: FakeLake,
+            mutation: u8,
+        }
+        impl super::LakeRunner for MutatingLake {
+            fn build_shared(
+                &mut self,
+                root: &Path,
+                target: &str,
+                options: &LakeBuildOptions,
+            ) -> Result<super::LakeRun, std::io::Error> {
+                let source = root.join(format!("{target}.lean"));
+                let old = fs::read(&source)?;
+                let modified = fs::metadata(&source)?.modified()?;
+                let result = self.lake.build_shared(root, target, options)?;
+                if self.mutation == 2 {
+                    let transient = root.join("Transient.lean");
+                    fs::write(&transient, "def transientInput := 1")?;
+                    fs::remove_file(&transient)?;
+                } else {
+                    fs::write(&source, "def changedWhileBuilding := 1")?;
+                    if self.mutation == 1 {
+                        fs::write(&source, old)?;
+                        fs::OpenOptions::new()
+                            .write(true)
+                            .open(&source)?
+                            .set_times(fs::FileTimes::new().set_modified(modified))?;
+                    }
+                }
+                Ok(result)
+            }
+        }
+        for (case, target, mutation) in [
+            ("changed", "MidBuildCapability", 0),
+            ("restored", "RestoredMidBuildCapability", u8::from(cfg!(unix))),
+            ("transient", "TransientMidBuildCapability", 2),
+        ] {
+            let root = make_project(&format!("inputs-{case}-mid-build"), target);
+            let error = CargoLeanCapability::new(&root, target)
+                .build_with_runner(
+                    &mut MutatingLake {
+                        lake: FakeLake::new(FakeMode::SuccessModern),
+                        mutation,
+                    },
+                    CargoMetadata::Suppress,
+                )
+                .expect_err("changed input is not an attestable build");
+            assert!(
+                matches!(error, LinkDiagnostics::LakeOutputUnresolved { ref reason, .. } if reason.contains("inputs changed"))
+            );
+            assert!(!super::cache_path(&root, target).exists());
+            assert!(!super::capability_manifest_path(&root, target, &[]).exists());
+        }
+    }
+
+    #[test]
+    fn ready_probe_preserves_cache_files_and_rejects_missing_or_changed_inputs() {
+        let root = make_project("ready-probe", "MyCapability");
+        let builder = CargoLeanCapability::new(&root, "MyCapability").package("my_pkg");
+        assert!(builder.probe_ready().expect("cold read probe").is_none());
+        assert!(!super::cache_path(&root, "MyCapability").exists());
+        let built = builder
+            .clone()
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
+            .expect("fixture build and manifest publication");
+        let manifest_before = fs::read(built.manifest_path()).expect("published manifest");
+        let modified_before = fs::metadata(built.manifest_path())
+            .expect("manifest metadata")
+            .modified()
+            .expect("mtime");
+        assert_eq!(builder.probe_ready().expect("warm read probe"), Some(built.clone()));
+        assert_eq!(
+            fs::read(built.manifest_path()).expect("unchanged manifest"),
+            manifest_before
+        );
+        assert_eq!(
+            fs::metadata(built.manifest_path())
+                .expect("unchanged metadata")
+                .modified()
+                .expect("mtime"),
+            modified_before
+        );
+        fs::write(built.manifest_path(), b"{}").expect("corrupt public ABI metadata");
+        assert!(builder.probe_ready().expect("mismatching manifest").is_none());
+        assert_eq!(fs::read(built.manifest_path()).expect("not republished"), b"{}");
+        fs::write(built.manifest_path(), manifest_before).expect("restore exact metadata");
+        write_file(&root.join("New.lean"), "def newSource := 1");
+        assert!(builder.probe_ready().expect("source set changed").is_none());
+        fs::remove_file(super::cache_path(&root, "MyCapability")).expect("remove cache key");
+        assert!(builder.probe_ready().expect("missing cache").is_none());
+        assert!(!super::cache_path(&root, "MyCapability").exists());
+    }
+
+    #[test]
+    fn ready_probe_requires_recorded_dependency_dylibs_and_matching_sysroot() {
+        let root = make_project("ready-probe-dependency", "MyCapability");
+        let dependency_path = root.join("libdependency.dylib");
+        write_file(&dependency_path, "dependency");
+        let sysroot = make_fake_sysroot("ready-probe");
+        let builder = CargoLeanCapability::new(&root, "MyCapability")
+            .lean_sysroot(&sysroot)
+            .dependency(LeanLibraryDependency::path(&dependency_path));
+        let built = builder
+            .clone()
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
+            .expect("fixture dependency build");
+        assert_eq!(builder.probe_ready().expect("matching explicit sysroot"), Some(built));
+        assert!(
+            CargoLeanCapability::new(&root, "MyCapability")
+                .probe_ready()
+                .expect("different build options")
+                .is_none()
+        );
+        fs::write(&dependency_path, "different dependency output").expect("replace dependency bytes");
+        assert!(
+            builder
+                .probe_ready()
+                .expect("dependency output identity changed")
+                .is_none()
+        );
+        fs::remove_file(&dependency_path).expect("remove dependency dylib");
+        assert!(builder.probe_ready().expect("missing dependency").is_none());
+        assert!(!dependency_path.exists());
+    }
+
+    #[test]
     fn cargo_capability_build_quiet_returns_metadata() {
         let root = make_project("cargo-capability", "MyCapability");
         let mut runner = FakeLake::new(FakeMode::SuccessModern);
@@ -1839,7 +2621,7 @@ mod tests {
                     LeanExportResultConvention::Pure,
                 ),
             ))
-            .build_quiet()
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
             .expect("cargo helper build");
 
         assert_eq!(built.dylib_path(), dylib.as_path());
@@ -1899,7 +2681,7 @@ mod tests {
                     .export_symbols_for_dependents()
                     .initializer("dependency_pkg", "Dependency"),
             )
-            .build_quiet()
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
             .expect("cargo helper build");
 
         let manifest: serde_json::Value =
@@ -1954,7 +2736,7 @@ mod tests {
             .package("my_pkg")
             .module("MyCapability")
             .dependency(LeanLibraryDependency::path(&dependency))
-            .build_quiet()
+            .build_with_runner(&mut FakeLake::new(FakeMode::SuccessModern), CargoMetadata::Suppress)
             .expect("cargo helper build");
 
         let manifest: serde_json::Value =

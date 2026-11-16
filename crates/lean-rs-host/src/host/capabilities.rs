@@ -35,8 +35,10 @@
 
 use core::fmt;
 
+use std::path::{Path, PathBuf};
+
 use lean_rs::error::LeanResult;
-use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanLibrary};
+use lean_rs::module::{LeanCapability, LeanLibrary};
 
 use crate::host::bracketed::{LeanBracketedImportRequest, LeanBracketedImportResult};
 use crate::host::cancellation::LeanCancellationToken;
@@ -63,6 +65,10 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// Manifest-backed bundled host shim capability. Session construction
     /// resolves typed bindings from this checked surface.
     shim_capability: LeanCapability<'lean>,
+    // Prepared before any project read custody. Import and body paths only
+    // read these locations; they must never run a nested Lake writer.
+    shim_search_paths: Vec<PathBuf>,
+    artifact_roots: Vec<PathBuf>,
 }
 
 impl fmt::Debug for LeanCapabilities<'_, '_> {
@@ -97,7 +103,13 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         package: &str,
         lib_name: &str,
     ) -> LeanResult<Self> {
-        let shim_capability = load_shim_capability(host)?;
+        let prepared = prepare_host_artifacts()?;
+        let shim_capability = load_prepared_shim_capability(host, &prepared)?;
+        let shim_search_paths = prepared.shim_search_paths.clone();
+        let mut artifact_roots = host.project().artifact_roots()?;
+        artifact_roots.extend(prepared.artifact_roots.iter().cloned());
+        artifact_roots.sort();
+        artifact_roots.dedup();
 
         // Now the user dylib. It does not need to depend on the host shims;
         // ad-hoc user exports still resolve from this library.
@@ -107,6 +119,8 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
             host,
             _user_library: Some(user_library),
             shim_capability,
+            shim_search_paths,
+            artifact_roots,
         })
     }
 
@@ -116,11 +130,64 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
     /// Sessions opened from this value can use every shim-backed session
     /// operation without loading a user capability dylib.
     pub(crate) fn new_shims_only(host: &'h LeanHost<'lean>) -> LeanResult<Self> {
-        let shim_capability = load_shim_capability(host)?;
+        let prepared = prepare_host_artifacts()?;
+        let shim_capability = load_prepared_shim_capability(host, &prepared)?;
+        let shim_search_paths = prepared.shim_search_paths.clone();
+        let mut artifact_roots = host.project().artifact_roots()?;
+        artifact_roots.extend(prepared.artifact_roots.iter().cloned());
+        artifact_roots.sort();
+        artifact_roots.dedup();
         Ok(Self {
             host,
             _user_library: None,
             shim_capability,
+            shim_search_paths,
+            artifact_roots,
+        })
+    }
+
+    /// Load only an already prepared, exact host-shim manifest snapshot.
+    ///
+    /// This entry never builds or publishes artifacts. The worker calls it
+    /// only after acquiring and transferring every artifact domain to its
+    /// independent guardian. The in-process host API leaves coordination to
+    /// its caller, as with all other dynamic loading operations.
+    ///
+    /// # Errors
+    /// Returns malformed, stale, incompatible or missing-artifact diagnostics,
+    /// or the dynamic-loader/module-initializer failure.
+    pub fn from_prepared(host: &'h LeanHost<'lean>, prepared: &LeanPreparedHostArtifacts) -> LeanResult<Self> {
+        let mut artifact_roots = host.project().artifact_roots()?;
+        artifact_roots.extend(prepared.artifact_roots.iter().cloned());
+        artifact_roots.sort();
+        artifact_roots.dedup();
+        Ok(Self {
+            host,
+            _user_library: None,
+            shim_capability: load_prepared_shim_capability(host, prepared)?,
+            shim_search_paths: prepared.shim_search_paths.clone(),
+            artifact_roots,
+        })
+    }
+
+    /// Load a project capability and the already prepared host shim snapshot.
+    ///
+    /// This performs no artifact build. Cooperating reader custody must already
+    /// cover the project, its complete dependency graph and the prepared shims.
+    ///
+    /// # Errors
+    /// Returns a dynamic-loader, initializer or prepared-shim validation error.
+    pub fn from_prepared_capability(
+        host: &'h LeanHost<'lean>,
+        prepared: &LeanPreparedHostArtifacts,
+        package: &str,
+        lib_name: &str,
+    ) -> LeanResult<Self> {
+        let library = LeanLibrary::open(host.runtime(), host.project().capability_dylib(package, lib_name))?;
+        let _module = library.initialize_module(package, lib_name)?;
+        Ok(Self {
+            _user_library: Some(library),
+            ..Self::from_prepared(host, prepared)?
         })
     }
 
@@ -223,17 +290,131 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         self.host
     }
 
+    /// Shared output domains prepared with this loaded capability.
+    ///
+    /// A worker holds read custody over these roots during imports and body
+    /// operations. These paths name storage domains, not loaded ABI evidence.
+    #[must_use]
+    pub fn artifact_roots(&self) -> &[PathBuf] {
+        &self.artifact_roots
+    }
+
+    /// Bundled import locations prepared during capability construction.
+    pub(crate) fn shim_search_paths(&self) -> &[PathBuf] {
+        &self.shim_search_paths
+    }
+
     /// Manifest-backed bundled host shim capability.
     pub(crate) fn shim_capability(&self) -> &LeanCapability<'lean> {
         &self.shim_capability
     }
 }
 
-fn load_shim_capability<'lean>(host: &LeanHost<'lean>) -> LeanResult<LeanCapability<'lean>> {
+/// Runtime-free storage metadata for a prepared bundled host capability.
+///
+/// A snapshot is not evidence that a runtime loaded these artifacts. Retain
+/// cooperating reader custody across validation, dynamic loading, all module
+/// initializers and the lifetime of the native worker generation.
+#[derive(Clone, Debug)]
+pub struct LeanPreparedHostArtifacts {
+    manifest_path: PathBuf,
+    manifest_json: String,
+    artifact_roots: Vec<PathBuf>,
+    shim_search_paths: Vec<PathBuf>,
+}
+
+impl LeanPreparedHostArtifacts {
+    /// Bind an exact UTF-8 snapshot and its independently admitted storage domains.
+    ///
+    /// This performs no build, dynamic loading or module initialization.
+    ///
+    /// # Errors
+    /// Returns malformed snapshot or invalid/unbounded canonical-domain errors.
+    pub fn from_snapshot(
+        manifest_path: PathBuf,
+        manifest_json: String,
+        artifact_roots: Vec<PathBuf>,
+        shim_search_paths: Vec<PathBuf>,
+    ) -> LeanResult<Self> {
+        let manifest = lean_toolchain::CapabilityManifest::from_bytes(&manifest_path, manifest_json.as_bytes())
+            .map_err(|error| lean_rs::__host_internals::host_module_init(error.message().to_owned()))?;
+        if manifest_json.len() > 64 * 1024
+            || manifest.package != crate::host::lake::SHIM_PACKAGE_NAME
+            || manifest.module != crate::host::lake::SHIM_LIB_NAME
+            || artifact_roots.is_empty()
+            || artifact_roots.len() > 32
+            || shim_search_paths.len() != 2
+            || artifact_roots
+                .iter()
+                .zip(artifact_roots.iter().skip(1))
+                .any(|(left, right)| left >= right)
+            || artifact_roots
+                .iter()
+                .any(|root| !root.is_absolute() || root.canonicalize().ok().as_ref() != Some(root))
+            || shim_search_paths
+                .iter()
+                .any(|path| !path.is_absolute() || path.canonicalize().ok().as_ref() != Some(path))
+        {
+            return Err(lean_rs::__host_internals::host_module_init(
+                "invalid prepared host artifact storage descriptor".to_owned(),
+            ));
+        }
+        Ok(Self {
+            manifest_path,
+            manifest_json,
+            artifact_roots,
+            shim_search_paths,
+        })
+    }
+
+    /// Canonical manifest path used as diagnostic context.
+    #[must_use]
+    pub fn manifest_path(&self) -> &Path {
+        &self.manifest_path
+    }
+    /// Exact metadata bytes to validate and consume during loading.
+    #[must_use]
+    pub fn manifest_json(&self) -> &str {
+        &self.manifest_json
+    }
+    /// Canonical cooperating output domains, sorted and deduplicated.
+    #[must_use]
+    pub fn artifact_roots(&self) -> &[PathBuf] {
+        &self.artifact_roots
+    }
+    /// Ready import paths for the interop and host shim packages.
+    #[must_use]
+    pub fn shim_search_paths(&self) -> &[PathBuf] {
+        &self.shim_search_paths
+    }
+}
+
+/// Prepare the bundled host capability without initializing any Lean runtime.
+///
+/// # Errors
+/// Returns the configured writer, build, publication or snapshot validation failure.
+pub fn prepare_host_artifacts() -> LeanResult<LeanPreparedHostArtifacts> {
     let built = crate::host::lake::LakeProject::shim_capability(host_shim_export_signatures())?;
-    LeanCapability::from_build_manifest(
+    crate::host::lake::prepared_artifacts(&built)
+}
+
+/// Inspect existing bundled outputs under shared custody without a writer or runtime.
+///
+/// # Errors
+/// Returns reader admission or invalid metadata errors. A cold/stale cache is `None`.
+#[cfg(unix)]
+pub fn ready_host_artifacts() -> LeanResult<Option<LeanPreparedHostArtifacts>> {
+    crate::host::lake::ready_artifacts(host_shim_export_signatures())
+}
+
+fn load_prepared_shim_capability<'lean>(
+    host: &LeanHost<'lean>,
+    prepared: &LeanPreparedHostArtifacts,
+) -> LeanResult<LeanCapability<'lean>> {
+    LeanCapability::from_manifest_snapshot(
         host.runtime(),
-        LeanBuiltCapability::manifest_path(built.manifest_path()),
+        prepared.manifest_path(),
+        prepared.manifest_json.as_bytes(),
     )
 }
 

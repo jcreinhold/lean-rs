@@ -153,6 +153,8 @@ macro_rules! host_shim_exports {
                 => [()] => [LeanIo<String>];
             optional clear_module_header_cache => "lean_rs_host_clear_module_header_cache"
                 => [(Obj<'lean>,)] => [LeanIo<()>];
+            optional runtime_version => "lean_rs_host_runtime_version"
+                => [()] => [LeanIo<String>];
             optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
                 => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
         }
@@ -177,6 +179,15 @@ macro_rules! resolve_binding {
     };
 }
 
+macro_rules! binding_present {
+    (mandatory, $binding:expr) => {
+        true
+    };
+    (optional, $binding:expr) => {
+        $binding.is_some()
+    };
+}
+
 macro_rules! define_host_shim_bindings {
     ($($kind:ident $field:ident => $symbol:literal => [$args:ty] => [$ret:ty];)*) => {
         /// Typed call handles for the bundled host shim exports.
@@ -187,6 +198,17 @@ macro_rules! define_host_shim_bindings {
         }
 
         impl<'lean, 'cap> HostShimBindings<'lean, 'cap> {
+            /// Signatures exist only for successfully checked typed handles.
+            pub(crate) fn checked_signatures(&self) -> std::collections::BTreeMap<String, serde_json::Value> {
+                let mut signatures = std::collections::BTreeMap::new();
+                $(
+                    if binding_present!($kind, self.$field) {
+                        signatures.insert(stringify!($field).to_owned(), signature_for::<$args, $ret>($symbol).to_json());
+                    }
+                )*
+                signatures
+            }
+
             /// Resolve every bundled host shim through manifest-checked lookup.
             pub(crate) fn resolve(capability: &'cap LeanCapability<'lean>) -> Result<Self, HostShimBindingError> {
                 Ok(Self {

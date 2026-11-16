@@ -9,23 +9,48 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### lean-rs stack 0.9.10
+
+- Bind stopped-operation evidence to the actual request and worker generation. Preserve confirmed termination when
+  replacement startup fails, and distinguish a stopped check without a result from unresolved execution.
+- Add opt-in durable native generation ownership and an independent guardian that retains artifact read custody until
+  the owned process group closes. Recover bounded capacity only from confirmed closure; failed observation stays fenced.
+- Prepare host artifacts in a runtime-free process. Probe warm artifacts under shared custody, admit the complete
+  canonical dependency union before dynamic loading or initialization, and load exact validated manifest snapshots.
+- Report actual loaded host-runtime compatibility metadata separately from preparation descriptors. Refuse incompatible
+  or missing required capabilities before target dispatch, and do not replay arbitrary Lean IO after a child failure.
+- Advance worker protocol to 13 for host metadata and artifact-read lifecycle messages. Install matching parent and
+  child builds together. The supported Lean toolchain window is unchanged.
+- The new managed native-reader completion check requires the macOS atomic process-group census. Other platforms
+  currently fail closed for that mode; Linux qualification remains open before a public release.
+
+### lean-toolchain 0.9.10
+
+- Retain source-entry and stable sibling project locks across materialization, owned Lake commands, cache updates and
+  capability-manifest publication. Loan close-only descriptions to the configured helper while retaining caller copies.
+- Bound cancellation and command delivery, preserve typed stopped versus unknown execution evidence, and reap helpers
+  after their callers stop waiting. Keep typed private Cargo bootstrap behavior separate from runtime-owned commands.
+- Restrict abandoned materialization cleanup to the entry protected by its lock.
+- Resolve bounded flattened Lake dependency domains once for readers and writers; acquire a sorted project-lock union
+  and reject missing or unsupported dependency metadata before command launch.
+
 ## [0.9.9]
 
 ### Fixed
 
-- Resolve private theorem names after module headers and report their actual kernel axioms. Report unavailable
-  axioms when source resolution succeeds but no matching kernel declaration exists; never substitute an empty list.
-- Reuse source headers across compatible checks and account for retained header imports per worker generation.
-  Retire before another uncached import once the budget is reached; report unavailable accounting explicitly.
-- Bound request writes and reads, drain worker logs, and stop interrupted requests without abandoning their child.
-  Track owned worker processes until their exit is confirmed, including interrupted startup and failed cleanup.
+- Resolve private theorem names after module headers and report their actual kernel axioms. Report unavailable axioms
+  when source resolution succeeds but no matching kernel declaration exists; never substitute an empty list.
+- Reuse source headers across compatible checks and account for retained header imports per worker generation. Retire
+  before another uncached import once the budget is reached; report unavailable accounting explicitly.
+- Bound request writes and reads, drain worker logs, and stop interrupted requests without abandoning their child. Track
+  owned worker processes until their exit is confirmed, including interrupted startup and failed cleanup.
 
 ### Changed
 
 - Concurrent direct-host imports wait up to 30 seconds for the active operation; same-thread recursive calls fail
   immediately rather than deadlock. Separate worker processes remain independent.
-- Worker protocol 12 carries source-header import accounting and planned retirement. Install matching parent and
-  worker versions together. Lean's supported toolchain range is unchanged.
+- Worker protocol 12 carries source-header import accounting and planned retirement. Install matching parent and worker
+  versions together. Lean's supported toolchain range is unchanged.
 
 ## [0.9.8]
 
@@ -33,8 +58,8 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 - Carry effective Lean options through file diagnostics, proof trials, declaration verification, and term elaboration.
   Checks can now use the same `autoImplicit` and other settings as the project's build instead of Lean defaults.
-- Invalidate cached results and incremental state when options change. Resolve imported and `weak` options using
-  Lean's normal frontend behavior, then apply the host heartbeat budget.
+- Invalidate cached results and incremental state when options change. Resolve imported and `weak` options using Lean's
+  normal frontend behavior, then apply the host heartbeat budget.
 
 ### Changed
 
@@ -46,19 +71,19 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 ### Fixed
 
 - Reuse unchanged module headers across source edits. This avoids repeated imports and preserves incremental
-  elaboration. Changes to the session, header, file context or options invalidate reuse, and failed header imports
-  retry normally. This does not change worker resource limits or make foreign exceptions recoverable.
+  elaboration. Changes to the session, header, file context or options invalidate reuse, and failed header imports retry
+  normally. This does not change worker resource limits or make foreign exceptions recoverable.
 
 ## [0.9.6]
 
-This release includes the fixes prepared for v0.9.5, whose hosted macOS test gate failed before any crate upload.
-The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
+This release includes the fixes prepared for v0.9.5, whose hosted macOS test gate failed before any crate upload. The
+v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 
 ### Fixed
 
-- The bounded-backpressure conformance test uses a smaller burst that still overfills the bounded reader buffer,
-  with a generous hang backstop for macOS timer coalescing. All row-delivery, buffer-pressure and terminal-outcome
-  assertions remain; dedicated request-deadline tests keep their short deadlines.
+- The bounded-backpressure conformance test uses a smaller burst that still overfills the bounded reader buffer, with a
+  generous hang backstop for macOS timer coalescing. All row-delivery, buffer-pressure and terminal-outcome assertions
+  remain; dedicated request-deadline tests keep their short deadlines.
 - Worker cancellation is observed at least every 50 ms while awaiting IPC, including when the child emits no progress.
   Partial responses preserve the original request deadline.
 - Failed worker startup performs bounded child cleanup. If replacement cleanup cannot confirm exit, the supervisor
@@ -75,8 +100,8 @@ The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 ### Added
 
 - **Added Lean 4.35.0 to the supported toolchain window.** The final release ships a `lean.h` byte-identical to
-  4.35.0-rc3 and 4.35.0-rc4 and joins that entry. The head of the window (CI matrices, sanitizer/release workflows,
-  and committed `lean-toolchain` pins) moves from 4.35.0-rc4 to 4.35.0.
+  4.35.0-rc3 and 4.35.0-rc4 and joins that entry. The head of the window (CI matrices, sanitizer/release workflows, and
+  committed `lean-toolchain` pins) moves from 4.35.0-rc4 to 4.35.0.
 
 ## [0.9.3]
 
@@ -90,36 +115,36 @@ The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 
 ### Added
 
-- **Added Lean 4.34.1 and 4.35.0-rc3 to the supported toolchain window.** Both ship new `lean.h` digests carrying
-  the same refcount-helper patch (`lean_is_unstuck_mt`, `lean_is_never_freed`, `LEAN_RC_STUCK_ST`); the inline
-  refcount paths `lean-rs-sys` mirrors behave identically, there is no struct layout change, and all 88 required
-  symbols resolve on both. The head of the window (CI matrices, sanitizer/release workflows, and committed
-  `lean-toolchain` pins) moves from 4.35.0-rc2 to 4.35.0-rc3.
+- **Added Lean 4.34.1 and 4.35.0-rc3 to the supported toolchain window.** Both ship new `lean.h` digests carrying the
+  same refcount-helper patch (`lean_is_unstuck_mt`, `lean_is_never_freed`, `LEAN_RC_STUCK_ST`); the inline refcount
+  paths `lean-rs-sys` mirrors behave identically, there is no struct layout change, and all 88 required symbols resolve
+  on both. The head of the window (CI matrices, sanitizer/release workflows, and committed `lean-toolchain` pins) moves
+  from 4.35.0-rc2 to 4.35.0-rc3.
 
 ## [0.9.1]
 
 ### Added
 
-- **Added Lean 4.34.0, 4.35.0-rc1, and 4.35.0-rc2 to the supported toolchain window.** 4.34.0 ships a
-  byte-identical `lean.h` to 4.34.0-rc2 and joins that entry. 4.35.0-rc1 and 4.35.0-rc2 ship new digests with no
-  struct layout change, and all 88 required symbols resolve on both. The head of the window (CI matrices,
-  sanitizer/release workflows, and committed `lean-toolchain` pins) moves from 4.34.0-rc2 to 4.35.0-rc2.
+- **Added Lean 4.34.0, 4.35.0-rc1, and 4.35.0-rc2 to the supported toolchain window.** 4.34.0 ships a byte-identical
+  `lean.h` to 4.34.0-rc2 and joins that entry. 4.35.0-rc1 and 4.35.0-rc2 ship new digests with no struct layout change,
+  and all 88 required symbols resolve on both. The head of the window (CI matrices, sanitizer/release workflows, and
+  committed `lean-toolchain` pins) moves from 4.34.0-rc2 to 4.35.0-rc2.
 
 ### Fixed
 
-- **`lean-rs-sys`: `lean_sarray_elem_size` masks the linearity marker bit.** Lean 4.35.0-rc1 reserves the top
-  bit of `m_other` in arrays, scalar arrays, and strings for `Array.markLinear` (`LEAN_LINEAR_MARK_MASK`). The
-  raw read reported `0x81` for a linear-marked `ByteArray`, so `lean-rs` would have rejected it as not a
-  `ByteArray`. Masking is correct on every supported toolchain because earlier releases never set that bit.
+- **`lean-rs-sys`: `lean_sarray_elem_size` masks the linearity marker bit.** Lean 4.35.0-rc1 reserves the top bit of
+  `m_other` in arrays, scalar arrays, and strings for `Array.markLinear` (`LEAN_LINEAR_MARK_MASK`). The raw read
+  reported `0x81` for a linear-marked `ByteArray`, so `lean-rs` would have rejected it as not a `ByteArray`. Masking is
+  correct on every supported toolchain because earlier releases never set that bit.
 
 ## [0.9.0]
 
 ### Added
 
-- The host shim reuses Lean's command-level incremental elaboration across one-shot builds of the same file label:
-  after an edit, the module is re-elaborated only from the first changed command, provided the imported environment,
-  heartbeat limit, and namespace context are unchanged. The retained `IncrementalState` shares its environment and
-  messages with the snapshot and is accounted at 2 KiB per command in the cache byte bound.
+- The host shim reuses Lean's command-level incremental elaboration across one-shot builds of the same file label: after
+  an edit, the module is re-elaborated only from the first changed command, provided the imported environment, heartbeat
+  limit, and namespace context are unchanged. The retained `IncrementalState` shares its environment and messages with
+  the snapshot and is accounted at 2 KiB per command in the cache byte bound.
 - `verify_declaration` and `verify_declaration_batch` attach, on a `not_found` verdict, up to five declarations of the
   module whose short name matches the target ignoring namespace and case, in `facts.candidates`; the proof-attempt edit
   target error names them too.
@@ -129,12 +154,12 @@ The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 ### Added
 
 - **`lean-rs-worker-parent`: child CPU-time sampling.** `LeanWorkerSupervisor::cumulative_cpu_millis` (plus
-  `LeanWorkerHostHandle::cumulative_cpu_millis` and `LeanWorkerCapability::cumulative_cpu_millis` accessors) reports the worker child's
-  cumulative CPU time (user + system) in milliseconds, for per-call contention-immune cost deltas around worker jobs.
-  Linux reads `/proc/<pid>/stat` (`utime`+`stime`, USER_HZ=100 ABI); macOS calls `proc_pidinfo`
-  (`PROC_PIDTASKINFO`, scaled by `mach_timebase_info` — the counters are mach absolute-time ticks, and
-  `proc_pid_rusage` returns zeros on current macOS); the crate's `forbid(unsafe_code)` relaxed to `deny` for this one
-  narrowly documented FFI call. Other Unix falls back to `ps -o cputime=` at one-second granularity.
+  `LeanWorkerHostHandle::cumulative_cpu_millis` and `LeanWorkerCapability::cumulative_cpu_millis` accessors) reports the
+  worker child's cumulative CPU time (user + system) in milliseconds, for per-call contention-immune cost deltas around
+  worker jobs. Linux reads `/proc/<pid>/stat` (`utime`+`stime`, USER_HZ=100 ABI); macOS calls `proc_pidinfo`
+  (`PROC_PIDTASKINFO`, scaled by `mach_timebase_info` — the counters are mach absolute-time ticks, and `proc_pid_rusage`
+  returns zeros on current macOS); the crate's `forbid(unsafe_code)` relaxed to `deny` for this one narrowly documented
+  FFI call. Other Unix falls back to `ps -o cputime=` at one-second granularity.
 
 ## [0.7.3]
 
@@ -144,53 +169,50 @@ The v0.9.5 tag is retained unchanged; no 0.9.5 crates were published.
 
 ### Added
 
-- **Added Lean 4.33.1 and 4.34.0-rc2 to the supported toolchain window.** Both ship new `lean.h` digests
-  with no struct layout change: 4.33.1 backports the TSan-instrumented refcount inlines from 4.34.0-rc1, and
-  4.34.0-rc2 implements the sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned
-  wrap-around arithmetic in `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported
-  `lean_nat_size_in_bytes`. Every mirrored struct is byte-identical in size, alignment, and field offsets, and
-  all 88 required symbols resolve on both. The head of the window (CI matrices, sanitizer/release workflows,
-  and committed `lean-toolchain` pins) moves from 4.34.0-rc1 to 4.34.0-rc2.
+- **Added Lean 4.33.1 and 4.34.0-rc2 to the supported toolchain window.** Both ship new `lean.h` digests with no struct
+  layout change: 4.33.1 backports the TSan-instrumented refcount inlines from 4.34.0-rc1, and 4.34.0-rc2 implements the
+  sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned wrap-around arithmetic in
+  `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported `lean_nat_size_in_bytes`. Every mirrored
+  struct is byte-identical in size, alignment, and field offsets, and all 88 required symbols resolve on both. The head
+  of the window (CI matrices, sanitizer/release workflows, and committed `lean-toolchain` pins) moves from 4.34.0-rc1 to
+  4.34.0-rc2.
 
 ## [0.7.2]
 
 ### Added
 
-- **Added Lean 4.34.0-rc1 to the supported toolchain window.** The new `lean.h` digest's only change is
-  ThreadSanitizer instrumentation (`LEAN_TSAN` guards and `lean_internal_*_rc` static-inline refcount helpers);
-  every mirrored struct is byte-identical in size, alignment, and field offsets, and all 88 required symbols
-  resolve. The head of the window (CI matrices, sanitizer workflow, and committed `lean-toolchain` pins) moves
-  from 4.33.0 to 4.34.0-rc1.
+- **Added Lean 4.34.0-rc1 to the supported toolchain window.** The new `lean.h` digest's only change is ThreadSanitizer
+  instrumentation (`LEAN_TSAN` guards and `lean_internal_*_rc` static-inline refcount helpers); every mirrored struct is
+  byte-identical in size, alignment, and field offsets, and all 88 required symbols resolve. The head of the window (CI
+  matrices, sanitizer workflow, and committed `lean-toolchain` pins) moves from 4.33.0 to 4.34.0-rc1.
 
 ## [0.7.1]
 
 ### Added
 
-- **Added Lean 4.33.0 to the supported toolchain window.** The final release ships a byte-identical
-  `lean.h` to 4.33.0-rc1/rc2, so it joins that entry; the head of the window (CI matrices, sanitizer,
-  release workflows, and committed `lean-toolchain` pins) moves from 4.33.0-rc2 to 4.33.0.
+- **Added Lean 4.33.0 to the supported toolchain window.** The final release ships a byte-identical `lean.h` to
+  4.33.0-rc1/rc2, so it joins that entry; the head of the window (CI matrices, sanitizer, release workflows, and
+  committed `lean-toolchain` pins) moves from 4.33.0-rc2 to 4.33.0.
 
 ## [0.7.0]
 
 ### Added
 
-- **Added Lean 4.32.2 and 4.33.0-rc2 to the supported toolchain window.**
-  Each shares the byte-identical `lean.h` ABI of its preceding compatible
-  release and resolves the complete required `libleanshared` symbol surface.
+- **Added Lean 4.32.2 and 4.33.0-rc2 to the supported toolchain window.** Each shares the byte-identical `lean.h` ABI of
+  its preceding compatible release and resolves the complete required `libleanshared` symbol surface.
 
 ## [0.6.1]
 
 ### Removed
 
-- **Dropped Lean 4.27.0–4.29.1 from the supported toolchain window**; the lower bound is now **4.30.0**.
-  `libleanshared` in the dropped releases does not export
-  `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`, which the compiled
-  `lean-rs-host` shim dylib references through `Lean.collectAxioms` (present in the shims since v0.1.18), so the
-  mandatory host shim fails `dlopen` there — the window claimed support the runtime never delivered. Verified by
-  `nm -gU`: 4.29.1 exports zero `collectAndGet` symbols, 4.30.0 and later export four. Downstream hosts gating on
-  `WindowVerdict` (e.g. lean-host-mcp) now refuse these toolchains at the gate instead of failing the shim load at
-  session open. No API changes; the `SUPPORTED_TOOLCHAINS` table, its mirrors, and the CI full matrix lost the five
-  entries.
+- **Dropped Lean 4.27.0–4.29.1 from the supported toolchain window**; the lower bound is now **4.30.0**. `libleanshared`
+  in the dropped releases does not export
+  `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`, which the compiled `lean-rs-host`
+  shim dylib references through `Lean.collectAxioms` (present in the shims since v0.1.18), so the mandatory host shim
+  fails `dlopen` there — the window claimed support the runtime never delivered. Verified by `nm -gU`: 4.29.1 exports
+  zero `collectAndGet` symbols, 4.30.0 and later export four. Downstream hosts gating on `WindowVerdict` (e.g.
+  lean-host-mcp) now refuse these toolchains at the gate instead of failing the shim load at session open. No API
+  changes; the `SUPPORTED_TOOLCHAINS` table, its mirrors, and the CI full matrix lost the five entries.
 
 ## [0.6.0]
 

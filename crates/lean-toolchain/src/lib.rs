@@ -20,7 +20,7 @@
 //! `lean-rs-abi → lean-toolchain` for link-free metadata, and `lean-rs-sys → lean-rs`
 //! for raw runtime FFI. Raw `lean_*` symbols never appear in this crate's public surface.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 mod build_helpers;
 mod built_capability;
@@ -32,12 +32,21 @@ mod limits;
 mod loader;
 pub mod manifest_validation;
 mod modules;
+#[cfg(unix)]
+pub mod native_guardian;
+#[cfg(unix)]
+pub mod process_group;
+#[cfg(unix)]
+pub mod shared_reader;
+pub mod shared_writer;
 mod source_package;
+mod write_domains;
+mod writer_lock;
 
 pub use build_helpers::{
     BuiltLeanCapability, CAPABILITY_MANIFEST_SCHEMA_VERSION, CargoLeanCapability, build_lake_target,
-    build_lake_target_quiet, capability_env_var, capability_manifest_env_var, emit_lean_link_directives,
-    emit_lean_link_directives_checked,
+    build_lake_target_quiet, build_private_lake_target_quiet, capability_env_var, capability_manifest_env_var,
+    emit_lean_link_directives, emit_lean_link_directives_checked,
 };
 pub use built_capability::{BuiltCapabilityArtifact, LeanBuiltCapability, LeanBuiltCapabilityError};
 pub use diagnostics::LinkDiagnostics;
@@ -64,7 +73,11 @@ pub use modules::{
 pub use source_package::{
     GeneratedSourceFile, MaterializedSourcePackage, SourcePackageError, SourcePackageManifestPolicy,
     SourcePackageMaterializationRequest, SourcePackageProvenance, materialize_source_package,
+    with_materialized_source_package,
 };
+
+#[cfg(unix)]
+pub use source_package::with_materialized_source_package_with_writer;
 
 /// Version of the `lean-toolchain` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

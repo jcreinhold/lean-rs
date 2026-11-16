@@ -19,7 +19,22 @@ Runtime application code usually does not depend on this crate directly: it show
 Downstream crates that ship Lean source commonly depend on it from `build.rs`, where `CargoLeanCapability` builds the
 Lake shared library and emits the compile-time path that runtime code opens through `lean-rs` or
 `lean-rs-worker-parent`. Same-process apps pair that path with `LeanCapability`; worker apps pair it with
-`LeanWorkerChild` and an app-owned worker-child binary. See
+`LeanWorkerChild` and an app-owned worker-child binary.
+
+Runtime builds bind `.writer_executable(...)` to the configured helper. Stable sibling locks cover the primary project's
+bounded, flattened Lake dependency union through cache inspection, Lake and manifest publication. The common
+`shared_writer::project_artifact_roots` resolver supports reader planning too; unknown graphs fail before GO.
+`SharedWriter::open_with_write_roots` includes additional prepared workspaces in one held union. Reuse a supplied writer
+with `build_quiet_with_writer(writer, cancelled)`; generated packages use `with_materialized_source_package_with_writer`
+to retain external entry and project custody across materialization and publication. `WriterFailure` distinguishes known
+not started, confirmed stopped with no result, and unresolved cleanup. Cancellation never authorizes replay.
+
+On macOS cleanup owns one private process group through actual closure; descendants must retain that group. Other Unix
+backends are weaker. The helper's private input directory survives caller cancellation until closure. Typed
+package-local Cargo bootstraps remain a separate controller-held-lock/direct-command exception, without those crash or
+descendant guarantees. See the architecture's Writer Custody section for the exact lifetime and aliasing contract.
+
+See
 [`docs/recipes/ship-crate-with-lean.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md).
 
 ## Quick start in a downstream `build.rs`

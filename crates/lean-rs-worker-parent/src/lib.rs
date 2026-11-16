@@ -17,6 +17,8 @@
 #![deny(unsafe_code)]
 
 mod capability;
+#[cfg(unix)]
+mod crash_ownership;
 mod pipe;
 mod planning;
 mod pool;
@@ -29,6 +31,11 @@ pub use capability::{
     LeanWorkerBootstrapSeverity, LeanWorkerCapability, LeanWorkerCapabilityBuilder, LeanWorkerChild,
     LeanWorkerHostHandle, LeanWorkerHostHandleBuilder, LeanWorkerModuleCacheLimits,
 };
+#[cfg(unix)]
+pub use crash_ownership::{
+    LeanWorkerNativeScope, LeanWorkerNativeScopeLease, LeanWorkerOwnedGeneration, LeanWorkerOwnedProcess,
+    LeanWorkerOwnerObservation,
+};
 pub use planning::{
     LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
     LeanWorkerModuleWork, LeanWorkerPlanMetadataExpectation, LeanWorkerPlannedBatch,
@@ -37,7 +44,7 @@ pub use pool::{
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerPoolSnapshot, LeanWorkerRestartPolicyClass, LeanWorkerSessionKey,
     LeanWorkerSessionLease,
 };
-pub use process::LeanWorkerProcessTracker;
+pub use process::{LeanWorkerExitObservation, LeanWorkerProcessTracker};
 pub use session::{
     LeanWorkerCancellationToken, LeanWorkerDataRow, LeanWorkerDataSink, LeanWorkerDiagnosticEvent,
     LeanWorkerDiagnosticSink, LeanWorkerJsonCommand, LeanWorkerProgressEvent, LeanWorkerProgressSink,
@@ -47,9 +54,9 @@ pub use session::{
 pub use supervisor::{
     LEAN_WORKER_KILL_WAIT_TIMEOUT_DEFAULT, LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
     LEAN_WORKER_REQUEST_TIMEOUT_LONG_RUNNING, LEAN_WORKER_SHUTDOWN_TIMEOUT_DEFAULT, LeanWorker, LeanWorkerConfig,
-    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerRequestCheckpoint,
-    LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerShutdownOutcome,
-    LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
+    LeanWorkerError, LeanWorkerExit, LeanWorkerLifecycleSnapshot, LeanWorkerPendingRequestStop,
+    LeanWorkerRequestCheckpoint, LeanWorkerRequestStopReceipt, LeanWorkerRestartPolicy, LeanWorkerRestartReason,
+    LeanWorkerShutdownOutcome, LeanWorkerShutdownReport, LeanWorkerStats, LeanWorkerStatus,
 };
 
 // Curated re-exports of the wire types that appear on this crate's public
@@ -59,22 +66,24 @@ pub use supervisor::{
 // recorders).
 #[doc(inline)]
 pub use lean_rs_worker_protocol::types::{
-    LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata, LeanWorkerDeclarationFilter,
-    LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection, LeanWorkerDeclarationInspectionFields,
-    LeanWorkerDeclarationInspectionRequest, LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch,
-    LeanWorkerDeclarationOutlineResult, LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow,
-    LeanWorkerDeclarationSearch, LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts,
-    LeanWorkerDeclarationSearchPruning, LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow,
-    LeanWorkerDeclarationSearchScope, LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo,
-    LeanWorkerDeclarationTargetResult, LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
+    LeanWorkerArtifactReadEpoch, LeanWorkerCapabilityFact, LeanWorkerCapabilityMetadata, LeanWorkerCommandMetadata,
+    LeanWorkerDeclarationFilter, LeanWorkerDeclarationFlags, LeanWorkerDeclarationInspection,
+    LeanWorkerDeclarationInspectionFields, LeanWorkerDeclarationInspectionRequest,
+    LeanWorkerDeclarationInspectionResult, LeanWorkerDeclarationNameMatch, LeanWorkerDeclarationOutlineResult,
+    LeanWorkerDeclarationProofSearchFacts, LeanWorkerDeclarationRow, LeanWorkerDeclarationSearch,
+    LeanWorkerDeclarationSearchBias, LeanWorkerDeclarationSearchFacts, LeanWorkerDeclarationSearchPruning,
+    LeanWorkerDeclarationSearchResult, LeanWorkerDeclarationSearchRow, LeanWorkerDeclarationSearchScope,
+    LeanWorkerDeclarationSearchTimings, LeanWorkerDeclarationTargetInfo, LeanWorkerDeclarationTargetResult,
+    LeanWorkerDeclarationType, LeanWorkerDeclarationVerificationBatchItem,
     LeanWorkerDeclarationVerificationBatchRequest, LeanWorkerDeclarationVerificationBatchResult,
     LeanWorkerDeclarationVerificationBatchRow, LeanWorkerDeclarationVerificationFacts,
     LeanWorkerDeclarationVerificationRequest, LeanWorkerDeclarationVerificationResult,
     LeanWorkerDeclarationVerificationStatus, LeanWorkerDeclarationVerificationTarget, LeanWorkerDerivedWorkFacts,
     LeanWorkerDiagnostic, LeanWorkerDoctorDiagnostic, LeanWorkerDoctorReport, LeanWorkerDoctorSeverity,
-    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult, LeanWorkerKernelResult,
-    LeanWorkerKernelStatus, LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
+    LeanWorkerElabFailure, LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerGoalAtResult,
+    LeanWorkerHostRuntimeExpectation, LeanWorkerHostRuntimeMetadata, LeanWorkerKernelResult, LeanWorkerKernelStatus,
+    LeanWorkerKernelSummary, LeanWorkerLocalInfo, LeanWorkerMetaResult, LeanWorkerMetaTransparency,
+    LeanWorkerModuleCacheStatus, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
     LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryBatchResult,
     LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQueryResult,
     LeanWorkerModuleQuerySelector, LeanWorkerModuleQueryTimings, LeanWorkerModuleSnapshotCacheClearResult,

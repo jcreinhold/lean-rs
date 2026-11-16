@@ -1,5 +1,5 @@
 use crate::pipe::Pipe;
-use crate::process::{LeanWorkerProcessTracker, OwnedChild};
+use crate::process::{LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedChild};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
@@ -23,12 +23,12 @@ use lean_rs_worker_protocol::types::{
     LeanWorkerDeclarationVerificationBatchResult, LeanWorkerDeclarationVerificationBatchRow,
     LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationRequest,
     LeanWorkerDeclarationVerificationResult, LeanWorkerDeclarationVerificationStatus, LeanWorkerDoctorReport,
-    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerImportStats, LeanWorkerKernelResult, LeanWorkerMetaResult,
-    LeanWorkerMetaTransparency, LeanWorkerModuleQuery, LeanWorkerModuleQueryBatchEnvelope,
-    LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome, LeanWorkerModuleQueryCacheFacts,
-    LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector, LeanWorkerModuleSnapshotCacheClearResult,
-    LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest, LeanWorkerProofAttemptResult, LeanWorkerRendered,
-    LeanWorkerResourceExhaustedFacts,
+    LeanWorkerElabOptions, LeanWorkerElabResult, LeanWorkerHostRuntimeMetadata, LeanWorkerImportStats,
+    LeanWorkerKernelResult, LeanWorkerMetaResult, LeanWorkerMetaTransparency, LeanWorkerModuleQuery,
+    LeanWorkerModuleQueryBatchEnvelope, LeanWorkerModuleQueryBatchItem, LeanWorkerModuleQueryBatchOutcome,
+    LeanWorkerModuleQueryCacheFacts, LeanWorkerModuleQueryOutcome, LeanWorkerModuleQuerySelector,
+    LeanWorkerModuleSnapshotCacheClearResult, LeanWorkerOutputBudgets, LeanWorkerProofAttemptRequest,
+    LeanWorkerProofAttemptResult, LeanWorkerRendered, LeanWorkerResourceExhaustedFacts,
 };
 use lean_rs_worker_protocol::worker_exports::{fixture_mul_signature, fixture_panic_signature};
 
@@ -281,6 +281,13 @@ pub struct LeanWorkerConfig {
     executable: PathBuf,
     process_tracker: LeanWorkerProcessTracker,
     current_dir: Option<PathBuf>,
+    shared_artifact_reads: bool,
+    #[cfg(unix)]
+    lifetime_directory: Option<PathBuf>,
+    #[cfg(unix)]
+    native_guardian_executable: Option<PathBuf>,
+    #[cfg(unix)]
+    native_capacity_slot: Option<lean_toolchain::native_guardian::NativeCapacitySlot>,
     env: Vec<(OsString, OsString)>,
     startup_timeout: Duration,
     request_timeout: Duration,
@@ -299,6 +306,13 @@ impl LeanWorkerConfig {
             executable: executable.into(),
             process_tracker: LeanWorkerProcessTracker::new(),
             current_dir: None,
+            shared_artifact_reads: false,
+            #[cfg(unix)]
+            lifetime_directory: None,
+            #[cfg(unix)]
+            native_guardian_executable: None,
+            #[cfg(unix)]
+            native_capacity_slot: None,
             env: Vec::new(),
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             request_timeout: LEAN_WORKER_REQUEST_TIMEOUT_DEFAULT,
@@ -327,6 +341,52 @@ impl LeanWorkerConfig {
     #[must_use]
     pub fn current_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.current_dir = Some(path.into());
+        self
+    }
+
+    /// Enable an authenticated parent lifeline and durable startup ownership.
+    ///
+    /// The child establishes a private inherited process group and waits for
+    /// its owned descriptor to be synced before starting Lean. EOF requests
+    /// this worker's own exit; descendants retain capacity until the inherited
+    /// group is absent. Regrouped descendants are outside this contract.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn lifetime_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.lifetime_directory = Some(directory.into());
+        self
+    }
+
+    /// Bind the independent guardian used with durable generation ownership.
+    ///
+    /// The guardian executable is link-free and must implement the private
+    /// native-guardian protocol. A lifetime directory is also required.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn native_guardian(mut self, executable: impl Into<PathBuf>) -> Self {
+        self.native_guardian_executable = Some(executable.into());
+        self
+    }
+
+    /// Bind this generation to a bounded actor slot shared with a companion.
+    ///
+    /// The registry keeps occupied slots across broker death until their actual
+    /// groups close. Each slot permits one main and one companion scope.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn native_capacity_slot(mut self, key: impl Into<String>, scope: impl Into<String>, limit: usize) -> Self {
+        self.native_capacity_slot = Some(lean_toolchain::native_guardian::NativeCapacitySlot {
+            key: key.into(),
+            scope: scope.into(),
+            limit,
+        });
+        self
+    }
+
+    /// Require actual worker-owned shared artifact read custody before host bodies.
+    #[must_use]
+    pub fn shared_artifact_reads(mut self, required: bool) -> Self {
+        self.shared_artifact_reads = required;
         self
     }
 
@@ -1059,6 +1119,42 @@ impl LeanWorkerRequestStopReceipt {
     }
 }
 
+/// Exact request-bound observation whose exit may be confirmed by a later reaper.
+/// It is not a stop receipt until `confirmed_stop` returns one.
+#[derive(Clone, Debug)]
+pub struct LeanWorkerPendingRequestStop {
+    request: InFlightRequest,
+    exit: LeanWorkerExitObservation,
+}
+
+impl LeanWorkerPendingRequestStop {
+    /// Exact dispatched operation at this checkpoint; this is not exit evidence.
+    #[must_use]
+    pub fn operation(&self) -> &'static str {
+        self.request.operation
+    }
+
+    /// Whether lifecycle recovery finished by proving whole-group absence
+    /// after ECHILD, without recovering this request's actual exit status.
+    ///
+    /// A caller may stop watching and expire its retained unknown result. This
+    /// fact does not produce a stop receipt or imply a successful proof.
+    #[must_use]
+    pub fn scope_closed_without_status(&self) -> bool {
+        self.exit.scope_closed_without_status()
+    }
+
+    /// Return stop evidence only after the owned child's wait/reap resolves.
+    /// This never infers proof success or that no prior IO effects occurred.
+    #[must_use]
+    pub fn confirmed_stop(&self) -> Option<LeanWorkerRequestStopReceipt> {
+        self.exit.confirmed_exit().map(|status| LeanWorkerRequestStopReceipt {
+            request: self.request.clone(),
+            exit: LeanWorkerExit::from_status(status, String::new()),
+        })
+    }
+}
+
 /// Structured result of shutting down a worker child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanWorkerShutdownReport {
@@ -1622,10 +1718,14 @@ pub struct LeanWorker {
     request_scope: Arc<()>,
     last_request: Option<InFlightRequest>,
     last_request_stop: Option<LeanWorkerRequestStopReceipt>,
+    last_request_exit: Option<LeanWorkerPendingRequestStop>,
     /// A failed replacement's process is still owned until cleanup proves exit.
     /// Historical `last_exit` belongs to an earlier child and is not that proof.
     pending_startup: Option<Box<StartupChild>>,
     runtime_metadata: LeanWorkerRuntimeMetadata,
+    host_runtime_metadata: Option<LeanWorkerHostRuntimeMetadata>,
+    host_read_active: bool,
+    last_host_session_refusal: Option<InFlightRequest>,
     stats: LeanWorkerStats,
     budget: GenerationBudget,
     /// The session configs the live child was observed to hold, MRU at the
@@ -1715,6 +1815,64 @@ impl LeanWorker {
         for (key, value) in &config.env {
             command.env(key, value);
         }
+        if config.shared_artifact_reads {
+            command.env("LEAN_RS_WORKER_SHARED_ARTIFACT_READS", "1");
+        }
+
+        #[cfg(unix)]
+        if config.native_capacity_slot.is_some() && config.native_guardian_executable.is_none() {
+            return Err(SpawnFailure::no_child(LeanWorkerError::Setup {
+                message: "native actor capacity requires the independent guardian".to_owned(),
+            }));
+        }
+        #[cfg(unix)]
+        if let Some(executable) = &config.native_guardian_executable {
+            if config.lifetime_directory.is_none() {
+                return Err(SpawnFailure::no_child(LeanWorkerError::Setup {
+                    message: "native guardian requires a durable lifetime directory".to_owned(),
+                }));
+            }
+            if config.shared_artifact_reads {
+                let registry = lean_toolchain::native_guardian::registry_directory().map_err(|source| {
+                    SpawnFailure::no_child(LeanWorkerError::Setup {
+                        message: format!("could not bind native ownership registry: {source}"),
+                    })
+                })?;
+                if config.lifetime_directory.as_ref() != Some(&registry) {
+                    return Err(SpawnFailure::no_child(LeanWorkerError::Setup {
+                        message:
+                            "protected native lifetime directory differs from the managed writer ownership registry"
+                                .to_owned(),
+                    }));
+                }
+            }
+            command.env(lean_toolchain::native_guardian::EXECUTABLE_ENV, executable);
+        }
+        #[cfg(unix)]
+        let lifetime = config
+            .lifetime_directory
+            .as_deref()
+            .map(|directory| {
+                if config.native_guardian_executable.is_some() {
+                    crate::crash_ownership::ParentLifetime::prepare_guarded_with_slot(
+                        directory,
+                        config.startup_timeout.saturating_sub(spawn_started.elapsed()),
+                        config.native_capacity_slot.as_ref(),
+                    )
+                } else {
+                    crate::crash_ownership::ParentLifetime::prepare(directory)
+                }
+            })
+            .transpose()
+            .map_err(|source| {
+                SpawnFailure::no_child(LeanWorkerError::Setup {
+                    message: format!("could not prepare worker parent lifeline: {source}"),
+                })
+            })?;
+        #[cfg(unix)]
+        if let Some(lifetime) = &lifetime {
+            lifetime.configure(&mut command);
+        }
 
         let mut child = StartupChild(Some(config.process_tracker.own(command.spawn().map_err(|source| {
             SpawnFailure::no_child(LeanWorkerError::Spawn {
@@ -1722,7 +1880,33 @@ impl LeanWorker {
                 source,
             })
         })?)));
-        let initialized = Self::initialize_child(config, spawn_started, &mut child);
+        let initialized = (|| {
+            #[cfg(unix)]
+            if let Some(lifetime) = lifetime {
+                let remaining = config.startup_timeout.saturating_sub(spawn_started.elapsed());
+                let lease =
+                    lifetime
+                        .accept(child.child_mut()?.id(), remaining)
+                        .map_err(|source| LeanWorkerError::Setup {
+                            message: format!("worker parent lifeline startup failed: {source}"),
+                        })?;
+                // Install ownership before ACK: a partial ACK must retain the
+                // exact inherited-group fence through startup cleanup.
+                child
+                    .child_mut()?
+                    .attach_lifetime(lease)
+                    .map_err(|source| LeanWorkerError::Setup {
+                        message: format!("could not pin native worker group: {source}"),
+                    })?;
+                child
+                    .child_mut()?
+                    .acknowledge_lifetime()
+                    .map_err(|source| LeanWorkerError::Setup {
+                        message: format!("worker parent lifeline ACK failed: {source}"),
+                    })?;
+            }
+            Self::initialize_child(config, spawn_started, &mut child)
+        })();
         initialized.map_err(|error| SpawnFailure::after_spawn(child, error, StartupChild::cleanup))
     }
 
@@ -1763,7 +1947,10 @@ impl LeanWorker {
             drop(sender.send((stdout, result)));
         });
 
-        let (stdout, runtime_metadata) = match receiver.recv_timeout(config.startup_timeout) {
+        // Lifeline authentication and pipe setup already consumed startup time.
+        // READY shares that budget, including the existing zero-wait cleanup path.
+        let remaining = config.startup_timeout.saturating_sub(spawn_started.elapsed());
+        let (stdout, runtime_metadata) = match receiver.recv_timeout(remaining) {
             Ok((stdout, Ok(metadata))) => (stdout, metadata),
             Ok((_stdout, Err(_handshake_err))) => {
                 // The handshake-thread observed a protocol-level error reading
@@ -1838,8 +2025,12 @@ impl LeanWorker {
             request_scope: Arc::new(()),
             last_request: None,
             last_request_stop: None,
+            last_request_exit: None,
             pending_startup: None,
             runtime_metadata,
+            host_runtime_metadata: None,
+            host_read_active: false,
+            last_host_session_refusal: None,
             stats: LeanWorkerStats {
                 last_spawn_handshake_elapsed: Some(spawn_handshake_elapsed),
                 ..LeanWorkerStats::default()
@@ -1964,6 +2155,21 @@ impl LeanWorker {
         }
     }
 
+    /// Whether this owner is retiring rather than ready for another request.
+    ///
+    /// This only observes stored state. It does not dispatch, poll, prove exit,
+    /// or release capacity. An exited leader with live inherited descendants
+    /// remains pending until actual owned cleanup completes.
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.pending_startup.is_some()
+            || self.child.as_ref().is_some_and(|child| {
+                self.state.rejects_new_requests()
+                    || matches!(self.state, WorkerSupervisorState::Crashed { .. })
+                    || child.cleanup_pending()
+            })
+    }
+
     /// Return lifecycle counters for this supervisor.
     #[must_use]
     pub fn stats(&self) -> LeanWorkerStats {
@@ -2043,6 +2249,29 @@ impl LeanWorker {
             && receipt.request.id.0 >= checkpoint.next_request_id.0
             && self.last_request.as_ref() == Some(&receipt.request))
         .then_some(receipt)
+    }
+
+    /// Observe the exact latest request since a checkpoint, even when owned
+    /// cleanup has transferred its child to the deferred reaper.
+    #[must_use]
+    pub fn pending_request_stop_since(
+        &self,
+        checkpoint: &LeanWorkerRequestCheckpoint,
+    ) -> Option<LeanWorkerPendingRequestStop> {
+        let pending = self.last_request_exit.as_ref()?;
+        (Arc::ptr_eq(&self.request_scope, &checkpoint.supervisor)
+            && pending.request.id.0 >= checkpoint.next_request_id.0
+            && self.last_request.as_ref() == Some(&pending.request))
+        .then(|| pending.clone())
+    }
+
+    /// Exact framed host-session refusal before a body, preserved across cleanup.
+    /// This names a request since this supervisor's checkpoint, not proof or exit.
+    #[must_use]
+    pub fn host_session_refusal_since(&self, checkpoint: &LeanWorkerRequestCheckpoint) -> Option<&'static str> {
+        let request = self.last_host_session_refusal.as_ref()?;
+        (Arc::ptr_eq(&self.request_scope, &checkpoint.supervisor) && request.id.0 >= checkpoint.next_request_id.0)
+            .then_some(request.operation)
     }
 
     /// Return protocol/runtime facts reported by the worker child.
@@ -2326,7 +2555,54 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<(), LeanWorkerError> {
-        self.open_worker_session_attempt(config, cancellation, progress, true)
+        self.host_runtime_metadata = None;
+        self.last_host_session_refusal = None;
+        let result = (|| {
+            self.open_worker_session_attempt(config, cancellation, progress, true)?;
+            if config.host_runtime_expectation().is_some() || self.config.shared_artifact_reads {
+                let actual = self.worker_host_runtime_metadata(cancellation, progress)?;
+                if let Some(expected) = config.host_runtime_expectation() {
+                    expected
+                        .validate(&actual)
+                        .map_err(|message| LeanWorkerError::Protocol {
+                            message: format!("host runtime compatibility: {message}"),
+                        })?;
+                }
+                if self.config.shared_artifact_reads
+                    && !actual.artifact_read_epochs.as_ref().is_some_and(|epochs| {
+                        !epochs.is_empty()
+                            && epochs.iter().any(|epoch| {
+                                Path::new(&epoch.project_root) == Path::new(&config.project_root_string())
+                                    && !epoch.epoch.is_empty()
+                            })
+                    })
+                {
+                    return Err(LeanWorkerError::Protocol {
+                        message: "worker did not report actual project artifact read custody".to_owned(),
+                    });
+                }
+                self.host_runtime_metadata = Some(actual);
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            // Preserve the exact framed pre-body refusal before cleanup sends
+            // another request or replaces the generation. It is no exit claim.
+            let refusal = matches!(&result, Err(LeanWorkerError::Worker { .. }))
+                .then(|| self.last_request.clone())
+                .flatten()
+                .filter(|request| {
+                    matches!(
+                        request.operation,
+                        "open_worker_session" | "worker_host_runtime_metadata"
+                    )
+                });
+            // Only an observed terminal boundary may release. An unknown
+            // operation stays owned and is retired by the ordinary supervisor.
+            drop(self.release_host_read());
+            self.last_host_session_refusal = refusal;
+        }
+        result
     }
 
     fn open_worker_session_attempt(
@@ -2338,6 +2614,7 @@ impl LeanWorker {
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "open_worker_session";
         check_cancelled(OPERATION, cancellation)?;
+        self.release_host_read()?;
         // An explicit switch needs only its requested profile in the new child.
         if self.budget.accounting_unknown {
             self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
@@ -2368,6 +2645,9 @@ impl LeanWorker {
             },
             LeanWorkerSessionMode::ShimsOnly => HostSessionMode::ShimsOnly,
         };
+        if self.config.shared_artifact_reads {
+            self.host_read_active = true;
+        }
         self.send_request_cancellable(
             Request::OpenHostSession {
                 project_root: config.project_root_string(),
@@ -2399,6 +2679,13 @@ impl LeanWorker {
             }
         };
         match response {
+            Response::HostArtifactEpochChanged if allow_retry => {
+                self.host_read_active = false;
+                // No body ran. A full process cycle invalidates every pooled
+                // environment and process-global Lean cache after any writer.
+                self.restart_with_reason(LeanWorkerRestartReason::Explicit)?;
+                self.open_worker_session_attempt(config, cancellation, progress, false)
+            }
             Response::HeaderImportRecycle if allow_retry => {
                 let reason = self
                     .budget
@@ -3123,6 +3410,64 @@ impl LeanWorker {
         }
     }
 
+    pub(crate) fn worker_host_runtime_metadata(
+        &mut self,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+    ) -> Result<LeanWorkerHostRuntimeMetadata, LeanWorkerError> {
+        const OPERATION: &str = "worker_host_runtime_metadata";
+        // Session opening just established the generation. Do not recycle in
+        // between its acknowledgement and this metadata-only inspection.
+        check_cancelled(OPERATION, cancellation)?;
+        self.send_request_cancellable(Request::HostRuntimeMetadata, OPERATION, cancellation)?;
+        // This inspection is part of opening a session, not another body
+        // request for max_requests/import policy. Charging it could force a
+        // recycle immediately before the body whose session we just checked.
+        let response = self.read_response_with_progress(OPERATION, progress, cancellation)?;
+        if let Response::HostRuntimeMetadata { metadata } = response {
+            Ok(metadata)
+        } else {
+            Err(unexpected_response(OPERATION, &response))
+        }
+    }
+
+    /// Close this child's read aliases after an observed terminal host operation.
+    ///
+    /// # Errors
+    /// Refuses unknown in-flight work and retains ownership on protocol failure.
+    pub fn release_host_read(&mut self) -> Result<(), LeanWorkerError> {
+        if !self.host_read_active {
+            return Ok(());
+        }
+        if !matches!(self.state, WorkerSupervisorState::Idle { .. }) || self.cleanup_pending() {
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "release_host_read",
+            });
+        }
+        let result = (|| {
+            self.send_request_cancellable(Request::ReleaseHostRead, "release_host_read", None)?;
+            match self.read_response("release_host_read")? {
+                Response::HostReadReleased => Ok(()),
+                other => Err(unexpected_response("release_host_read", &other)),
+            }
+        })();
+        if result.is_ok() {
+            self.host_read_active = false;
+        } else {
+            self.state = WorkerSupervisorState::Crashed {
+                generation: self.generation,
+            };
+        }
+        result
+    }
+
+    /// Last metadata validated for this generation; absent before a checked
+    /// session or after any shutdown/replacement attempt.
+    #[must_use]
+    pub fn host_runtime_metadata(&self) -> Option<&LeanWorkerHostRuntimeMetadata> {
+        self.host_runtime_metadata.as_ref()
+    }
+
     pub(crate) fn worker_capability_metadata(
         &mut self,
         export: &str,
@@ -3225,6 +3570,11 @@ impl LeanWorker {
         check_cancelled(operation, cancellation)?;
         self.ensure_running()?;
         self.begin_in_flight(operation)?;
+        if !matches!(&request, Request::ReleaseHostRead) {
+            // A later dispatched request supersedes a prior pre-body refusal.
+            // Resource release alone must preserve that failed call's phase.
+            self.last_host_session_refusal = None;
+        }
         let started = Instant::now();
         let result = self.write_request_bounded(request, operation, cancellation, self.config.request_timeout);
         if let Err(error) = result {
@@ -3335,6 +3685,10 @@ impl LeanWorker {
             generation: self.generation,
             process_id,
         };
+        self.last_request_exit = self.child.as_ref().map(|child| LeanWorkerPendingRequestStop {
+            request: request.clone(),
+            exit: child.exit_observation(),
+        });
         self.next_request_id = next_request_id;
         self.state = WorkerSupervisorState::Busy {
             request: request.clone(),
@@ -3353,6 +3707,13 @@ impl LeanWorker {
             }
         };
         request.operation = operation;
+        if let Some(pending) = self.last_request_exit.as_mut()
+            && pending.request.id == request.id
+            && pending.request.generation == request.generation
+            && pending.request.process_id == request.process_id
+        {
+            pending.request = request.clone();
+        }
         self.last_request = Some(request.clone());
         self.state = WorkerSupervisorState::Busy {
             request: request.clone(),
@@ -3391,7 +3752,7 @@ impl LeanWorker {
         let config = self.open_session_keys.last().cloned();
         let generation = self.stats.restarts;
         self.prepare_request(import_like)?;
-        if self.stats.restarts != generation
+        if (self.stats.restarts != generation || (self.config.shared_artifact_reads && !self.host_read_active))
             && let Some(config) = config
         {
             self.open_worker_session(&config, cancellation, progress)?;
@@ -3585,6 +3946,7 @@ impl LeanWorker {
         next.request_scope = Arc::clone(&self.request_scope);
         next.last_request.clone_from(&self.last_request);
         next.last_request_stop.clone_from(&self.last_request_stop);
+        next.last_request_exit.clone_from(&self.last_request_exit);
         next.generation = next_generation;
         next.next_request_id = next_request_id;
         next.state = WorkerSupervisorState::Idle {
@@ -3740,6 +4102,16 @@ impl LeanWorker {
         };
 
         loop {
+            #[cfg(unix)]
+            if self.child.as_mut().is_some_and(OwnedChild::poll_guardian) {
+                self.terminalize_request_failure(streaming, started, request_backpressure_waits);
+                drop(receiver);
+                drop(reader);
+                self.shutdown_child(ShutdownIntent::KillOnly)?;
+                return Err(LeanWorkerError::Setup {
+                    message: "native guardian failed; owned request group stopped without a proof result".to_owned(),
+                });
+            }
             if cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
                 if streaming {
                     self.record_stream_failure(started, request_backpressure_waits);
@@ -3847,6 +4219,10 @@ impl LeanWorker {
                     if cancellation.is_some() {
                         wait_for = wait_for.min(CANCELLATION_POLL_INTERVAL);
                     }
+                    #[cfg(unix)]
+                    if self.child.as_ref().is_some_and(OwnedChild::has_guardian) {
+                        wait_for = wait_for.min(CANCELLATION_POLL_INTERVAL);
+                    }
                     match receiver.recv_timeout(wait_for) {
                         Ok(event) => event,
                         Err(mpsc::RecvTimeoutError::Timeout) if wait_for < remaining => {
@@ -3893,17 +4269,29 @@ impl LeanWorker {
                         }
                     }
                 }
-                None if cancellation.is_some() => match receiver.recv_timeout(CANCELLATION_POLL_INTERVAL) {
-                    Ok(event) => event,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        self.finish_in_flight();
-                        drop(reader);
-                        return Err(LeanWorkerError::Protocol {
-                            message: "worker response reader exited without a terminal response".to_owned(),
-                        });
+                None if cancellation.is_some() || {
+                    #[cfg(unix)]
+                    {
+                        self.child.as_ref().is_some_and(OwnedChild::has_guardian)
                     }
-                },
+                    #[cfg(not(unix))]
+                    {
+                        false
+                    }
+                } =>
+                {
+                    match receiver.recv_timeout(CANCELLATION_POLL_INTERVAL) {
+                        Ok(event) => event,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            self.finish_in_flight();
+                            drop(reader);
+                            return Err(LeanWorkerError::Protocol {
+                                message: "worker response reader exited without a terminal response".to_owned(),
+                            });
+                        }
+                    }
+                }
                 None => match receiver.recv() {
                     Ok(event) => event,
                     Err(_err) => {
@@ -4092,6 +4480,9 @@ impl LeanWorker {
             });
         }
         match self.status()? {
+            LeanWorkerStatus::Running if self.cleanup_pending() => Err(LeanWorkerError::ShutdownInProgress {
+                operation: self.state.current_operation().unwrap_or("worker_request"),
+            }),
             LeanWorkerStatus::Running => Ok(()),
             LeanWorkerStatus::Exited(exit) if exit.success => Err(LeanWorkerError::ChildExited { exit }),
             LeanWorkerStatus::Exited(exit) => Err(LeanWorkerError::ChildPanicOrAbort { exit }),
@@ -4219,6 +4610,7 @@ impl LeanWorker {
         intent: ShutdownIntent,
         cleanup: impl FnOnce(&mut StartupChild) -> Result<ExitStatus, LeanWorkerError>,
     ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.host_runtime_metadata = None;
         let started = Instant::now();
         let graceful_timeout = self.config.shutdown_timeout;
         if let Some(mut pending) = self.pending_startup.take() {
@@ -5408,6 +5800,30 @@ mod tests {
         assert_eq!(tracker.active_processes(), 0);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn pending_stop_is_exact_and_resolves_only_after_owned_reap() {
+        let mut worker = sleeping_worker();
+        let checkpoint = worker.request_checkpoint();
+        worker.begin_in_flight("late_owned_reap").expect("bind exact request");
+        let pending = worker.pending_request_stop_since(&checkpoint).expect("bound observer");
+        assert!(pending.confirmed_stop().is_none());
+        assert!(
+            worker
+                .pending_request_stop_since(&worker.request_checkpoint())
+                .is_none()
+        );
+        // This owned sleep fixture has no protocol stdin/stdout. Exercise
+        // actual kill/reap rather than attempting a graceful wire request.
+        worker
+            .shutdown_child(super::ShutdownIntent::KillOnly)
+            .expect("owned cleanup confirms exit");
+        let receipt = pending.confirmed_stop().expect("observer resolved by wait");
+        assert_eq!(receipt.operation(), "late_owned_reap");
+        assert_eq!(receipt.worker_generation(), 0);
+        assert_eq!(receipt.request_id(), 0);
+    }
+
     fn dummy_config() -> LeanWorkerConfig {
         LeanWorkerConfig::new(PathBuf::from("/nonexistent/lean-rs-worker-child"))
     }
@@ -5429,12 +5845,16 @@ mod tests {
             request_scope: std::sync::Arc::new(()),
             last_request: None,
             last_request_stop: None,
+            last_request_exit: None,
             pending_startup: None,
             runtime_metadata: crate::session::LeanWorkerRuntimeMetadata {
                 worker_version: "test".to_owned(),
                 protocol_version: 1,
                 lean_version: None,
             },
+            host_runtime_metadata: None,
+            host_read_active: false,
+            last_host_session_refusal: None,
             stats: LeanWorkerStats::default(),
             budget: GenerationBudget::default(),
             open_session_keys: Vec::new(),
@@ -5596,21 +6016,22 @@ mod tests {
         let no_spawn = super::LeanWorker::spawn_tracked(&dummy_config()).expect_err("missing executable");
         assert!(matches!(no_spawn.error, LeanWorkerError::Spawn { .. }));
         assert!(no_spawn.pending.is_none());
-        let timeout = super::LeanWorker::spawn_tracked(
-            &LeanWorkerConfig::new("/bin/sh").startup_timeout(Duration::from_millis(10)),
-        )
-        .expect_err("shell does not speak the worker protocol");
-        assert!(matches!(
-            timeout.error,
-            LeanWorkerError::Timeout {
-                operation: "startup",
-                ..
-            }
-        ));
-        assert!(
-            timeout.pending.is_none(),
-            "confirmed startup timeout must not quarantine a nonexistent child"
-        );
+        for startup_timeout in [Duration::ZERO, Duration::from_millis(10)] {
+            let timeout =
+                super::LeanWorker::spawn_tracked(&LeanWorkerConfig::new("/bin/sh").startup_timeout(startup_timeout))
+                    .expect_err("shell does not speak the worker protocol");
+            assert!(matches!(
+                timeout.error,
+                LeanWorkerError::Timeout {
+                    operation: "startup",
+                    ..
+                }
+            ));
+            assert!(
+                timeout.pending.is_none(),
+                "confirmed startup timeout must not quarantine a nonexistent child"
+            );
+        }
     }
 
     #[cfg(unix)]

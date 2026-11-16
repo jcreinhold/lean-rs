@@ -72,7 +72,9 @@ pub use self::bracketed::{
     LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult, LeanBracketedRejectedOperation,
 };
 pub use self::cancellation::LeanCancellationToken;
-pub use self::capabilities::LeanCapabilities;
+#[cfg(unix)]
+pub use self::capabilities::ready_host_artifacts;
+pub use self::capabilities::{LeanCapabilities, LeanPreparedHostArtifacts, prepare_host_artifacts};
 pub use self::declaration_search::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
@@ -93,8 +95,8 @@ pub use self::process::{
 };
 pub use self::progress::{LeanProgressEvent, LeanProgressSink};
 pub use self::session::{
-    HeaderImportState, LeanDeclarationFilter, LeanImportLevel, LeanImportProfileMode, LeanImportProfilerOptions,
-    LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
+    HeaderImportState, LeanDeclarationFilter, LeanHostRuntimeMetadata, LeanImportLevel, LeanImportProfileMode,
+    LeanImportProfilerOptions, LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
 };
 
 #[cfg(test)]

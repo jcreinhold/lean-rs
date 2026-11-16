@@ -3050,7 +3050,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::artifact_roots(&self) -> &[std::path::PathBuf]
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &[&str], lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared_capability(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, &str, &str) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::profiling_session<'c>(&'c self, &[&str], lean_rs_host::LeanImportProfileMode, &lean_rs_host::LeanImportProfilerOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session_with_profile<'c>(&'c self, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
@@ -3135,6 +3138,18 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHost<'lean>
+pub struct lean_rs_host::host::LeanHostRuntimeMetadata
+pub lean_rs_host::host::LeanHostRuntimeMetadata::checked_binding_signatures: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub lean_rs_host::host::LeanHostRuntimeMetadata::runtime_lean_version: core::option::Option<alloc::string::String>
+impl core::fmt::Debug for lean_rs_host::LeanHostRuntimeMetadata
+pub fn lean_rs_host::LeanHostRuntimeMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Send for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Sync for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Unpin for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanHostRuntimeMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHostRuntimeMetadata
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHostRuntimeMetadata
 pub struct lean_rs_host::host::LeanImportProfilerOptions
 pub lean_rs_host::host::LeanImportProfilerOptions::profiler: bool
 pub lean_rs_host::host::LeanImportProfilerOptions::trace_profiler: bool
@@ -3195,6 +3210,24 @@ impl core::marker::Unpin for lean_rs_host::LeanImportStats
 impl core::marker::UnsafeUnpin for lean_rs_host::LeanImportStats
 impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanImportStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanImportStats
+pub struct lean_rs_host::host::LeanPreparedHostArtifacts
+impl lean_rs_host::host::LeanPreparedHostArtifacts
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::artifact_roots(&self) -> &[std::path::PathBuf]
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::from_snapshot(std::path::PathBuf, alloc::string::String, alloc::vec::Vec<std::path::PathBuf>, alloc::vec::Vec<std::path::PathBuf>) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::manifest_json(&self) -> &str
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::manifest_path(&self) -> &std::path::Path
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::shim_search_paths(&self) -> &[std::path::PathBuf]
+impl core::clone::Clone for lean_rs_host::host::LeanPreparedHostArtifacts
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::clone(&self) -> lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::fmt::Debug for lean_rs_host::host::LeanPreparedHostArtifacts
+pub fn lean_rs_host::host::LeanPreparedHostArtifacts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::marker::Send for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::marker::Sync for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::marker::Unpin for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::marker::UnsafeUnpin for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::host::LeanPreparedHostArtifacts
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::host::LeanPreparedHostArtifacts
 pub struct lean_rs_host::host::LeanProgressEvent
 pub lean_rs_host::host::LeanProgressEvent::current: u64
 pub lean_rs_host::host::LeanProgressEvent::elapsed: core::time::Duration
@@ -3220,6 +3253,7 @@ pub struct lean_rs_host::host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::attempt_proof(&mut self, &lean_rs_host::ProofAttemptRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofAttemptOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::checked_host_runtime_metadata(&self) -> lean_rs::error::LeanResult<lean_rs_host::LeanHostRuntimeMetadata>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_header_cache(&mut self) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::configure_header_import_budget(&mut self, u64, u64) -> lean_rs::error::LeanResult<()>
@@ -3564,6 +3598,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::SessionStats
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::SessionStats
 pub trait lean_rs_host::host::LeanProgressSink: core::marker::Send + core::marker::Sync
 pub fn lean_rs_host::host::LeanProgressSink::report(&self, lean_rs_host::LeanProgressEvent)
+pub fn lean_rs_host::host::prepare_host_artifacts() -> lean_rs::error::LeanResult<lean_rs_host::host::LeanPreparedHostArtifacts>
+pub fn lean_rs_host::host::ready_host_artifacts() -> lean_rs::error::LeanResult<core::option::Option<lean_rs_host::host::LeanPreparedHostArtifacts>>
 pub mod lean_rs_host::meta
 pub enum lean_rs_host::meta::LeanMetaResponse<Resp>
 pub lean_rs_host::meta::LeanMetaResponse::Failed(lean_rs_host::LeanElabFailure)
@@ -4698,7 +4734,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanCancellationT
 impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanCancellationToken
 pub struct lean_rs_host::LeanCapabilities<'lean, 'h>
 impl<'lean, 'h> lean_rs_host::LeanCapabilities<'lean, 'h>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::artifact_roots(&self) -> &[std::path::PathBuf]
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::bracketed_import_query(&self, &[&str], lean_rs_host::LeanBracketedImportRequest, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanBracketedImportResult>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts) -> lean_rs::error::LeanResult<Self>
+pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::from_prepared_capability(&'h lean_rs_host::LeanHost<'lean>, &lean_rs_host::host::LeanPreparedHostArtifacts, &str, &str) -> lean_rs::error::LeanResult<Self>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::profiling_session<'c>(&'c self, &[&str], lean_rs_host::LeanImportProfileMode, &lean_rs_host::LeanImportProfilerOptions) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session<'c>(&'c self, &[&str], core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
 pub fn lean_rs_host::LeanCapabilities<'lean, 'h>::session_with_profile<'c>(&'c self, &[&str], lean_rs_host::LeanSessionImportProfile, core::option::Option<&lean_rs_host::LeanCancellationToken>, core::option::Option<&dyn lean_rs_host::LeanProgressSink>) -> lean_rs::error::LeanResult<lean_rs_host::LeanSession<'lean, 'c>>
@@ -4861,6 +4900,18 @@ impl<'lean> core::marker::Unpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::marker::UnsafeUnpin for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHost<'lean>
 impl<'lean> core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHost<'lean>
+pub struct lean_rs_host::LeanHostRuntimeMetadata
+pub lean_rs_host::LeanHostRuntimeMetadata::checked_binding_signatures: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub lean_rs_host::LeanHostRuntimeMetadata::runtime_lean_version: core::option::Option<alloc::string::String>
+impl core::fmt::Debug for lean_rs_host::LeanHostRuntimeMetadata
+pub fn lean_rs_host::LeanHostRuntimeMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Send for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Sync for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::Unpin for lean_rs_host::LeanHostRuntimeMetadata
+impl core::marker::UnsafeUnpin for lean_rs_host::LeanHostRuntimeMetadata
+impl core::panic::unwind_safe::RefUnwindSafe for lean_rs_host::LeanHostRuntimeMetadata
+impl core::panic::unwind_safe::UnwindSafe for lean_rs_host::LeanHostRuntimeMetadata
 pub struct lean_rs_host::LeanImportProfilerOptions
 pub lean_rs_host::LeanImportProfilerOptions::profiler: bool
 pub lean_rs_host::LeanImportProfilerOptions::trace_profiler: bool
@@ -4970,6 +5021,7 @@ pub struct lean_rs_host::LeanSession<'lean, 'c>
 impl<'lean, 'c> lean_rs_host::LeanSession<'lean, 'c>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::attempt_proof(&mut self, &lean_rs_host::ProofAttemptRequest, &lean_rs_host::LeanElabOptions, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::ProofAttemptOutcome>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::check_evidence(&mut self, &lean_rs_host::LeanEvidence<'lean>, core::option::Option<&lean_rs_host::LeanCancellationToken>) -> lean_rs::error::LeanResult<lean_rs_host::EvidenceStatus>
+pub fn lean_rs_host::LeanSession<'lean, 'c>::checked_host_runtime_metadata(&self) -> lean_rs::error::LeanResult<lean_rs_host::LeanHostRuntimeMetadata>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_header_cache(&mut self) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::clear_module_snapshot_cache(&mut self) -> lean_rs::error::LeanResult<lean_rs_host::host::process::ModuleSnapshotCacheClearResult>
 pub fn lean_rs_host::LeanSession<'lean, 'c>::configure_header_import_budget(&mut self, u64, u64) -> lean_rs::error::LeanResult<()>

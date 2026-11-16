@@ -25,6 +25,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Runtime-free facts prepared before a guarded native generation starts.
+///
+/// These paths and the exact shim manifest snapshot are storage facts. They
+/// do not attest what the child eventually loaded or authorize a proof result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeanWorkerPreparedHostArtifacts {
+    pub protocol: u32,
+    pub shim_manifest_path: String,
+    pub shim_manifest_json: String,
+    pub artifact_roots: Vec<String>,
+    pub shim_search_paths: Vec<String>,
+}
+
 /// Lean-native attribution for the imported environment behind a worker session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LeanWorkerImportStats {
@@ -1371,6 +1385,67 @@ pub enum LeanWorkerModuleQueryBatchOutcome {
     /// The loaded capability dylib does not export
     /// `lean_rs_host_process_module_query_batch`.
     Unsupported,
+}
+
+/// Shared artifact epoch observed while this worker owns the domain's read FD.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerArtifactReadEpoch {
+    pub project_root: String,
+    pub epoch: String,
+}
+
+/// Facts reported only after a host session resolves checked loaded shim bindings.
+///
+/// Compile identity is not a live C-library version query. The optional Lean
+/// version is read through the loaded shim, not inferred from a worker sidecar.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LeanWorkerHostRuntimeMetadata {
+    /// Actual read custody at session validation, absent in older/unconfigured workers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_read_epochs: Option<Vec<LeanWorkerArtifactReadEpoch>>,
+    pub compiled_lean_version: String,
+    pub compiled_header_sha256: String,
+    pub runtime_lean_version: Option<String>,
+    /// Operation name to canonical manifest ABI signature fingerprint. Only
+    /// successfully resolved bindings occur here; optional absent exports do not.
+    pub checked_host_bindings: std::collections::BTreeMap<String, String>,
+}
+
+/// Optional per-session requirements, checked before a body command can run.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LeanWorkerHostRuntimeExpectation {
+    pub compiled_header_sha256: Option<String>,
+    pub runtime_lean_version: Option<String>,
+    pub checked_host_bindings: std::collections::BTreeMap<String, String>,
+}
+
+impl LeanWorkerHostRuntimeExpectation {
+    /// Validate an actual session's metadata; extra compatible bindings are fine.
+    ///
+    /// # Errors
+    /// Returns the first missing or incompatible required toolchain or binding.
+    pub fn validate(&self, actual: &LeanWorkerHostRuntimeMetadata) -> Result<(), String> {
+        if self
+            .compiled_header_sha256
+            .as_ref()
+            .is_some_and(|v| v != &actual.compiled_header_sha256)
+        {
+            return Err("compiled Lean header does not match the required toolchain".into());
+        }
+        if self
+            .runtime_lean_version
+            .as_ref()
+            .is_some_and(|v| actual.runtime_lean_version.as_ref() != Some(v))
+        {
+            return Err("loaded Lean runtime version is missing or incompatible".into());
+        }
+        for (name, required) in &self.checked_host_bindings {
+            if actual.checked_host_bindings.get(name) != Some(required) {
+                return Err(format!("loaded host binding is missing or incompatible: {name}"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Generic metadata reported by one downstream capability package.

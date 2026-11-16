@@ -72,6 +72,14 @@ impl LakeProject {
         &self.root
     }
 
+    /// Canonical shared output domains used by this host and its bundled shims.
+    ///
+    /// Keep this with the owning root functions when bundled outputs move.
+    pub(crate) fn artifact_roots(&self) -> LeanResult<Vec<PathBuf>> {
+        lean_toolchain::shared_writer::project_artifact_roots(&self.root)
+            .map_err(|error| lean_rs::__host_internals::host_module_init(error.to_string()))
+    }
+
     /// On-disk path to the compiled capability dylib for the
     /// `(package, lean_lib_name)` pair.
     ///
@@ -142,30 +150,6 @@ impl LakeProject {
         paths
     }
 
-    /// Search path for the bundled `lean-rs-host-shims` package's `.olean`
-    /// files. A session that imports `LeanRsHostShims.*` needs this entry on
-    /// the search path so the shim package's `.olean` files are reachable at
-    /// runtime.
-    ///
-    /// # Errors
-    ///
-    /// Returns a module-initialization error if the bundled shim package
-    /// cannot be built.
-    pub(crate) fn shim_olean_search_path() -> LeanResult<PathBuf> {
-        let package_dir = bundled_host_shims_root();
-        drop(build_bundled_target(&package_dir, SHIM_LIB_NAME)?);
-        Ok(package_dir.join(".lake").join("build").join("lib").join("lean"))
-    }
-
-    /// Search path for the generic `lean-rs-interop-shims` package's `.olean`
-    /// files. Host shim modules import `LeanRsInterop.Callback`, so sessions
-    /// that import `LeanRsHostShims.*` need this entry on the Lean search path.
-    pub(crate) fn interop_olean_search_path() -> LeanResult<PathBuf> {
-        let package_dir = bundled_interop_shims_root();
-        drop(build_bundled_target(&package_dir, INTEROP_LIB_NAME)?);
-        Ok(package_dir.join(".lake").join("build").join("lib").join("lean"))
-    }
-
     /// Source roots passed to the source-range shim.
     ///
     /// Lean's declaration-range extension stores positions, not a stable
@@ -179,6 +163,19 @@ impl LakeProject {
     /// Build the bundled host-shim target and emit a manifest carrying
     /// trusted export signatures.
     pub(crate) fn shim_capability(export_signatures: Vec<LeanExportSignature>) -> LeanResult<BuiltLeanCapability> {
+        // Both independently runnable packages need their own validity keys.
+        // The host target can rebuild the path dependency, so its writer graph
+        // also includes the interop domain rather than nesting another writer.
+        let root = bundled_interop_shims_root();
+        let bootstrap =
+            lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), &root)
+                .map_err(artifact_error)?;
+        drop(
+            interop_capability_builder(&root)
+                .private_bootstrap(bootstrap)
+                .build_quiet()
+                .map_err(|error| artifact_error(std::io::Error::other(error)))?,
+        );
         build_bundled_capability(&bundled_host_shims_root(), SHIM_LIB_NAME, export_signatures)
     }
 }
@@ -232,18 +229,6 @@ fn bundled_interop_shims_root() -> PathBuf {
         .join(BUNDLED_INTEROP_SHIMS_DIR)
 }
 
-fn build_bundled_target(project_root: &Path, target_name: &str) -> LeanResult<PathBuf> {
-    let _guard = BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
-        lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
-    })?;
-    lean_toolchain::build_lake_target_quiet(project_root, target_name).map_err(|diagnostic| {
-        lean_rs::__host_internals::host_module_init(format!(
-            "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
-            project_root.display()
-        ))
-    })
-}
-
 fn build_bundled_capability(
     project_root: &Path,
     target_name: &str,
@@ -252,18 +237,130 @@ fn build_bundled_capability(
     let _guard = BUNDLED_SHIM_BUILD_LOCK.lock().map_err(|_| {
         lean_rs::__host_internals::host_module_init("bundled lean-rs shim build lock is poisoned".to_owned())
     })?;
-    let mut builder = lean_toolchain::CargoLeanCapability::new(project_root, target_name)
-        .package(SHIM_PACKAGE_NAME)
-        .module(SHIM_LIB_NAME);
-    for signature in export_signatures {
-        builder = builder.export_signature(signature);
-    }
+    let bootstrap =
+        lean_toolchain::shared_writer::PrivateLakeBootstrap::new(Path::new(env!("CARGO_MANIFEST_DIR")), project_root)
+            .map_err(|error| lean_rs::__host_internals::host_module_init(error.to_string()))?;
+    let builder = bundled_capability_builder(project_root, target_name, export_signatures).private_bootstrap(bootstrap);
     builder.build_quiet().map_err(|diagnostic| {
         lean_rs::__host_internals::host_module_init(format!(
             "could not build bundled lean-rs shim target `{target_name}` under {}: {diagnostic}",
             project_root.display()
         ))
     })
+}
+
+fn bundled_capability_builder(
+    project_root: &Path,
+    target_name: &str,
+    export_signatures: Vec<LeanExportSignature>,
+) -> lean_toolchain::CargoLeanCapability {
+    let mut builder = lean_toolchain::CargoLeanCapability::new(project_root, target_name)
+        .package(SHIM_PACKAGE_NAME)
+        .module(SHIM_LIB_NAME);
+    for signature in export_signatures {
+        builder = builder.export_signature(signature);
+    }
+    shim_sysroot(builder)
+}
+
+fn interop_capability_builder(root: &Path) -> lean_toolchain::CargoLeanCapability {
+    shim_sysroot(
+        lean_toolchain::CargoLeanCapability::new(root, INTEROP_LIB_NAME)
+            .package("lean_rs_interop_shims")
+            .module(INTEROP_LIB_NAME),
+    )
+}
+
+fn shim_sysroot(builder: lean_toolchain::CargoLeanCapability) -> lean_toolchain::CargoLeanCapability {
+    // Per-toolchain prep workers always receive this explicit sysroot. It must
+    // participate in both build and ready keys: changing only a manifest's
+    // fingerprint could otherwise relabel an artifact built by another Lean.
+    match std::env::var_os("LEAN_SYSROOT") {
+        Some(root) => builder.lean_sysroot(PathBuf::from(root)),
+        None => builder,
+    }
+}
+
+pub(crate) fn prepared_artifacts(built: &BuiltLeanCapability) -> LeanResult<super::LeanPreparedHostArtifacts> {
+    use std::io::Read as _;
+    let manifest_path = built.manifest_path().canonicalize().map_err(artifact_error)?;
+    let mut bytes = Vec::new();
+    fs::File::open(&manifest_path)
+        .map_err(artifact_error)?
+        .take(64 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(artifact_error)?;
+    let manifest_json = String::from_utf8(bytes).map_err(|error| artifact_error(std::io::Error::other(error)))?;
+    let roots = lean_toolchain::shared_writer::project_artifact_root_union(&[
+        bundled_host_shims_root(),
+        bundled_interop_shims_root(),
+    ])
+    .map_err(artifact_error)?;
+    let paths = [bundled_interop_shims_root(), bundled_host_shims_root()]
+        .into_iter()
+        .map(|root| project_olean_search_path(&root).canonicalize().map_err(artifact_error))
+        .collect::<LeanResult<Vec<_>>>()?;
+    super::LeanPreparedHostArtifacts::from_snapshot(manifest_path, manifest_json, roots, paths)
+}
+
+#[cfg(unix)]
+pub(crate) fn ready_artifacts(
+    signatures: Vec<LeanExportSignature>,
+) -> LeanResult<Option<super::LeanPreparedHostArtifacts>> {
+    use std::time::{Duration, Instant};
+    let host_root = bundled_host_shims_root();
+    let interop_root = bundled_interop_shims_root();
+    let workspaces = [host_root.clone(), interop_root.clone()];
+    // No .lake creation or EX admission is allowed on this path.
+    let roots = lean_toolchain::shared_writer::project_artifact_root_union(&workspaces).map_err(artifact_error)?;
+    if roots.iter().any(|root| !root.join(".lake").is_dir()) {
+        return Ok(None);
+    }
+    let helper = std::env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV)
+        .ok_or_else(|| artifact_error(std::io::Error::other("ready probe requires configured artifact helper")))?;
+    let started = Instant::now();
+    let mut ordered = roots
+        .into_iter()
+        .map(|root| lean_toolchain::shared_writer::project_lock_path(&root).map(|lock| (lock, root)))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(artifact_error)?;
+    ordered.sort();
+    let mut readers = Vec::with_capacity(ordered.len());
+    for (_, root) in ordered {
+        readers.push(
+            lean_toolchain::shared_reader::SharedReadProxy::acquire(
+                Path::new(&helper),
+                &root,
+                Duration::from_secs(30).saturating_sub(started.elapsed()),
+            )
+            .map_err(artifact_error)?,
+        );
+    }
+    if interop_capability_builder(&interop_root)
+        .probe_ready()
+        .map_err(|error| artifact_error(std::io::Error::other(error)))?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let builder = bundled_capability_builder(&host_root, SHIM_LIB_NAME, signatures);
+    let result = builder
+        .probe_ready()
+        .map_err(|error| artifact_error(std::io::Error::other(error)))?
+        .map(|built| prepared_artifacts(&built))
+        .transpose()?;
+    for reader in &mut readers {
+        reader.validate().map_err(artifact_error)?;
+    }
+    Ok(result)
+}
+
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "I/O error adapter is consumed by Result::map_err"
+)]
+fn artifact_error(error: std::io::Error) -> lean_rs::LeanError {
+    lean_rs::__host_internals::host_module_init(error.to_string())
 }
 
 #[cfg(test)]
@@ -314,6 +411,14 @@ mod tests {
         fn drop(&mut self) {
             drop(fs::remove_dir_all(&self.root));
         }
+    }
+
+    #[test]
+    fn artifact_roots_are_owned_domains_without_creating_build_outputs() {
+        let project = TempProject::new("artifact-roots");
+        let roots = project.project().artifact_roots().expect("existing source roots");
+        assert_eq!(roots, vec![project.canonical_root()]);
+        assert!(!project.canonical_root().join(".lake").exists());
     }
 
     #[test]

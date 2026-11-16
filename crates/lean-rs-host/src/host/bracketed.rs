@@ -102,7 +102,7 @@ impl LeanBracketedImportResult {
         request: LeanBracketedImportRequest,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Self> {
-        let search_paths = LeanSession::import_search_paths(capabilities)?;
+        let search_paths = LeanSession::import_search_paths(capabilities);
         let imports_owned: Vec<String> = imports.iter().map(|&import| import.to_owned()).collect();
         let declaration_names = request.declaration_names;
         with_session_import_lock(|| {
