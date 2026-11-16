@@ -364,3 +364,112 @@ fn regular_metadata_retains_the_exact_byte_bound() {
             .contains("byte bound")
     );
 }
+
+#[test]
+fn frozen_flattened_package_domains_are_not_workspace_seeds() {
+    let f = Fixture::new();
+    let primary = f.package("A");
+    let middle = primary.join(".lake/packages/B");
+    let leaf = primary.join(".lake/packages/C");
+    fs::create_dir_all(&middle).expect("middle package");
+    fs::create_dir_all(&leaf).expect("leaf package");
+    write_manifest(&primary, &[git("B"), git("C")]);
+    write_manifest(&middle, &[git("C")]);
+    write_manifest(&leaf, &[]);
+    assert!(!middle.join(".lake/packages/C").exists());
+    assert_eq!(
+        workspace_roots_with_domains(std::slice::from_ref(&primary), &[middle.clone(), leaf.clone()])
+            .expect("frozen domains retain primary resolution"),
+        vec![primary, middle, leaf]
+    );
+}
+
+#[test]
+fn frozen_domains_remain_when_primary_metadata_drops_them() {
+    let f = Fixture::new();
+    let primary = f.package("A");
+    let frozen = f.package("B");
+    write_manifest(&primary, &[path("B", &frozen)]);
+    let expected =
+        workspace_roots_with_domains(std::slice::from_ref(&primary), std::slice::from_ref(&frozen)).expect("capture");
+    write_manifest(&primary, &[]);
+    fs::write(
+        frozen.join("lake-manifest.json"),
+        "not an independent workspace manifest",
+    )
+    .expect("irrelevant domain metadata");
+    assert_eq!(
+        workspace_roots_with_domains(&[primary], &[frozen]).expect("retain frozen domain without parsing it"),
+        expected
+    );
+}
+
+#[test]
+fn frozen_domains_do_not_bypass_git_cleanup_or_size_bounds() {
+    let f = Fixture::new();
+    let primary = f.package("A");
+    let git_root = primary.join(".lake/packages/B");
+    fs::create_dir_all(&git_root).expect("Git package");
+    write_manifest(&git_root, &[]);
+    write_manifest(&primary, &[git("B")]);
+    let nested = git_root.join("nested");
+    fs::create_dir(&nested).expect("nested physical domain");
+    assert!(
+        workspace_roots_with_domains(std::slice::from_ref(&primary), &[nested])
+            .expect_err("Git cleanup can unlink frozen lock")
+            .to_string()
+            .contains("unlink")
+    );
+    write_manifest(&primary, &[]);
+    let mut domains = Vec::new();
+    for i in 0..31 {
+        domains.push(f.package(&format!("P{i}")));
+    }
+    assert_eq!(
+        workspace_roots_with_domains(std::slice::from_ref(&primary), &domains)
+            .expect("maximum union")
+            .len(),
+        32
+    );
+    domains.push(f.package("Extra"));
+    assert!(
+        workspace_roots_with_domains(std::slice::from_ref(&primary), &domains)
+            .expect_err("oversized union")
+            .to_string()
+            .contains("thirty-two")
+    );
+    assert!(
+        workspace_roots_with_domains(&[primary], &vec![f.0.clone(); 33])
+            .expect_err("bounded domain input")
+            .to_string()
+            .contains("thirty-two")
+    );
+}
+
+#[test]
+fn frozen_domains_must_exist_and_keep_their_canonical_directory_identity() {
+    let f = Fixture::new();
+    let primary = f.package("A");
+    let frozen = f.package("B");
+    let missing = f.0.join("missing");
+    assert_eq!(
+        workspace_roots_with_domains(std::slice::from_ref(&primary), &[missing])
+            .expect_err("missing frozen domain")
+            .kind(),
+        io::ErrorKind::NotFound
+    );
+    let file = f.0.join("file");
+    fs::write(&file, "not a directory").expect("file");
+    assert!(workspace_roots_with_domains(std::slice::from_ref(&primary), &[file]).is_err());
+    #[cfg(unix)]
+    {
+        let alias = f.0.join("alias");
+        std::os::unix::fs::symlink(frozen, &alias).expect("alias");
+        assert!(
+            workspace_roots_with_domains(&[primary], &[alias])
+                .expect_err("must not rewrite frozen root")
+                .to_string()
+                .contains("canonical")
+        );
+    }
+}

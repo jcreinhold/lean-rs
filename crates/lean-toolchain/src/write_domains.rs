@@ -212,6 +212,16 @@ fn validate_git_layout(roots: &BTreeSet<PathBuf>, git_roots: &[PathBuf]) -> io::
 }
 
 pub(crate) fn workspace_roots(workspaces: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
+    workspace_roots_with_domains(workspaces, &[])
+}
+
+pub(crate) fn workspace_roots_with_domains(
+    workspaces: &[PathBuf],
+    frozen_domains: &[PathBuf],
+) -> io::Result<Vec<PathBuf>> {
+    if frozen_domains.len() > MAX_ROOTS {
+        return Err(invalid("artifact union exceeds thirty-two explicit domains"));
+    }
     if workspaces.is_empty() || workspaces.len() > MAX_ROOTS {
         return Err(invalid("artifact union requires one to thirty-two workspaces"));
     }
@@ -226,6 +236,19 @@ pub(crate) fn workspace_roots(workspaces: &[PathBuf]) -> io::Result<Vec<PathBuf>
         let graph = artifact_graph(&workspace)?;
         roots.extend(graph.roots);
         git_roots.extend(graph.git_roots);
+        if roots.len() > MAX_ROOTS {
+            return Err(invalid("Lake dependency graph exceeds thirty-two roots"));
+        }
+    }
+    for root in frozen_domains {
+        // These are already selected physical domains, not new Lake workspace
+        // entrypoints. In particular, never reinterpret a flattened package's
+        // own manifest outside its primary workspace map.
+        let canonical = root.canonicalize()?;
+        if !root.is_absolute() || canonical != *root || !canonical.is_dir() {
+            return Err(invalid("frozen artifact domain must be a canonical absolute directory"));
+        }
+        roots.insert(canonical);
         if roots.len() > MAX_ROOTS {
             return Err(invalid("Lake dependency graph exceeds thirty-two roots"));
         }

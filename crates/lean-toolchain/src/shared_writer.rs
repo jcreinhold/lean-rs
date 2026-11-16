@@ -57,6 +57,24 @@ pub fn project_artifact_root_union(workspaces: &[PathBuf]) -> io::Result<Vec<Pat
     crate::write_domains::workspace_roots(workspaces)
 }
 
+/// Expand workspace seeds and retain separately frozen physical artifact domains.
+///
+/// Only `workspaces` are interpreted as independently runnable Lake projects.
+/// `frozen_domains` must be canonical absolute directories and are merged without
+/// reading their manifests, even when a workspace no longer discovers them.
+/// The complete union retains the same size, deduplication and Git-cleanup
+/// ancestry checks. Unrelated domains require stable-parent ownership.
+///
+/// # Errors
+/// Returns unsupported workspace metadata, noncanonical or missing frozen
+/// directories, graph-size violations, or unsafe replacement-layout errors.
+pub fn project_artifact_roots_with_domains(
+    workspaces: &[PathBuf],
+    frozen_domains: &[PathBuf],
+) -> io::Result<Vec<PathBuf>> {
+    crate::write_domains::workspace_roots_with_domains(workspaces, frozen_domains)
+}
+
 /// Decode helper startup workspace roots; their actual domains still require locks.
 ///
 /// # Errors

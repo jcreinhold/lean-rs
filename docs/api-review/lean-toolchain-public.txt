@@ -353,6 +353,7 @@ pub fn lean_toolchain::shared_writer::inherited_writer_workspaces(&std::path::Pa
 pub fn lean_toolchain::shared_writer::previous_writer_stopped(&std::fs::File) -> std::io::error::Result<bool>
 pub fn lean_toolchain::shared_writer::project_artifact_root_union(&[std::path::PathBuf]) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub fn lean_toolchain::shared_writer::project_artifact_roots(&std::path::Path) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
+pub fn lean_toolchain::shared_writer::project_artifact_roots_with_domains(&[std::path::PathBuf], &[std::path::PathBuf]) -> std::io::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub fn lean_toolchain::shared_writer::project_lock_path(&std::path::Path) -> std::io::error::Result<std::path::PathBuf>
 pub fn lean_toolchain::shared_writer::run_shared_writer(&std::path::Path, &std::path::Path, &std::process::Command, core::time::Duration) -> std::io::error::Result<std::process::Output>
 pub fn lean_toolchain::shared_writer::writer_lock_receipt(&[(std::path::PathBuf, std::fs::File)]) -> std::io::error::Result<serde_json::value::Value>

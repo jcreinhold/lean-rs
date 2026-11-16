@@ -9,7 +9,7 @@ use lean_rs_host::host::{LeanPreparedHostArtifacts, prepare_host_artifacts, read
 use lean_rs_worker_protocol::protocol::HostSessionMode;
 use lean_rs_worker_protocol::types::LeanWorkerPreparedHostArtifacts;
 use lean_toolchain::CapabilityManifest;
-use lean_toolchain::shared_writer::{SHARED_WRITER_EXECUTABLE_ENV, project_artifact_root_union};
+use lean_toolchain::shared_writer::{SHARED_WRITER_EXECUTABLE_ENV, project_artifact_roots_with_domains};
 
 const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 const PREPARED_ENV: &str = "LEAN_RS_PREPARED_HOST_ARTIFACTS";
@@ -109,6 +109,8 @@ pub(crate) struct ManifestSnapshot {
     path: PathBuf,
     json: Vec<u8>,
     parsed: CapabilityManifest,
+    primary_workspace: PathBuf,
+    artifact_domains: Vec<PathBuf>,
 }
 impl ManifestSnapshot {
     fn read(path: &Path) -> io::Result<Self> {
@@ -118,7 +120,15 @@ impl ManifestSnapshot {
     }
     fn from_bytes(path: PathBuf, json: Vec<u8>) -> io::Result<Self> {
         let parsed = CapabilityManifest::from_bytes(&path, &json).map_err(|error| invalid(error.message()))?;
-        Ok(Self { path, json, parsed })
+        let primary_workspace = artifact_workspace(&parsed.primary_dylib)?;
+        let artifact_domains = Self::resolve_artifact_domains(&parsed)?;
+        Ok(Self {
+            path,
+            json,
+            parsed,
+            primary_workspace,
+            artifact_domains,
+        })
     }
     pub(crate) fn path(&self) -> &Path {
         &self.path
@@ -130,18 +140,35 @@ impl ManifestSnapshot {
         if read_bounded(&self.path)? != self.json {
             return Err(invalid("capability manifest changed before read admission"));
         }
+        self.validate_domains()
+    }
+    fn validate_domains(&self) -> io::Result<()> {
+        if artifact_workspace(&self.parsed.primary_dylib)? != self.primary_workspace
+            || Self::resolve_artifact_domains(&self.parsed)? != self.artifact_domains
+        {
+            return Err(invalid("capability artifact domains changed before read admission"));
+        }
         Ok(())
     }
-    fn workspaces(&self) -> io::Result<Vec<PathBuf>> {
-        std::iter::once(self.parsed.primary_dylib.as_path())
+    fn primary_workspace(&self) -> &Path {
+        &self.primary_workspace
+    }
+    fn artifact_domains(&self) -> &[PathBuf] {
+        &self.artifact_domains
+    }
+    // Library dependencies identify domains to protect, not independently
+    // runnable Lake workspaces. Their names resolve in a seed's flat map.
+    fn resolve_artifact_domains(parsed: &CapabilityManifest) -> io::Result<Vec<PathBuf>> {
+        let domains = std::iter::once(parsed.primary_dylib.as_path())
             .chain(
-                self.parsed
+                parsed
                     .dependencies
                     .iter()
                     .map(lean_toolchain::LeanLibraryDependency::path_ref),
             )
             .map(artifact_workspace)
-            .collect()
+            .collect::<io::Result<BTreeSet<_>>>()?;
+        Ok(domains.into_iter().collect())
     }
 }
 
@@ -150,8 +177,11 @@ impl ManifestSnapshot {
 pub(crate) struct SessionAdmission {
     pub(crate) prepared: LeanPreparedHostArtifacts,
     pub(crate) capability: Option<ManifestSnapshot>,
+    shim: ManifestSnapshot,
+    shim_workspace_seeds: Vec<PathBuf>,
     roots: Vec<PathBuf>,
-    workspaces: Vec<PathBuf>,
+    workspace_seeds: Vec<PathBuf>,
+    frozen_domains: Vec<PathBuf>,
     direct_library: Option<(PathBuf, PathBuf)>,
 }
 impl SessionAdmission {
@@ -168,15 +198,25 @@ impl SessionAdmission {
             prepared.manifest_path().to_path_buf(),
             prepared.manifest_json().as_bytes().to_vec(),
         )?;
-        let shim_roots = project_artifact_root_union(&shim.workspaces()?)?;
+        // The two bundled shim packages are independent build workspaces.
+        // Resolve those roots from their import paths, never from the DTO's
+        // claimed artifact union or from every dependency DLL in its manifest.
+        let shim_seeds = prepared
+            .shim_search_paths()
+            .iter()
+            .map(|path| artifact_workspace(path))
+            .collect::<io::Result<Vec<_>>>()?;
+        if shim_seeds.len() != 2
+            || shim_seeds.iter().collect::<BTreeSet<_>>().len() != 2
+            || !shim_seeds.iter().any(|root| root == shim.primary_workspace())
+        {
+            return Err(invalid(
+                "shim primary workspace requires two distinct import workspace seeds",
+            ));
+        }
+        let shim_roots = project_artifact_roots_with_domains(&shim_seeds, shim.artifact_domains())?;
         if shim_roots != prepared.artifact_roots() {
             return Err(invalid("prepared shim domains do not cover the exact manifest closure"));
-        }
-        for path in prepared.shim_search_paths() {
-            let root = artifact_workspace(path)?;
-            if !shim_roots.contains(&root) {
-                return Err(invalid("prepared import path lies outside the shim domains"));
-            }
         }
         let capability = match mode {
             HostSessionMode::Capability {
@@ -209,21 +249,35 @@ impl SessionAdmission {
             | HostSessionMode::ShimsOnly => None,
             _ => return Err(invalid("unsupported guarded host mode")),
         };
-        let mut workspaces = BTreeSet::from([PathBuf::from(project_root)]);
-        workspaces.extend(shim.workspaces()?);
+        let project = Path::new(project_root).canonicalize()?;
+        let project_roots = project_artifact_roots_with_domains(std::slice::from_ref(&project), &[])?;
+        let mut workspace_seeds = BTreeSet::from([project]);
+        workspace_seeds.extend(shim_seeds.iter().cloned());
+        let mut frozen_domains: BTreeSet<_> = shim_roots.into_iter().collect();
         if let Some(capability) = &capability {
-            workspaces.extend(capability.workspaces()?);
+            let primary = capability.primary_workspace().to_path_buf();
+            // A capability package already resolved through the project map
+            // cannot be reinterpreted as a standalone Lake workspace: its own
+            // dependency names still belong to that project's flattened map.
+            if !project_roots.contains(&primary) {
+                workspace_seeds.insert(primary);
+            }
+            frozen_domains.extend(capability.artifact_domains().iter().cloned());
         }
         if let Some((_, canonical)) = &direct_library {
-            workspaces.insert(artifact_workspace(canonical)?);
+            frozen_domains.insert(artifact_workspace(canonical)?);
         }
-        let workspaces: Vec<_> = workspaces.into_iter().collect();
-        let roots = project_artifact_root_union(&workspaces)?;
+        let workspace_seeds: Vec<_> = workspace_seeds.into_iter().collect();
+        let frozen_domains: Vec<_> = frozen_domains.into_iter().collect();
+        let roots = project_artifact_roots_with_domains(&workspace_seeds, &frozen_domains)?;
         Ok(Self {
             prepared,
             capability,
+            shim,
+            shim_workspace_seeds: shim_seeds,
             roots,
-            workspaces,
+            workspace_seeds,
+            frozen_domains,
             direct_library,
         })
     }
@@ -234,6 +288,16 @@ impl SessionAdmission {
         if read_bounded(self.prepared.manifest_path())? != self.prepared.manifest_json().as_bytes() {
             return Err(invalid("prepared shim manifest changed before read admission"));
         }
+        self.shim.validate_domains()?;
+        let shim_seeds = self
+            .prepared
+            .shim_search_paths()
+            .iter()
+            .map(|path| artifact_workspace(path))
+            .collect::<io::Result<Vec<_>>>()?;
+        if shim_seeds != self.shim_workspace_seeds {
+            return Err(invalid("prepared shim import domains changed before read admission"));
+        }
         if let Some(capability) = &self.capability {
             capability.validate()?;
         }
@@ -242,7 +306,7 @@ impl SessionAdmission {
         {
             return Err(invalid("project capability changed domains before admission"));
         }
-        if project_artifact_root_union(&self.workspaces)? != self.roots {
+        if project_artifact_roots_with_domains(&self.workspace_seeds, &self.frozen_domains)? != self.roots {
             return Err(invalid("Lake dependency domains changed before read admission"));
         }
         Ok(())
@@ -343,6 +407,72 @@ mod tests {
             )
             .expect("storage descriptor")
         }
+        fn output_root(root: PathBuf) -> PathBuf {
+            fs::create_dir_all(root.join(".lake/build/lib/lean")).expect("output directory");
+            fs::write(root.join(".lake/build/lib/libcap.dylib"), b"metadata fixture").expect("artifact");
+            root
+        }
+        fn lake_manifest(root: &Path, names: &[&str]) {
+            let packages = names
+                .iter()
+                .map(|name| {
+                    serde_json::json!({
+                        "name":name, "type":"git", "subDir":null,
+                        "manifestFile":"lake-manifest.json"
+                    })
+                })
+                .collect::<Vec<_>>();
+            fs::write(
+                root.join("lake-manifest.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "version":"1.3.0", "packagesDir":".lake/packages", "packages":packages
+                }))
+                .expect("Lake graph JSON"),
+            )
+            .expect("Lake graph");
+        }
+        fn flat_graph(root: &Path) -> (PathBuf, PathBuf) {
+            let t = Self::output_root(root.join(".lake/packages/T"));
+            let u = Self::output_root(root.join(".lake/packages/U"));
+            Self::lake_manifest(root, &["T", "U"]);
+            Self::lake_manifest(&t, &["U"]);
+            Self::lake_manifest(&u, &[]);
+            assert!(!t.join(".lake/packages").exists());
+            (t, u)
+        }
+        fn prepared_flat_shims(&self, t: &Path, u: &Path) -> LeanPreparedHostArtifacts {
+            let manifest = Self::manifest(
+                &self.host,
+                "lean_rs_host_shims",
+                "LeanRsHostShims",
+                &[self.interop.clone(), t.to_path_buf()],
+            );
+            let mut roots = vec![
+                self.host.clone(),
+                self.interop.clone(),
+                t.to_path_buf(),
+                u.to_path_buf(),
+            ];
+            roots.sort();
+            LeanPreparedHostArtifacts::from_snapshot(
+                manifest.clone(),
+                fs::read_to_string(manifest).expect("shim snapshot"),
+                roots,
+                vec![
+                    self.interop.join(".lake/build/lib/lean"),
+                    self.host.join(".lake/build/lib/lean"),
+                ],
+            )
+            .expect("flat shim descriptor")
+        }
+        fn mode_at(primary: &Path, dependencies: &[PathBuf]) -> HostSessionMode {
+            let manifest = Self::manifest(primary, "cap", "Cap", dependencies);
+            HostSessionMode::Capability {
+                package: "cap".to_owned(),
+                lib_name: "Cap".to_owned(),
+                manifest_path: Some(manifest.to_string_lossy().into_owned()),
+            }
+        }
         fn mode(&self) -> HostSessionMode {
             let manifest = Self::manifest(&self.semantic, "cap", "Cap", std::slice::from_ref(&self.dependency));
             HostSessionMode::Capability {
@@ -430,6 +560,290 @@ mod tests {
                 .expect_err("new domain must refuse")
                 .to_string()
                 .contains("dependency domains changed")
+        );
+    }
+    #[test]
+    fn separate_capability_uses_its_flat_workspace_map_for_dependency_dlls() {
+        let fixture = Fixture::new();
+        let (t, u) = Fixture::flat_graph(&fixture.semantic);
+        let mode = Fixture::mode_at(&fixture.semantic, std::slice::from_ref(&t));
+        let admission =
+            SessionAdmission::capture(fixture.project.to_str().expect("UTF8"), &mode, fixture.prepared(false))
+                .expect("dependency DLL is a protected domain, not a workspace seed");
+        let expected = BTreeSet::from([
+            fixture.project.clone(),
+            fixture.host.clone(),
+            fixture.interop.clone(),
+            fixture.semantic.clone(),
+            t.clone(),
+            u,
+        ])
+        .into_iter()
+        .collect::<Vec<_>>();
+        assert_eq!(admission.roots(), expected);
+        admission.validate_after_admission().expect("same flat graph after ACK");
+        assert!(
+            !t.join(".lake/packages").exists(),
+            "no standalone package materialization"
+        );
+    }
+    #[test]
+    fn shim_dependencies_use_only_the_two_independent_shim_workspace_maps() {
+        let fixture = Fixture::new();
+        let (t, u) = Fixture::flat_graph(&fixture.host);
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &HostSessionMode::ShimsOnly,
+            fixture.prepared_flat_shims(&t, &u),
+        )
+        .expect("shim dependency DLL must not be expanded as a standalone workspace");
+        let expected = BTreeSet::from([
+            fixture.project.clone(),
+            fixture.host.clone(),
+            fixture.interop.clone(),
+            t.clone(),
+            u,
+        ])
+        .into_iter()
+        .collect::<Vec<_>>();
+        assert_eq!(admission.roots(), expected);
+        admission.validate_after_admission().expect("same shim graph after ACK");
+        assert!(!t.join(".lake/packages").exists());
+    }
+    #[test]
+    fn capability_primary_already_in_project_map_is_not_reexpanded() {
+        let fixture = Fixture::new();
+        let (t, u) = Fixture::flat_graph(&fixture.project);
+        let mode = Fixture::mode_at(&t, std::slice::from_ref(&u));
+        let admission =
+            SessionAdmission::capture(fixture.project.to_str().expect("UTF8"), &mode, fixture.prepared(false))
+                .expect("capability primary resolves in its containing project map");
+        let expected = BTreeSet::from([
+            fixture.project.clone(),
+            fixture.host.clone(),
+            fixture.interop.clone(),
+            t.clone(),
+            u,
+        ])
+        .into_iter()
+        .collect::<Vec<_>>();
+        assert_eq!(admission.roots(), expected);
+        admission
+            .validate_after_admission()
+            .expect("project map remains stable");
+        assert!(!t.join(".lake/packages").exists());
+    }
+    #[test]
+    fn frozen_dependency_domain_does_not_discover_an_unrelated_workspace_graph() {
+        let fixture = Fixture::new();
+        fs::write(fixture.dependency.join("lake-manifest.json"), b"not a workspace graph").expect("unrelated metadata");
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &fixture.mode(),
+            fixture.prepared(false),
+        )
+        .expect("captured DLL domains do not authorize unrelated graph discovery");
+        assert!(admission.roots().contains(&fixture.dependency));
+        admission
+            .validate_after_admission()
+            .expect("immutable frozen domain remains protected");
+    }
+    #[test]
+    fn added_domain_in_captured_capability_workspace_refuses_after_ack() {
+        let fixture = Fixture::new();
+        let (t, _u) = Fixture::flat_graph(&fixture.semantic);
+        let mode = Fixture::mode_at(&fixture.semantic, std::slice::from_ref(&t));
+        let admission =
+            SessionAdmission::capture(fixture.project.to_str().expect("UTF8"), &mode, fixture.prepared(false))
+                .expect("capture capability graph");
+        let v = Fixture::output_root(fixture.semantic.join(".lake/packages/V"));
+        Fixture::lake_manifest(&v, &[]);
+        Fixture::lake_manifest(&fixture.semantic, &["T", "U", "V"]);
+        assert!(
+            admission
+                .validate_after_admission()
+                .expect_err("no union extension after ACK")
+                .to_string()
+                .contains("dependency domains changed")
+        );
+        assert!(!admission.roots().contains(&v));
+    }
+    #[test]
+    fn added_domain_in_captured_shim_workspace_refuses_after_ack() {
+        let fixture = Fixture::new();
+        let (t, u) = Fixture::flat_graph(&fixture.host);
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &HostSessionMode::ShimsOnly,
+            fixture.prepared_flat_shims(&t, &u),
+        )
+        .expect("capture shim graph");
+        let v = Fixture::output_root(fixture.host.join(".lake/packages/V"));
+        Fixture::lake_manifest(&v, &[]);
+        Fixture::lake_manifest(&fixture.host, &["T", "U", "V"]);
+        assert!(
+            admission
+                .validate_after_admission()
+                .expect_err("no shim union extension after ACK")
+                .to_string()
+                .contains("dependency domains changed")
+        );
+        assert!(!admission.roots().contains(&v));
+    }
+    #[test]
+    fn descriptor_cannot_self_authorize_an_extra_shim_domain() {
+        let fixture = Fixture::new();
+        let prepared = fixture.prepared(false);
+        let mut roots = prepared.artifact_roots().to_vec();
+        roots.push(fixture.dependency.clone());
+        roots.sort();
+        let prepared = LeanPreparedHostArtifacts::from_snapshot(
+            prepared.manifest_path().to_path_buf(),
+            prepared.manifest_json().to_owned(),
+            roots,
+            prepared.shim_search_paths().to_vec(),
+        )
+        .expect("storage descriptor alone does not prove admission coverage");
+        assert!(
+            SessionAdmission::capture(
+                fixture.project.to_str().expect("UTF8"),
+                &HostSessionMode::ShimsOnly,
+                prepared,
+            )
+            .err()
+            .expect("extra root must refuse")
+            .to_string()
+            .contains("exact manifest closure")
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_capability_dependency_cannot_extend_frozen_domains_after_ack() {
+        let fixture = Fixture::new();
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &fixture.mode(),
+            fixture.prepared(false),
+        )
+        .expect("capture dependency artifact identity");
+        let outside = Fixture::output_root(fixture.directory.join("outside"));
+        let dependency = fixture.dependency.join(".lake/build/lib/libcap.dylib");
+        fs::remove_file(&dependency).expect("replace only fixture DLL");
+        std::os::unix::fs::symlink(outside.join(".lake/build/lib/libcap.dylib"), dependency)
+            .expect("retarget dependency alias");
+        assert!(
+            admission
+                .validate_after_admission()
+                .expect_err("changed DLL domain must refuse")
+                .to_string()
+                .contains("artifact domains changed")
+        );
+        assert!(!admission.roots().contains(&outside));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_shim_dependency_cannot_extend_frozen_domains_after_ack() {
+        let fixture = Fixture::new();
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &HostSessionMode::ShimsOnly,
+            fixture.prepared(false),
+        )
+        .expect("capture shim dependency identity");
+        let outside = Fixture::output_root(fixture.directory.join("outside"));
+        let dependency = fixture.interop.join(".lake/build/lib/libcap.dylib");
+        fs::remove_file(&dependency).expect("replace only fixture DLL");
+        std::os::unix::fs::symlink(outside.join(".lake/build/lib/libcap.dylib"), dependency)
+            .expect("retarget shim dependency alias");
+        assert!(
+            admission
+                .validate_after_admission()
+                .expect_err("changed shim DLL domain must refuse")
+                .to_string()
+                .contains("artifact domains changed")
+        );
+        assert!(!admission.roots().contains(&outside));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_shim_import_path_cannot_extend_frozen_domains_after_ack() {
+        let fixture = Fixture::new();
+        let admission = SessionAdmission::capture(
+            fixture.project.to_str().expect("UTF8"),
+            &HostSessionMode::ShimsOnly,
+            fixture.prepared(false),
+        )
+        .expect("capture shim import domain");
+        let outside = Fixture::output_root(fixture.directory.join("outside"));
+        let import = fixture.interop.join(".lake/build/lib/lean");
+        fs::remove_dir(&import).expect("replace only empty fixture import directory");
+        std::os::unix::fs::symlink(outside.join(".lake/build/lib/lean"), import).expect("retarget shim import alias");
+        assert!(
+            admission
+                .validate_after_admission()
+                .expect_err("changed import domain must refuse")
+                .to_string()
+                .contains("shim import domains changed")
+        );
+        assert!(!admission.roots().contains(&outside));
+    }
+    #[test]
+    fn descriptor_cannot_omit_the_shim_primary_workspace_seed_and_its_graph() {
+        let fixture = Fixture::new();
+        let _graph = Fixture::flat_graph(&fixture.host);
+        let prepared = fixture.prepared(false);
+        let mut roots = vec![
+            fixture.host.clone(),
+            fixture.interop.clone(),
+            fixture.dependency.clone(),
+        ];
+        roots.sort();
+        let prepared = LeanPreparedHostArtifacts::from_snapshot(
+            prepared.manifest_path().to_path_buf(),
+            prepared.manifest_json().to_owned(),
+            roots,
+            vec![
+                fixture.interop.join(".lake/build/lib/lean"),
+                fixture.dependency.join(".lake/build/lib/lean"),
+            ],
+        )
+        .expect("storage descriptor must still establish independent seeds");
+        assert!(
+            SessionAdmission::capture(
+                fixture.project.to_str().expect("UTF8"),
+                &HostSessionMode::ShimsOnly,
+                prepared,
+            )
+            .err()
+            .expect("missing primary seed must refuse")
+            .to_string()
+            .contains("shim primary workspace")
+        );
+    }
+    #[test]
+    fn descriptor_cannot_replace_the_second_shim_workspace_with_a_duplicate() {
+        let fixture = Fixture::new();
+        let prepared = fixture.prepared(false);
+        let prepared = LeanPreparedHostArtifacts::from_snapshot(
+            prepared.manifest_path().to_path_buf(),
+            prepared.manifest_json().to_owned(),
+            prepared.artifact_roots().to_vec(),
+            vec![
+                fixture.host.join(".lake/build/lib/lean"),
+                fixture.host.join(".lake/build/lib/lean"),
+            ],
+        )
+        .expect("storage descriptor must still establish distinct seeds");
+        assert!(
+            SessionAdmission::capture(
+                fixture.project.to_str().expect("UTF8"),
+                &HostSessionMode::ShimsOnly,
+                prepared,
+            )
+            .err()
+            .expect("duplicate seed must refuse")
+            .to_string()
+            .contains("two distinct import workspace seeds")
         );
     }
 }
