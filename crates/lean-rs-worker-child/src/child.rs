@@ -572,6 +572,7 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 if shared_reads {
+                    let allow_wait = artifact_epochs.is_none();
                     let read = std::env::var_os("LEAN_HOST_MCP_WRITER_EXECUTABLE")
                         .ok_or_else(|| std::io::Error::other("shared artifact helper is not configured"))
                         .and_then(|helper| {
@@ -579,11 +580,20 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
                                 Path::new(&helper),
                                 admission.as_ref().map_or(&[], SessionAdmission::roots),
                                 Duration::from_secs(30),
+                                allow_wait,
                                 guardian.as_mut(),
                             )
                         });
                     let read = match read {
                         Ok(read) => read,
+                        Err(error) if !allow_wait && lean_toolchain::shared_reader::is_admission_contention(&error) => {
+                            // Only the one-pass pre-transfer collector creates
+                            // this exact typed error. No body or new guardian
+                            // retain ran. The parent confirms the old generation
+                            // stopped, then permits one cold session attempt.
+                            write_response(&writer, Response::HostArtifactEpochChanged)?;
+                            continue;
+                        }
                         Err(error) => {
                             read_admission_failed = true;
                             write_response(

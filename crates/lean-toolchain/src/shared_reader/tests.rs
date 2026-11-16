@@ -241,6 +241,7 @@ fn delayed_proxy_helper_is_reaped_after_bounded_drop() -> io::Result<()> {
         _directory: directory,
         epoch: "fixture".to_owned(),
         reaper,
+        diagnostics: Diagnostics::empty(),
     };
     let start = Instant::now();
     drop(proxy);

@@ -238,6 +238,7 @@ pub mod lean_toolchain::shared_reader
 pub struct lean_toolchain::shared_reader::SharedReadProxy
 impl lean_toolchain::shared_reader::SharedReadProxy
 pub fn lean_toolchain::shared_reader::SharedReadProxy::acquire(&std::path::Path, &std::path::Path, core::time::Duration) -> std::io::error::Result<Self>
+pub fn lean_toolchain::shared_reader::SharedReadProxy::acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
 pub fn lean_toolchain::shared_reader::SharedReadProxy::epoch(&self) -> &str
 pub fn lean_toolchain::shared_reader::SharedReadProxy::validate(&mut self) -> std::io::error::Result<()>
 impl core::ops::drop::Drop for lean_toolchain::shared_reader::SharedReadProxy
@@ -252,9 +253,11 @@ impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_reader::Sha
 pub struct lean_toolchain::shared_reader::SharedReader
 impl lean_toolchain::shared_reader::SharedReader
 pub fn lean_toolchain::shared_reader::SharedReader::acquire(&std::path::Path, &std::path::Path, core::time::Duration) -> std::io::error::Result<Self>
+pub fn lean_toolchain::shared_reader::SharedReader::acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
 pub fn lean_toolchain::shared_reader::SharedReader::epoch(&self) -> &str
 pub fn lean_toolchain::shared_reader::SharedReader::guardian_loan(&self, &std::path::Path) -> std::io::error::Result<lean_toolchain::native_guardian::GuardianReadLoan<'_>>
 pub fn lean_toolchain::shared_reader::SharedReader::inherit_by_body_children(&self) -> std::io::error::Result<()>
+pub fn lean_toolchain::shared_reader::SharedReader::try_acquire_union(&std::path::Path, &[std::path::PathBuf], core::time::Duration, &impl core::ops::function::Fn() -> bool + ?core::marker::Sized) -> std::io::error::Result<alloc::vec::Vec<Self>>
 impl core::fmt::Debug for lean_toolchain::shared_reader::SharedReader
 pub fn lean_toolchain::shared_reader::SharedReader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for lean_toolchain::shared_reader::SharedReader
@@ -264,6 +267,7 @@ impl core::marker::Unpin for lean_toolchain::shared_reader::SharedReader
 impl core::marker::UnsafeUnpin for lean_toolchain::shared_reader::SharedReader
 impl core::panic::unwind_safe::RefUnwindSafe for lean_toolchain::shared_reader::SharedReader
 impl core::panic::unwind_safe::UnwindSafe for lean_toolchain::shared_reader::SharedReader
+pub fn lean_toolchain::shared_reader::is_admission_contention(&std::io::error::Error) -> bool
 pub mod lean_toolchain::shared_writer
 pub enum lean_toolchain::shared_writer::WriterDisposition
 pub lean_toolchain::shared_writer::WriterDisposition::NotStarted

@@ -319,23 +319,17 @@ pub(crate) fn ready_artifacts(
     let helper = std::env::var_os(lean_toolchain::shared_writer::SHARED_WRITER_EXECUTABLE_ENV)
         .ok_or_else(|| artifact_error(std::io::Error::other("ready probe requires configured artifact helper")))?;
     let started = Instant::now();
-    let mut ordered = roots
-        .into_iter()
-        .map(|root| lean_toolchain::shared_writer::project_lock_path(&root).map(|lock| (lock, root)))
-        .collect::<std::io::Result<Vec<_>>>()
-        .map_err(artifact_error)?;
-    ordered.sort();
-    let mut readers = Vec::with_capacity(ordered.len());
-    for (_, root) in ordered {
-        readers.push(
-            lean_toolchain::shared_reader::SharedReadProxy::acquire(
-                Path::new(&helper),
-                &root,
-                Duration::from_secs(30).saturating_sub(started.elapsed()),
-            )
-            .map_err(artifact_error)?,
-        );
-    }
+    // The complete pre-body admission owns one original budget. Contention
+    // releases every partial proxy, confirms those pure helpers stopped, then
+    // waits without retaining any SH lock. Hard/uncertain failures do not retry.
+    let mut readers = lean_toolchain::shared_reader::SharedReadProxy::acquire_union(
+        Path::new(&helper),
+        &roots,
+        Duration::from_secs(30).saturating_sub(started.elapsed()),
+        &|| false,
+    )
+    .map_err(artifact_error)?;
+    validate_ready_artifact_domains(&workspaces, &roots)?;
     if interop_capability_builder(&interop_root)
         .probe_ready()
         .map_err(|error| artifact_error(std::io::Error::other(error)))?
@@ -352,7 +346,20 @@ pub(crate) fn ready_artifacts(
     for reader in &mut readers {
         reader.validate().map_err(artifact_error)?;
     }
+    validate_ready_artifact_domains(&workspaces, &roots)?;
     Ok(result)
+}
+
+#[cfg(unix)]
+fn validate_ready_artifact_domains(workspaces: &[PathBuf], captured: &[PathBuf]) -> LeanResult<()> {
+    let current = lean_toolchain::shared_writer::project_artifact_root_union(workspaces).map_err(artifact_error)?;
+    if current != captured {
+        return Err(artifact_error(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "ready artifact domains changed during read admission",
+        )));
+    }
+    Ok(())
 }
 
 #[allow(
@@ -419,6 +426,29 @@ mod tests {
         let roots = project.project().artifact_roots().expect("existing source roots");
         assert_eq!(roots, vec![project.canonical_root()]);
         assert!(!project.canonical_root().join(".lake").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ready_artifact_admission_rejects_graph_drift_without_refreshing_captured_roots() {
+        let project = TempProject::new("ready-root");
+        let dependency = TempProject::new("ready-dependency");
+        project.write_manifest(r#"{"packages":[]}"#);
+        dependency.write_manifest(r#"{"packages":[]}"#);
+        let workspaces = vec![project.canonical_root()];
+        let captured = lean_toolchain::shared_writer::project_artifact_root_union(&workspaces)
+            .expect("capture initial ready domains");
+        validate_ready_artifact_domains(&workspaces, &captured).expect("unchanged captured domains");
+        project.write_manifest(
+            &serde_json::json!({"version":"1.3.0","packages":[{"name":"dependency","type":"path","dir":dependency.canonical_root(),"manifestFile":"lake-manifest.json"}]}).to_string(),
+        );
+        let error = validate_ready_artifact_domains(&workspaces, &captured)
+            .expect_err("a newly required domain was not protected by this admission");
+        assert!(error.to_string().contains("domains changed"));
+        assert_eq!(
+            captured, workspaces,
+            "the captured roots were never extended after admission"
+        );
     }
 
     #[test]

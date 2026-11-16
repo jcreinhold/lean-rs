@@ -20,6 +20,7 @@ impl ArtifactReadScope {
         helper: &Path,
         roots: &[PathBuf],
         timeout: Duration,
+        allow_wait: bool,
         guardian: Option<&mut GuardianHandle>,
     ) -> io::Result<Self> {
         let guardian =
@@ -43,25 +44,29 @@ impl ArtifactReadScope {
         if domains.is_empty() {
             return Err(io::Error::other("host has no shared artifact domains"));
         }
-        let mut readers = Vec::with_capacity(domains.len());
+        // This child has no request-local cancellation flag: the existing
+        // parent lifeline and supervisor cancel its owned process group. Both
+        // collector modes retain this operation's one original time budget.
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let readers = if allow_wait {
+            SharedReader::acquire_union(helper, &domains, remaining, &|| false)?
+        } else {
+            // The guardian still owns the previous call's SH descriptions for
+            // this generation. Waiting here would deadlock a demanded writer
+            // against this already-admitted call. Typed contention is returned
+            // before any inheritance or new guardian transfer, so the parent
+            // can cycle the old generation before one fresh pre-body attempt.
+            SharedReader::try_acquire_union(helper, &domains, remaining, &|| false)?
+        };
         let mut epochs = Vec::with_capacity(domains.len());
-        for root in &domains {
-            let remaining = timeout.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "artifact read admission expired",
-                ));
-            }
-            let reader = SharedReader::acquire(helper, root, remaining)?;
-            // This code runs inside the controlled native worker, before its
-            // body can spawn descendants, never inside the multithreaded broker.
+        for (reader, root) in readers.iter().zip(&domains) {
+            // Acquisition and all contention retries finish before the first
+            // inheritable descriptor or irreversible guardian retain/ACK.
             reader.inherit_by_body_children()?;
             epochs.push(LeanWorkerArtifactReadEpoch {
                 project_root: root.to_string_lossy().into_owned(),
                 epoch: reader.epoch().to_owned(),
             });
-            readers.push(reader);
         }
         let loans = readers
             .iter()

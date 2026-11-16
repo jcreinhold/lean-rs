@@ -143,6 +143,17 @@ process fences remain authoritative after helper or caller loss. Demand files ar
 are never unlinked as recovery. Embedders retaining warm readers must fence matching new admissions and retire those
 readers only after their admitted calls finish; the MCP broker performs this automatically without a manual pool drain.
 
+Whole-domain readers use `SharedReader::acquire_union` or `SharedReadProxy::acquire_union` before any body. The
+complete canonical input union stays fixed; acquisition sorts lock paths but returns guards in input order. A complete
+short gate preflight closes before helpers are spawned. Only opted-in normal helper exit 75, observed before any
+transfer or readiness bytes, permits another admission round. The descriptor path rechecks its listener after reap;
+the proxy path requires empty output and actual helper exit. Ordinary helper, transport, descriptor, identity and
+cleanup errors remain hard, with bounded stage/status/stderr diagnostics. Every tentative descriptor closes first;
+partial proxies all receive EOF and their actual helper exits are confirmed before waiting. One absolute deadline and
+cancellation predicate cover all rounds. A warm owner retaining earlier guardian custody uses one-pass
+`try_acquire_union` and must retire that generation on typed contention rather than wait on its own old locks.
+No metadata, import, initializer, guardian acknowledgement or target body is replayed by these admission loops.
+
 Writers acquire all project locks in globally sorted path order, revalidate the graph under those locks, and retry a
 changed graph only before launch within the original admission budget. The helper validates every borrowed domain before
 ACK and rechecks graph coverage and inode identity before each GO. Loan order still names the primary project first,
