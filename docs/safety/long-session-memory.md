@@ -1,34 +1,27 @@
-# Long-Session Memory
+# Long-session memory
 
-Repeated fresh `Lean.importModules` calls in one process drive resident set size from tens of MiB into the GiB range and
-never give it back. Steady operations against a *reused* imported environment (bulk introspection, elaboration, kernel
-checks, `MetaM`) do not accumulate. The shipped consumer pattern follows directly: pool imported environments, and cycle
-the worker process once an import sweep has retained more than the generation's byte budget.
+Repeated fresh `Lean.importModules` calls can retain GiB of process-lifetime state even after sessions drop. The
+measured warm-session workloads stayed approximately flat. Reuse imported environments and bound fresh imports per child
+generation; process exit resets the retained state. [Production hosting](../production-hosting.md) owns the operational
+pattern. This page preserves the retention model, diagnostic methods, and recorded measurements.
 
-For a new long-running Rust host, start with [`docs/production-hosting.md`](../production-hosting.md). This document is
-the retention model, measurements, and diagnostic background behind that pattern.
+## Measurement limits
 
-The rest of this document records what `Drop` reclaims, what the reproducer measures, and what shape the measurement has
-on the supported toolchains.
+RSS includes clean file-backed `.olean` pages, so it can fall under pressure while unreclaimable memory grows. In the
+recorded Mathlib-scale downstream sample, ΔRSS / Δ`phys_footprint` was 5.78–5.83 on first import, then reached 0.00
+while retained memory grew by 2.3–5.4 GB per import. macOS physical footprint comes from
+`proc_pid_rusage(RUSAGE_INFO_V2).ri_phys_footprint`; Linux `Private_Dirty` from `smaps_rollup` is a separate
+private-page measure. Neither is the same quantity as RSS. The current worker RSS policy remains best effort.
 
-## Read the numbers below with two corrections
+`LeanWorkerImportStats::non_memory_mapped_region_bytes` predicted Δ`phys_footprint` in that sample with slope 1.091 and
+R² 0.962 (n = 12, first import of each process excluded). This is workload evidence for the residue counter, not a
+universal conversion from import stats to process memory.
 
-**Every RSS figure in this document is an upper bound of the wrong quantity, and under memory pressure it moves the
-wrong way.** RSS counts clean, file-backed `.olean` pages that cost nothing to reclaim. Measured against a Mathlib-scale
-project, ΔRSS / Δ`phys_footprint` is 5.78–5.83 on the first import in a process and then falls to **0.00** — RSS
-*decreased* by the OS evicting clean mapped pages while the unreclaimable total grew by 2.3–5.4 GB per import. It is
-anti-correlated with what matters, not merely inflated. The quantity a policy should read is physical footprint (macOS
-`proc_pid_rusage(RUSAGE_INFO_V2).ri_phys_footprint`, Linux `/proc/<pid>/smaps_rollup` `Private_Dirty`), or — with no
-syscall at all — `LeanWorkerImportStats::non_memory_mapped_region_bytes`, which predicts Δ`phys_footprint` with slope
-1.091 and R² 0.962 (n = 12, first import of each process excluded).
-
-**Every table below was measured on the workspace fixture, whose import sets share ~99% of their closure** (they all
-import `Lean`). That is not a representative workload, and the difference is not a constant factor: on real per-file
-headers, the mmap byte fraction is 0.994 on the *first* import in a process and 0.000–0.29 on every later one, because
-`.olean` compacted regions are position-dependent and each `importModules` gets a fresh `ImportState` with no region
-cache. Residue is therefore the profile's *whole* closure on every import after the first — 10–18 MB for the first,
-2.0–4.5 GB for each later one — and profiles that overlap more cost *more*, not less: five near-identical profiles
-retained 16.0 GiB where five unrelated ones retained 9.6 GiB. Treat the fixture tables as shapes, not magnitudes.
+The fixture tables below use import sets sharing about 99% of their closure, since each imports `Lean`. On the recorded
+real per-file headers, mmap byte fraction was 0.994 on first import and 0.000–0.29 later: `.olean` compacted regions are
+position-dependent and each `importModules` gets a fresh `ImportState`. Recorded residue was 10–18 MB on first import
+and 2.0–4.5 GB later. Five near-identical profiles retained 16.0 GiB; five unrelated profiles retained 9.6 GiB. The
+fixture shows retention and reuse behavior; its magnitudes do not predict a downstream peak.
 
 ## Retention Model
 
@@ -71,10 +64,12 @@ cd fixtures/lean && lake build && cd -
 LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
 ```
 
-The default workload is bounded so it can be run on a developer machine without reproducing the OOM failure mode:
+The example's fallback workload is bounded. Repository Cargo configuration overrides the import count to one; inspect
+[`.cargo/config.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.cargo/config.toml) and explicit environment
+overrides when reproducing a result:
 
 - 4 fresh import/drop acquisitions through a zero-capacity pool with `max_fresh_imports=4`.
-- 4 bounded-pool acquisitions through a pool with capacity 4 and the same fresh-import budget.
+- 4 bounded-pool acquisitions through a pool with capacity 1 and the same fresh-import budget.
 - 64 `query_declarations_bulk` calls over 16 fixture names.
 - 64 elaboration calls, 50/50 success vs. diagnostic-producing terms.
 - Snapshots before/after runtime init, host/capability load, import loops, bulk introspection, elaboration, drop, and a
@@ -153,8 +148,8 @@ Normal host sessions now default to the `Private` full-session profile: `importA
 and `loadExts := true`. This is a pre-1.0 behavior correction for unacceptable memory growth, not a
 compatibility-preservation exercise. `ExportedPublic` and `Server` are narrower on paper, but current fixture imports
 are non-`module` files and Lean rejects exported/server-level imports of them with
-`cannot import non-module ... from module`. The old behavior remains available only as the explicit
-` FullPrivateCompat ` profile: ` importAll := true `, import level `.private `, and ` loadExts := true`.
+`cannot import non-module ... from module`. The old behavior remains available only as the explicit `FullPrivateCompat`
+profile: `importAll := true`, import level `.private`, and `loadExts := true`.
 
 The import-mode matrix compares the same fixture imports across:
 
@@ -302,7 +297,7 @@ does not reset Lean import state.
 The numbers below are local snapshots on macOS aarch64 against `lean=4.29.1`. They are not portable: macOS RSS is noisy
 under memory pressure and compression, and absolute KiB values vary between machines. The *shape*—order-of-magnitude
 growth during fresh imports, flat reuse, flat introspection and elaboration, no return to baseline after drop—is the
-load-bearing claim and reproduces across the supported window.
+load-bearing claim and was observed in the recorded runs.
 
 Fresh-import-then-drop, capacity 0:
 
@@ -319,10 +314,10 @@ Fresh-import-then-drop, capacity 0:
 Sixteen imports of the fixture workload move RSS from ~50 MiB into the multi-GiB range, despite a pool capacity of zero
 and every session environment being dropped immediately.
 
-Read the series as evidence that dropping reclaims nothing, not as a growth *rate*: it is not monotone (3.73 → 3.85 →
-2.90 → 2.39 GB), because macOS RSS under compression is noisy enough at this scale to move the reading in either
-direction. The marginal cost of one import is measured separately, by the `pooled-distinct` arms below, which compare
-fresh processes at a fixed import count instead of sampling one process over time.
+Read the series as evidence that dropping does not return process memory to baseline, not as a growth *rate*: it is not
+monotone (3.73 → 3.85 → 2.90 → 2.39 GB), because macOS RSS under compression is noisy enough at this scale to move the
+reading in either direction. The marginal cost of one import is measured separately, by the `pooled-distinct` arms
+below, which compare fresh processes at a fixed import count instead of sampling one process over time.
 
 Full sweep with `LEAN_RS_LONG_SESSION_IMPORTS=64`:
 
@@ -333,6 +328,10 @@ Full sweep with `LEAN_RS_LONG_SESSION_IMPORTS=64`:
 | Bulk introspection | 0 | 16 | 3,662,176 → 3,662,224 |
 | Elaboration (256 ok, 256 fail) | 0 | 1 | 3,668,672 → 3,532,464 |
 | After drops + steady-state | n/a | n/a | 3,532,464 → 3,487,472 |
+
+In the 2026-06-08 pool fixture capture, parent RSS ranged from 2,144 to 3,456 KiB; cold requests were about 215 ms and
+warm reuse about 5–6 ms. Child peak RSS was 419,616 KiB. These are local workload measurements, not service-level
+bounds.
 
 The pool counters confirm the Rust-side bookkeeping:
 
@@ -376,8 +375,8 @@ repetitions; the alternating arm is the noisy one, for the reason recorded above
 N=2.
 
 Open questions the reproducer does not answer: how the retained bytes split between interned names, globally registered
-module state, compacted `.olean` regions, and mimalloc arena retention; behaviour on mathlib or other large downstream
-module sets; cross-toolchain variation beyond the current resolved version.
+module state, compacted `.olean` regions, and mimalloc arena retention; how these fixture measurements generalize beyond
+the separately recorded downstream sample; cross-toolchain variation.
 
 ## Recycling API
 
@@ -395,182 +394,39 @@ global stop-the-world / finalize / reinitialize contract strong enough to back t
 rejected for a separate reason: the measured growth is not attributable to loaded dylib handles or symbol-resolution
 caches.
 
-## Consumer Pattern
+## Pooling and cycling
 
-The production caller story is summarized in [`docs/production-hosting.md`](../production-hosting.md): bounded worker
-pool, total and per-worker child RSS budgets, `LeanWorkerRestartPolicy::memory_bounded`, warm-session reuse, batched
-repeated work, and typed resource-failure reporting. The rest of this section explains the memory model that motivates
-those choices.
-
-Reuse imported environments. Keep a small `SessionPool` keyed by the canonical project root, ordered import set, and
-import profile, then run introspection, elaboration, kernel checks, and `MetaM` calls against pooled sessions. Import
-order is preserved deliberately; Lean imports are not sorted as a cache convenience. For same-process hosts that may see
-many distinct import sets, configure `SessionPoolMemoryPolicy` so cache-miss imports fail before the process crosses a
-fresh-import or RSS budget. Steady operations against a warm environment do not accumulate RSS.
-
-Avoid repeatedly creating fresh imported environments in one process. If a workload must sweep many distinct import
-sets, put a process boundary around the sweep: restart the worker after a bounded number of fresh imports. Sixty-four
-fresh imports of the fixture workload were already enough to push RSS into the multi-GiB range; use a lower limit for
-larger module sets.
-
-Call `SessionPool::drain()` when a worker is idle, when a project closes, or before handing a worker to a different
-stable import set. Drain cadence is policy for the embedding application: drain releases cached environments, but cannot
-bound workloads that continuously create fresh import sets. Those still require cycling the worker process at a bounded
-import count or RSS ceiling.
-
-The worker crates provide that process-cycling policy. Their restart policy can cycle explicitly, before a configured
-request count, before a configured import-like request count, before a configured number of retained **import residue
-bytes**, after an idle interval, or when a best-effort child RSS sample reaches a ceiling. Memory guardrail errors
-include the latest Lean import stats when a session has opened in that process, so an RSS refusal can be read next to
-the retained `.olean` region shape that preceded it.
-
-**Prefer `max_import_residue_bytes` to `max_imports`, and prefer either to the RSS ceiling.** An import count is not a
-memory bound: measured on real per-file headers, the same four imports retained 9.6 GiB on one workload and 16.0 GiB on
-another. `max_import_residue_bytes` accumulates `LeanWorkerImportStats::non_memory_mapped_region_bytes`, which is what
-the child cannot reclaim, needs no `ps` fork, and — see the corrections at the top of this document — is not confounded
-by clean mapped pages the way RSS is. Keep `max_imports` set as a high backstop rather than as the primary bound; it is
-the only thing between a residue-accounting failure and an OS kill, and it costs one `u64` compare.
-
-Size the session pool separately from the restart bound, via `LeanWorkerConfig::session_pool_capacity`. Deriving one
-from the other means the parent recycles the child exactly where the pool would have begun evicting, so the pool never
-gets to do its job. The two answer different questions: the budget bounds bytes per child generation, the capacity
-bounds how many warm profiles that generation holds, and a held environment costs ~2–4% of the import it saves.
-
-Worker children also accept `LEAN_RS_LEAN_MAX_MEMORY_KIB` as an opt-in Lean runtime memory limit. Lean checks this limit
-periodically and can throw before the OS kills the process. It is not reclamation: it does not free compacted regions,
-extension state, interned names, allocator arenas, or runtime globals, and process cycling remains the reset boundary.
-
-The worker memory reproducer is:
-
-```sh
-cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
-LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
-LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
-cargo run -p lean-rs-worker-child --example memory_cycling
-```
-
-On the 2026-06-08 macOS aarch64 rebaseline with a 2 GiB cap, cycling after every fresh full-session import kept each
-child near 1,194,368 KiB. Allowing two fresh imports in one child reached 3,236,416 KiB, above that local budget. The
-current 1,572,864 KiB default keeps the one-import policy but avoids automatically widening to the two-import candidate.
-This supports the operational claim: process cycling bounds retained RSS for this workload; in-process drain does not
-reset it.
-
-`LeanWorkerPool` applies the same memory fact at the local orchestration layer. Pool policy can reject new distinct
-workers when known total child RSS reaches a budget, cycle a warm worker when its sampled RSS reaches a per-worker
-ceiling, cycle idle workers, and bound admission waits for a full pool. RSS sampling remains best effort and
-platform-specific: an unavailable sample is recorded as unavailable, not treated as proof that the pool is under budget.
-
-Cold import admission is intentionally local to the existing Rust boundaries:
-
-| Path | Admission shape |
-| --- | --- |
-| Direct `LeanCapabilities::session` | no pooling; caller owns process budget |
-| Same-process `SessionPool` cache miss | `SessionPoolMemoryPolicy` refuses before `Lean.importModules` |
-| Same-process `SessionPool` cache hit | warm reuse; no fresh import admission |
-| `LeanWorkerCapabilityBuilder::open` | single worker child; `LeanWorkerRestartPolicy` checks import-like session open before it enters the child |
-| Explicit worker `open_session` / `open_session_with_imports` | reuses the child's live session when the key matches, else supervisor records import-like admission and applies restart/RSS policy first |
-| `LeanWorkerPool::acquire_lease` with a new session key | `&mut LeanWorkerPool` serializes one pool; `max_workers` and total child RSS are checked before `builder.open()` |
-| Lease command after `session_missing` | reopens through the same worker supervisor admission path |
+[Production hosting](../production-hosting.md) owns pool sizing, residue/RSS limits, admission, retries, and typed
+resource failures. The [profiling guide](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md) owns the
+bounded worker/pool reproducer commands and report fields. These controls act at lifecycle boundaries; they do not
+prevent a single import from overshooting a budget. `LEAN_RS_LEAN_MAX_MEMORY_KIB` changes Lean's process-global limit.
+An overrun can abort through an uncaught foreign exception, so it is a contained-process guardrail rather than a
+recoverable Rust error or reclamation API.
 
 ### Pooled worker sessions
 
-The worker child answers a repeated `OpenHostSession` from its live session when
-`(project_root, mode, imports, import_profile)` all match — import order significant — instead of importing again. This
-is what stops a long-lived child's RSS from growing with the number of calls rather than with the workload: every open
-runs a full `importModules`, and under `loadExts := true` those regions are never reclaimable.
+The child reuses its live session when `(project_root, mode, imports, import_profile)` matches; import order matters.
+Otherwise it checks a bounded pool of parked sessions before importing. `LeanWorkerConfig::session_pool_capacity` sets
+capacity explicitly; when absent, the supervisor derives it from `restart_policy.max_imports` when available. Configure
+capacity separately from the restart budget so cycling does not preempt useful warm reuse.
 
-An open whose key does *not* match is served from a bounded pool of parked sessions before it is served by importing.
-The child parks the outgoing session rather than dropping it, so **several imported environments coexist by design** —
-up to `LEAN_RS_WORKER_SESSION_POOL_CAPACITY`, which `LeanWorker::spawn` derives from `restart_policy.max_imports` unless
-the embedder sets it explicitly, so the parent cycles the child at exactly the point the pool would begin evicting.
-`LEAN_RS_WORKER_SESSION_POOL_CAPACITY=1` reproduces the pre-pool child exactly and is the rollback.
+A pooled environment is a snapshot of its import. Rebuilding `.olean` files does not refresh that snapshot. The caller
+must track freshness for every retained profile and cycle the worker or select a different validated key when artifacts
+change. Reopening the same key alone does not promise a new import.
 
-Keeping the old environment alive is nearly free *because* the retention model above says its regions are not reclaimed
-by dropping it. Measured by the `pooled-distinct` arm of `examples/long_session_memory.rs`, fresh process per arm:
-holding N environments live costs 30–50 MB more than holding one and dropping N−1, against 0.8–1.0 GiB per import — so
-the pool trades ~4% of one import for N−1 imports it no longer performs. At N=2 an alternating workload falls from 8.82
-GB and 8 imports to 1.68 GB and 2; at N=4, from ~7.9 GB and 16 imports to 4.19 GB and 4.
+A later import can register an environment extension and leave an older environment with a short `extensions` array.
+Both pools compare an epoch derived from public append-only registries before reuse and evict stale environments. The
+epoch includes persistent extensions, scoped extensions, and builtin attributes. This is a correctness boundary: reusing
+an environment across a registering import can otherwise cause Lean to index past its extension storage.
 
-**A pooled or reused session's environment is a snapshot taken at its own import.** A child holding K sessions holds K
-snapshots of differing age, and neither side invalidates: `.olean` files rebuilt on disk after an import are not
-observed, and no amount of reopening that key will pick them up. Invalidation is the caller's job: cycle the worker
-(`LeanWorkerCapabilityBuilder`/pool `cycle()`), or open with a key that differs. A consumer whose freshness signal is
-coarser than its build output — a lockfile hash rather than the build directory, say — was previously protected by the
-accidental per-call re-import and is not any more; with a pool it must also track *every* profile the child may still be
-holding, not merely the last one, since a profile served several calls ago can be restored without importing.
+`stats.imports` counts imports rather than opens. Snapshot caches survive parking and clear when the corresponding
+session drops; cache identity includes mode. A failed open can leave the child sessionless while other parked sessions
+remain reusable. See [Worker session adapter](../architecture/17-worker-session-adapter.md) for the supported session
+operations and [Worker pool](../architecture/20-worker-pool.md) for lease and admission behavior.
 
-A pooled environment is also dropped, below capacity, when a later import registers a Lean environment extension.
-`Environment.extensions` is sized exactly once, at `finalizeImport`, and both the array and its growth helper are
-`private`, so an environment that outlives a `registerEnvExtension` can never be repaired — and elaborating any
-`namespace`, `section`, or `open … in` against it makes `ScopedEnvExtension.pushScope` index past the end and `panic!`
-once per out-of-range slot, which kills the child mid-request. Both pools detect this with a stamp summing three public
-append-only registries (`persistentEnvExtensionsRef`, `scopedEnvExtensionsRef`, and the builtin attribute count),
-recorded at import and re-read before reuse. The eviction only ever frees slots and lowers RSS; its cost is one
-re-import per held profile, and only for a profile held across a registering import. Registration during import is
-ordinary rather than exotic — it is how every user `initialize` block and every `register_simp_attr` comes into
-existence — so a project whose modules carry initializers will see this fire, and a project whose modules do not will
-never see it at all.
-
-`stats.imports` counts imports, not opens, so it is the observable for whether reuse is happening. The retained
-module-snapshot cache is cleared exactly when a session is dropped and never when one is merely parked — sound because
-`mode` joins the snapshot cache key, so two live sessions over the same root and imports cannot answer from each other's
-environment. A failed open leaves the child sessionless but leaves the pool intact, which is strictly better than
-before: the caller's retry may land on a key the pool still holds. Callers already handle that path by retrying on
-`worker_session_missing`.
-
-There is no global import semaphore and no `max_concurrent_imports` knob in this baseline. One pool cannot internally
-run concurrent cold opens because lease acquisition takes `&mut LeanWorkerPool`; multiple independent pools are a
-caller-level concurrency decision and should be bounded by their own process policy and RSS budget.
-
-Resource-boundary failures are reported as typed resource facts where the boundary can prove them. Same-process
-`SessionPool` refusals are `LeanDiagnosticCode::ResourceExhausted` host failures with `ResourceExhaustedFacts` attached:
-the facts name the cause, requested import count, import/RSS budget, latest import-stats diagnostic when available, and
-`work_entered_lean=false`. Worker and worker-pool resource failures expose `LeanWorkerResourceExhaustedFacts` through
-`LeanWorkerError::resource_exhausted_facts()`: pool admission refusals and pre-dispatch cancellation report
-`work_entered_child=false`, while in-flight RSS hard limits, timeouts, cancellations observed while reading worker
-events, and degraded module-query batches report `work_entered_child=true`.
-
-Callers should treat `work_entered_child=false` as a hard admission refusal: retry only after changing the budget,
-choosing a warmer/equivalent session key, or cycling according to policy. `work_entered_child=true` means Lean work
-started and the result is interrupted or degraded under runtime pressure; module-query batches preserve per-selector
-`BudgetExceeded` items and attach the same resource facts to the batch facts. Ordinary Lean diagnostics, missing
-declarations, unsupported exports, and protocol errors are not relabeled as resource exhaustion without runtime
-evidence.
-
-The pool memory-scheduling workload is:
-
-```sh
-cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
-LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
-cargo run -p lean-rs-worker-child --example pool_memory_scheduling
-```
-
-On the same run, the pool fixture used one worker, peaked at 419,616 KiB child RSS, and held the parent process around
-2,144 KiB to 3,456 KiB. Cold pool requests were roughly 215 ms; warm pool reuse was roughly 5-6 ms. The profiling rows
-named `admission=...` report cold-open attempts, admitted opens, typed refusals, observed concurrent cold opens,
-import-like requests, and RSS before/after admission. Use the pool knobs together to avoid multiplying Lean import RSS
-across many local children. They do not change the underlying reset rule: only process exit resets Lean process-global
-retained memory.
-
-The same profiling output also emits `session_reuse=...` rows. These rows report key hits, key misses, distinct keys,
-fresh imports avoided, and miss reasons such as `empty_pool`, `reuse_disabled`, `no_matching_key`, and
-`stale_environment`. They explain whether a fresh import was avoided by warm reuse; admission rows explain whether a
-cold open was allowed.
-
-The `replacement=...` rows for worker and pool workloads break the current synchronous replacement path into
-spawn/handshake, capability-load, session-open/import, first-command, warm-command, and total replacement timings, plus
-the restart reason and budget status. The current status is `synchronous-no-overlap`: the old child exits before the
-replacement starts, so no warm-spare process temporarily doubles child RSS. Background replacement or warm spares remain
-a future opt-in design that must be admitted by the total child RSS budget before spawn/import begins.
-
-The `batch=...` rows cover the warm `process_module_query_batch` proof-agent path. Their implementation reuses the
-existing bounded module-query batch API through one checked-out worker-pool lease; it does not add a new Lean shim or
-batch protocol. These rows are evidence about request/session churn on a warm child. They do not imply compacted regions
-were reclaimed, do not hide cold import cost, and do not replace worker cycling for full `loadExts := true` sessions.
+The retained-memory measurements above explain why pooling helps: an extra live environment cost 30–50 MB in the fixture
+sample, far less than the 0.8–1.0 GiB additional import residue in that run. These observations support reuse; they do
+not make cached environments free or bound an arbitrary workload.
 
 ## Process-global Lean state that is not memory
 
@@ -582,8 +438,9 @@ the same document.
 
 `envExtensionsRef` grows whenever an imported module's `initialize` block registers an environment extension, and every
 environment created before that point keeps a permanently short `extensions` array. This is a correctness hazard rather
-than a memory one, and both pools handle it by dropping the affected environments; see "Pooled worker sessions" above
-for the mechanism and `LeanSession::extension_registry_epoch` for the primitive.
+than a memory one, and both pools handle it by dropping the affected environments; see
+[Pooled worker sessions](#pooled-worker-sessions) for the mechanism and `LeanSession::extension_registry_epoch` for the
+primitive.
 
 ### The attribute map (documented, not fixed)
 

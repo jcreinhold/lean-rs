@@ -1,147 +1,88 @@
-# Adding a Lean release to the supported window
+# Change the supported Lean window
 
-Adding a version requires two verifications: the `lean.h` layout is unchanged from an existing entry, and every symbol
-in `REQUIRED_SYMBOLS` still resolves in the new `libleanshared`. The single source of truth is
-[`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs); the steps below either update that file
-or follow from it. Budget ~30 minutes plus CI time. End state: the workspace builds and tests cleanly against the new
-release on every CI cell.
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) owns the supported versions and header digests. The
+[version matrix](version-matrix.md) describes the tested platforms; the
+[compatibility policy](architecture/02-versioning-and-compatibility.md) governs ABI changes and version drops.
 
-## Steps
+## Verify a candidate
 
-### 1. Install the toolchain
+Install the candidate and compare its header with a supported release:
 
 ```sh
 elan toolchain install leanprover/lean4:vX.Y.Z
-```
-
-~500 MB. Skip if already installed.
-
-### 2. Capture the `lean.h` SHA-256
-
-```sh
-shasum -a 256 \
-  ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h | cut -d' ' -f1
-```
-
-Compare against existing entries in [`SUPPORTED_TOOLCHAINS`](../crates/lean-rs-abi/src/supported.rs):
-
-- **Digest matches an existing entry** → append `"X.Y.Z"` to that entry's `versions` array, then jump to step 4. The
-  common case; Lean often ships point releases without touching `lean.h`.
-- **New digest** → run step 3 first.
-
-### 3. (New digest only) Verify layout + symbols
-
-Two checks. Both must pass; either failure means do **not** silently add the entry.
-
-**Layout check.** The 10 `#[repr(C)]` struct definitions in `lean-rs-sys/src/repr.rs` must be byte-identical to the new
-header's relevant block:
-
-```sh
+shasum -a 256 ~/.elan/toolchains/leanprover--lean4---vX.Y.Z/include/lean/lean.h
 scripts/check-lean-header.sh <existing-version> X.Y.Z
-```
-
-Empty output: layouts unchanged, safe to add. Non-empty: stop and revisit
-[`02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md).
-
-**Symbol check.** Every `REQUIRED_SYMBOLS` entry must resolve:
-
-```sh
 scripts/check-lean-symbols.sh X.Y.Z
 ```
 
-Empty output: every required symbol resolves. Non-empty: a symbol disappeared upstream. Either add it to the entry's
-`missing_symbols` list (and update consumer call sites to tolerate absence), or file an upstream issue and stop.
+The header script diffs the relevant struct declarations; it does not measure sizes, alignment, or offsets. Inspect any
+change against the mirrors in [`repr.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/src/repr.rs) and the layout literals in `lean-rs-abi`.
+Also review changed inline refcount helpers and ownership conventions: unchanged struct layout alone is insufficient. A
+matching digest permits reusing an existing table entry, but still run the symbol check against the candidate library.
+Empty symbol-check output means every required export was found.
 
-### 4. Update the `SUPPORTED_TOOLCHAINS` table
+Stop on an unexplained layout, calling-convention, or missing-symbol change. Do not hide failures behind
+version-specific wrappers or allowlist exceptions. The current contract requires every `REQUIRED_SYMBOLS` entry on every
+supported version; adding a `missing_symbols` exception requires changing that contract and its consumers and tests
+together.
 
-Edit [`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs):
+## Update the support records
 
-- Add a new `SupportedToolchain { versions: &["X.Y.Z"], header_digest: "<digest>", missing_symbols: &[] }` entry in
-  version order, **or** append `"X.Y.Z"` to an existing entry's `versions` array when the digest matched.
-- Mirror the entry in [`crates/lean-rs-sys/digests/manifest.json`](../crates/lean-rs-sys/digests/manifest.json) and
-  [`docs/version-matrix.md`](version-matrix.md).
+1. Append the candidate version to the matching digest entry in `SUPPORTED_TOOLCHAINS`, or add an entry in version order
+   after verifying a new digest. Record the reason for any ABI-relevant header change beside the entry.
+2. Mirror the version and digest in
+   [`crates/lean-rs-sys/digests/manifest.json`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/digests/manifest.json).
+3. Add both platform cells to the `full_matrix` include list in [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). If the window or
+   policy changed, update [version-matrix.md](version-matrix.md) and the affected support claims in crate READMEs and
+   architecture docs.
 
-### 5. Update the CI matrix
+When the candidate becomes the head, update these together:
 
-Edit [`.github/workflows/ci.yml`](../.github/workflows/ci.yml): add `"X.Y.Z"` to `matrix.lean_version`. If `X.Y.Z` is
-the new highest version, also update the head version in
-[`.github/workflows/sanitizer.yml`](../.github/workflows/sanitizer.yml) (`LEAN_VERSION_HEAD`),
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) (`LEAN_VERSION_HEAD` **and** the `verify` matrix's
-`lean_version`), [`.github/workflows/release-recover.yml`](../.github/workflows/release-recover.yml)
-(`LEAN_VERSION_HEAD`), and [`.github/workflows/compile-fail.yml`](../.github/workflows/compile-fail.yml)
-(`LEAN_VERSION_HEAD`), bump `DEFAULT_LEAN_VERSION` in [`scripts/prerelease.sh`](../scripts/prerelease.sh) (it mirrors
-`release.yml`'s `LEAN_VERSION_HEAD` and must move in lockstep), and move the head-gated
-`if: … matrix.lean_version == '<old head>'` steps in `ci.yml` (actionlint, public-API diff, nightly install) to the new
-head.
+- The default `lean_version` and head-gated steps in `ci.yml`.
+- `LEAN_VERSION_HEAD` in `release.yml`, `release-recover.yml`, `sanitizer.yml`, and `compile-fail.yml`; the release
+  verification matrix; and `DEFAULT_LEAN_VERSION` in [`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh).
+- Every tracked `lean-toolchain` file. Find the pins with `git ls-files '*lean-toolchain'`; this includes bundled shims,
+  fixtures, the shipped-crate template, and the runtime model.
 
-**When `X.Y.Z` is the new head, also bump the committed `lean-toolchain` pins to it** (root `lean-toolchain`, the three
-`crates/**/shims/**/lean-toolchain`, `fixtures/lean`, `fixtures/interop-shims`, `templates/shipped-lean-crate/lean`, and
-`formal/RuntimeModel`). `ci.yml` and `release.yml` repin per run, but `sanitizer.yml` and `compile-fail.yml` have **no
-repin step** — they build against the committed pin, while their `LEAN_VERSION_HEAD` install + `LEAN_SYSROOT` point at
-the new head. A stale pin splits the toolchain: `lean-rs-sys` validates `LEAN_SYSROOT` and falls back to the pinned
-version, but `lean-rs-worker-child`'s build script trusts `LEAN_SYSROOT` unverified and bakes an rpath to the
-(uninstalled) head prefix, so the loader fails with `libleanshared.so: cannot open shared object file`. Keep the
-committed pins equal to the head.
+Keep the committed pins equal to the head. The sanitizer and compile-fail workflows install that version without
+repinning the workspace, so mismatched pins can mix headers and runtime-library search paths.
 
-### 6. Verify the new version
+## Validate and record evidence
 
-**Local (cheap path):** build and test against the new version only. Digest equality (step 2) already proves the
-layout and symbol surface match an existing entry, so the remaining local question is whether the toolchain resolves
-into the window and links:
+Select the new toolchain in a disposable checkout or restore any pins you change, then run the focused checks:
 
 ```sh
-# From the workspace root with the new toolchain selected:
-elan override set leanprover/lean4:vX.Y.Z
-cargo nextest run -p lean-rs-abi -p lean-toolchain
-elan override unset
+cargo nextest run -p lean-rs-abi -p lean-toolchain -p lean-rs-sys
 ```
 
-The `version_window` tests (`baked_toolchain_is_in_the_supported_window`,
-`resolved_version_aliases_into_the_matched_entry`) prove the new version aliases into its entry; the lean-toolchain
-linkage tests prove `REQUIRED_SYMBOLS` resolve against its `libleanshared`. A failure on a version *other* than the
-one being added is pre-existing — investigate separately; it is not caused by appending a version string.
+`lean-toolchain/tests/version_window.rs` checks the baked fingerprint and support table. The actual link-time symbol
+probe is [`lean-rs-sys/tests/linkage.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/tests/linkage.rs); the toolchain metadata tests alone do
+not load `libleanshared` or prove symbol presence.
 
-**CI (authoritative gate):** the full per-version sweep below is slow (~7 min per version) and installs every window
-toolchain locally, so run it on CI via the `full_matrix` workflow-dispatch input rather than locally:
+Run the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md) on the new version. Use CI's manual `full_matrix: true` dispatch for the
+full supported window on Ubuntu and macOS. Ordinary push CI runs only Ubuntu at the head; release verification runs the
+head on both platforms.
 
-```sh
-scripts/test-all-toolchains.sh
-```
+For a local sweep, [`scripts/test-all-toolchains.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/test-all-toolchains.sh) accepts explicit versions or
+reads the digest manifest. It repins every tracked `lean-toolchain`, deletes Cargo and Lake build outputs, rebuilds the
+fixture packages, and runs workspace nextest. It restores pins on exit and keeps a recovery snapshot for interrupted
+runs. It **skips uninstalled toolchains**, so a successful exit does not prove the whole window ran; inspect the
+summary. Use a disposable checkout and install the intended versions before a sweep.
 
-It iterates every version in `digests/manifest.json`, repoints the workspace `lean-toolchain` files (root + bundled
-shim packages under `crates/lean-rs/shims/` and `crates/lean-rs-host/shims/` + `fixtures/lean` +
-`fixtures/interop-shims`), rebuilds the Lake packages, runs `cargo nextest run --workspace`, and prints a per-version
-pass/fail summary. Restores the original `lean-toolchain` files on exit (even on failure). Run it locally only when
-the change could plausibly break an *existing* entry (new digest, `missing_symbols` edits, repr changes) or before a
-release.
+Commit the candidate digest, whether it matched an existing entry, the header/inline review, symbol-probe result, and
+the versions and platforms actually tested. Investigate failures on existing versions as well; adding a version does not
+make a failing compatibility cell acceptable.
 
-### 7. Commit and PR
+## Drop a version
 
-Commit message: `Add Lean X.Y.Z to the supported toolchain window`. PR description includes:
+Remove it from the support table, digest manifest, CI include list, and documentation. Record why and include the failed
+probe or test evidence. Correcting a support claim that never worked is a patch; dropping working support is breaking
+and bumps the minor version under the `0.x` policy.
 
-- The new digest (and whether it matched an existing entry).
-- The step 6 summary.
-- Any `missing_symbols` updates and why.
+## Diagnose a failure
 
-## Dropping a Lean release from the supported window
-
-The mirror of the add path: remove the entry (or version) from `SUPPORTED_TOOLCHAINS`, from
-[`crates/lean-rs-sys/digests/manifest.json`](../crates/lean-rs-sys/digests/manifest.json), from the full-matrix
-`include` list in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), and from
-[`docs/version-matrix.md`](version-matrix.md) and the window text in `README.md`, the crate READMEs,
-[`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md), and
-[`docs/release.md`](release.md). Record *why* in the comment above `SUPPORTED_TOOLCHAINS` and in the lower-bound
-paragraph of `02-versioning-and-compatibility.md`, with the verification evidence (a symbol probe, a failed sweep).
-A drop that corrects a support claim the runtime never delivered (the claimed versions already fail) is a patch;
-a drop of versions that genuinely worked is breaking and bumps the minor.
-
-## When the bump fails
-
-A test failure on the new version does **not** justify pinning around it with brittle wrappers or version-specific
-allowlists. The right resolution depends on what broke:
-
-| Symptom | Cause | Action |
-| --- | --- | --- |
-| Test fails on the new version, passes on every other version | Upstream regression | File an issue on the Lean repo with a minimal repro. Consider skipping the version (exclude from the table) pending the fix. |
-| Lake's emitted artifact name or initializer-symbol shape changed | Naming/signature shift in Lake codegen | Extend the relevant probe (`crates/lean-rs-host/src/host/lake.rs` for dylib names; `crates/lean-rs/src/module/initializer.rs` for initializer symbols) to accept the new shape alongside the existing ones. Tests must pass on every window entry. |
-| `repr.rs` no longer matches the header, or ownership/return conventions differ | C ABI shift | Stop and discuss with maintainers before patching. Do not silently bump `EXPECTED_HEADER_DIGEST` without updating the mirrors. |
+| Failure | Next step |
+| --- | --- |
+| New version fails while existing versions pass | Minimize the failure; report an upstream regression or leave the candidate unsupported. |
+| Lake artifact names or initializer symbols changed | Extend the loader/build probe to support the new shape and retain tests for existing versions. |
+| Header layout or ownership/return conventions changed | Resolve the ABI design before changing accepted digests or mirrors. |

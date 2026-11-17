@@ -1,104 +1,77 @@
 # Safety Model
 
-`lean-rs` is the crate that owns raw Lean ABI operations for the workspace. It may use `unsafe` internally to initialise
-the Lean runtime, manage Lean object ownership, decode Lean object layouts, load dynamic symbols, and bridge callbacks.
-Safe public APIs in `lean-rs` are allowed only when the crate enforces the relevant safety invariants itself.
+`lean-rs` owns the safe Rust boundary around Lean runtime initialization, object ownership, ABI conversion, dynamic
+loading, and callbacks. A safe API must enforce the ownership, lifetime, layout, and signature invariants it needs. This
+is a Rust memory-safety contract; Lean still owns elaboration, kernel checking, and the meaning of proof terms.
+Termination and recovery from fatal Lean failures require separate resource and process boundaries.
 
-This is a Rust memory-safety claim for safe Rust APIs. It is not a claim that Lean code is semantically correct, that a
-proof term proves what the user intended, that user-authored Lean code terminates, or that Lean's kernel/elaborator
-never rejects the input.
-
-`lean-rs-host` is outside that trusted implementation boundary. It forbids unsafe Rust code crate-wide and consumes
-`lean-rs` through safe handles, safe ABI conversion/view APIs, and manifest-checked host-shim bindings. Bundled host
-shims are resolved once through trusted export signature metadata and cached as typed `HostShimBindings`; public
-`LeanSession` methods dispatch only those closed host operations.
-
-Every change that adds an unsafe block, wrapper type, FFI call, or concurrency claim must be consistent with the rules
-below. An API that cannot be made consistent does not ship as safe.
+`lean-rs-host` forbids unsafe Rust crate-wide. It consumes safe handles, conversion/view APIs, and manifest-checked
+`HostShimBindings` from `lean-rs`; its session methods dispatch a closed set of host operations.
 
 ## Unsafe boundary
 
-Raw `lean_*` symbols enter the workspace only through `lean-rs-sys` (published). Its public types are opaque:
-`lean_object` is `[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`, and downstream code reaches object state only
-through `pub unsafe fn` helpers. Lean's header layout (`LeanObjectRepr`) is `pub(crate)`.
+Raw `lean_*` symbols enter through `lean-rs-sys`. Its public FFI types are opaque: `lean_object` has no accessible
+fields, and `LeanObjectRepr` and the other layout mirrors remain `pub(crate)`. Raw consumers depend on `lean-rs-sys`
+directly and accept its unsafe preconditions. The safe `lean-rs` surface never re-exports raw symbols or requires
+callers to inspect object headers, manage reference counts, or cast symbol addresses.
 
-Inside `lean-rs`, imports of `lean_rs_sys` live in the runtime, ABI conversion, module loading/dispatch, callback, and
-error-decoding internals and are never re-exported. Every public safe function of `lean-rs` must either avoid raw Lean
-state or fully enforce the needed ownership, lifetime, layout, and ABI-signature invariants before returning. A reader
-of `lean_rs::*` should not have to choose a refcount discipline, inspect a Lean object header, or cast a symbol address
-to a C function pointer to use the safe surface.
+Safe export lookup requires trusted signature metadata, such as a build manifest for a known capability contract.
+`LeanModule::exported_unchecked::<Args, R>(name)` is unsafe: a symbol name and caller-selected Rust types do not prove
+that the compiled C ABI matches. Manifest and loader checks are described in
+[`29-loader-and-artifact-boundary.md`](29-loader-and-artifact-boundary.md).
 
-Checked export lookup is safe only when backed by trusted signature metadata, such as a build manifest generated for a
-known capability contract. `LeanModule::exported_unchecked::<Args, R>(name)` is unsafe because arbitrary dynamic export
-lookup cannot be validated from a raw symbol name plus caller-chosen `Args`/`R`. The call is memory-safe only if the
-symbol's compiled C ABI is known to match those Rust types. Raw dynamic-loader symbol addresses and `lean_rs_sys` remain
-implementation details of `lean-rs`.
+The current public hidden `LeanAbi` conversion hooks do not fully enforce the intended boundary: `Obj`'s safe `from_c`
+implementation accepts a raw C representation without a caller-side unsafe requirement. The sibling-crate marker
+convention also does not restrict implementations through Rust visibility. These are unresolved implementation gaps, not
+exceptions to the required contract above. The [unsafe inventory](../safety/unsafe-inventory.md) records the source
+locations and required follow-up; documentation cleanup does not repair that source boundary.
 
-Applications that genuinely need raw FFI opt in by depending on `lean-rs-sys` directly, accepting full `unsafe`
-discipline (per-block `// SAFETY:`, per-fn `# Safety` doc) and opaque public types—friendlier than forking the
-workspace, and the same trade every peer `*-sys` crate makes.
+## Object ownership and lifetime
 
-## Reference counting
+[`Obj<'lean>`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/runtime/obj.rs) owns one Lean reference; `Clone` increments it and `Drop`
+releases it. `ObjRef<'lean, 'a>` borrows from its source without independently adjusting the reference count. Both carry
+the runtime lifetime. The raw ABI ownership aliases (`lean_obj_arg`, `b_lean_obj_arg`, `lean_obj_res`) stay below the
+safe boundary.
 
-Lean's per-thread runtime model means refcount adjustments cannot escape the safe layer.
-`pub(crate) runtime::obj::Obj<'lean>` owns one refcount; `pub(crate) runtime::obj::ObjRef<'lean, 'a>` is a borrowed view
-tied to its source's lifetime and the runtime borrow. `Obj<'lean>` releases its reference on `Drop`; `Clone` performs
-`lean_inc` via the Rust mirror in `lean-rs-sys`; `ObjRef` performs no RC adjustments on its own.
-
-The public surface never accepts or returns raw `lean_obj_arg`, `b_lean_obj_arg`, or `lean_obj_res`. A caller of
-`lean-rs` does not need to know what `lean_inc` and `lean_dec` are. If a future API would force the caller to choose a
-refcount discipline, that is a charter violation, not an option.
-
-The former host ownership/drop leakage is closed for argument-only `LeanAbi` impls: host types name the boxed C-ABI
-representation through `Obj`'s associated `LeanAbi` type and consume impossible owned returns through `Obj::from_c`.
-
-## Proof objects
-
-Proof-related results cross into Rust as opaque handles or Lean-authored summaries. Rust does not reconstruct proof
-terms, inspect their structure, or re-derive a kernel judgement; the kernel is in Lean.
-
-A handle's only safe public operations are the ones Lean explicitly exposes through a capability—"ask Lean to print this
-proof's type" is fine if Lean offers it; "walk the proof's expression tree in Rust" is not.
-
-The same rule applies to host diagnostic and query payloads: Rust may decode a Lean-authored summary shape, but raw
-constructor layout knowledge should be hidden in `lean-rs` conversion/view APIs rather than duplicated in
-`lean-rs-host`.
+Semantic handles and host-defined evidence wrap those objects. Rust may decode Lean-authored summaries and transport
+opaque handles; it must not reconstruct a kernel judgment or duplicate Lean's proof semantics. Constructor layout
+knowledge belongs in `lean-rs` conversion/view APIs rather than in the host service layer.
 
 ## Concurrency
 
-The Lean runtime is per-thread (`lean_initialize_thread` / `lean_finalize_thread`), so every Lean-derived handle is
-`!Send + !Sync` by default. Treating a Lean object as freely portable is a soundness hazard. Opting any handle type into
-`Send` or `Sync` is a per-type contract change that must be justified against the per-thread model.
+Lean-derived handles inherit `!Send + !Sync` from `LeanRuntime`. Opting a handle into either trait is a per-type
+contract change requiring justification against Lean's thread and reference-count rules. Initialize and use runtime
+handles on the calling thread; use `LeanThreadGuard` to scope explicit attach/detach. See
+[`04-concurrency.md`](04-concurrency.md) for the precise contract and async embedding pattern.
 
-See [`04-concurrency.md`](04-concurrency.md) for the full thread-attach discipline and the async-embedding pattern.
+## Unsafe-code review
 
-## Workspace lint policy
+The workspace sets `unsafe_code = "deny"`. `lean-rs-sys` is the single crate-wide opt-out. Elsewhere, new unsafe code
+requires:
 
-`unsafe-code = "deny"` at the workspace level (set in `Cargo.toml` `[workspace.lints.rust]`).
+1. `#[allow(unsafe_code)]` at the smallest scope that compiles, with the reason in the PR description; no blanket
+   crate-root allow.
+2. A `// SAFETY:` comment on each unsafe block naming the invariant it relies on, and a `# Safety` section on each
+   public unsafe function stating its preconditions. Merely naming the FFI crate is insufficient.
+3. A check that would catch a plausible violation when practical: a focused boundary test, refcount stress test,
+   sanitizer run, or Miri test for Rust-only behavior.
+4. Reviewer sign-off from someone other than the author before merge.
 
-Per-file opt-outs require, in order:
-
-1. **`#[allow(unsafe_code)]` at the smallest scope that compiles**—a module, not a crate. PR description names the
-   reason. A blanket allow at the crate root is rejected.
-2. **A `// SAFETY:` comment on every `unsafe { ... }` block** naming the invariant the caller or surrounding context
-   relies on. "Calls into `lean-rs-sys`" is not a safety comment; "the runtime is initialized on this thread and `obj`
-   is the unique owner per `Obj<'lean>`'s `Drop`" is.
-3. **A test that would fail under a plausible violation** when practical—Miri on the Rust side of the boundary (Miri
-   cannot validate the Lean C runtime itself), a sanitizer build, a refcount stress test, or a focused unit test on the
-   unsafe boundary. The `miri` job in [`.github/workflows/sanitizer.yml`](../../.github/workflows/sanitizer.yml) runs
-   `cargo +nightly miri test -p lean-rs-sys` under `-Zmiri-tree-borrows` for exactly this pure-Rust boundary;
-   FFI-touching tests gate out with `#[cfg_attr(miri, ignore)]`.
-4. **Reviewer sign-off from someone other than the author.** Self-merging a new `unsafe` block is not allowed.
+The [sanitizer workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/sanitizer.yml) runs Miri on the pure-Rust `lean-rs-sys` boundary with
+`-Zmiri-tree-borrows`; FFI tests are ignored there. Its ASan job covers Rust-only `lean-toolchain` helpers. It does
+**not** instrument in-process Lean tests: the uninstrumented Lean shared runtime currently crashes that configuration
+before producing useful Rust diagnostics. Loader regressions, ordinary workspace tests, worker containment tests, and
+manual ABI fuzzing cover the remaining paths; none substitutes for reviewing the unsafe invariant itself.
 
 ## Panic discipline
 
-Rust panics must not unwind across a C or Lean frame. The `error` module of `lean-rs` is the typed conversion point for
-Rust-owned boundaries: it catches Rust panics before they cross into Lean callbacks, converts Lean `IO` exceptions to
-typed Rust errors, and converts ABI-shape violations to typed errors. It is not a Lean-runtime panic recovery layer. A
-Lean internal panic, generated `unreachable`, `std::exit`, or `abort` during a `LeanSession` call may terminate the
-process; see [`06-panic-containment.md`](06-panic-containment.md). No `unwrap()`, `expect()`, or `panic!` in non-test
-code unless a comment names a proof obligation that makes the call infallible.
+Rust unwinds must not cross C or Lean frames. Callback trampolines catch unwinding Rust panics and return a callback
+status plus a bounded `LeanError`. Lean `IO` exceptions and ABI-shape failures also use typed Rust errors.
 
-Lean-to-Rust callbacks go through `LeanCallbackHandle`, not raw user-provided function pointers. The registry catches
-unwinding Rust panics before the C boundary and reports them as callback status plus a bounded `LeanError`; see
+Lean internal panics, aborting Rust panics, generated unreachable paths, foreign unwinds, `std::exit`, and `abort` have
+no in-process recovery guarantee. Use the worker process boundary when the application must survive them; see
+[`06-panic-containment.md`](06-panic-containment.md).
+
+Non-test code must not use `unwrap()`, `expect()`, or `panic!` unless a comment states the proof obligation making the
+operation infallible. Lean-to-Rust callbacks use `LeanCallbackHandle`, with the lifetime and reentrancy rules in
 [`10-callback-registry.md`](10-callback-registry.md).

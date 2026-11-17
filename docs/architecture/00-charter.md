@@ -1,191 +1,95 @@
-# Architecture Charter
+# Architecture charter
 
-The design boundary between Lean and the `lean-rs` runtime bridge, the smallest public interface that supports it, and
-the alternatives that were considered and rejected. Any new API or behavior must clear three questions: does it hide
-what should be hidden, preserve what should be preserved, discard what should be discarded?
+`lean-rs` is a Rust runtime bridge to Lean 4. Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`,
+and dependent-type meaning. Rust owns linking, runtime initialization, ABI conversion, module loading, error boundaries,
+scheduling, diagnostics, batching, process isolation, and packaging.
 
-The charter pins intent, not Rust items or symbol names; those live in the per-crate API review baselines under
-[`docs/api-review/`](../api-review/).
+An API belongs here when it hides a hosting decision while preserving Lean's capabilities. Rust must not recompute Lean
+semantic facts, and Lean services must not depend on a Rust application's scheduler or packaging policy.
 
-## Purpose
+## Crate boundaries
 
-This workspace is a Lean runtime bridge for Rust. The `lean-rs` crate is the typed FFI layer, `lean-rs-host` is the
-standard Lean service layer, and the worker crates add process isolation around those services.
+| Crate | Responsibility |
+| --- | --- |
+| `lean-rs-abi` | Static supported-toolchain, required-symbol, and `lean.h` layout metadata. No build script, extern declarations, link directives, or installed-toolchain probe. |
+| `lean-toolchain` | Toolchain discovery, live build-time identity, fingerprints, Lake builds, artifact manifests, linking diagnostics, and native command/artifact ownership helpers. Builds without Lean when no runtime is required. |
+| `lean-rs-sys` | Raw Lean C ABI declarations and inline mirrors. Public FFI types are opaque; layout representations remain crate-private. Its build script checks the active header digest and emits runtime link directives. |
+| `lean-rs-interop-shims` | Packaged Lean/C source for generic callback and worker-stream helpers, materialized into a caller-owned build root. |
+| `lean-rs` | Runtime and thread handles, object ownership, ABI conversion, library/module loading, checked typed exports, callbacks, and errors. |
+| `lean-rs-host` | Standard services: imports, sessions, elaboration, evidence, declaration/module queries, bounded `MetaM`, and same-process session pooling. Owns its Lean host-shim packages. |
+| `lean-rs-worker-protocol` | Framed parent/child messages and owned wire data; no Lean runtime link. |
+| `lean-rs-worker-parent` | Child supervision, deadlines, cycling, local pools, diagnostics, and typed command facades; no Lean runtime link. |
+| `lean-rs-worker-child` | Lean-linked child runtime and worker executable. |
 
-Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type meaning. The Rust bridge
-owns linking, runtime initialization, ABI conversion, module loading, error and panic boundaries, scheduling,
-diagnostics, batching, process isolation, and packaging. The two halves do not negotiate. Anything that asks Rust to
-recompute a Lean semantic fact is out of scope; anything that asks Lean to know about Rust hosting (thread pools, panic
-conversion, FFI batching, module loaders) is out of scope.
+The profiling harness is an unpublished workspace member; the ABI fuzz harness is a separate unpublished package. Public
+crates share a version, with curated surfaces recorded in
+[API baselines](https://github.com/jcreinhold/lean-rs/tree/main/docs/api-review). The static ABI crate underlies both
+raw bindings and toolchain helpers; `lean-toolchain` does not depend on `lean-rs-sys`. The safe runtime uses both,
+`lean-rs-host` builds on it, and the worker boundary wraps host services.
 
-## Adopted Design
+Use the highest layer that fits the job:
 
-Published crates plus one workspace-internal helper:
+- `lean-rs` for custom same-process exports and callbacks;
+- `lean-rs-host` for common checked Lean services;
+- worker crates for fatal-exit containment, request watchdogs, process memory reset, or live row streams.
 
-- **`lean-rs-sys`** (published). Raw `extern "C"` view of `lean.h`, split by semantic category; pure-Rust mirrors of
-  `lean.h`'s `static inline` refcount helpers via `AtomicI32::from_ptr`; the `REQUIRED_SYMBOLS` allowlist; build-time
-  `LEAN_HEADER_DIGEST`; link directives. Public types are opaque (`lean_object` is
-  `[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`); layout structs are `pub(crate)`. The one crate-wide
-  `#[allow(unsafe_code)]` opt-out; every `unsafe { ... }` block carries a `// SAFETY:` comment naming the invariant.
-- **`lean-toolchain`** (published). Toolchain discovery, typed `ToolchainFingerprint`, fixture digest, layered link
-  diagnostics, build-script helpers. Re-exports `LEAN_VERSION`, `LEAN_HEADER_DIGEST`, and `REQUIRED_SYMBOLS` from
-  `lean-rs-sys` so the allowlist lives in one place.
-- **`lean-rs-interop-shims`** (published). Package-owned Lean/C source payload for the generic interop shim package,
-  with a build-script helper that materializes that payload under a caller-owned cache and caller-selected Lean
-  toolchain. It exists so downstream crates do not depend on a sibling `lean-rs` checkout for reusable callback and
-  worker-streaming helpers.
-- **`lean-rs`** (published). The safe FFI crate: bring the runtime up, open a Lake-built dylib, initialise a module,
-  call typed `@[export]` functions, and register Rust callbacks through a generic shim package. Five public modules
-  (`error`, `module`, `handle`, `runtime`, `abi`) plus one `#[doc(hidden)] pub mod __host_internals` giving the sibling
-  `lean-rs-host` the small set of `LeanError`-constructor wrappers it needs without exposing them to external callers.
-  It has no theorem-prover host shim contract; every downstream that just needs to call Lean from Rust starts here.
-- **`lean-rs-host`** (published). The standard Lean service layer built on `lean-rs`: `LeanHost`, `LeanCapabilities`,
-  `LeanSession`, elaboration / evidence / meta surfaces, `SessionPool`. Owns and bundles the 28 + 9 `lean_rs_host_*`
-  `@[export]` Lean shim contract it loads through manifest-checked `HostShimBindings` alongside consumer capability
-  dylibs. Batch and session-pool operations are methods on `LeanSession` rather than a separate `batch` module.
-  Downstreams that need common Lean services add it on top of `lean-rs`; downstreams that only need typed FFI do not pay
-  for it.
-- **The worker crates** (`lean-rs-worker-protocol`, `lean-rs-worker-parent`, `lean-rs-worker-child`; published
-  process-boundary layer). The parent supervises a child process around the standard Lean service layer. They own
-  process lifecycle, private framing, request timeouts, fatal-exit classification, memory cycling, live row streaming,
-  diagnostics, terminal summaries, capability metadata, and typed command facades. They are not a remote `LeanSession`
-  mirror and not a `lean-dup` API. Downstreams bring their own command names and serde row schemas.
+Downstream applications own their semantic commands and row schemas. The worker API is a supervised process service, not
+a remote mirror of every `LeanSession` operation. Its model is specified in
+[Worker runtime semantics](30-worker-runtime-semantics.md).
 
-`lean-rs-test-support` is workspace-internal (`publish = false`).
+## Ownership and lifetime
 
-### Composition Rule
+`Obj<'lean>` owns a Lean reference count and carries a lifetime tied to a `LeanRuntime` borrow. Semantic handles and
+host/session types propagate that lifetime. `LeanRuntime::init` initializes the process once and returns a static
+anchor; Lean-derived handles remain thread-confined. [Concurrency](04-concurrency.md) describes initialization and
+thread attachment, and the [safety model](01-safety-model.md) defines the unsafe obligations.
 
-Compose at the highest layer that fits the workload:
+Dropping an object or session releases its owned references. It does not reset Lean's process-global imports,
+initializers, extension registries, or allocator state. Full-session workloads reuse environments and bound fresh
+imports; process exit is the reset boundary. See [Production hosting](../production-hosting.md) and the
+[retention measurements](../safety/long-session-memory.md).
 
-- use `lean-rs` for custom same-process ABI calls, module loading, and advanced callbacks;
-- use `lean-rs-host` for checked in-process theorem-prover work such as imports, elaboration, kernel checks, declaration
-  queries, progress, cancellation, and pooling;
-- use the worker crates when the application needs a process boundary for fatal Lean exits, request watchdogs, worker
-  cycling, live row streams, diagnostics, or typed downstream commands.
+## Knowledge hidden by each layer
 
-Lower layers are still real APIs. They are escape hatches and implementation substrates, not steps every downstream
-caller should hand-compose.
+| Boundary | Hidden decisions |
+| --- | --- |
+| Safe runtime | Initialization order; scalar/heap tags; constructor layout; owned versus borrowed reference counts; object conversion; module initializer symbols; dynamic loader calls; callback context pointers and panic containment. |
+| Host services | Host-shim symbol binding and ABI; Lean monad/state plumbing; environment handles; batching; cache and same-process pool bookkeeping. |
+| Worker services | Child handles; request framing; generation and cleanup ownership; request interruption; bounded event buffers; replacement and admission policy. |
+| Build tooling | Toolchain discovery order; Lake artifact naming; content-addressed build reuse; artifact manifests; native command and writer-lock lifetimes. |
 
-### Lifetime spine
+Public callers choose capabilities, imports, budgets, commands, and typed results. They should not need to reconstruct
+the hidden decisions to use an operation safely. Explicitly unsafe raw FFI remains available through `lean-rs-sys` for
+applications that accept those obligations.
 
-The universal currency inside `lean-rs` is a token-bound object handle: `runtime::Obj<'lean>` carries a phantom lifetime
-tied to a `&'lean LeanRuntime` borrow. Public types built on top—the semantic handles (`LeanExpr<'lean>`,
-`LeanName<'lean>`, …) and the service-layer surfaces in `lean-rs-host` (`LeanHost<'lean>`,
-`LeanCapabilities<'lean, 'h>`, `LeanSession<'lean, 'c>`)—propagate the lifetime so the type system enforces
-*init-before-use* and *no value escapes the runtime*. The pattern is borrowed from PyO3's `Bound<'py, T>`; `LeanRuntime`
-plays the role `Python<'py>` plays, except creation is process-once rather than GIL-scoped. `'lean` is invisible at
-typical call sites (inferred from the runtime borrow) and disappears from the `*_rs::*` re-exports when bound to
-`'static`.
+Checked export lookup relies on trusted signature metadata from the capability's author. It checks ABI compatibility; it
+does not prove that native code implements the declared semantics. Arbitrary symbol lookup stays explicitly unsafe. The
+charter's semantic boundary and Rust memory-safety boundary are separate obligations.
 
-The crate split gives each layer its own semver and refactor surface: `lean-rs`'s internal modules can reshape without
-affecting `lean-rs-host` callers, and vice versa, as long as both crate roots stay stable.
+## Preserved capabilities
 
-Topic deep-dives:
+Applications can load compiled Lean modules, invoke typed exports, ask the elaborator and kernel questions through
+bounded host services, batch requests, reuse sessions, and receive diagnostics or rows across a process boundary. The
+bridge keeps Lean's semantic authority intact while presenting owned Rust results or lifetime-bound Lean handles.
 
-- [`05-raw-sys-design.md`](05-raw-sys-design.md)—`lean-rs-sys` design rationale.
-- [`03-host-stack.md`](03-host-stack.md)—`lean-rs-host` curated service surface.
-- [`14-interop-release-contract.md`](14-interop-release-contract.md)—reusable interop release contract.
-- [`16-production-boundary.md`](16-production-boundary.md),
-  [`17-worker-session-adapter.md`](17-worker-session-adapter.md)—worker-process boundary and the host-session subset
-  crossing it.
-- [`18-worker-data-streaming.md`](18-worker-data-streaming.md)—downstream row streams over the worker boundary.
-- [`20-worker-pool.md`](20-worker-pool.md)—local worker-pool boundary.
-- [`22-worker-row-batching.md`](22-worker-row-batching.md),
-  [`23-worker-data-plane-format.md`](23-worker-data-plane-format.md)—row batching and data-plane format decisions.
-- [`24-lean-side-worker-streaming.md`](24-lean-side-worker-streaming.md)—Lean-side worker envelope helpers.
-- [`28-production-scale-release.md`](28-production-scale-release.md)—production-scale worker contract.
+Lower layers remain usable APIs for custom integrations. Common host users should not have to assemble raw runtime, ABI,
+or shim dispatch themselves.
 
-## Hidden knowledge
+## Rejected designs
 
-No public Rust API requires a caller to know any of this. If `lean-rs` exposes a service-layer detail, or `lean-rs-host`
-exposes a raw runtime detail, the wrong layer has taken ownership.
+- **Wrap all of `lean.h` as a nominally safe facade.** This exposes ownership, initialization, and layout obligations to
+  callers. Add safe operations that discharge those obligations; keep raw access in `lean-rs-sys`.
+- **Reimplement Lean semantics in Rust.** Independent `Expr`, universe, environment, or proof interpretations would
+  become a second authority. Rust semantic handles wrap Lean values; Lean computes their meaning.
+- **Split every internal module into a public crate.** A crate needs a real independent consumer and compatibility
+  boundary. ABI metadata and build tooling have link-free consumers; runtime internals remain modules of `lean-rs`.
+- **Bundle typed FFI and standard host services into one required interface.** Calling a user export must not require
+  the theorem-prover host-shim contract. Generic callback helpers live below host services.
+- **Adopt an external raw binding without the required ABI contract.** Raw bindings must support the project's opaque
+  types, checked header window, symbol allowlist, inline mirrors, and packaging. A wrapper around an incompatible
+  binding does not establish those guarantees.
+- **Treat in-process drop as runtime recycling.** Lean provides no global finalize/reinitialize contract that can
+  invalidate every old object, symbol, task, and initializer safely. Use process cycling.
 
-**Hidden by `lean-rs`:**
-
-- Runtime init order: `lean_initialize_runtime_module`, `lean_initialize`, per-thread `lean_initialize_thread` /
-  `lean_finalize_thread`, process-args setup, `LEAN_INIT_MUTEX`.
-- `lean_object` layout: tag bits, packed scalar encoding, ctor field placement, scalar vs heap distinction
-  (`lean_is_scalar`).
-- Reference counting: `lean_inc` / `lean_dec`, owned vs borrowed args (`lean_obj_arg` vs `b_lean_obj_arg`), owned
-  results (`lean_obj_res`), in-place reuse rules.
-- Module initializer names and ordering: per-module `initialize_<Module>` symbols, dependency order, idempotent flag.
-- Object conversion: boxed scalars (`lean_box` / `lean_unbox`), strings, bytearrays, arrays, ctor structures, closures.
-- Exception and panic boundary: Lean exceptions to typed Rust errors; Rust panics caught before unwinding across a C
-  frame.
-- The boundary between Lean semantic authority and Rust hosting: Rust never owns a semantic fact about a Lean term.
-
-**Hidden by `lean-rs-host`:**
-
-- Session lifecycle: `LeanHost` → `LeanCapabilities` → `LeanSession` construction order, imports cache, capability
-  refresh, the 28 + 9 `lean_rs_host_*` Lean shim contract.
-- Host-shim dispatch: manifest-backed `HostShimBindings`, typed cached handles, tracing-span shape, and metrics.
-- Batching: per-source result aggregation, `N + 1` vs `2N` FFI-cost analysis behind bulk methods, strict / skip-missing
-  semantics.
-- Pool capacity: FIFO-take / LIFO-push reuse, capability-agnostic storage (entries are bare `Obj<'lean>` environments
-  rewrapped at acquire), over-capacity drop accounting.
-
-## Decisions that must not leak
-
-Implementation details. Changing them is allowed; surfacing them in the public API is a contract change.
-
-- `lean_object` layout (tag bits, header, ctor field order).
-- Borrowed vs owned RC tokens (`lean_obj_arg`, `b_lean_obj_arg`, `lean_obj_res`).
-- Module initializer symbol names (`initialize_<Module>`), ordering, per-module idempotence flag.
-- Lake search policy: how `lean-toolchain` finds Lake, search order, cache, fallback discovery for embedders without a
-  Lake workspace.
-- `MetaM` execution details: elaborator state, meta-level monad stack, trace and option propagation.
-- Raw proof-term interpretation: `Expr`, universe levels, declaration bodies, environment internals.
-
-## Preserved capability
-
-Rust applications using `lean-rs` can call Lean code, ask the elaborator and kernel semantic questions through bounded
-host capabilities, and receive typed results. They can load compiled Lean modules, invoke exported functions, batch
-calls, and reuse sessions. None of this requires reaching into `lean-rs-sys` or knowing any item in the hidden-knowledge
-table. Applications that need arbitrary typed `@[export]` calls use `lean-rs` directly. Applications that legitimately
-need raw FFI can opt in by depending on `lean-rs-sys` directly, accepting full `unsafe` discipline. This is friendlier
-than a workspace fork.
-
-## Discarded behaviour
-
-Not in scope; will not be added.
-
-- **Raw `lean_*` calls through `lean-rs`.** Raw imports live in `pub(crate)` modules and are never re-exported through
-  `lean-rs`'s safe surface. Applications needing raw FFI depend on `lean-rs-sys` directly (opting in to full `unsafe`
-  discipline and opaque public types). The recommended path is to contribute the missing capability to `lean-rs`'s safe
-  layer.
-- **Rust-side reconstruction of Lean semantics.** No parallel representation of `Expr`, universes, environments, or
-  proof terms.
-- **Unmeasured FFI micro-optimizations.** Any performance claim is backed by a named workload, command, before number,
-  and after number—the discipline in `PERFORMANCE-BASELINE`.
-
-## Rejected alternatives
-
-Each was considered before the adopted shape. Recorded so reviewers can recognize a regression toward one of them.
-
-- **A safe wrapper over all of `lean.h`.** Surface is large and shallow. Every ABI decision (`lean_obj_arg` direction,
-  RC obligation, initializer ordering, ctor field layout) ends up in the public type system, so the caller still has to
-  know everything `lean.h` knows. The "safety" is nominal.
-- **Mirror Lean internals in Rust.** Creating Rust types for `Expr`, `Level`, `Name`, environments, and elaborator state
-  creates a second source of truth. Drift is guaranteed the moment Lean's internals evolve, and drift here means
-  *quietly wrong proofs*. The charter's first rule—Lean owns Lean semantics—exists to make this impossible.
-- **Thin façade re-exporting raw FFI directly.** Pushes the entire initialization, refcount, and error contract back
-  onto callers. No error or panic boundary; degenerates into raw-FFI-with-extra-steps.
-- **Six published crates, one per layer** (`lean4-sys` → `lean4-runtime` → `lean4-abi` → `lean4-module` → `lean4-host` +
-  test-support). Fake public-API story: no real downstream picks up `lean4-abi` or `lean4-runtime` in isolation; they
-  take `lean4-host`. Cuts against the dominant Rust binding shape (`git2`+`libgit2-sys`, `openssl`+`openssl-sys`,
-  `z3`+`z3-sys`, `rusqlite`+`libsqlite3-sys`, the pyo3 family), which is consistently two or three crates: a raw `*-sys`
-  plus one safe front door, plus a build helper in larger stacks. The internal *organization* the layer cake encodes is
-  real and worth preserving; `pub(crate)` modules inside `lean-rs` police those boundaries at zero semver cost.
-- **External `lean-sys` adoption.** Considered taking `digama0/lean-sys` as the raw FFI source. Rejected: the published
-  `0.0.9` was pinned to a Lean below our target, and the surfaces we needed (`LEAN_VERSION` const,
-  `cargo:rerun-if-changed=lean.h`, signature-checked allowlist, typed diagnostics) would have required ongoing upstream
-  PRs the published crate did not provide.
-- **Conflate typed FFI and standard services in one crate.** Putting both layers behind one default entry point
-  (`LeanHost`) made it impossible for an external typed-FFI consumer to depend on `lean-rs = "0.1"` without first
-  satisfying the `lean_rs_host_*` shim contract. Generic callback helpers belong below the service layer; theorem-prover
-  shims do not.
-
-The adopted shape is deeper than each rejected alternative: fewer caller-facing details, less temporal coupling, a small
-unsafe surface, and a one-line in-process layering invariant (`lean-rs-sys → lean-toolchain → lean-rs → lean-rs-host`)
-with the worker crates wrapping the service layer when callers need a process boundary. It matches the dominant Rust
-binding shape, so contributors arrive with correct expectations, and it contains no Rust-side dependent-type imitation.
+Performance claims need a named workload, command, toolchain, and measured result. Preserve the limits of each
+measurement; follow [Performance](../performance.md) when comparing changes.

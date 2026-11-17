@@ -1,167 +1,109 @@
-# Release Checklist
+# Release checklist
 
-The `lean-rs` workspace publishes via [`.github/workflows/release.yml`](../.github/workflows/release.yml). Pushing a
-`v<semver>` git tag fires the workflow, which runs the pre-flight gate set, the public-API diff, workspace package
-creation, the per-crate live publish in dependency order, and opens a GitHub Release whose body is the matching
-`## [<version>]` section of [`CHANGELOG.md`](../CHANGELOG.md).
+[`.github/workflows/release.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml) publishes all nine crates when a `v<semver>` tag is
+pushed. It verifies the head Lean version on Ubuntu and macOS, checks public API baselines, packages and publishes
+crates in dependency order, and creates a GitHub Release from the matching `## [<version>]` changelog section.
 
-This document is the **human checklist** for the steps before the tag push. The steps after the tag push are owned by
-the workflow.
+The [version matrix](version-matrix.md) owns support claims; use the [bump procedure](bump-toolchain.md) when changing
+that window. A release that needs full-window evidence also needs CI's manual `full_matrix: true` run: the release
+verification job tests only the head.
 
-**Supported Lean window:** 4.30.0 through 4.35.0. Adding the next release follows the
-[bump procedure](bump-toolchain.md); re-confirm against the [version matrix](version-matrix.md) and
-`crates/lean-rs-abi/src/supported.rs` before any release.
+## Prepare the release
 
-**Publishing is [`scripts/publish-workspace.sh`](../scripts/publish-workspace.sh): idempotent, per-crate, in dependency
-order.** It walks the crates topologically, skips any already on crates.io at the workspace version, and publishes each
-missing one with its own `cargo publish -p` (which waits for that upload to land in the index before the next crate's
-verify build resolves it). Because already-published crates are skipped, **re-running the publish job after a partial
-upload completes the release without burning a version**—no separate recovery run is needed in the common case. We do
-not use `cargo publish --workspace`: its single global index-propagation deadline aborts the entire plan when one crate
-loses the race, stranding the crates that had not uploaded and forcing a recovery run on nearly every release. The same
-script backs `release-recover.yml`.
-
-## One-time setup
-
-1. Create a [scoped publish token](https://crates.io/settings/tokens) on crates.io with `publish-new`, `publish-update`,
-   and `yank` scopes. Token format: `cio…`.
-2. Add the token in the GitHub repo settings (Settings → Secrets and variables → Actions) as `CARGO_REGISTRY_TOKEN`.
-3. If you sign git tags (recommended), set up your GPG / SSH signing key in your local git config—the workflow doesn't
-   verify signatures, but a signed tag is the audit trail the GitHub Release UI surfaces.
-
-## Step 1—Pre-flight (local)
-
-The gates the release workflow will run; running them locally is the fast feedback loop.
-
-```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo nextest run --workspace --profile ci
-cargo test --doc --workspace
-cargo test -p lean-rs-worker-child --test loader_regressions -- --nocapture --test-threads=1
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
-DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
-python3 scripts/check_package_docsrs.py
-cargo package --workspace --no-verify
-actionlint .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/sanitizer.yml .github/workflows/compile-fail.yml
-```
-
-Stop on any failure. `cargo test` (single-process) is not the gate—see [`docs/testing.md`](testing.md).
-
-## Step 2—CHANGELOG + version bump
-
-1. Move `## [Unreleased]` entries into a new `## [X.Y.Z]` section (or compose fresh). The workflow extracts the section
-   body whose heading matches the pushed tag—heading text must match exactly (e.g., `## [0.2.1]` for tag `v0.2.1`).
-2. Bump `[workspace.package].version` and `[workspace.dependencies]` in the root `Cargo.toml` if they don't already
-   match. The workflow asserts `"v${workspace.package.version}" == "${GITHUB_REF_NAME}"` before any publish.
-3. If the public API changed intentionally, regenerate the baselines in the same commit:
+1. Run the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md). Release verification also runs ABI fuzz smoke, workflow linting,
+   docs.rs-mode documentation, and the package-tarball simulation. The workflow is the exact gate list.
+2. Run the clean-tree package check and inspect its results:
 
    ```sh
-   for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
-     cargo +nightly-2026-06-18 public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
-   done
+   uv run scripts/check_package_docsrs.py
+   cargo package --workspace --no-verify
    ```
 
-   Use `cargo-public-api@0.52.0` with the pinned nightly, as required by [the API review instructions](api-review.md).
-   The workflow re-runs that pinned `cargo public-api --simplified` for each crate and `diff`s against
-   these baselines. Drift fails the workflow before any publish.
+   The Python check packages the crates, verifies crate/template contents, then builds docs from unpacked packages with
+   `DOCS_RS=1` and Lean tools hidden from `PATH`.
+3. Move the unreleased changelog entries into `## [X.Y.Z]`. The heading must match tag `vX.Y.Z` exactly.
+4. Set `[workspace.package].version` and the workspace dependency versions in `Cargo.toml` to `X.Y.Z`.
+5. Regenerate intentionally changed public API baselines using the pinned tools and procedure in
+   [api-review.md](api-review.md). The release workflow compares the same eight baseline files; `lean-rs-abi` is
+   published but currently has no baseline in that loop.
+6. Merge the release changes after the required checks pass.
 
-## Step 3—PR and merge
+The repository must have a scoped crates.io publish token in the `CARGO_REGISTRY_TOKEN` Actions secret. Local publishing
+uses the same credential through `cargo login`. Keep credential setup outside release commits.
 
-Open a PR with CHANGELOG + version + (if needed) baseline changes. Merge after CI is green on the existing `ci.yml`
-matrix. The release workflow does not run until the tag is pushed; the regular CI run on the PR is the final correctness
-gate.
+## Interop checks
 
-## Step 4—(Optional) Workflow dry-run
-
-Before tagging, manually trigger the release workflow with `dry_run: true` from the Actions UI (Actions → Release → "Run
-workflow" → check **dry_run**). Runs every gate including workspace package creation and the public-API diff but skips
-the live publish and the GitHub Release. Useful when CHANGELOG section extraction or the public-API diff needs a sanity
-check that doesn't show up in the regular CI run.
-
-The dry run invokes `scripts/publish-workspace.sh --dry-run`, which verify-builds each crate without uploading. One
-caveat: a dry run cannot resolve a downstream crate against an upstream workspace crate that has not actually been
-uploaded, so a dry run of the full chain fails on the first crate with an unpublished workspace dependency. That failure
-is a dry-run artifact (the real run uploads each crate before the next resolves it), so use the dry run to exercise the
-gates and CHANGELOG/baseline checks, not as a publish rehearsal.
-
-## Step 5—Cut the tag
-
-Only after the merge commit is on `main`:
+For changes to callback, progress, or worker streaming contracts, run these targeted checks in addition to the workspace
+gates:
 
 ```sh
-git tag -s v0.2.1 -m "lean-rs v0.2.1"
-git push origin v0.2.1
+cargo nextest run -p lean-rs --test callback_trampoline --test callback_registry --test string_callback_abi
+cargo nextest run -p lean-rs-host --test progress
+cargo nextest run -p lean-rs-worker-child --test streaming_runner --test typed_command
+cargo run -p lean-rs --example interop_callback
+cargo run -p lean-rs --example string_streaming
+cargo run -p lean-rs-host --example progress
+cargo run -p lean-rs-worker-child --example worker_capability_runner
 ```
 
-`-s` for a signed tag (recommended) or `-a` for unsigned annotated. The tag fires the workflow.
-
-## Step 6—Watch the workflow
+The examples need their artifact-writer prerequisites; see the [interop](recipes/downstream-interop.md) and
+[worker](recipes/worker-capability-runner.md) recipes. For performance-sensitive changes, compare saved baselines on the
+same toolchain and machine:
 
 ```sh
-gh run watch --workflow=release.yml
+cargo bench -p lean-rs-host --bench session -- host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline <saved-baseline>
+cargo bench -p lean-rs-worker-child --bench row_payload -- --baseline <saved-baseline>
+cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
 ```
 
-The workflow:
+The worker-capability benchmark is an operational measurement, not a saved-baseline comparison. Record the command,
+revision, workload, and results using the [performance guide](performance.md). Sanitizer coverage is narrower: the
+current workflow runs Miri on pure-Rust sys helpers and ASan on Rust-only toolchain helpers; it does not instrument the
+Lean runtime or establish callback/worker safety by itself.
 
-1. Installs elan + Lean (head of the supported window).
-2. Asserts the tag matches the workspace version.
-3. Runs `fmt`, `clippy`, `nextest`, doctests, `doc` build.
-4. Runs the docs.rs-compatible doc build with `DOCS_RS=1`.
-5. Runs the public-API diff against the committed baselines.
-6. Runs `python3 scripts/check_package_docsrs.py`, which packages the workspace, checks crate/template package contents,
-   unpacks the normalized tarballs, hides Lean/elan/lake from `PATH`, and builds docs with `DOCS_RS=1`.
-7. Runs `cargo package --workspace --no-verify` to create the package tarballs.
-8. Publishes the workspace with `scripts/publish-workspace.sh` (idempotent, per-crate, topological order; skips crates
-   already on crates.io).
-9. Extracts the matching `## [<version>]` section from `CHANGELOG.md`.
-10. Creates a GitHub Release with that body. Tags containing `-` (e.g. `v0.2.0-rc.1`) are marked prerelease
-    automatically.
+## Optional dry run
 
-**If the workflow fails after some crates have published** (a partial release), crates.io versions are immutable, but
-the publish step is idempotent, so recovery does **not** burn a version:
+Dispatch the Release workflow with `dry_run: true`. It runs verification, API checks, and
+[`scripts/publish-workspace.sh --dry-run`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/publish-workspace.sh) without uploading crates or creating a
+GitHub Release.
 
-1. **Re-run the failed job** (Actions → the failed run → "Re-run failed jobs"). The publish script skips the crates
-   already on crates.io and publishes only the rest. This is the normal fix—a partial upload from an index-propagation
-   race (`... awaiting confirmation`) completes on the second attempt.
-2. **If re-running the tag job is undesirable or unavailable** (the heavy `verify` matrix already passed and you want a
-   light publish-only run, or the tag job's environment is wedged), run the `release-recover.yml` workflow (Actions →
-   "Release recovery" → Run workflow) with the same `version` (e.g. `0.2.3`). It runs the same idempotent publish script
-   on a fresh checkout and ensures the GitHub Release exists. The workspace version on the checked-out ref must equal
-   the `version` input, since it uploads the crate contents on that ref. `dry_run: true` verify-builds without uploading
-   (subject to the dry-run interdependency caveat above).
+A dry run cannot resolve an unpublished workspace dependency from crates.io. It can therefore fail at a downstream crate
+even when the real ordered upload would succeed. Inspect the failure rather than treating it as a successful publish
+rehearsal.
 
-Only when a crate's *contents* must change (a genuine build break, not a propagation race) do you bump the patch
-version: repeat steps 1–3 and re-tag at the new merge commit. The tag-vs-version assertion prevents re-tagging against
-the wrong workspace version.
+## Tag and watch
 
-## Step 7—Post-publish
-
-- Verify the release on crates.io: `cargo search lean-rs` (every published crate should appear with the new version).
-- Verify docs.rs built each crate cleanly: visit `https://docs.rs/lean-rs/<version>` (and the same for each of the other
-  published crates) within ~10 minutes. A docs.rs failure is recoverable only by a patch publish with the doc fix.
-- Add a fresh `## [Unreleased]` heading at the top of `CHANGELOG.md`.
-
-## Fallback—local publish when CI is unavailable
-
-Use only when CI is genuinely blocked (account suspension, runner outage, secret loss).
+After the release commit is on `main`, create and push an annotated tag; sign it if signing is configured:
 
 ```sh
-version=$(cargo metadata --no-deps --format-version 1 \
-  | python3 -c 'import json,sys; m=json.load(sys.stdin); print(next(p["version"] for p in m["packages"] if p["name"]=="lean-rs"))')
-
-scripts/publish-workspace.sh
-
-git tag -s "v${version}" -m "lean-rs v${version}"
-git push origin "v${version}"
-gh release create "v${version}" \
-  --notes-file <(awk -v ver="$version" '$0 ~ "^## \\[" ver "\\]" {f=1;next} f&&/^## \\[/{exit} f' CHANGELOG.md)
+git tag -s vX.Y.Z -m "lean-rs vX.Y.Z"
+git push origin vX.Y.Z
+gh run list --workflow release.yml
+gh run watch <run-id>
 ```
 
-Prerequisite: `cargo login` once with the same scoped publish token.
+Use `git tag -a` for an unsigned annotated tag. The workflow checks tag/version agreement before publishing. It marks
+versions containing `-` as prereleases and extracts the matching changelog section for the release body.
 
-If the script fails partway—**stop**, then simply re-run `scripts/publish-workspace.sh`: it skips the crates already on
-crates.io and resumes with the rest (the same idempotence the CI job relies on). Do not use `--allow-dirty` or attempt
-to overwrite a published version; crates.io versions are immutable. Only a genuine *content* change (a build break, not
-an index race) requires bumping the patch version. `scripts/publish-workspace.sh --dry-run` needs no credentials,
-subject to the interdependency caveat above.
+## Recover a partial upload
+
+[`scripts/publish-workspace.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/publish-workspace.sh) skips versions already present on crates.io and
+uploads only missing crates, one crate at a time. Re-run the failed job after resolving an index-propagation or runner
+failure; that resumes the same release without a version bump.
+
+For a separate publish-only run, dispatch [Release recovery](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release-recover.yml) at the exact
+release commit with its version, without the `v` prefix. It uses the same publish script and ensures the GitHub Release
+exists. It checks the workspace version but does not repeat the full verification gates; use it only for contents
+already verified for that release. `dry_run: true` has the same dependency-resolution limitation described above.
+
+Published crate versions are immutable. If crate contents need a fix, prepare and verify a patch release. Do not move an
+existing release tag or use `--allow-dirty` to publish changed contents under it.
+
+If CI is unavailable after the same release checks have passed locally, the local upload command is
+`scripts/publish-workspace.sh`; it uses the same order and resume behavior. Record the verification and upload results
+before creating the corresponding release. Local upload does not itself create a tag or GitHub Release.
+
+## Verify delivery
+
+Check every published crate at the intended version on crates.io and docs.rs. A docs.rs build failure that needs changed
+contents requires a patch publish. Add a fresh `## [Unreleased]` heading for subsequent work.

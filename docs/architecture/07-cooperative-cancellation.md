@@ -1,86 +1,51 @@
 # Cooperative Cancellation
 
-`lean-rs-host` cancellation is cooperative. A caller creates a `LeanCancellationToken`, shares a clone with the thread
-that may request cancellation, and passes `Some(&token)` to a `LeanSession` operation. The operation checks the token
-before it enters Lean and, for token-aware bulk paths, between per-item dispatches. If the token has been cancelled, the
-operation returns `LeanError::Cancelled` with diagnostic code `lean_rs.cancelled`.
+`LeanCancellationToken` is a one-way, clonable flag. Pass `Some(&token)` to a host operation; another thread may call
+`cancel()` on a clone. When the operation reaches a host-controlled check, it returns `LeanError::Cancelled` with code
+`lean_rs.cancelled`. Create a fresh token for the next request.
 
 ```rust
-use std::thread;
-use lean_rs_host::LeanCancellationToken;
-
-let token = LeanCancellationToken::new();
+let token = lean_rs_host::LeanCancellationToken::new();
 let canceller = token.clone();
+std::thread::spawn(move || canceller.cancel());
 
-thread::spawn(move || {
-    canceller.cancel();
-});
-
-// On the Lean worker thread:
-// session.query_declarations_bulk(&names, Some(&token))?;
+// On the thread that owns the session:
+let declarations = session.query_declarations_bulk(&names, Some(&token), None)?;
 ```
 
-Already-collected bulk results are discarded. There is no partial-output return shape.
+The token contains only `Arc<AtomicBool>` and is `Send + Sync`. Sessions, capabilities, pools, runtime references, and
+Lean handles remain thread-bound. Sharing the token does not permit sharing the session.
 
-Cancellation is a control signal checked at host-owned boundaries. Progress events are observability signals delivered
-through the reusable interop callback substrate. Where a method uses a Rust per-item loop, progress reports and
-cancellation checks share the same item boundary.
+## Checkpoints and bulk work
 
-## What Is Checked
+Host query, elaboration, kernel, meta, and proof-workflow calls accept an optional cancellation token. They check it
+before dispatch, with additional checks where the Rust implementation controls multiple dispatch points. Some methods
+accept a progress sink after the token; see the [session API](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/session.rs) for exact
+signatures.
 
-Every host operation that can enter Lean accepts `Option<&LeanCancellationToken>` as its final argument:
+`query_declarations_bulk`, `declaration_type_bulk`, `declaration_kind_bulk`, `declaration_name_bulk`, and
+`elaborate_bulk` use a Rust per-item loop when given a token. This creates checkpoints between items at the cost of
+batching. On observed cancellation, collected results are discarded; no partial-output value is returned. Empty input
+returns immediately.
 
-- `LeanCapabilities::session`
-- `SessionPool::acquire`
-- `LeanSession::{query_declaration,list_declarations,list_declarations_filtered,declaration_source_range,declaration_type,declaration_kind,declaration_name}`
-- `LeanSession::{elaborate,kernel_check,check_evidence,summarize_evidence}`
-- `LeanSession::{run_meta,query_declarations_bulk,declaration_type_bulk,declaration_kind_bulk,declaration_name_bulk,elaborate_bulk}`
+With `None`, those methods retain their Lean-side bulk dispatch. Other operations, including fresh import, filtered
+listing, kernel checking, and module processing, may enter one long Lean call after their pre-dispatch check. There is
+no universal post-dispatch check: a token cancelled while that call runs need not turn its successful result into
+`Cancelled`.
 
-Some long-running methods also accept `Option<&dyn LeanProgressSink>` after the cancellation token. That progress sink
-is not a cancellation token. It may call `token.cancel()` on a shared token, but the session still observes cancellation
-only at the next host-controlled check point.
+A progress sink may cancel a shared token, but that only changes the flag. A per-item path observes it at its next
+check; a Lean-side progress callback does not itself add cancellation or stop semantics.
 
-`None` preserves the existing non-cancellable path. In particular, `query_declarations_bulk(..., None)`,
-`declaration_*_bulk(..., None)`, and `elaborate_bulk(..., None)` keep their single Lean-side bulk dispatch.
+## Limits
 
-`Some(token)` enables cancellation checks. For singular methods, the token is checked before each FFI dispatch point the
-Rust side controls. For bulk methods, the Rust side switches to a per-item loop and checks the token between items. That
-path is intentionally less batched: cancellation points require returning to Rust.
+The token cannot interrupt a running Lean call, a stuck `isDefEq`, C-side reduction, an export's own long loop, or a
+fatal runtime failure. Heartbeat limits in `LeanElabOptions` and `LeanMetaOptions` bound work that burns heartbeats;
+they do not guarantee wall-clock termination.
 
-## What Is Not Checked
+Use the worker process boundary for a request watchdog and recovery from work that does not return. Cancelling an async
+join handle or timing out an in-process wait does not stop the underlying Lean work. Pre-emptive interruption would
+leave object ownership and global runtime state unproven, the same reason [panic containment](06-panic-containment.md)
+uses a process boundary.
 
-The token does not interrupt work already running inside Lean. It cannot stop:
-
-- one stuck `isDefEq` call that never returns to the host;
-- a C-side kernel reduction that does not burn heartbeats;
-- an `@[export]` symbol that runs its own long loop without checking heartbeats or returning to Rust;
-- Lean runtime panics, aborts, `std::exit`, or foreign unwinds.
-
-Use `LeanElabOptions` / `LeanMetaOptions` heartbeats for interpreter work that does burn heartbeats. Use a caller-level
-timeout or a worker-process boundary for work that may not return to a cooperative check point.
-
-## Threading Model
-
-`LeanCancellationToken` is `Clone + Send + Sync` because it contains only an `Arc<AtomicBool>`. That does not make
-`LeanSession` cross-thread. Sessions, Lean handles, capabilities, pools, and runtimes remain `!Send + !Sync` and stay on
-the Lean worker thread.
-
-The intended pattern is asymmetrical:
-
-1. The worker thread owns the `LeanSession` and passes `Some(&token)` to the operation.
-2. Another thread owns a clone of the token and calls `cancel()`.
-3. The worker observes cancellation at the next host-controlled check point and returns `LeanError::Cancelled`.
-
-The token is one-way. Create a fresh token for the next operation.
-
-## Rejected Shapes
-
-`*_with_cancellation` methods were rejected as a shallow duplicate API. They double the public surface while providing
-the same operation with one extra argument.
-
-A session-wide cancellation wrapper was rejected because cancellation is an operation-level decision. A token may apply
-to one user request, not to the session's whole imported environment.
-
-Pre-emptive cancellation was rejected because the host cannot safely unwind or interrupt arbitrary Lean runtime work.
-Panic containment imposes the same boundary: when the host cannot prove Lean state and refcounts remain valid, the
-recovery boundary is a worker process. See [`06-panic-containment.md`](06-panic-containment.md).
+The optional argument keeps cancellation at operation scope without duplicating every method as `*_with_cancellation` or
+making a token part of a session's imported environment.

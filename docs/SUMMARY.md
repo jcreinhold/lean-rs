@@ -12,49 +12,38 @@
 # Same-process FFI (`lean-rs`)
 
 - [Concurrency](architecture/04-concurrency.md)
-- [Panic containment](architecture/06-panic-containment.md)
-- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)
-- [Reusable interop](architecture/08-reusable-interop.md)
-- [Info-tree projection](architecture/09-info-tree-projection.md)
-- [Callback registry](architecture/10-callback-registry.md)
+- [Callback registry and payloads](architecture/10-callback-registry.md)
 - [Generic interop shims](architecture/11-generic-interop-shims.md)
 - [Interop build and link](architecture/12-interop-build-and-link.md)
-- [Structured progress](architecture/13-structured-progress.md)
-- [Interop release contract](architecture/14-interop-release-contract.md)
-- [Callback payloads](architecture/15-callback-payloads.md)
 - [Loader and artifact boundary](architecture/29-loader-and-artifact-boundary.md)
 
 # Standard Lean services (`lean-rs-host`)
 
 - [Service-layer surface](architecture/03-host-stack.md)
 - [Capability contract](lean-rs-host-capability-contract.md)
+- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)
+- [Structured progress](architecture/13-structured-progress.md)
+- [Module-query projection](architecture/09-info-tree-projection.md)
 - [Same-process controls](same-process-controls.md)
 
-# Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)
+# Worker services
 
 - [Production boundary](architecture/16-production-boundary.md)
+- [Panic containment](architecture/06-panic-containment.md)
 - [Worker session adapter](architecture/17-worker-session-adapter.md)
 - [Worker data streaming](architecture/18-worker-data-streaming.md)
 - [Worker capability layer](architecture/19-worker-capability-layer.md)
-- [Worker pool](architecture/20-worker-pool.md)
+- [Worker pool and observability](architecture/20-worker-pool.md)
 - [Import-set planning](architecture/21-import-set-planning.md)
-- [Worker row batching](architecture/22-worker-row-batching.md)
-- [Worker data-plane format](architecture/23-worker-data-plane-format.md)
-- [Lean-side worker streaming](architecture/24-lean-side-worker-streaming.md)
-- [Mathlib-scale worker fixture](architecture/25-mathlib-scale-worker-fixture.md)
-- [Worker pool observability](architecture/26-worker-pool-observability.md)
-- [Downstream worker replacement fixture](architecture/27-lean-dup-readiness.md)
-- [Production-scale release](architecture/28-production-scale-release.md)
+- [Scale and downstream fixtures](architecture/25-mathlib-scale-worker-fixture.md)
 - [Worker runtime semantics](architecture/30-worker-runtime-semantics.md)
-- [Runtime model proof home](architecture/31-runtime-model-proof-home.md)
+- [Runtime model proof package](architecture/31-runtime-model-proof-home.md)
 
 # Recipes
 
 - [Ship a crate with Lean](recipes/ship-crate-with-lean.md)
-- [Downstream interop](recipes/downstream-interop.md)
-- [String-callback streaming](recipes/string-callback-streaming.md)
-- [Worker capability runner](recipes/worker-capability-runner.md)
-- [Worker process boundary](recipes/worker-process-boundary.md)
+- [Exports and callbacks](recipes/downstream-interop.md)
+- [Worker commands and raw transport](recipes/worker-capability-runner.md)
 
 # Safety audits
 

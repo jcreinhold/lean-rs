@@ -1,152 +1,83 @@
 # Concurrency and the Lean Task Runtime
 
-The concurrency contract for `lean-rs`. Lean is per-thread; `LeanRuntime` is `!Send`; every handle inherits that
-structurally; thread attach is a public RAII type owned by `lean_rs::runtime`. The rest of the design follows.
+Lean-derived values stay on their originating OS thread. Rust scheduling happens around complete synchronous Lean
+operations; Lean's own task manager remains an implementation detail of those operations.
 
 ## Thread affinity
 
-`LeanRuntime` contains a `PhantomData<*mut ()>`, so it is `!Send + !Sync`. Every safe handle on the public surface
-either holds `&'lean LeanRuntime` directly or transitively (through `Obj<'lean>`, which carries
-`PhantomData<&'lean LeanRuntime>`), and inherits the same restriction. The auto-trait inference is structural—there are
-no `unsafe impl Send` or `unsafe impl Sync` anywhere in the crate.
+`LeanRuntime` contains `PhantomData<*mut ()>` and is `!Send + !Sync`. Object handles carry a borrow of that runtime,
+directly or through `Obj<'lean>`, and inherit the restriction. It covers semantic handles, `LeanHost`,
+`LeanCapabilities`, `LeanSession`, `LeanEvidence`, `SessionPool`, `PooledSession`, and `LeanThreadGuard`. The
+[compile-fail suite](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs) pins the handle chain;
+no unsafe `Send` or `Sync` implementation relaxes it.
 
-Handles covered:
+`LeanRuntime::init()` returns a process-lived borrow. The `'lean` parameter still records the dependency in every handle
+and prevents a value from escaping a shorter runtime view. A `'static` lifetime does not make a handle thread-safe.
 
-- `LeanRuntime`, `LeanThreadGuard<'lean>`
-- `LeanHost<'lean>`, `LeanCapabilities<'lean, 'h>`, `LeanSession<'lean, 'c>`
-- `LeanName<'lean>`, `LeanLevel<'lean>`, `LeanExpr<'lean>`, `LeanDeclaration<'lean>`, `LeanEvidence<'lean>`
-- `SessionPool<'lean>`, `PooledSession<'lean, 'p, 'c>`
+Plain Rust projections can cross threads: `EvidenceStatus`, `ProofSummary`, diagnostics, errors, statistics, and
+`LeanCancellationToken`. A container such as `LeanResult<T>` is transferable only when its payload is. In particular,
+`LeanKernelOutcome<'lean>` contains `LeanEvidence<'lean>` and stays on the Lean thread. Send its `status()` or a
+`ProofSummary` instead.
 
-Each is pinned at compile time by `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs`. An accidental
-`impl Send` from a refactor is caught by the `.stderr` snapshot in the pinned `compile-fail` CI job
-([`.github/workflows/compile-fail.yml`](../../.github/workflows/compile-fail.yml), `RUN_TRYBUILD=1`) before the change
-can merge.
+## Initialization and explicit attachment
 
-### Why the `'lean` parameter, on top of `OnceLock`
+Call `LeanRuntime::init()` on each thread that constructs Lean handles. Initialization runs once per process; every
+successful call also marks the calling thread as permitted in the Rust thread-local dispatch check. Do not capture a
+runtime reference from a coordinator in a worker closure: `&LeanRuntime` is itself `!Send`.
 
-In practice the runtime resolves to `&'static LeanRuntime`: `OnceLock` makes it a process-once singleton, and no current
-caller binds `'lean` to a non-static lifetime. The parameter forecloses one bug class `OnceLock` alone cannot catch—a
-handle outliving a scoped runtime view (e.g., a future per-task `LeanRuntime`). The cost is signature noise.
+`LeanThreadGuard::attach(runtime)` explicitly calls `lean_initialize_thread`; dropping the guard calls
+`lean_finalize_thread`. Every additional Rust-created thread that uses Lean must hold this guard around all Lean work
+and the destruction of its Lean handles, then drop it on that same thread. Nested guards are legal and balance attach
+depth. The thread that performed the first process initialization and threads started by Lean already have Lean's
+runtime context and need no additional guard.
 
-## What can cross threads
+The distinction matters: later `init()` calls update the Rust thread-local permission marker; they do not themselves
+call the C attach function. A successful later `init()` therefore does not replace the required guard on a Rust-created
+worker thread. Typed export dispatch has a debug-only attachment assertion; it is a diagnostic aid rather than a
+release-mode safety boundary. The implementation is in
+[runtime initialization](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/runtime/init.rs) and
+[thread attachment](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/runtime/thread.rs).
 
-Data types—types that carry information *about* a Lean result but no Lean refcount—are `Send + Sync` by auto-trait
-derivation and may travel freely:
+## Lean task manager
 
-- `LeanCancellationToken` (contains only `Arc<AtomicBool>`; it carries no Lean handle and is checked cooperatively by
-  the worker thread).
-- `LeanError`, `LeanResult<T>` (per `LeanError`'s `Clone + Send + Sync` derivation, with `T: Send + Sync` as the usual
-  constraint).
-- `EvidenceStatus`, `LeanKernelOutcome<'lean>` (the `'lean` argument is a marker; the type carries no Lean refcount).
-- `ProofSummary` (a bounded byte buffer).
-- `LeanDiagnostic`, `LeanPosition`, `LeanSeverity`.
-- `SessionStats`, `PoolStats`.
+`LeanRuntime::init` starts the task manager after runtime initialization and the end-of-bootstrap marker. Services that
+run `Language.Lean.processCommands`, including kernel checks and module processing, need it.
 
-Typical workflow: a worker runs Lean work to completion inside its `LeanThreadGuard` scope, projects the result to one
-of these plain Rust types, and sends the projection back to a coordinator thread over a channel. Lean handles never
-leave the worker.
+Set `LEAN_RS_NUM_THREADS` to a positive integer before the first `init()` to override Lean's compiled-in worker
+heuristic. The first call captures the value; invalid values warn on the `lean_rs` tracing target and use Lean's
+default. Later environment changes do not reconfigure the manager. Account for this count when several worker processes
+run concurrently. Repository test runs default to one Lean task worker; see [testing](../testing.md).
 
-Cancellation is the asymmetric exception to "results travel back": the coordinator sends a `LeanCancellationToken` clone
-into the worker before the operation starts, then may call `cancel()` from another thread. The session itself still
-stays on the worker. See [`07-cooperative-cancellation.md`](07-cooperative-cancellation.md).
+The task manager and runtime live until process exit. `lean-rs` does not finalize or recycle them in-process. Lean
+`Task α` values are not a public Rust API; Rust-side scheduling uses Rust primitives.
 
-## Thread attach and detach
+## Per-thread session pools
 
-`LeanThreadGuard<'lean>` is the public RAII type owning one attach/detach pair. `LeanThreadGuard::attach(runtime)`
-attaches the calling OS thread (forwarded to `lean_initialize_thread`); the guard's `Drop` detaches
-(`lean_finalize_thread`). Three rules:
+`SessionPool` uses single-threaded interior mutability and retains environment handles on its owning thread. Reuse keys
+include the canonical Lake root, ordered imports, and import profile; the pool also rejects environments whose
+extension-registration stamp is stale. Import order is preserved because it affects Lean imports.
 
-1. Every OS thread that Lean did not start, and that calls into Lean, must hold a `LeanThreadGuard` for the duration of
-   its Lean work.
-2. The thread that called `LeanRuntime::init` does **not** need a guard; it is implicitly attached for the rest of its
-   lifetime. (Lean's own initialization runs on that thread; treating it as a "main" thread is the convention.)
-3. A guard must be dropped on the same thread that attached it. The `!Send` claim on `LeanThreadGuard` makes that
-   structural—the compiler refuses to let one cross a thread boundary.
+Use one host/capability/session pool per Rust worker. Separate workers may execute against their own environments, but
+host import and source-processing paths that touch global Lean import/cache state share a process-local mutex. This is
+not a claim that all Lean operations serialize, nor does it serialize separate worker processes.
 
-Nested attaches are legal: a worker that re-enters `attach` (e.g., inside a callback) gets a second guard; the
-per-thread attach depth balances on the matching `Drop`.
+## Async embedding
 
-Every host-call funnel (`crate::module::LeanExported::call`, which all typed Lean dispatches route through) inserts a
-debug-only `debug_assert_attached`. A worker that forgets its guard panics with a clear Rust message in debug; release
-builds compile the assertion away.
+Submit a complete Lean job to a bounded blocking executor or dedicated worker thread:
 
-## Task manager
+1. Inside each additional Rust-created blocking or dedicated thread, call `LeanRuntime::init()`, attach a
+   `LeanThreadGuard`, and then construct the host, capabilities, and sessions there.
+2. Complete all Lean calls and convert their results to owned Rust data on that same thread.
+3. Drop all Lean handles before the guard, then return the projection through a channel or blocking-task join handle.
+   Keep handles within the synchronous scope. The first process-initialization thread has the attachment exception
+   described above.
 
-The Lean task manager is required for any capability that runs `Language.Lean.processCommands` (notably
-`LeanSession::kernel_check`), which asserts `g_task_manager` on entry. `LeanRuntime::init` therefore starts the task
-manager as part of its process-once init sequence, after `lean_initialize_runtime_module` and `lean_initialize`.
+A Tokio `spawn_blocking` closure is one possible adapter. Do not use async-runtime worker start/stop hooks to attach
+blocking workers: those hooks do not establish the lifetime of each blocking task. A dedicated thread can keep its own
+host and session pool across many jobs; an arbitrary blocking-task scheduler must not migrate those values between
+threads.
 
-Worker count defaults to Lean's compiled-in heuristic (typically one per core). Override by setting
-`LEAN_RS_NUM_THREADS` to a positive integer **before** the first `LeanRuntime::init` call; the first call captures the
-value and later changes have no effect, because the task manager is process-lived and `init` is idempotent. Invalid
-values fall back to Lean's default with a `tracing::warn!` against the `lean_rs` target.
-
-Set `LEAN_RS_NUM_THREADS` when several Lean-using processes run side by side (CI test matrices, batch workers,
-multi-tenant services) so the sum of their pools does not oversubscribe cores. The workspace defaults it to `1` for its
-own test runs; see [`docs/testing.md`](../testing.md) for the test-runner side.
-
-The crate does not currently expose a programmatic `with_workers(n)` constructor; the env var is the single supported
-override. Adding a programmatic API later is a strict refinement.
-
-The task manager is process-lived. `lean-rs` does not call `lean_finalize_task_manager`; Lean tears it down at process
-exit, like the runtime itself.
-
-The Lean `Task` *value* type (Lean-level `Task α`) is intentionally not part of the public Rust surface. `lean_task_*`
-exists in `lean.h` but is not exposed through `lean-rs-sys`. Rust-side concurrency uses Rust primitives; Lean tasks are
-an internal implementation detail of capabilities that need them.
-
-## `SessionPool` under concurrency
-
-`SessionPool<'lean>` is a per-thread free-list for `LeanSession` instances bucketed by a session-safety key: canonical
-Lake project root, ordered imports, and import profile. Import order is preserved because `Lean.importModules` is
-order-sensitive. Interior mutability is `RefCell<PoolInner<'lean>>` + `Cell<PoolStats>`; combined with the inherited
-`!Send + !Sync` of `LeanRuntime`, the pool is firmly single-threaded.
-
-Intended deployment: one pool per worker, all anchored to the shared `&'static LeanRuntime` returned by
-`LeanRuntime::init`. Workers acquire and release independently; the pool itself never crosses a thread boundary.
-Cross-thread session sharing is unsupported and prevented at compile time. If a workload needs more capacity than one
-pool can sustain, the answer is more workers (each with its own pool), not a shared pool.
-
-## Embedding in async runtimes (Tokio / smol / async-std)
-
-**Sync-first, with a dedicated bounded thread pool.** Each worker holds a `LeanThreadGuard` for its lifetime and owns
-its own `LeanHost` / `LeanCapabilities` / `SessionPool`. Async code submits jobs to that pool via the runtime's
-blocking-task primitive and receives back a `Send`-able Rust projection.
-
-```rust
-// One-time setup, off the async pool.
-let runtime = lean_rs::LeanRuntime::init()?;
-let lean_pool = tokio::runtime::Builder::new_multi_thread()
-    .worker_threads(num_lean_workers)
-    .on_thread_start(move || {
-        WORKER_GUARD.with(|cell| {
-            cell.borrow_mut()
-                .replace(lean_rs::LeanThreadGuard::attach(runtime));
-        });
-    })
-    .on_thread_stop(|| {
-        WORKER_GUARD.with(|cell| { cell.borrow_mut().take(); });
-    })
-    .build()?;
-
-// In async code:
-let summary: lean_rs::ProofSummary = lean_pool
-    .spawn_blocking(move || run_one_lean_job(/* ... */))
-    .await??;
-```
-
-Two rules carry over from the sync API:
-
-1. **No Lean-derived value crosses an `await`.** `LeanSession`, `LeanExpr`, etc. are `!Send`; the compiler will refuse.
-   The programmer must arrange the work so a complete unit happens inside one `spawn_blocking` closure.
-2. **The return value must be `Send + Sync` Rust data.** A `LeanKernelOutcome` or `ProofSummary` is the natural unit;
-   raw handles are not.
-
-No async helpers ship as part of `lean-rs`. The sketch shows what to wire up, not a published API.
-
-### Why not async-first
-
-Making `lean-rs` itself `async fn`-shaped would push every Lean call through an executor poll, multiply the surface, and
-provide no benefit over the pattern above. Lean is synchronous inside a thread; the natural place to absorb that into an
-async service is at the thread boundary, not inside the binding crate. Embedders needing fine-grained async cancellation
-around a Lean call wrap the blocking task themselves—the building block is `spawn_blocking`, not yet-another `Future`.
+`!Send` values cannot be retained across an `await` in a future that must be `Send`. Even on a local executor, keep the
+Lean operation synchronous and on its attached thread. Async cancellation does not pre-empt a running Lean call; see
+[cooperative cancellation](07-cooperative-cancellation.md). Use the worker crates for process timeouts and fatal-exit
+containment.

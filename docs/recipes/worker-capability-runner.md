@@ -1,25 +1,25 @@
-# Worker Capability Runner
+# Worker capability runner
 
-Run the capability runner from a clean checkout:
+Use the worker crates for process isolation, typed commands and live rows, diagnostics, request timeouts, and worker
+cycling. For Cargo packaging and an app-owned child binary, start with
+[ship-crate-with-lean.md](ship-crate-with-lean.md).
+
+The in-tree fixtures exercise the complete path:
 
 ```sh
 cargo run -p lean-rs-worker-child --example worker_capability_runner
+cargo run -p lean-rs-worker-child --example worker_streaming
 ```
 
-This is the normal path for a project that wants a Lean worker process, live rows, typed decoding, diagnostics, timeout
-policy, terminal completion, and explicit worker cycling without writing a subprocess protocol. It uses the generic
-fixture under [`fixtures/interop-shims/`](../../fixtures/interop-shims/); the command names resemble a downstream tool,
-but the row schemas are deliberately small fixture schemas.
+Fixture build helpers currently require a configured shared-writer helper through `LEAN_HOST_MCP_WRITER_EXECUTABLE`. The
+fixture spans multiple package roots and cannot use a package-local bootstrap. These commands do not configure that
+helper themselves.
 
-If you are packaging your own application, start with [`ship-crate-with-lean.md`](ship-crate-with-lean.md). That recipe
-shows the `build.rs` helper, runtime capability open, and app-owned worker child binary. This page explains the worker
-capability behavior using the in-tree fixture.
+## Open a capability
 
-## What The Example Shows
+The builder names the Lake project, package, shared target, imports, and trusted export signatures:
 
-The example opens a worker-backed capability with `LeanWorkerCapabilityBuilder`:
-
-```rust
+```rust,ignore
 let mut capability = LeanWorkerCapabilityBuilder::new(
     workspace.join("fixtures").join("interop-shims"),
     "lean_rs_interop_consumer",
@@ -30,22 +30,29 @@ let mut capability = LeanWorkerCapabilityBuilder::new(
     "lean_rs_interop_consumer_worker_shape_metadata",
     serde_json::json!({"source": "worker_capability_runner"}),
 )
+.streaming_command_export("lean_rs_interop_consumer_worker_shape_index")
+.streaming_command_export("lean_rs_interop_consumer_worker_shape_timeout_after_row")
 .open()?;
 ```
 
-The builder builds the Lake target, resolves and starts `lean-rs-worker-child`, health-checks the child, opens the
-configured imports, and optionally validates generic capability metadata. The caller still names the Lake project,
-package, target, and imports because those identify the capability. The caller does not construct `.lake/build/lib`
-paths, wire stdio pipes, decode private frames, or repeat startup ordering.
+The builder builds or reuses the Lake target, resolves and starts the worker child, checks its handshake, opens the
+imports, and validates the requested metadata. It hides artifact paths, pipes, frames, and startup sequencing.
+`validate_metadata` also registers that export's `String -> IO String` signature. Register each command's signature with
+`streaming_command_export`, `json_command_export`, or the corresponding metadata/doctor helper before opening a
+source-built capability. Packaged capabilities carry those signatures in their build manifest instead.
 
-Packaged applications should use the manifest-backed form shown in [`ship-crate-with-lean.md`](ship-crate-with-lean.md).
-The same builder exposes `check()` for startup probes and doctor commands; it validates the app-owned worker child,
-capability manifest/artifacts, worker handshake, import session, and optional metadata expectation before real work
-starts.
+The default child resolver checks the configured override, sibling Cargo profile paths, and the in-tree development
+build. Packaged applications should use an explicit `LeanWorkerChild` descriptor, as in the shipped-crate recipe.
+`builder.check()` returns a bootstrap report; it is an active startup probe, so it can build artifacts and start a
+child.
 
-The row command uses the typed facade:
+## Run a typed command
 
-```rust
+The application owns ordinary serde request, row, and summary types. The fixture uses `ShapeRequest`, `ShapeRow`, and
+`ShapeSummary`:
+
+```rust,ignore
+let mut session = capability.open_session(None, Some(&progress))?;
 let command = LeanWorkerStreamingCommand::<ShapeRequest, ShapeRow, ShapeSummary>::new(
     "lean_rs_interop_consumer_worker_shape_index",
 );
@@ -59,48 +66,97 @@ let summary = session.run_streaming_command(
 )?;
 ```
 
-`ShapeRequest`, `ShapeRow`, and `ShapeSummary` are ordinary serde types owned by the downstream crate. The worker crates
-owns the transport: child lifecycle, private framing, live bounded row forwarding, typed diagnostics, progress events,
-request timeout, cancellation, terminal completion, and fatal-child classification.
+A row sink implements `LeanWorkerTypedDataSink<Row>::report`. It receives the stream name, per-stream sequence, and
+typed payload while Lean produces rows. Buffer tentative rows if the application needs atomic commit: commit only after
+the command returns terminal success. The summary reports total rows, per-stream counts, elapsed duration, and optional
+application-defined metadata.
 
-Rows are live and tentative. A sink sees each row while Lean produces it, but the caller should commit buffered rows
-only after `run_streaming_command` returns terminal success. The terminal summary reports total row count, per-stream
-counts, elapsed duration, and optional downstream-defined metadata.
+| Channel | Purpose |
+| --- | --- |
+| Rows | Application data decoded into the chosen row type |
+| Diagnostics | Worker/capability observations through `LeanWorkerDiagnosticSink` |
+| Progress | Coarse ticks through `LeanWorkerProgressSink` |
+| Terminal result | Completion status and summary that determine whether rows can be committed |
 
-## Channels
+Malformed envelopes, nonzero callback status, and row or summary decoding failures are typed errors. Decode errors carry
+command, stream, and sequence context. A Lean internal panic or abort can kill the child; the supervisor classifies the
+exit without treating delivered rows as a successful result. Applications still own schemas, cache validity,
+persistence, reporting, and domain-specific meaning.
 
-Keep the channels separate:
+## Timeout, cancellation, and cleanup
 
-- **Rows** carry downstream data. The worker assigns per-stream sequence values and decodes payloads into the caller's
-  row type.
-- **Diagnostics** carry worker or capability observations. They are delivered through `LeanWorkerDiagnosticSink`, not
-  through row payloads.
-- **Progress** carries coarse operation ticks. It is useful for user feedback and cancellation boundaries, but it is not
-  the row stream.
-- **Terminal summary** says whether delivered rows are committable.
+Set request timeout through `LeanWorkerConfig`, a builder, or a live worker/session. One request deadline includes the
+bounded write and all responses; receiving progress or rows does not reset it. Startup timeout covers the child
+handshake separately.
 
-`LeanWorkerSession::run_data_stream` remains available for low-level fixtures and schema-less tooling. Prefer typed
-commands for application code because decode errors include command, stream, and sequence context.
+Cancellation is checked while waiting for IPC even when Lean emits no events. A dispatched cancellation or timeout
+invalidates the open session and triggers child shutdown/replacement. The returned error may instead describe cleanup or
+replacement failure; do not assume a replacement started merely because a timeout occurred. Reopen a session after
+successful recovery. The runner demonstrates a tentative row followed by a timeout, then an explicit cycle and a
+successful command.
 
-## Timeout And Cycling
+```rust,ignore
+capability.cycle()?;
+let report = capability.shutdown()?;
+eprintln!("worker shutdown outcome: {:?}", report.outcome);
+```
 
-The example also runs a command that emits one tentative row and then sleeps. It lowers the request timeout and expects
-`LeanWorkerError::Timeout`. On timeout, the supervisor kills and replaces the child, records a timeout restart reason,
-and invalidates the open session. The example then explicitly cycles the worker and proves a later typed command
-succeeds in the fresh child.
+`shutdown()` stops request admission, requests termination, escalates after the shutdown timeout, and reports cleanup
+status. Dropping the handle performs best-effort cleanup but cannot return failures. The deprecated `terminate()` API
+reports only the legacy exit view. Cycling is the process memory-reset boundary; draining an in-process `SessionPool` is
+only cache eviction.
 
-Use cancellation when the caller knows it wants to stop and can wait for a row or progress boundary. Use request timeout
-as the parent-enforced watchdog for unresponsive Lean work.
+## Wire and raw rows
 
-## What Downstream Projects Own
+The Lean streaming export has a fixed ABI:
 
-The worker crates do not define business commands or row schemas. A downstream project still owns:
+```lean
+@[export lean_rs_interop_consumer_worker_data_stream]
+def workerDataStream (requestJson : String) (handle trampoline : USize) : IO UInt8 := ...
+```
 
-- semantic command names and export names;
-- request, row, and terminal-summary serde types;
-- cache validity rules;
-- persistence and reporting;
-- any ranking, indexing, or domain-specific interpretation.
+The child creates a local `LeanCallbackHandle<LeanStringEvent>`. Each callback string is a JSON envelope:
 
-The fixture uses command-like names such as `version`, `doctor`, `extract`, `features`, `index`, and `probe` only to
-exercise the generic worker capability layer. They are examples, not APIs reserved by the worker crates.
+```json
+{"stream": "rows", "payload": {"kind": "done", "ordinal": 1}}
+```
+
+The callback handle never crosses the process boundary. The worker validates the envelope and assigns sequence numbers
+per stream within one request. The parent exposes raw rows as:
+
+```rust,ignore
+pub struct LeanWorkerDataRow {
+    pub stream: String,
+    pub sequence: u64,
+    pub payload: serde_json::Value,
+}
+```
+
+`LeanWorkerSession::run_data_stream` supports schema-less inspection. Typed commands keep validated raw JSON until the
+row decoder runs; the raw API parses payloads into `serde_json::Value`. Prefer the typed API when the schema is known.
+Neither API defines a downstream tool's business protocol.
+
+Use metadata or doctor exports, rather than a row stream, for capability discovery. Both use `String -> IO String`:
+`capability_metadata` decodes commands, capabilities, versions, and extra JSON; `capability_doctor` decodes pass,
+warning, and error diagnostics. Metadata validation can be part of startup; doctor remains an explicit operation. Worker
+runtime facts come from `runtime_metadata()` and remain separate from application metadata.
+
+## Operational probe
+
+```sh
+cargo run --release -p lean-rs-worker-child --example worker_capability_probe
+```
+
+The probe records cold startup, session opening, import-once row throughput, cancellation latency, fatal-exit recovery,
+cycling, and parent/child RSS. Its `version`, `doctor`, `extract`, `features`, `index`, and `probe` names exercise
+generic fixture schemas; they are not reserved commands or a downstream parity claim.
+
+An explicit comparison command is optional:
+
+```sh
+LEAN_RS_WORKER_COMPARE_COMMAND='cargo run -p lean-dup -- --help' \
+  cargo run --release -p lean-rs-worker-child --example worker_capability_probe
+```
+
+Record the exact command, revisions, and output limits with comparison results. The comparison command is outside the
+worker contract.

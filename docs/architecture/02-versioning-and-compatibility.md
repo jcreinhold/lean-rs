@@ -1,190 +1,104 @@
 # Versioning and Compatibility
 
-The supported Lean toolchain window, the in-tree raw-FFI policy, the header-digest policy, crate semver, and supported
-platforms. The single place to look when deciding whether a given Lean toolchain or host OS is supported. Each entry is
-a compatibility commitment; bumping any of them requires a versioned proposal, not a build fix.
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) is the source of truth for accepted Lean releases
+and audited `lean.h` digests. The current window starts at 4.30.0 and ends at 4.35.0, including the explicitly listed
+release candidates. Do not infer support for an unlisted release from its version number. The
+[version matrix](../version-matrix.md) summarizes support; the [bump procedure](../bump-toolchain.md) owns changes to
+it.
 
-## Supported Lean toolchain window
+## Toolchain identity and ABI checks
 
-`lean-rs` supports a **contiguous window of Lean 4 stable releases**, plus the leading release candidate while it is
-being qualified, enumerated in the [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) table. The table
-is the single source of truth; this document mirrors it for narrative context. As of 2026-10-13:
-
-| Lean versions (header-identical) | `lean.h` SHA-256 (prefix) |
+| Crate | Owns |
 | --- | --- |
-| 4.30.0 | `5a25125970f4…` |
-| 4.31.0-rc1, 4.31.0-rc2 | `99ef35d69709…` |
-| 4.31.0 | `486fe204404c…` |
-| 4.32.0-rc1, 4.32.0, 4.32.2 | `22eed50aa703…` |
-| 4.33.0-rc1, 4.33.0-rc2, 4.33.0 | `9018878554c5…` |
-| 4.33.1 | `02af00402831…` |
-| 4.34.0-rc1 | `19510ea01b07…` |
-| 4.34.0-rc2, 4.34.0 | `982c731a1fba…` |
-| 4.34.1 | `866d80c309a9…` |
-| 4.35.0-rc1 | `322d6bd8ab26…` |
-| 4.35.0-rc2 | `071e79d03971…` |
-| 4.35.0-rc3, 4.35.0-rc4, 4.35.0 | `eb951e1171d3…` |
+| `lean-rs-abi` | Static `SUPPORTED_TOOLCHAINS`, `REQUIRED_SYMBOLS`, and layout literals; no build script, probe, FFI, or linking |
+| `lean-rs-sys` | Raw declarations, inline mirrors, opaque types, private layouts, runtime linking, and build-baked live identity |
+| `lean-toolchain` | Discovery, typed fingerprints, fixture digests, build/link diagnostics and helpers; its own build-baked live identity |
 
-Digests are shown as 12-character prefixes; the full SHA-256 for each row lives in
-[`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs), which the build scripts hash-check against.
+`lean-rs-sys` and `lean-toolchain` hash the discovered header and require a matching supported entry. A discovered but
+unsupported header fails the build with the digest and accepted window. Header-identical releases share one entry. Both
+build scripts record discovered and resolved versions; resolution prefers the exact discovered alias when listed and
+otherwise uses the entry's first alias.
 
-Lean does not always bump `lean.h` between point releases; rows that share a header share a digest. Extending the window
-is the [bump procedure](../bump-toolchain.md).
+`lean-toolchain` can emit latest-supported metadata when no toolchain is installed. That fallback supports link-free
+consumers; it is not evidence of an installed runtime. Normal `lean-rs-sys` builds require Lean. Under `DOCS_RS=1`, both
+crates emit synthetic documentation metadata without probing Lean; raw-FFI documentation mode emits no runtime links.
 
-**Lower bound: 4.30.0.** Originally 4.26.0: a 2026-05-18 multi-toolchain sweep
-([`scripts/test-all-toolchains.sh`](../../scripts/test-all-toolchains.sh)) covered 4.23.0 through 4.29.1, and releases ≤
-4.25.x SIGSEGV inside `lean_dec_ref_cold` from service-layer tests (`lean-rs-host` session/meta) while 4.26.0+ passed.
-The bound was raised to **4.27.0 on 2026-07-19** when 4.26.0 stopped building the bundled `lean-rs-host` shim (it
-lacks `Lean.Elab.ContextInfo.cmdEnv?` and `String.trimAscii`, and rejects an `Environment` add-declaration call on a
-type mismatch the shim sources rely on), and to **4.30.0 on 2026-07-28**: `libleanshared` in 4.27.0–4.29.1 does not
-export `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`, which the compiled host
-shim dylib references through `Lean.collectAxioms` (in the shims since v0.1.18), so the mandatory shim fails
-`dlopen` on those releases — the window had claimed support the runtime never delivered. Verified by `nm -gU`:
-4.29.1 exports zero `collectAndGet` symbols; 4.30.0 and later export four. The 4.30.0 row replaced the
-4.30.0-rc2 row on 2026-05-26 after the standard layout-probe + symbol-probe gate passed against the final release. The
-4.31.0-rc1 row was added on 2026-05-30 after the same layout-probe + symbol-probe gate passed against it (`lean.h`
-byte-identical in the relevant block to 4.30.0; all 88 `REQUIRED_SYMBOLS` resolve). The 4.31.0-rc2 release ships a
-byte-identical `lean.h`, so it shares the rc ABI-equivalence row. The final 4.31.0 release ships a *different* `lean.h`
-than its release candidates, so it was added on 2026-06-19 as its own row (layout byte-identical in the relevant block;
-all 88 symbols resolve) rather than joining the rc row. The 4.32.0-rc1 row was added the same day under the same gate.
-The final 4.32.0 release ships a *byte-identical* `lean.h` to 4.32.0-rc1, so on 2026-07-14 it joined the rc row as the
-same ABI-equivalence entry; 4.32.2 joined it on 2026-08-04 under the same digest and symbol checks. The 4.33.0-rc1 row was added on 2026-07-19 as the new head. It ships a *new* `lean.h`
-digest, but the only change is two C11 `_Atomic(...)` field qualifiers—`m_canceled` (a `uint8_t` inside the opaque
-`lean_task_imp`) and `m_imp` (a pointer in `lean_task_object`)—that Lean added to document atomic access. `_Atomic(T)`
-for a lock-free scalar/pointer keeps `T`'s size and alignment, so a probe against both headers reports byte-identical
-size, alignment, and field offsets for all ten mirrored structs; `repr.rs` is unchanged and all 88 `REQUIRED_SYMBOLS`
-resolve. The textual `check-lean-header.sh` diff is non-empty for this pair by design (it is a literal diff), but the
-audited byte layout is preserved. The 4.33.0-rc2 release joined the same ABI-equivalence entry on 2026-08-04: its
-header digest is identical and all 88 `REQUIRED_SYMBOLS` resolve. The final 4.33.0 release joined the same entry on 2026-08-10 (byte-identical header).
-The 4.34.0-rc1 row was added on 2026-08-11 as the new head: a new digest whose only change is TSan-instrumented
-refcount inlines (`LEAN_TSAN` guards and `lean_internal_*_rc` helpers), with byte-identical struct layouts and all
-88 symbols resolving. The 4.33.1 patch release backports that same TSan instrumentation plus sticky-rc comments, so
-it was added on 2026-08-15 as its own row under the same gate. The 4.34.0-rc2 row was added the same day as the new
-head: it implements the sticky-rc band (`LEAN_RC_STICKY`/`LEAN_RC_STICKY_DROP`/`LEAN_RC_INC_MAX`, unsigned
-wrap-around arithmetic in `lean_inc_ref_n`, cold-path `lean_inc_ref_huge_n`) and adds an exported
-`lean_nat_size_in_bytes`; no struct declaration changes, so layouts stay byte-identical and all 88
-`REQUIRED_SYMBOLS` resolve (the two new exports are additive, not part of the required surface). The final 4.34.0
-joined that row on 2026-09-24 (byte-identical header). The 4.35.0-rc1 row was added on 2026-09-24: a new digest with
-no struct declaration changes and all 88 symbols resolving, but one semantic change to a mirrored inline.
-`LEAN_LINEAR_MARK_MASK` (0x80) claims the top bit of `m_other` in arrays, scalar arrays, and strings as the
-`Array.markLinear` linearity marker, and `lean_sarray_elem_size` masks it out; the `lean-rs-sys` mirror masks it too,
-which is correct across the whole window because earlier releases never set that bit (element sizes are at most 8).
-The other header changes (`mark_linear`/`propagate_mark` inlines, `lean_copy_sarray`/`lean_copy_string` replacing
-`lean_copy_byte_array`/`lean_copy_float_array`, `lean_st_ref_set`/`reset` renamed to `put`/`take`, an exported mimalloc
-fast path behind the inline small-object allocator) touch nothing `lean-rs-sys` declares or mirrors. The 4.35.0-rc2
-row was added the same day as the new head: a new digest whose only change from 4.35.0-rc1 is the additive
-`lean_nat_powmod` export, with all 88 symbols resolving. The 4.34.1 and 4.35.0-rc3 rows were added on 2026-09-25,
-4.35.0-rc3 as the new head. Both carry the same refcount-helper patch: the sticky-rc test in `lean_inc_ref_n` is
-factored into a `lean_is_unstuck_mt` inline (the same comparison), a `lean_is_never_freed` inline is added, and
-`LEAN_RC_STUCK_ST` documents where the runtime's `lean_inc_ref_huge_n` freezes an overflowing single-threaded count.
-The inline paths `lean-rs-sys` mirrors behave identically, layouts are byte-identical, and all 88 symbols resolve.
-4.35.0-rc4 joined the 4.35.0-rc3 row on 2026-10-12 as the new head (byte-identical header). The final
-4.35.0 joined the same row on 2026-10-13 as the new head (byte-identical header).
+`LeanRuntime::init` checks the build-baked version against the supported table. It cannot query the loaded Lean C
+runtime's version and does not detect a shared-library substitution after compilation. Header checks guard audited
+layout and inline assumptions; they are not a security boundary or a proof that every required runtime symbol exists.
+Linkage tests and toolchain probes cover symbols separately.
 
-**Policy.**
+A supported-window change must review object layouts, inline semantics, ownership conventions, initialization, shim
+builds, and actual loading. A digest change alone need not mean an ABI break; an unchanged struct layout does not prove
+that inline behavior stayed compatible. See [raw FFI design](05-raw-sys-design.md).
 
-- The window is contiguous and CI-tested in full. Every named release runs the workspace suite on `ubuntu-latest` and
-  `macos-latest`; see [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
-- A consumer may build against any release in the window. The build script accepts any `lean.h` digest in the table;
-  `LeanRuntime::init` re-validates against the same table as a backstop.
-- Layout assumptions in [`lean-rs-sys/src/repr.rs`](../../crates/lean-rs-sys/src/repr.rs) are verified byte-identical
-  across the entire window.
-- A change in Lean's C ABI—`lean_object` layout, ownership convention on `lean_obj_arg` / `b_lean_obj_arg`, the
-  initializer protocol—at any point in the window is a contract change. Stop; do not paper over the ABI change with
-  brittle wrappers.
+## Compatibility evidence that explains the window
 
-**Lake naming conventions.** The current window (4.30.0+) uses only the `≥ 4.27` convention, but the
-[dylib loader](../../crates/lean-rs/src/module/library.rs) and the
-[Lake-project discovery](../../crates/lean-rs-host/src/host/lake.rs) still probe both shapes so Rust code stays
-convention-agnostic and the legacy `≤ 4.26` form keeps working for out-of-window toolchains.
+The table's source comments retain full digest and per-release audit details. These findings explain the non-obvious
+boundaries and checks:
 
-| Lean range | Dylib filename | Initializer symbol |
+- A 2026-05-18 sweep of 4.23.0–4.29.1 found service-layer crashes in `lean_dec_ref_cold` on releases through 4.25.x;
+  4.26.0 and later passed that sweep. The floor subsequently moved to 4.27.0 on 2026-07-19 because 4.26.0 could not
+  build the bundled shims (`ContextInfo.cmdEnv?`, `String.trimAscii`, and an environment add-declaration type mismatch).
+- The floor moved to 4.30.0 on 2026-07-28 because 4.27.0–4.29.1 could not load the host shim that uses
+  `Lean.collectAxioms`. `nm -gU` found no `collectAndGet` exports in 4.29.1 and four in 4.30.0 and later. The missing
+  symbol was `_l___private_Lean_Util_CollectAxioms_0__Lean_CollectAxioms_collectAndGet___boxed`. A successful header
+  comparison had therefore been insufficient evidence of usable host services.
+- 4.31.0 final has a different header from its release candidates and needs its own digest row. Header-identical
+  releases, such as 4.32.0-rc1 / 4.32.0 / 4.32.2, share a row.
+- 4.33.0 adds C11 `_Atomic` qualifiers to `lean_task_imp.m_canceled` and `lean_task_object.m_imp`. The recorded probe
+  found identical sizes, alignments, and field offsets for the ten mirrored structs. A textual header diff remains
+  nonempty even when the measured layout is unchanged.
+- 4.34.0-rc1 adds TSan refcount instrumentation; 4.33.1 backports it. 4.34.0-rc2 adds sticky-refcount bands, wraparound
+  increment logic, `lean_inc_ref_huge_n`, and `lean_nat_size_in_bytes`. Later 4.34.1 / 4.35.0-rc3 headers factor that
+  logic through `lean_is_unstuck_mt` and add `lean_is_never_freed` / `LEAN_RC_STUCK_ST`. These are reasons to review
+  inline behavior separately from layout and symbol availability.
+- 4.35.0-rc1 assigns `0x80` of `m_other` to `LEAN_LINEAR_MARK_MASK`. The scalar-array element-size mirror masks that
+  bit; older releases leave it unset. The release also renames/copies helpers outside the bound surface. 4.35.0-rc2's
+  `lean_nat_powmod` addition is outside `REQUIRED_SYMBOLS`.
+
+Routine new aliases and qualification dates belong in the supported table and git history rather than a second
+release-by-release chronology here.
+
+## CI coverage and platforms
+
+The [CI workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml) runs the head Lean version on `ubuntu-latest` and `macos-latest` by
+default. Its manual `full_matrix` option runs every listed release on both platforms. A support claim must distinguish
+head validation from full-window validation; the default PR run is not a full-window sweep.
+
+Supported platforms are x86_64 GNU/Linux and Apple Silicon macOS as exercised by that matrix. Windows, BSD, embedded,
+and WASM have no support commitment. Adding a platform requires its build/link policy and CI coverage, not just a
+conditional compilation fix.
+
+The Rust channel is `stable` in [`rust-toolchain.toml`](https://github.com/jcreinhold/lean-rs/blob/main/rust-toolchain.toml); this follows stable rather than
+pinning an exact compiler release. The MSRV is 1.94 in [`Cargo.toml`](https://github.com/jcreinhold/lean-rs/blob/main/Cargo.toml). Compile-fail diagnostics are
+validated in their dedicated [workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/compile-fail.yml) because wording varies with compiler
+and platform.
+
+## Lake naming
+
+All supported Lean releases use the newer Lake convention. The loader and project discovery still probe legacy filenames
+so callers need not encode the naming policy themselves:
+
+| Lean range | Shared library | Initializer |
 | --- | --- | --- |
-| ≤ 4.26 | `lib{LibName}.{dylib,so}` | `initialize_{MangledModule}` |
-| ≥ 4.27 | `lib{escaped_package}_{LibName}.{dylib,so}` | `initialize_{MangledPackage}_{MangledModule}` |
+| Through 4.26 | `lib{LibName}.{dylib,so}` | `initialize_{MangledModule}` |
+| From 4.27 | `lib{escaped_package}_{LibName}.{dylib,so}` | `initialize_{MangledPackage}_{MangledModule}` |
 
-## Raw FFI source
+Probing the old shape does not extend the supported toolchain window. Use the
+[build/link helpers](12-interop-build-and-link.md), not hand-built paths.
 
-Raw `extern "C"` declarations for the curated subset of `lean.h` and the pure-Rust mirrors of `lean.h`'s `static inline`
-refcount helpers live in the published workspace crate `lean-rs-sys` (`crates/lean-rs-sys/`). Link-free ABI metadata,
-including the `REQUIRED_SYMBOLS` allowlist and supported-window table, lives in `lean-rs-abi` (`crates/lean-rs-abi/`).
-Publication matches every peer `*-sys` crate and gives advanced users a stable raw-FFI escape hatch without forcing
-metadata-only consumers to link Lean.
+## Crate and protocol compatibility
 
-There is no external `lean-sys` dependency. The split between `lean-rs-abi`, `lean-rs-sys`, and `lean-toolchain`:
+Cargo `0.x` semver governs public Rust items at crate-root and public module paths; a minor version may break APIs.
+Private modules and `pub(crate)` items may be reorganized without creating a public path commitment. The
+[API review baselines](../api-review.md) record the reviewed surface.
 
-- **`lean-rs-abi`** owns link-free ABI/toolchain metadata: the `REQUIRED_SYMBOLS` allowlist, `SUPPORTED_TOOLCHAINS`
-  window table, `LEAN_VERSION`, `LEAN_RESOLVED_VERSION`, `LEAN_HEADER_PATH`, and `LEAN_HEADER_DIGEST`.
-- **`lean-rs-sys`** owns runtime FFI: extern declarations split by category, the pure-Rust refcount mirrors, opaque
-  public types, crate-private layout structs, and the `cargo:rustc-link-*` directives for dynamic/static Lean runtime
-  linking. It re-exports `lean-rs-abi` metadata for compatibility.
-- **`lean-toolchain`** owns everything composed on top: the typed `ToolchainFingerprint` (which exposes
-  `is_supported()`), the Lake fixture digest, layered link diagnostics, reusable build-script helpers, and
-  `required_symbols()` returning `lean_rs_abi::REQUIRED_SYMBOLS` so the allowlist lives in one place.
+`lean-rs-sys` commits to public symbol names/signatures and its toolchain window, with unsafe caller obligations.
+Private header layouts are not public fields. Bundled generic and host Lean packages must work within the same window.
+The worker protocol also checks its own version at the process boundary; use matched parent/child releases rather than
+assuming arbitrary wire compatibility across protocol changes.
 
-See [`05-raw-sys-design.md`](05-raw-sys-design.md) for the rationale behind `lean-rs-sys`.
-
-## Header digest
-
-The probe lives in the crates that actually have a toolchain at build time, not in the static `lean-rs-abi`. The build
-scripts of `lean-rs-sys` (which links `libleanshared`) and `lean-toolchain` (the discovery crate) each compute a SHA-256
-over the discovered `lean.h` and look it up in [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs). A
-miss against an *installed* toolchain fails the build with a bounded diagnostic naming the discovered digest and the
-full window; `lean-rs-sys` additionally emits `cargo:rustc-cfg=lean_v_X_Y_Z` (dots → underscores) so per-version
-divergences can be `#[cfg]`-gated. Both bake the resolved version into `LEAN_RESOLVED_VERSION` for runtime inspection.
-`lean-toolchain` degrades to the latest supported window entry when no toolchain is present (so link-free downstream
-crates build without Lean); `lean-rs-sys`, which must link Lean, has no such fallback.
-
-The digest's two jobs: (1) refuse to compile the Rust refcount mirrors against a `lean.h` whose layout has not been
-audited; (2) refuse to silently link a consumer's binary against a different `libleanshared` than the one whose ABI the
-published `lean-rs-sys` was authored for. It is not a security boundary.
-
-## Crate semver
-
-The workspace crates start at `0.1.0` and follow Cargo's `0.x` semver: any minor bump may break the public API;
-consumers should pin a single minor.
-
-**`lean-rs-sys`.** The public surface is intrinsically `unsafe`—the curated `extern "C"` view of `lean.h`. The semver
-promise is about *symbol names and signatures* and the `SUPPORTED_TOOLCHAINS` window, **not** about safe behaviour.
-Lean's header layout is **not** part of this surface—`LeanObjectRepr` is `pub(crate)` and may be updated to track Lean
-version bumps without breaking downstream code that uses the `pub unsafe fn` helpers.
-
-**`lean-toolchain`, `lean-rs`, `lean-rs-host`, the worker crates.** Standard `0.x` semver over the curated re-exports at
-each crate root. Items inside `lean-rs`'s `pub(crate)` modules (`runtime`, `abi`) and the internal helper modules under
-`module/` and `host/` are **not** part of the public API; they can be renamed, moved, or collapsed without a minor bump
-as long as the curated re-exports keep their shape. `lean-rs-host` also depends on its bundled host shim package's
-`@[export]` contract. The worker crates' semver surface is their supervisor, capability-builder, typed-command, row,
-diagnostic, timeout, and restart-policy API; private protocol frame shapes are not public API.
-
-**Lean shim packages.** Same toolchain window. `lean-rs` bundles `lean-rs-interop-shims` for generic callback ABI
-helpers. `lean-rs-host` bundles `lean-rs-host-shims` plus the generic helper it needs for host progress.
-
-Stabilization to `1.0` requires the `RELEASE-READINESS` contract and is not implicit.
-
-## Supported platforms
-
-Supported and CI-tested:
-
-- `ubuntu-latest` (x86_64 GNU/Linux).
-- `macos-latest` (Apple Silicon).
-
-Rust toolchain: `stable`, pinned by `rust-toolchain.toml` at the repo root.
-
-Windows is an explicit non-goal at this stage. Adding it is itself a compatibility decision: a CI matrix entry, a
-documented build flag covering MSVC linking and the `lean-rs-sys` feature selection, and an update to this file. Other
-platforms (BSDs, embedded, WASM) are not supported.
-
-## Bumping the Lean version: process
-
-The canonical procedure lives in [`docs/bump-toolchain.md`](../bump-toolchain.md). In summary:
-
-1. `elan toolchain install leanprover/lean4:vX.Y.Z`.
-2. Capture the new `lean.h` SHA-256 (the bump-toolchain doc has a one-liner).
-3. Add a row to [`SUPPORTED_TOOLCHAINS`](../../crates/lean-rs-abi/src/supported.rs) (or extend an existing
-   header-identical row).
-4. Add the version to the matrix in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
-5. Run `scripts/test-all-toolchains.sh` locally; commit; open PR.
-
-If any ABI assumption breaks at the new release—`lean_object` layout shifts, a `REQUIRED_SYMBOLS` entry disappears, the
-Lake naming convention changes again—stop. File a Stop and discuss before patching around the diff with brittle
-wrappers.
+When extending the Lean window, follow [the bump procedure](../bump-toolchain.md), update the table and CI matrix, and
+run the full-window checks. If a layout, ownership, initializer, or shim assumption breaks, resolve that contract change
+before claiming support.

@@ -1,74 +1,52 @@
 # Structured Progress
 
-`lean-rs-host` progress is a host-level observation channel for long-running `LeanSession` calls. It is built on the
-scoped progress callback from `lean-rs` and the generic `lean-rs-interop-shims` callback helper. `lean-rs` owns the raw
-callback handle, trampoline, scoped borrowed context, panic containment, status decoding, and deterministic teardown.
-The host crate owns the policy: phase names, totals, cancellation checkpoints, and which session methods report events.
+`LeanProgressSink` observes long-running host operations. `lean-rs` supplies the scoped callback and panic/status
+boundary; `lean-rs-host` supplies phase names, totals, and reporting points. Cancellation remains a separate control
+signal.
 
-## Public Contract
+## Public contract
 
-Long-running host methods accept a final `progress: Option<&dyn LeanProgressSink>` after their existing cancellation
-parameter. `None` is the fast path: no callback handle is allocated, no progress shim is called, and bulk methods keep
-their single-dispatch path. `Some(sink)` registers a temporary `lean_rs::LeanProgressCallback` for the one call and
-drops it before the method returns.
+Methods that report progress accept `Option<&dyn LeanProgressSink>` after their cancellation argument. `None` avoids
+callback registration. A Lean-side progress path registers `LeanProgressCallback` for one synchronous call and removes
+it before returning; Rust-side item loops report directly through the host panic boundary.
 
-The scoped callback converts the raw Lean callback payload into `LeanProgressTick` before host code runs. The host
-bridge maps that progress tick into `LeanProgressEvent`; it does not expose `LeanStringEvent`, raw status bytes, context
-pointers, or any downstream streaming policy through the host progress surface.
+`LeanProgressEvent` contains a method-local `phase: &'static str`, `current: u64`, `total: Option<u64>`, and elapsed
+`Duration` since that phase began. Events run synchronously on the calling Lean-bound thread. A sink must not re-enter
+the same session or call stack; queue expensive UI, logging, or IPC work elsewhere.
 
-`LeanProgressEvent` contains:
+Unwinding sink panics become `LeanError::Host` at `HostStage::CallbackPanic`, code `lean_rs.internal`. Fatal Lean
+failures still require [process containment](06-panic-containment.md).
 
-- `phase: &'static str`: a stable method-local phase label;
-- `current: u64`: a phase-local counter;
-- `total: Option<u64>`: a known phase-local bound when cheap;
-- `elapsed: Duration`: time since that phase began.
+## Reporting and batching
 
-Events are delivered synchronously on the Lean-bound worker thread. A sink must not call back into the same
-`LeanSession` or re-enter the same Lean call stack. Expensive UI, logging, or IPC work should be queued by the sink and
-handled on a different thread.
+The current reporting paths are fresh session imports (including pool misses), declaration lookup/type/kind/name bulk
+methods, bulk elaboration, filtered declaration listing, and kernel checking. Events are phase-granular; they do not
+promise visibility into every Lean suboperation. Empty bulk input emits no events and performs no dispatch.
 
-Rust panics from progress sinks are contained by the callback boundary. The session method returns `LeanError::Host`
-with stage `CallbackPanic` and code `lean_rs.internal`. Lean internal panics remain process-scoped; see
-[`06-panic-containment.md`](06-panic-containment.md).
+With progress and no cancellation token, bulk methods retain one Lean-side bulk dispatch. Declaration lookup also
+reports its Rust-side `prepare_names` phase, whose individual name conversions remain separate dispatches. With a
+cancellation token, bulk methods that have singular equivalents iterate in Rust and report after each item; cancellation
+is observed at the next explicit check and partial output is discarded.
 
-## Reporting Points
+Fresh import, filtered listing, and kernel checking have no corresponding Rust item loop. Their callbacks provide
+observations during Lean work, not an interrupt mechanism. A sink may call `token.cancel()`, but a single dispatched
+Lean call need not check the flag again before returning. See
+[cooperative cancellation](07-cooperative-cancellation.md).
 
-Progress is phase-granular, not a promise that every Lean suboperation reports. The current service surface reports
-progress for:
+Tracing describes call boundaries for logs and profiles. Progress is caller-supplied live feedback, such as
+`phase=query_declarations_bulk current=4200 total=5000`; neither channel replaces the other.
 
-- `LeanCapabilities::session` and `SessionPool::acquire` on fresh imports;
-- `LeanSession::query_declarations_bulk`;
-- `LeanSession::{declaration_type_bulk,declaration_kind_bulk,declaration_name_bulk}`;
-- `LeanSession::elaborate_bulk`;
-- `LeanSession::list_declarations_filtered`;
-- `LeanSession::kernel_check`.
+## ABI and package boundary
 
-Bulk methods with `progress = Some` and `cancellation = None` use Lean-side progress shims so they still perform one
-bulk dispatch. Bulk methods with both progress and cancellation use Rust per-item loops where a per-item singular path
-exists, so cancellation can be observed between items and partial output can be discarded. `list_declarations_filtered`,
-fresh import, and `kernel_check` do not have a Rust per-item equivalent; cancellation is checked before dispatch and
-then again only after Lean returns.
+Additive host progress shims return `IO (Except UInt8 α)`. `LeanProgressCallback::decode_result` decodes success and
+maps a `Panic` status to the stored callback error. `StaleHandle`, `WrongPayload`, and `Stopped` are invariant failures:
+a host progress sink reports observations and has no generic callback stop semantics. Existing no-progress exports
+retain their separate signatures.
 
-Empty bulk input returns an empty vector, records no FFI dispatch, and emits no progress event.
+Capabilities prepare the bundled generic interop and host shim targets, opening the generic interop library globally
+before the host library so imported `LeanRsInterop.Callback.Tick` initialization is available. Package ownership and
+parity are specified in [generic shims](11-generic-interop-shims.md).
 
-## Relationship To Tracing And Cancellation
-
-`tracing` spans describe call boundaries and are useful for logs, profiles, and post-hoc diagnostics. Progress events
-are a caller-supplied in-process callback for live user feedback such as
-`phase=query_declarations_bulk current=4200 total=5000`. Neither replaces the other.
-
-Cancellation is a control signal. Progress is an observation signal. Where a method uses a Rust per-item loop, the
-cancellation check and progress report happen at the same item boundary. A progress sink may call `token.cancel()` on a
-shared `LeanCancellationToken`; the method observes that token at the next host-controlled cancellation check.
-
-## ABI Boundary
-
-The host shims expose additive progress variants returning `IO (Except UInt8 α)`. The `UInt8` is the callback
-`LeanCallbackStatus` byte. `LeanProgressCallback::decode_result` decodes `Except.ok` as the method result, maps `Panic`
-through the callback handle's stored error, and maps `StaleHandle`, `WrongPayload`, and `Stopped` to internal invariant
-failures. Host progress is one-way: unlike a generic callback loop, a progress sink does not define stop semantics.
-Existing no-progress shim symbols and signatures are unchanged.
-
-`LeanCapabilities` builds the crate-bundled generic interop and host shim Lake targets on demand, then opens the generic
-interop shim dylib globally before opening the host shim dylib. This anchors the generated `LeanRsInterop.Callback.Tick`
-initializer that host progress shims import.
+The [progress implementation](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/progress.rs),
+[session dispatch](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/session.rs), and
+[progress tests](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/tests/progress.rs) define and verify the reporting behavior.

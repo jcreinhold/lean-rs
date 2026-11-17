@@ -1,14 +1,10 @@
 # Callback Registry
 
-`lean-rs` exposes a narrow Rust callback registry for Lean-to-Rust calls. This is a same-process primitive, not a
-`LeanSession` feature and not the worker-facing data streaming API. A callback handle is the low-level same-process
-mechanism used when an exported Lean function must push data into Rust before it returns. Worker-style callers should
-normally use the worker crates' typed commands and row sinks; the worker child may use callbacks internally, but parent
-callers do not receive or pass callback handles.
+`LeanCallbackHandle<P>` lets an explicit Lean export synchronously push a supported payload into Rust. `lean-rs` owns
+registration, payload decoding, the C trampoline, panic containment, and stale-handle detection. Worker parent callers
+use typed commands and row sinks; callbacks may implement the child-local mechanism.
 
-## Public Shape
-
-Rust code registers a closure for one sealed payload type:
+## Registration and ABI
 
 ```rust
 let callback = lean_rs::LeanCallbackHandle::<lean_rs::LeanProgressTick>::register(|tick| {
@@ -18,103 +14,80 @@ let callback = lean_rs::LeanCallbackHandle::<lean_rs::LeanProgressTick>::registe
 let (handle, trampoline) = callback.abi_parts();
 ```
 
-A Lean export that follows the callback ABI accepts the two values as `USize`:
-
-```text
-opaque_handle : USize
-trampoline    : USize
-```
-
-Lean treats both values as opaque and passes them to a payload-specific helper such as `LeanRsInterop.Callback.Tick` or
-`LeanRsInterop.Callback.String`. The helper invokes the Rust trampoline through its matching C symbol. Callers cannot
-supply their own trampoline function pointer through the public API.
-
-### Underlying ABI
-
-Lean never calls the Rust trampoline pointer directly. It passes the opaque handle and trampoline `USize` values to a
-small C helper linked into the shim dylib (for the tick payload, `lean_rs_interop_tick_callback_call`), which casts the
-trampoline to its stable C signature and invokes it:
+Lean receives the pair as opaque `USize` values and passes them to a payload-specific
+[`LeanRsInterop.Callback`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback.lean) helper. A small
+C helper linked into the shim invokes the shared private trampoline ABI:
 
 ```c
-uint8_t (*)(uintptr_t handle, uint64_t current, uint64_t total)
+uint8_t (*)(uintptr_t handle, uint8_t payload_tag,
+           uint64_t arg0, uint64_t arg1, lean_object *payload)
 ```
 
-This keeps the mechanism free of any process-global exported Rust symbol: the Rust caller owns both the handle and the
-trampoline, and the shim knows only the C ABI shape.
+The tick helper supplies tag `0`, the two counters, and a null object payload. The string helper supplies tag `1` and a
+borrowed Lean string. These private C arguments differ from the Lean helper signatures below the public opaque pair.
+This requires no globally exported Rust symbol. Consumers pass the crate-owned trampoline, not an arbitrary function
+pointer; payload helpers own the matching ABI shape.
 
-## Payloads
+## Payload family
 
-`LeanCallbackHandle<P>` is generic over `P: LeanCallbackPayload`, but `LeanCallbackPayload` is sealed. Downstream crates
-can use supported payloads; they cannot add new ABI shapes or decode raw Lean objects themselves.
+`LeanCallbackPayload` is sealed. Each handle accepts one supported shape:
 
-The supported payloads are:
+| Payload | Fields | Ownership |
+| --- | --- | --- |
+| `LeanProgressTick` | `current: u64`, `total: u64` | Plain counters; no host progress policy |
+| `LeanStringEvent` | `value: String` | Borrowed Lean string copied into owned Rust UTF-8 before user code runs |
 
-```rust
-pub struct LeanProgressTick {
-    pub current: u64,
-    pub total: u64,
-}
+A single enum was rejected because every callback would receive variants it cannot use, making wrong payloads ordinary
+application branching. User-defined payload implementations were rejected because they would expose object lifetimes,
+reference counts, and trampoline safety to consumers. The sealed family keeps those obligations in `lean-rs`. Byte-array
+and arbitrary-object callbacks require a concrete same-process use case before adding ABI and ownership surface. Worker
+JSON rows already have their own transport and do not require a new callback payload.
 
-pub struct LeanStringEvent {
-    pub value: String,
-}
-```
+See the [string streaming recipe](../recipes/downstream-interop.md#string-callbacks) for a downstream line protocol and
+[structured progress](13-structured-progress.md) for the host interpretation of tick counters.
 
-`LeanProgressTick` is the two-counter payload. It carries no host policy by itself; `lean-rs-host` interprets it as
-progress when reporting long-running session work.
+## Lifetime and threads
 
-`LeanStringEvent` copies a borrowed Lean `String` into an owned Rust `String` before user code runs. No Lean object
-lifetime escapes the trampoline. Trusted same-process line-oriented protocols can use it directly; see
-[`../recipes/string-callback-streaming.md`](../recipes/string-callback-streaming.md) for a JSONL-like example.
+Dropping a handle unregisters its id. Lean may use it only while the Rust registration is alive; a later call returns
+`StaleHandle` without dereferencing freed context. Handles are process-local and cannot cross an IPC boundary.
 
-## Flow And Lifetime
+`LeanCallbackHandle<P>` is `Send + Sync`, and registered closures must be
+`Fn(P) -> LeanCallbackFlow + Send + Sync + 'static`. Registry lookup clones an internal `Arc` before invoking the
+closure. A concurrent unregister prevents future lookup; an already-resolved owned callback may complete.
 
-Callbacks return `LeanCallbackFlow`. `Continue` lets the Lean-side callback loop continue; `Stop` asks Lean to stop
-cleanly and return `LeanCallbackStatus::Stopped`.
+`LeanProgressCallback<'a>` is a scoped specialization whose closure may borrow its caller. The wrapper is
+`!Send + !Sync`, owns the borrowed context, and unregisters before releasing it. Keep it alive for the entire
+synchronous Lean call using its ABI pair. It also decodes host progress results of shape `Except UInt8 T`, keeping raw
+status handling out of host code.
 
-`LeanCallbackHandle<P>` is an RAII registration. Dropping it unregisters the id. Lean may call the handle only while the
-Rust value is alive. If a stale id is called after drop, the trampoline returns `LeanCallbackStatus::StaleHandle`
-instead of dereferencing freed Rust memory.
+## Flow, panic, and reentrancy
 
-The handle is `Send + Sync`. The registered closure must be `Fn(P) -> LeanCallbackFlow + Send + Sync + 'static` because
-Lean may invoke it on the Lean-bound worker thread, and registry lookup clones an internal `Arc` before running the
-callback.
+`Continue` lets a cooperating Lean loop proceed; `Stop` requests a clean stop. Helpers must stop and propagate any
+nonzero status. A callback cannot forcibly interrupt arbitrary Lean work.
 
-`LeanProgressCallback<'a>` is the scoped progress specialization used by `lean-rs-host`. Its closure may borrow from the
-caller, so the value is not `Send` or `Sync`; it must stay alive for exactly the synchronous Lean call that receives its
-`(handle, trampoline)` pair. The type owns the borrowed context and unregisters the callback handle before releasing
-that context. It also decodes host progress shim results of shape `Except UInt8 T`, so host code does not inspect raw
-callback status bytes.
+Callbacks execute synchronously on the calling Lean-bound thread. They must not re-enter the same `LeanSession` or Lean
+call stack. Queue expensive UI or IPC work for another thread. The registry provides one-way callbacks, not session
+reentrancy.
 
-## Panic And Reentrancy
-
-Rust panics must not cross Lean or C frames. The registry trampoline catches unwinding Rust panics, records a
-`LeanError` with `HostStage::CallbackPanic`, and returns `LeanCallbackStatus::Panic` to Lean. Aborting Rust panics and
-Lean internal panics remain process-scoped.
-
-Callbacks run synchronously on the Lean-bound thread. A callback invoked during a Lean call must not call back into the
-same `LeanSession` or re-enter the same Lean call stack. The registry is a one-way callback mechanism; it does not make
-the host session reentrant.
-
-## Diagnostics
-
-The trampoline returns `LeanCallbackStatus` as a `UInt8` status:
+The trampoline catches unwinding Rust panics, records a bounded `LeanError` at `HostStage::CallbackPanic`, and returns
+`Panic`. Aborting Rust panics and fatal Lean failures remain process-scoped; see
+[panic containment](06-panic-containment.md).
 
 | Status | Byte | Meaning |
 | --- | ---: | --- |
-| `Ok` | `0` | The callback ran successfully and asked Lean to continue |
-| `StaleHandle` | `1` | Lean called a dropped callback id |
-| `Panic` | `2` | The callback panicked and Rust contained the unwind |
-| `WrongPayload` | `3` | Lean used a handle with the wrong payload trampoline |
-| `Stopped` | `4` | The callback asked Lean to stop cleanly |
+| `Ok` | `0` | Callback ran and requested continuation |
+| `StaleHandle` | `1` | Registration no longer exists |
+| `Panic` | `2` | Rust contained a callback unwind |
+| `WrongPayload` | `3` | Handle was used with the wrong payload trampoline |
+| `Stopped` | `4` | Callback requested a clean stop |
 
-For `Panic`, callers can inspect `LeanCallbackHandle::last_error()` while the handle is still alive. The recorded error
-has diagnostic code `lean_rs.internal` and stage `CallbackPanic`.
+`last_error()` exposes a recorded panic while the handle is alive; its diagnostic code is `lean_rs.internal`.
 
-## Files
+## Implementation and checks
 
-- Registry: `crates/lean-rs/src/callback.rs`
-- Generic Lean helpers: `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/Tick.lean` and
-  `crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback/String.lean`
-- C trampoline helper: `crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c`
-- Tests: `crates/lean-rs/tests/callback_registry.rs` and `crates/lean-rs/tests/callback_trampoline.rs`
+The [registry](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/callback.rs),
+[C helpers](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/shims/lean-rs-interop-shims/c/interop_callback.c), and
+[Lean payload helpers](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs/shims/lean-rs-interop-shims/LeanRsInterop/Callback) implement the boundary.
+[`callback_registry.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_registry.rs) covers payload mismatch, clean stop, stale
+ids, owned strings, scoped progress, and contained panics;
+[`callback_trampoline.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/tests/callback_trampoline.rs) exercises the lower-level trampoline.

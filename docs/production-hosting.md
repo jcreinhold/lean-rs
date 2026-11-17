@@ -1,21 +1,18 @@
 # Production Rust Hosting
 
-Use worker children for long-running hosts. The production shape is:
+Use bounded worker children for long-running import-heavy services. Process exit reclaims Lean's process-lifetime import
+state; dropping sessions or clearing caches does not. Measure the workload, then configure the worker count, retained
+import-byte budget, warm-session capacity, RSS ceilings, and request limits together.
 
 ```rust
 use lean_rs_worker_parent::{
     LeanWorkerCapabilityBuilder, LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerRestartPolicy,
 };
 
-// What a child cannot reclaim, in bytes. Size it from the machine, not from a
-// module count: the same *number* of imports costs 9.6 GiB on one workload and
-// 16.0 GiB on another.
-const IMPORT_RESIDUE_BUDGET_BYTES: u64 = 9 * 1024 * 1024 * 1024;
-const CHILD_RSS_KIB: u64 = 1_572_864;
-
+// Set both budgets from measurements on the deployment machine.
 let pool_config = LeanWorkerPoolConfig::new(1)
-    .max_total_child_rss_kib(CHILD_RSS_KIB)
-    .per_worker_rss_ceiling_kib(CHILD_RSS_KIB);
+    .max_total_child_rss_kib(child_rss_ceiling_kib)
+    .per_worker_rss_ceiling_kib(child_rss_ceiling_kib);
 
 let builder = LeanWorkerCapabilityBuilder::new(
     lake_project_root,
@@ -24,127 +21,82 @@ let builder = LeanWorkerCapabilityBuilder::new(
     ["MyCapability"],
 )
 .worker_executable(worker_child_binary)
-// How many warm import profiles one child holds. Independent of the restart
-// bound on purpose: derive one from the other and the pool never evicts,
-// because the parent recycles the child first.
 .session_pool_capacity(8)
 .restart_policy(
     LeanWorkerRestartPolicy::default()
-        .max_import_residue_bytes(IMPORT_RESIDUE_BUDGET_BYTES)
-        // A backstop, not the bound: it catches a child whose import stats come
-        // back zeroed, which is the only way the byte accounting can go blind.
-        .max_imports(32),
+        .max_import_residue_bytes(import_residue_budget_bytes)
+        .max_imports(32)
+        .max_rss_kib(child_rss_ceiling_kib),
 );
 
 let mut pool = LeanWorkerPool::new(pool_config);
 let mut lease = pool.acquire_lease(builder)?;
-
-// Run related work through the same warm lease. For proof-state/module-query
-// workflows, prefer the bounded batch API over many tiny session requests.
 let outcome = lease.process_module_query_batch(source, &selectors, &budgets, &options, None, None)?;
 ```
 
-Set the worker count, import residue budget, session pool capacity, restart policy, and batching strategy together.
-Changing only one of them can reintroduce the failure mode the worker boundary is meant to prevent.
+The capacity and import-count values illustrate separate controls; they are not portable defaults.
 
-The RSS budgets above are a coarse outer guard, not the cycling policy. RSS counts clean mapped `.olean` pages that cost
-nothing to reclaim, and under memory pressure it *falls* while the unreclaimable total keeps growing — see
-[`docs/safety/long-session-memory.md`](safety/long-session-memory.md), which opens with the measurements. Bound the
-residue; leave RSS as a ceiling you do not expect to reach.
+## Choose the bounds
 
-## Why This Shape
-
-Rust cannot reclaim fully loaded Lean import state in-process. Full host sessions use `loadExts := true`; after that,
-Lean environment extensions may retain references into compacted `.olean` regions, so `Environment.freeRegions` is not a
-safe cleanup tool. The reset boundary for those sessions is process exit.
-
-Rust can still control the operational shape:
-
-| Control | Production pattern |
+| Control | Purpose |
 | --- | --- |
-| Admission | Refuse cold work before it starts when the pool, import count, or RSS budget is exhausted. |
-| Reuse | Reuse warm sessions keyed by canonical roots, ordered imports, import profile, metadata expectation, and toolchain facts. |
-| Scheduling | Keep local worker count bounded and size the total child RSS budget with `max_workers`. |
-| Batching | Keep one warm lease open for related module-query work and preserve item-level results. |
-| Cycling | Restart worker children once a generation has retained more than a byte budget of import residue. |
-| Reporting | Surface `ResourceExhausted` facts instead of returning empty or misleading Lean results. |
+| Worker count | Bound local concurrency and the number of resident Lean runtimes. |
+| `max_import_residue_bytes` | Cycle before further import work after confirmed imports reach the retained-byte budget. |
+| `max_imports` | Backstop when import-byte accounting is absent or wrong. |
+| `session_pool_capacity` | Bound the number of warm import profiles retained in a child, independently of the restart budget. |
+| RSS ceilings | Guard pool admission and worker assignment using best-effort samples. |
+| Request timeout | Discard a child generation that fails to complete a request in time. |
+| Batches on one lease | Reuse a warm session for related queries while preserving item-level outcomes. |
 
-The checked-in local defaults use one worker, one fresh full-session import per child, and a 1,572,864 KiB child RSS
-budget. Treat those numbers as local operating defaults, not portable safety constants. Larger hosts should measure with
-their own cap and set `max_total_child_rss_kib = max_workers * per_worker_rss_ceiling_kib` when they intentionally allow
-multiple local children.
+Prefer the residue-byte policy to an import count: equal numbers of imports can retain very different amounts of data.
+The counter uses non-memory-mapped compacted-region bytes, including accounted header imports. RSS also counts clean
+mapped `.olean` pages and can fall under pressure while retained private bytes grow. The
+[memory evidence](safety/long-session-memory.md) explains these measurements.
 
-## Handling Resource Exhaustion
+These are checks at lifecycle boundaries, not hard allocation limits. A generation can complete one import larger than
+its residue budget; the next import check cycles it. RSS sampling can be unavailable. Monitor accounting and unavailable
+sample counters rather than treating a configured ceiling as proof of a bounded peak.
 
-Resource failures are caller-visible facts, not Lean query failures. A minimal worker-side classifier is:
+For multiple children, size the total RSS budget with the worker count; `max_workers * per_worker_rss_ceiling_kib` is a
+starting configuration when the host intentionally admits all workers. The profiling scripts use a local 1,572,864 KiB
+cap, one worker, and one fresh full-session import per generation. Those are diagnostic workload settings, not library
+defaults or portable safety constants.
+
+## Reuse and resource failures
+
+Warm session keys include canonical roots, ordered imports, import profile, metadata expectation, toolchain facts, and
+manifest identity where applicable. Keep related work on one lease and use bounded module-query batches to reduce
+session and request churn. Batching does not reclaim Lean memory or replace cycling.
+
+Resource failures remain distinct from Lean query results:
 
 ```rust
-fn handle_worker_error(err: lean_rs_worker_parent::LeanWorkerError) -> lean_rs_worker_parent::LeanWorkerError {
-    if let Some(facts) = err.resource_exhausted_facts() {
-        if facts.work_entered_child {
-            eprintln!(
-                "Lean work started but was interrupted or degraded by a resource guard: cause={}",
-                facts.cause
-            );
-        } else {
-            eprintln!(
-                "resource admission refused before Lean work entered the child: cause={}",
-                facts.cause
-            );
-        }
-    }
-    err
+if let Some(facts) = err.resource_exhausted_facts() {
+    eprintln!(
+        "resource guard: cause={} work_entered_child={}",
+        facts.cause, facts.work_entered_child
+    );
 }
 ```
 
-Treat `work_entered_child=false` as a hard admission refusal. Retry only after changing the budget, choosing an
-equivalent warm session key, or cycling according to policy. Treat `work_entered_child=true` as interrupted or degraded
-work; module-query batches keep per-selector failures such as budget exhaustion in the returned batch facts.
+`work_entered_child=false` reports refusal before child work began. Retry after changing the budget, selecting an
+equivalent warm key, or cycling according to policy. A true value reports interrupted or degraded work. Module-query
+batches can preserve per-selector budget failures in their returned facts. Same-process pool refusals use
+`LeanDiagnosticCode::ResourceExhausted` with `ResourceExhaustedFacts`. Do not translate either kind into `not_found` or
+an empty successful result.
 
-Same-process `SessionPool` refusals use `LeanDiagnosticCode::ResourceExhausted` and attach `ResourceExhaustedFacts` to
-the host failure. The same rule applies: do not convert resource exhaustion into `not_found`, an empty result, or a
-generic protocol error.
+## Same-process hosts
 
-## Diagnostic Same-Process Hosts
+Embedded tools can use `SessionPoolMemoryPolicy` to refuse fresh imports before entering Lean. Disabled pool/restart
+policies suit short-lived tests or hosts with an external process boundary. Full sessions use `loadExts := true`, so
+extension state can retain references into compacted `.olean` regions and `Environment.freeRegions` is unsafe.
 
-Same-process host sessions remain useful for embedded tools, examples, and focused diagnostics. They are not the default
-pattern for unbounded long-running import-heavy services.
+The bracketed metadata query is a separate path: it imports with `loadExts := false`, serializes owned results, and
+frees regions before returning. See [same-process controls](same-process-controls.md) for its restrictions.
 
-Use `SessionPool` with `SessionPoolMemoryPolicy` when the host must stay in-process, and configure a fresh-import and
-RSS budget before cache misses can call `Lean.importModules`. `SessionPoolMemoryPolicy::disabled()` and
-`LeanWorkerRestartPolicy::disabled()` are for short-lived tests, benchmarks, or hosts that enforce an external process
-memory boundary.
+## Measure policy changes
 
-Bracketed lightweight queries are the only in-process path that can call `Environment.freeRegions`, and only because
-they import with `loadExts := false` and return fully Rust-owned serialized data before the bracket exits. They are not
-a replacement for normal full sessions.
-
-## Profiling Commands
-
-Validate policy changes with the existing bounded workloads:
-
-```sh
-LEAN_RS_WORKER_MEMORY_IMPORTS=6 \
-LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
-./profiling/scripts/profile_memory.sh worker-cycling
-
-LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
-./profiling/scripts/profile_memory.sh pool-memory
-```
-
-The worker and pool reports include `import_stats=...`, `admission=...`, `session_reuse=...`, `replacement=...`, and
-`batch=...` rows. Those rows explain, separately, what was imported, whether cold work was admitted, whether a warm key
-was reused, how much synchronous replacement cost, and whether repeated module-query work stayed on one warm lease.
-
-The same-process long-session workload is diagnostic:
-
-```sh
-LEAN_RS_LONG_SESSION_MAX_RSS_KIB=1572864 \
-./profiling/scripts/profile_memory.sh long-session
-```
-
-Run it to understand retention and attribution, not as a production soak test.
+Use the [profiling commands](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md) for bounded worker cycling, pool admission and reuse, synchronous
+replacement timings, and warm batch workloads. Use the same-process long-session probe to diagnose retention, rather
+than as an unbounded service soak test. See [diagnostics](diagnostics.md) for resource facts, streaming outcomes, and
+pool snapshots.

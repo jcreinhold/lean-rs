@@ -1,169 +1,73 @@
-# Loader And Artifact Boundary
+# Loader and Artifact Boundary
 
-The v0.1.1 release validated the worker foundation, but it also exposed a separate source of fragility: shipping Lean
-shared libraries is still too easy to do correctly only by accident. A caller should not have to know which dylib must
-be opened first, which one needs global symbols, how long a transitive dependency handle must remain alive, which
-environment variables the platform loader consults, or why docs.rs builds without Lean installed.
-
-Those details are real, and they are volatile. They belong behind the `lean-rs` crate boundaries, not in every
-downstream build script, test helper, or worker launcher.
-
-## Chosen Boundary
-
-The shipping stack has three responsibilities:
+Shipped capabilities use one build-time artifact description for same-process loading and worker startup:
 
 ```text
-CargoLeanCapability artifact description
-    -> LeanCapability bundle loader
-    -> LeanWorkerCapabilityBuilder / LeanWorkerPool
+CargoLeanCapability -> manifest-backed LeanBuiltCapability
+  -> LeanCapability or LeanWorkerCapabilityBuilder / LeanWorkerPool
 ```
 
-- `lean-toolchain` owns the build artifact description. It builds the Lake shared-library target, resolves Lake's dylib
-  naming, emits Cargo rerun and link directives, and records enough artifact metadata for runtime code to reopen the
-  same capability without rediscovering Lake output conventions. Release gates also simulate docs.rs from normalized
-  crate tarballs with Lean, Lake, and Elan hidden from `PATH`, so package drift fails before crates.io receives
-  immutable uploads.
-- `lean-rs` owns runtime loader lifetime and symbol visibility. It opens the capability and any dependent Lean dylibs in
-  the required order, keeps those handles alive for the full capability lifetime, preflights the manifest and artifacts
-  into stable diagnostics, initializes the requested module, and hides platform loader differences.
-- The worker crates own the process boundary. They locate and start the app-owned worker child, build the child
-  environment, open the capability in the child, report bootstrap diagnostics, and keep protocol pipes private.
+Applications supply their Lake package/module, exported commands, schemas, and isolation policy. The library owns Lake
+artifact naming, dependency load order, symbol visibility, handle lifetime, module initialization, preflight, and worker
+bootstrap. Repeating those details in each consumer's build script or loader would produce platform-specific failures.
 
-Callers still know their own Lake package and root module, exported command names, typed request and row schemas, and
-whether the workload should run in process or behind worker isolation. Those are application decisions. Loader order,
-`RTLD_GLOBAL`, `LD_LIBRARY_PATH`, `DYLD_*`, Lake `.lake/build/lib` layout, docs.rs no-Lean behavior, and worker protocol
-pipes are not.
+## Build artifacts
 
-## Rejected Designs
+`lean-toolchain::CargoLeanCapability` builds the shared Lake target, emits Cargo rerun/link directives, and writes a
+manifest containing the primary dylib, declared dependency dylibs, initializer metadata, toolchain fingerprint, and
+trusted export signatures. `LeanBuiltCapability` is the link-free descriptor shared by the runtime and worker parent.
 
-**Caller-managed loader order.** Rejected. It would make every user understand which Lean dylibs are dependencies, which
-ones must be opened globally, and how long each handle must stay alive. That repeats the same fragile dynamic-loader
-contract at every call site and test fixture.
+Declare separately built dependency dylibs through the builder so both loading paths see the same order and visibility
+requirements. `build_lake_target` and raw link directives remain available for custom build systems; the
+[shipped-crate template](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate) demonstrates the normal path. Shared build coordination
+belongs to the [build-and-link contract](12-interop-build-and-link.md).
 
-**Scattered helper fixes.** Rejected. Test-only handle leaks, local `LD_LIBRARY_PATH` workarounds, special docs.rs
-branches in individual build scripts, and one-off worker child path probes can fix one failure at a time, but they keep
-the volatile knowledge duplicated. The next platform or package layout change would create another incident.
+## Runtime loading
 
-**Deep loader/artifact boundary.** Chosen. The build helper records the artifact; the runtime loader opens the complete
-bundle and anchors it; the worker builder transports that bundle into an isolated child process. Each layer has a
-different abstraction and hides a distinct kind of complexity.
+`LeanCapability::from_build_manifest` preflights the artifact and opens its `LeanLibraryBundle`. The bundle retains the
+primary and dependency handles, opens dependencies before their consumer, applies requested global visibility, and
+initializes modules. This matters especially on ELF systems, where a later library may need symbols from an earlier
+library opened globally. A permissive macOS loader is insufficient validation.
 
-## Brittleness Classes
+Manifest-backed `exported` checks the requested Rust ABI against trusted signature metadata, verifies function/global
+classification and symbol presence, then creates the typed handle. The manifest is cooperative build metadata, not
+protection against malicious libraries or substituted native code.
 
-### Lean Process-Global State
+`LeanCapability::from_manifest_snapshot` consumes captured bytes without rereading the manifest path. Artifact custody
+must span loading and initializers; a storage descriptor alone is not evidence of the loaded ABI. Guarded worker
+sessions apply the [read-custody protocol](17-worker-session-adapter.md#shared-artifact-read-custody).
 
-Lean runtime initialization, imported modules, interned names, persistent objects, allocator state, and module
-initializers are process-scoped. Dropping a Rust wrapper does not necessarily undo those effects. `lean-rs-host` exposes
-checked in-process services; the worker crates remain the production boundary for panic containment and memory reset.
+`LeanCapabilityPreflight` and `LeanRuntimePreflight` expose doctor-style checks. `LeanLibrary::open`,
+`LeanLibrary::open_globally`, direct dylib descriptors, and unchecked exports remain advanced paths whose callers take
+on the corresponding loader or ABI obligations.
 
-### Dynamic-Loader Symbol Visibility
+## Worker bootstrap
 
-Lean-generated shared libraries can reference symbols emitted by imported Lean libraries. On ELF platforms, later
-libraries may need earlier libraries to have been opened with globally visible symbols. On macOS the loader can appear
-more forgiving, which makes Linux-only failures easy to miss. Normal callers should not choose global visibility
-manually.
+Applications ship an app-owned child calling `lean_rs_worker_child::run_worker_child_stdio`; dependency binaries are not
+automatically installed with a consuming application. `LeanWorkerChild` locates that binary and binds it to the matching
+Lean sysroot. The child's linked `libleanshared` and runtime stdlib oleans must come from the same toolchain.
 
-### Transitive Dylib Lifetime
+The capability builder opens the same manifest-backed artifact inside the child and hides pipes, framing, and bootstrap
+diagnostics. Typed child settings carry supported configuration. The low-level supervisor inherits the parent's
+environment and applies worker-specific overrides; it does not claim to sanitize the environment. Normal packaged
+examples should not require callers to set dynamic-loader variables or open Lean dylibs manually.
 
-Opening a dependency globally is not enough if the Rust handle is dropped while another Lean dylib still relies on its
-symbols. The loader boundary must anchor dependent handles for as long as the capability can execute code that depends
-on them. Test-only leaks are a symptom that lifetime belongs in the loader abstraction.
+`LeanWorkerCapabilityBuilder::check()` validates child resolution/executable status, artifact preflight, handshake,
+import startup, and optional metadata expectations before a body command. Current import startup still needs Lean
+tooling on `PATH`; the report exposes that deployment requirement. Process isolation and memory-reset semantics remain
+with the [worker boundary](16-production-boundary.md).
 
-### docs.rs Builds Without Lean
+## Package and regression checks
 
-docs.rs builds crate documentation in an environment where Lean, Lake, and Elan may be absent. Published crates must
-make documentation builds independent of a local Lean installation. A docs.rs guard is not a substitute for checking
-package contents and build behavior before publishing.
+Published tarballs must include every source, shim, template, and metadata file their build path needs. docs.rs builds
+must work with Lean, Lake, and Elan unavailable. `scripts/check_package_docsrs.py` checks package contents and simulates
+docs.rs from normalized tarballs with those tools hidden from `PATH`; a docs.rs build-script guard alone does not check
+package completeness.
 
-### crates.io Package Drift
+`crates/lean-rs-worker-child/tests/loader_regressions.rs` checks the shipped template's package list, transitive
+capability lifetime, same-process binary, and worker example. It removes `LD_LIBRARY_PATH`, `LD_PRELOAD`,
+`DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` to test artifact/rpath/bundle behavior
+without a developer shell's loader setup. It keeps `PATH` for the current tooling requirement.
 
-Published tarballs are immutable. A missing template, shim, README, benchmark, `lean-toolchain`, `lakefile.lean`, or
-generated doc baseline cannot be repaired in-place after release. The package boundary must include explicit contents
-checks so local builds, docs.rs builds, and downstream builds see the files the docs describe.
-
-### Worker Child Bootstrap Environment
-
-Worker applications ship an app-owned worker child. The parent must find that binary, pass capability artifact paths,
-preserve only the environment needed by Lean and the worker protocol, and report startup failures with actionable
-diagnostics. Callers should not debug child pipes, inherited environment drift, or dependency-binary lookup rules.
-
-## Crate Responsibilities
-
-### `lean-toolchain`
-
-`lean-toolchain` hides:
-
-- Lean and Lake discovery;
-- `lake build <target>:shared`;
-- Lake shared-library naming across supported toolchains;
-- Cargo rerun directives and link directives;
-- package include expectations for Lean sources and Lake metadata;
-- artifact metadata such as package, module, dylib path, search roots, toolchain fingerprint, and dependency dylibs
-  known at build time.
-
-The lower-level `build_lake_target` and raw link-directive helpers remain for advanced build systems. They are not the
-canonical shipped-crate path.
-
-### `lean-rs`
-
-`lean-rs` hides:
-
-- `LeanLibrary` handle lifetime;
-- dependency open order;
-- global symbol visibility;
-- manifest preflight and repair hints;
-- module initializer symbol names and sequencing;
-- platform loader differences;
-- nullary Lean global-vs-function export classification.
-
-`LeanCapability` is the normal same-process runtime surface for shipped capabilities. `LeanCapabilityPreflight` is the
-doctor-style surface for checking a manifest-backed capability before opening it. `LeanLibrary::open` and
-`LeanLibrary::open_globally` remain public for advanced same-process interop and focused tests, but they are escape
-hatches: using them means the caller has chosen to manage loader details explicitly.
-
-### the worker crates
-
-The worker crates hide:
-
-- app-owned worker child lookup;
-- child environment construction;
-- capability startup inside the child;
-- bootstrap and capability diagnostics;
-- request timeouts, restart policy, and process isolation;
-- worker protocol frames, pipes, and child lifecycle details.
-
-The worker builder and pool should consume the same artifact description as the same-process loader. Worker
-parent-facing examples must not ask callers to open Lean dylibs, set loader paths, or pass callback handles across the
-process boundary.
-
-## Normal And Advanced Paths
-
-Use the highest-level surface that matches the job:
-
-- Use `CargoLeanCapability` in `build.rs` for crates that ship Lean source.
-- Use `LeanCapability` to call a built capability in process.
-- Use `LeanWorkerCapabilityBuilder` or `LeanWorkerPool` when the application needs process isolation, request timeouts,
-  live rows, memory cycling, or crash containment. Their normal packaged-app input is the same manifest-backed
-  capability descriptor that `LeanCapability` consumes.
-- Use `LeanLibrary::open`, `LeanLibrary::open_globally`, raw link directives, and low-level worker APIs only for
-  advanced interop, diagnostics, and tests.
-
-## Regression Gates
-
-`crates/lean-rs-worker-child/tests/loader_regressions.rs` protects the public packaged-app path. It builds the
-shipped-crate template, then runs the same-process binary and worker example with `LD_LIBRARY_PATH`, `LD_PRELOAD`,
-`DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `DYLD_INSERT_LIBRARIES` removed. The test proves the canonical
-path relies on build artifacts, rpath, and the bundle loader rather than a developer shell's loader environment. The
-same file also checks the template package list and proves a public `LeanCapability` bundle keeps a transitive Lean
-dependency alive after the opener helper returns.
-
-Worker bootstrap is checked through `LeanWorkerCapabilityBuilder::check()`. The report validates app-owned child
-resolution, executable status, manifest-backed capability preflight, protocol handshake, import session startup, and
-optional metadata expectations before a real command runs. The worker regression still keeps `PATH` because current
-host-session import startup uses Lean tooling; the bootstrap check now reports that deployment boundary explicitly
-instead of asking callers to manage child pipes or dynamic-loader variables.
-
-This is not a narrow fix for one Linux or docs.rs failure. The failures point at a common design problem: volatile
-loader, package, and bootstrap decisions were visible in too many places. The hardening arc moves those decisions behind
-the crates that can own and test them, then makes the package simulation, loader regressions, worker bootstrap checks,
-and public-API baselines release gates.
+These gates protect three distinct contracts: build artifacts describe dependencies, the runtime anchors and loads
+them, and the worker boots the application-owned child with typed diagnostics.

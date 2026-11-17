@@ -1,67 +1,40 @@
 # Import Set Planning
 
-The planner sits above the memory-aware worker pool and groups module work by the same facts the pool uses for session
-reuse, so downstream tools can avoid repeating Lean imports without learning worker process mechanics.
-
-## Crate Boundary
-
-Two concerns are better apart:
-
-**Planner in the worker crates.** Rejected as the only layer. Worker sessions and pool keys matter for batching, but
-Lake module discovery is useful without a worker child process.
-
-**Discovery in `lean-toolchain`, batching in the worker crates.** Chosen. `lean-toolchain` owns Lake root detection,
-module-root discovery, module-name validation, source-set fingerprints, and capability-target declaration checks. The
-worker crates own the worker-facing batch plan because the batch key is a `LeanWorkerSessionKey` and feeds
-`LeanWorkerPool` leases.
-
-This split keeps Lake layout policy in one general-purpose crate and keeps worker session policy in the worker crate.
-Neither crate learns downstream commands, row schemas, cache validity, ranking, or reporting.
+`lean-toolchain` discovers Lake modules without a worker dependency. `LeanWorkerImportPlanner` groups that discovery
+into compatible worker-session batches. The pool still chooses the child; the planner neither schedules requests nor
+decides downstream cache validity.
 
 ## Discovery
 
-`lean-toolchain::discover_lake_modules` accepts a requested root and optional selected module roots. It resolves
-conventional Lake project locations, discovers `lean_lib` roots from `lakefile.lean` or `lakefile.toml`, enumerates Lean
-source modules deterministically, and returns:
+`lean-toolchain::discover_lake_modules` resolves a Lake project, reads `lean_lib` roots from `lakefile.lean` or
+`lakefile.toml`, validates module names, and enumerates sources deterministically. Callers may restrict selected roots.
+It returns:
 
-- `LeanModuleDescriptor` values with module name, source path, and source root;
-- `LeanModuleSetFingerprint` with the build-baked toolchain fingerprint, lakefile digest, optional manifest digest,
+- `LeanModuleDescriptor` values with module name, path, and source root;
+- `LeanModuleSetFingerprint` with the configured toolchain fingerprint (build-baked by default), lakefile digest, optional manifest digest,
   source count, and maximum source mtime;
-- typed `LeanModuleDiscoveryDiagnostic` errors for missing Lake roots, missing selected module roots, invalid module
-  names, unsupported toolchains, and I/O failures.
+- typed errors for missing projects/selected roots, invalid names, unsupported toolchains, and I/O failures.
 
-The fingerprint carries cache-key-relevant facts. It does not decide whether a downstream cache entry is fresh.
+The fingerprint records source-set facts; it is not a content digest of every source file. The planner's
+`plan_lake_project` also requires the capability target to be explicitly declared as a `lean_lib`.
 
-## Worker Batches
+## Batches
 
-`LeanWorkerImportPlanner` consumes discovery output or explicit `LeanWorkerModuleWork` values. It groups work by:
+The planner accepts discovered modules or explicit `LeanWorkerModuleWork` values. It groups by project root, capability
+package/target, source root, ordered import set, import profile, and restart-policy class. Configured capability metadata
+expectations are carried into each batch's session key. Each `LeanWorkerPlannedBatch` includes sorted modules, a batch
+fingerprint, and material for `capability_builder()`.
 
-- Lake project root;
-- capability package and target;
-- source root;
-- import set;
-- optional capability metadata expectation;
-- Lean toolchain and `lean-rs` protocol fingerprint;
-- restart-policy class.
+The [pool reuse key](20-worker-pool.md#leases-and-reuse) also carries build-baked toolchain identity. There is no separate
+worker protocol fingerprint in the planner or session-key structure. Work planned from one capability project defaults
+to that project's import workspace; a caller configuring a different workspace must set that on the derived builder.
 
-Each `LeanWorkerPlannedBatch` contains a `LeanWorkerSessionKey`, module work items, a batch fingerprint, and enough
-capability material to create a `LeanWorkerCapabilityBuilder`. The plan contains no worker ids, child pids, pipe
-handles, protocol frames, queue positions, or scheduling decisions. The pool still decides which local child hosts a
-batch.
+Treat a planned batch as an execution group: its modules share session requirements. It makes no claim about reuse of
+cached declaration rows, feature rows, proof results, or reports.
 
-## Downstream Use
+## Recorded fixture comparison
 
-A downstream tool should treat planned batches as execution groups, not cache records. The group says: "these modules
-can run against the same worker session requirements." It does not say whether a declaration row, feature row, probe
-result, or report is valid for reuse. That remains downstream policy.
-
-The import planner is therefore deliberately not a `lean-dup` API. A `lean-dup` integration can map its source modules
-into planned batches, then run typed worker commands through pool leases. The worker crates still do not define
-`extract`, `features`, `index`, or `probe` methods.
-
-## Performance Claim
-
-The fixture test records the shape rather than claiming universal speedup: naive per-module execution opened one worker
-capability per module, while the planned path used one batch and one pool worker. On a local run, two interop fixture
-modules took 1049 ms in the naive path and 573 ms through a single planned pool lease. Larger projects should use their
-own workload numbers before turning a batch plan into a cache or scheduling policy.
+The fixture comparison opened one capability per module in the naive path and one batch/worker in the planned path.
+A recorded local run of two interop modules took 1049 ms naively and 573 ms with one planned lease. That capture lacks
+platform/revision metadata and is historical shape evidence, not a portable baseline. Larger projects need their own
+measurements before adopting a cache or scheduling policy.

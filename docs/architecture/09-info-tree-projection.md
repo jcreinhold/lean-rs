@@ -1,12 +1,10 @@
 # Module-query projection
 
-`LeanSession::process_module_query` is the public module-processing boundary. Callers submit a `ModuleQuery`; the Lean
-shim parses the file header, elaborates the body for that request, performs any info-tree traversal in Lean, and returns
-only the requested bounded projection.
-
-The old whole-file `ProcessedFile` dump is intentionally gone. Diagnostics, cursor type lookup, cursor goal lookup, and
-name-reference lookup no longer serialize every command, term, tactic, raw expression string, inferred type string, and
-expected type string in the file.
+`LeanSession::process_module_query` accepts one `ModuleQuery`; `process_module_query_batch` accepts several named
+selectors and elaborates the body once. Lean owns header handling, elaboration, info-tree traversal, and bounded
+rendering. Rust receives the requested projections rather than a whole-file dump of Lean internals. The cached batch
+variant adds shim-owned snapshot reuse. The exact types live in
+[`host::process`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/process/query.rs).
 
 ## Query Shape
 
@@ -19,6 +17,10 @@ expected type string in the file.
 
 All traversal and rendering policy stays Lean-owned. Rust chooses the query and decodes the result; it does not
 reconstruct info-tree semantics from a broad internal dump.
+
+Batch selectors additionally support proof states inside declarations, declaration targets, surrounding declarations,
+and declaration outlines. Selector ids associate each result with its request. Proof attempts and explicit verification
+reuse the same module-processing infrastructure.
 
 ## Outcome Shape
 
@@ -40,11 +42,15 @@ Module-system headers keep the same import reporting policy as ordinary headers:
 
 ## Bounds
 
-Budgets are internal policy, not public knobs:
+Single-query rendering uses the following bounds:
 
 - diagnostics and tactic goals use `LeanElabOptions::diagnostic_byte_limit`;
 - type rendering uses a private bounded expression renderer;
 - references stop at an internal cap and set `truncated`.
+
+Batch callers supply `ModuleQueryOutputBudgets`: defaults are 8 KiB per rendered field and 64 KiB combined payload.
+Setters and ABI encoding clamp each budget at `LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX` (1 MiB), including values supplied by
+direct struct literals. Selector outcomes report truncation or exhausted budgets.
 
 This keeps the API narrow and makes frame size a consequence of query shape. Worker frame limits remain a final
 transport guard, not the first place oversized full-file expression strings are discovered.
@@ -93,8 +99,8 @@ locals collector so the concern lives in one place:
 - **`pretty`** (default for user-facing `proof_state`): each local's type/value is rendered with `Meta.ppExpr` inside
   the goal's `MetaM` context, so binders resolve to user names and notation is applied, then bound under the diagnostic
   byte budget. On a pretty-printer failure it falls back to the raw renderer. This matches the goal renderer and is
-  *cheaper* than the raw unfolded form (the raw locals, `((((Quiver.Hom.{v,u} _uniq.NNNN)…`, were the proximate trigger
-  of the RSS spike).
+  more compact than the raw unfolded form in the recorded regression (raw locals such as
+  `((((Quiver.Hom.{v,u} _uniq.NNNN)…` accompanied the RSS spike). This is not a general pretty-printer cost guarantee.
 - **`raw`**: the previous `Expr`-string form, opt-in via the `locals_raw` selector field.
 - **`skip`**: render no locals at all. The verify path and the try-proof-step goals path read only `goals_after` and
   discard locals, so they pass `skip` and pay nothing for locals they never inspect.
@@ -130,10 +136,10 @@ an observable one.
 
 ## Degraded verdicts under resource pressure
 
-A read-only `verify_declaration` / `proof_state` query elaborated under memory pressure can be *degraded*: the captured
-proof state references a metavariable whose decl was evicted, so the elaboration result is untrustworthy even though no
-Lean exception was thrown. Three layers keep the verdict honest and the child alive, each at the abstraction where the
-signal is authoritative:
+A read-only `verify_declaration` / `proof_state` result can contain a captured proof state with a missing metavariable
+declaration, a failure observed during resource pressure. Rendering that state can panic even when no Lean exception was
+reported. The implementation screens this structural defect and treats resource signals conservatively; it does not
+prove that memory pressure evicted a particular declaration. Three layers handle the distinct signals:
 
 1. **In-Lean structural screen (Layer A).** Before any renderer dereferences a captured proof state, a *total* predicate
    walks the goal's target and local-context types for metavariables and checks each against `MetavarContext.findDecl?`
@@ -155,14 +161,15 @@ signal is authoritative:
    uncatchable process exit, so only the parent can absorb it. `worker_verify_declaration` and
    `worker_process_module_query_batch` map a `ChildPanicOrAbort` during the request to a synthesized degraded result —
    verify → `Ok { BudgetExceeded, facts: unavailable(), imports: [] }`; batch → a per-selector `BudgetExceeded` outcome
-   — and record a `ChildAbort` restart (`stable_cause = "child_abort"`). The caller always gets a verdict; the next call
-   is served by a freshly respawned child. This is the process-boundary half of the panic-containment contract; see
+   — and record a `ChildAbort` restart (`stable_cause = "child_abort"`). A successful restart yields the degraded verdict
+   and a fresh child for subsequent calls; a failed restart or non-abort error still propagates. This is the
+   process-boundary half of the panic-containment contract; see
    [`06-panic-containment.md`](06-panic-containment.md).
 
 No new status variant is introduced: `BudgetExceeded` already names "the worker could not complete this within its
-resource envelope," which is exactly the degraded case. `LEAN_RS_VERIFY_RSS_TAINT_KIB` is an internal env var plumbed
-from the pool's per-worker RSS ceiling by `LeanWorkerModuleCacheLimits::verify_rss_taint_kib`, mirroring
-`LEAN_RS_MODULE_CACHE_RSS_GUARD_KIB`; it is not a public knob.
+resource envelope," which is exactly the degraded case. `LEAN_RS_VERIFY_RSS_TAINT_KIB` is an internal child environment
+variable configured through the public `LeanWorkerModuleCacheLimits::verify_rss_taint_kib` builder, alongside the module
+cache RSS guard. Leave it unset or zero to disable it; choose a ceiling above the warm import baseline when enabling it.
 
 ## Reusing module headers after edits
 
@@ -225,7 +232,8 @@ The host's heartbeat limit overrides the map's `maxHeartbeats`. This resource ov
 semantic options such as `autoImplicit` and `maxSynthPendingDepth`, which must match the build.
 All source elaboration entry points, proof overlays, and explicit verification use the map. The worker
 cache key, module snapshot lookup, incremental reuse, and header reuse all distinguish option changes.
-Worker protocol version 11 prevents an old child from silently ignoring the new map.
+The [worker protocol version check](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-worker-protocol/src/protocol.rs) prevents a mismatched old child
+from silently ignoring the map.
 
 Resolving Lake configuration belongs to the caller, not the Lean runtime bridge. The host does not read
 or build a project merely to discover options. A caller that omits build options cannot claim that its

@@ -1,16 +1,11 @@
 # Worker Data Streaming
 
-The worker crates need a row stream for downstream protocols that produce arbitrary user data while a worker request is
-running. The host-session adapter can already return copied theorem-prover values and progress events, but that is not
-enough for tools that need a sequence of downstream-owned rows such as JSONL-like `lean-dup` output.
+Worker streams carry downstream-owned JSON rows while a request runs. The worker owns framing, per-stream ordering,
+backpressure, cancellation, diagnostics, and terminal completion. Downstream code owns stream names, row schemas,
+validation, persistence, and interpretation.
 
-Worker data rows are worker IPC data. They are not same-process callback payloads and not Lean runtime handles. The
-worker owns process framing, ordering, cancellation boundaries, fatal-exit behavior, and sink panic containment.
-Downstream crates own the row schema.
-
-## Public Row Shape
-
-The selected public row type is:
+Use `LeanWorkerStreamingCommand<Req, Row, Summary>` for typed commands. The schema-less escape hatch is
+`run_data_stream`, whose public row type is:
 
 ```rust
 pub struct LeanWorkerDataRow {
@@ -20,86 +15,114 @@ pub struct LeanWorkerDataRow {
 }
 ```
 
-`stream` is a caller-defined channel name, such as `"rows"`, `"warnings"`, or a tool-specific stream label. `sequence`
-is assigned by the worker crates per stream within one request. `payload` is arbitrary JSON owned by the downstream
-protocol.
+Sequences are assigned per stream within one request. Protocol frames carry validated raw JSON; typed commands decode it
+directly into `Row`, avoiding an intermediate `serde_json::Value`. Only the schema-less API constructs that tree.
+Callback handles and runtime-bound Lean objects remain inside the child.
 
-This type is intentionally generic at the worker boundary and intentionally not schema-free inside downstream tools. The
-worker crates carry rows. They do not define `lean-dup` row structs, theorem-search result schemas, or application
-business objects.
+## Completion and backpressure
 
-## Chosen Boundary
+Rows reach the sink live and remain tentative until the request returns terminal success. `LeanWorkerStreamSummary`
+records total and per-stream row counts, elapsed time, and optional downstream terminal metadata. Discard partial output
+when atomic commit is required and the request fails, times out, is cancelled, or loses its child.
 
-The worker crates own:
+Diagnostics and progress use separate sinks. Sink panics are contained by the worker API. A bounded reader event buffer
+propagates slow-sink pressure through the child pipe; committed streams never drop rows. The parent request watchdog
+also covers silent streams. See [pool observability](20-worker-pool.md#observability-and-backpressure) for counters and
+[the capability recipe](../recipes/worker-capability-runner.md) for normal use.
 
-- length-delimited, versioned row frames in the private worker protocol;
-- per-stream row ordering;
-- conversion from child-side streaming callbacks to parent-side row events;
-- live forwarding with pipe backpressure at row boundaries;
-- terminal stream summaries for commit-after-success workflows;
-- diagnostics as a separate worker channel, not row payloads;
-- row-boundary cancellation behavior;
-- EOF and fatal-child-exit behavior while a stream is active;
-- containment of parent-side data-sink panics.
+Raw stdout JSONL would expose framing, EOF, crash, and completion rules to each consumer. Cross-process callback
+handles would violate the callback registry's process-local lifetimes. Worker rows hide both sets of mechanics.
 
-Downstream crates own:
+## Lean envelope helpers
 
-- stream names and their meanings;
-- JSON object shape;
-- validation beyond "is valid JSON";
-- semantic interpretation of each row;
-- persistence, indexing, deduplication, and UI policy.
+`LeanRsInterop.Worker.Stream` ships with `lean-rs-interop-shims`. It provides:
 
-The boundary follows the same rule as the worker-process boundary: the worker hides process and IPC mechanics, but it
-does not absorb downstream domain schemas.
+| Helper | Purpose |
+| --- | --- |
+| `jsonString` | Escape a Lean string as JSON |
+| `row` | Wrap a stream name and caller-supplied payload JSON |
+| `diagnostic` | Build a diagnostic envelope |
+| `progress`, `chunkProgress` | Build progress envelopes |
+| `metadata` | Build a terminal metadata envelope |
+| `emitAll` | Send an envelope array through the child-local string callback |
+| `countChunks` | Count chunks for a downstream-owned plan |
 
-## Rejected Designs
+Capability code builds its envelope array locally and calls `emitAll` once. Request parsing, payload JSON validity,
+command algorithms, and chunk scheduling remain downstream responsibilities. Pool selection, leases, cancellation,
+and timeouts remain Rust worker responsibilities.
 
-**Raw stdout JSONL.** Rejected. It exposes process I/O, framing, completion, EOF, cancellation, and fatal-exit rules to
-every consumer. It also competes with structured worker diagnostics and progress for the same untyped channel. That
-would make each downstream tool reimplement the worker protocol outside the worker.
+The helper surface records a specific shared-library constraint: generic chunk loops, source macros expanding those
+loops, and single-envelope helpers allocating one-element arrays caused child SIGSEGVs in the Lean 4.29.1 worker path.
+The retained fixture pattern factors out envelope construction and `emitAll`, while keeping chunk scheduling in the
+capability. That historical failure is a reason to recheck this path before adding convenience runners.
 
-**Public cross-process callbacks.** Rejected. `LeanCallbackHandle` is a same-process mechanism. Its handle lifetime,
-trampoline values, refcount rules, panic containment, and wrong-payload checks are valid only inside one process.
-Passing those handles across the worker boundary would turn an in-process FFI tool into an IPC API and leak exactly the
-mechanics the worker exists to hide.
+## Per-row framing evidence
 
-**Worker data rows.** Chosen. A worker row stream is the smallest public shape that supports arbitrary downstream JSON
-rows while preserving the worker's deep module boundary. Callers learn a row sink and a row type; they do not learn
-frame bytes, pipe reads, child exits, callback handles, or terminal-response frames.
+The protocol keeps per-row frames. A private 64-row batch prototype did not improve the 512-row export
+`lean_rs_interop_consumer_worker_data_stream_many`:
 
-## Relationship To Callback Payloads
+| Variant | `stream/typed_many_512` | Bench throughput | Large-stream probe |
+| --- | --- | --- | --- |
+| Per-row baseline | 275.81–303.74 ms | 1.69–1.86 K rows/s | 3590.5 rows/s |
+| Private 64-row batches | 296.70–339.81 ms | 1.51–1.73 K rows/s | 1257.4 rows/s |
+| Per-row after prototype removal | 261.74–270.41 ms | 1.89–1.96 K rows/s | 3298.9 rows/s |
 
-The child may use in-process callbacks to collect strings from a Lean export, but those callbacks remain child-local.
-For the first streaming runner, the child registers a `LeanCallbackHandle<LeanStringEvent>`, parses each callback string
-as a row, diagnostic, or terminal-metadata envelope, and sends private worker frames to the parent. The parent sees
-`LeanWorkerDataRow`, `LeanWorkerDiagnosticSink` events, and a terminal summary; callback handles stay inside the child.
+The protocol-only `worker::row_payload::protocol_batching` comparison also failed to justify batching:
 
-Byte streaming and Lean-object callbacks stay in the same-process callback-payload track. They require their own ABI and
-soundness work because they change how Lean data enters Rust in one process. Worker row streaming does not shortcut that
-work: it serializes process-safe JSON values over IPC.
+| Frame shape | Time |
+| --- | --- |
+| Per-row raw JSON | 829.78–838.39 µs |
+| Batched 16 raw JSON | 900.46–945.11 µs |
+| Batched 64 raw JSON | 839.94–849.64 µs |
 
-The reverse is also true: worker row streaming does not need wider callback payloads. Worker-class data already travels
-to the parent as JSON or validated raw JSON frames. Add byte or object callback payloads only for real same-process
-interop needs, not to improve worker ergonomics.
+Reproduce the current baseline with:
 
-## Consumer Guidance
+```sh
+cargo bench -p lean-rs-worker-child --bench row_payload -- \
+  worker::row_payload::stream/typed_many_512 --quiet
+cargo bench -p lean-rs-worker-child --bench row_payload -- \
+  worker::row_payload::protocol_batching --quiet
+cargo nextest run -p lean-rs-worker-child --test streaming_runner \
+  large_stream_records_live_forwarding_throughput_and_rss --no-capture
+```
 
-Use direct string callbacks when the Lean extension is trusted, in-process, and the application does not need crash
-isolation or memory reset.
+The removed prototype is a recorded comparison, not a current benchmark mode. No public batch sink or private
+`DataRowBatch` frame is implemented. A future batch design needs both a protocol benchmark win and a broader worker or
+pool/lease win while preserving live delivery, fatal-exit reporting, and row-boundary cancellation.
 
-Use worker data rows when the application needs the worker process boundary. The row payload can be any JSON value, but
-the worker crates treat it as data. Schema ownership remains with the downstream crate.
+## Data-plane format evidence
 
-For throughput, private `DataRow` frames carry validated raw JSON payloads. The public schema-less `LeanWorkerDataRow`
-still exposes `serde_json::Value`; that conversion happens only for callers that choose the low-level raw-row API. The
-typed command facade decodes the raw payload directly into the downstream row type, avoiding an intermediate JSON tree.
+Encoding candidates were compared on `small_rows_8192` (small declaration-like rows) and `large_rows_512` (4 KiB payload
+rows). Representative frame sizes in bytes:
 
-The normal worked recipe is [`../recipes/worker-capability-runner.md`](../recipes/worker-capability-runner.md). The
-lower-level process-boundary and raw-row escape hatch is documented in
-[`../recipes/worker-process-boundary.md`](../recipes/worker-process-boundary.md).
+| Shape | JSON tree | Raw JSON | Binary envelope with JSON payload | MessagePack | CBOR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `small_rows_8192` | 97 | 97 | 76 | 40 | 76 |
+| `large_rows_512` | 4154 | 4154 | 4133 | 4108 | 4139 |
 
-Request timeout is the watchdog for streams that stop producing terminal success. It is enforced by the parent
-supervisor, not by the Lean callback. If the deadline expires after some rows have been delivered, those rows are still
-tentative: callers that need atomic commit must discard them unless `run_data_stream` returns
-`Ok(LeanWorkerStreamSummary)`.
+Recorded median throughput, estimated from each reported range:
+
+| Format | Small rows | Large rows |
+| --- | ---: | ---: |
+| `binary_json_payload` | 3.36 M rows/s | 0.90 M rows/s |
+| `messagepack_typed` | 2.66 M rows/s | 1.24 M rows/s |
+| `batched_raw_json_64` | 2.30 M rows/s | 0.62 M rows/s |
+| `raw_json` (current) | 2.29 M rows/s | 0.61 M rows/s |
+| `serde_json::Value` | 1.42 M rows/s | 0.40 M rows/s |
+| `cbor_typed` | 1.37 M rows/s | 0.87 M rows/s |
+
+The end-to-end worker capture was much slower: about 2 K rows/s for `typed_many_512`; `row_perf_probe` reported about
+2.4 K rows/s, parent RSS about 6 MiB, and child RSS growth about 400 MiB for the 512-row stream. Its one-row large-payload
+case took about 200 ms with about 370 MiB child RSS growth.
+
+```sh
+cargo bench -p lean-rs-worker-child --bench row_payload -- \
+  worker::row_payload::data_plane --quiet
+cargo run --release -p lean-rs-worker-child --example row_perf_probe
+```
+
+These captures did not record enough platform/revision metadata to serve as portable baselines. Re-capture on the same
+hardware before claiming a regression. The encoding benchmarks suggest candidates but do not identify the end-to-end
+bottleneck: neither the binary envelope nor MessagePack has a measured Lean-to-parent replacement path. Keep raw JSON
+until a full worker workload justifies a protocol change. No binary, MessagePack, or CBOR row API is exposed. Peer and
+harness authors can use the codec in `lean-rs-worker-protocol`; parent-facing callers use typed commands and row sinks.

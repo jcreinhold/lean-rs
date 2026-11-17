@@ -1,86 +1,62 @@
-# Runtime Model Proof Home
+# Runtime Model Proof Package
 
-This document decides where checked Lean proofs for [`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md)
-belong. The decision is architectural: this prompt does not add Lean files or a Lake package.
+`formal/RuntimeModel/` contains the abstract Lean model for the
+[worker runtime contract](30-worker-runtime-semantics.md). It is separate from ABI fixtures, shipped shims, and consumer
+templates, so abstract proofs neither become runtime payloads nor depend on native loading.
 
-## Decision
+## Current package
 
-`lean-rs` should carry a durable, lightweight proof package for the worker runtime model under `formal/RuntimeModel/`.
+The Lake package is `lean_rs_runtime_model`, with default library `RuntimeModel`. Its `lean-toolchain` matches the
+repository pin. It has no Mathlib or other package dependency and uses only Lean's implicit `Init` plus its own modules:
 
-The package is not a fixture, not a worker child, and not a runtime integration test. It is a small Lean development for
-the abstract transition systems and invariants named in the canonical runtime model. Prompt 36 created this package
-skeleton.
+| Module | Contents |
+| --- | --- |
+| `RuntimeModel.Basic` | Generation/request/lease ids, outcomes, events, generation and completion predicates |
+| `RuntimeModel.Worker` | Worker phases, functional terminal ledger, abstract steps and finite traces |
+| `RuntimeModel.Pool` | Lease statuses, reuse predicate, and lease-state updates |
+| `RuntimeModel.lean` | Public module imports |
 
-## Existing Lean Roots
+The source contains five theorem declarations:
 
-The existing Lake roots are not the proof home:
+- `stale_generation_events_cannot_complete`: a completing event's generation agrees with the request generation;
+- `terminal_outcome_unique`: two outcomes stored for the same state/generation/request are equal;
+- `consumed_lease_not_reusable`;
+- `released_lease_not_reusable`;
+- `consumed_or_released_lease_not_reusable`.
 
-- `fixtures/lean/` is the `LeanRsFixture` ABI-boundary fixture package. It exports stable symbols for Rust tests,
-  examples, and benchmarks.
-- `fixtures/interop-shims/` is a consumer fixture for reusable interop shims.
-- `crates/lean-rs/shims/lean-rs-interop-shims/` and `crates/lean-rs-host/shims/*` are shipped shim packages used by the
-  runtime and host crates.
-- `templates/shipped-lean-crate/lean/` is a consumer template.
+These are small abstract facts. In particular, ledger lookup uniqueness does not by itself prove that every Rust
+execution records at most one terminal event. The package does not yet prove implementation-trace refinement,
+shutdown liveness, restart fairness, or the full native process/guardian contract. Rust conformance tests provide
+separate implementation evidence; their private trace vocabulary is not a proof of refinement.
 
-Durable proofs should not live in any of those roots. Mixing proofs into fixtures would make test payloads look like
-specification authority, and mixing them into shims would couple abstract proofs to runtime-loading artifacts.
+## Verification
 
-## Package Shape
-
-Prompt 36 should create this minimal shape:
-
-```text
-formal/RuntimeModel/
-  lean-toolchain
-  lakefile.lean
-  RuntimeModel/
-    Basic.lean
-    Worker.lean
-    Pool.lean
-```
-
-The package should use the repository root `lean-toolchain` version. Its Lake package name should be
-`lean_rs_runtime_model`, and its default library should be `RuntimeModel`.
-
-The first package should import only `Init` unless a specific theorem needs a narrow Lean standard-library module. It
-must not depend on `libleanshared`, the worker child binary, fixture packages, host shims, or import-heavy Lean runtime
-behavior. It should model requests, responses, rows, generations, leases, worker states, pool states, events, and trace
-predicates as ordinary inductive types and structures.
-
-The verification command for Prompt 36 is:
+The formal package is checked separately from routine Rust tests. From the repository root:
 
 ```sh
-cd /Users/jcreinhold/Code/lean-rs/formal/RuntimeModel
+cd formal/RuntimeModel
 lake build
+lake env lean --stdin <<'LEAN'
+import RuntimeModel
+#print axioms RuntimeModel.stale_generation_events_cannot_complete
+#print axioms RuntimeModel.terminal_outcome_unique
+#print axioms RuntimeModel.consumed_lease_not_reusable
+#print axioms RuntimeModel.released_lease_not_reusable
+#print axioms RuntimeModel.consumed_or_released_lease_not_reusable
+LEAN
 ```
 
-Routine Rust verification does not run this command. A later release gate may opt in explicitly after the package is
-stable and measured.
+Do not treat a theorem as checked release evidence without a successful build and axiom inspection. Project axioms,
+`sorry`, and `admit` are excluded from checked evidence. Record the toolchain and revision with the result.
 
-## Proof Scope
+A runtime-model release also runs the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md), `mdbook build docs`, and the named
+[worker probes](../performance.md) for startup, shutdown, restart, pool admission, dispatch, streaming, and backpressure.
+Performance reports record command, platform, row counts, throughput, parent/child RSS availability, and fallback versus
+real mathlib module-list workload.
 
-The initial proof package should target the stable model labels from
-[`30-worker-runtime-semantics.md`](30-worker-runtime-semantics.md), not implementation details. Suggested theorem names:
+## Maintenance
 
-- `terminal_outcome_unique`
-- `generation_separation`
-- `affine_lease_consumed_once`
-- `serial_request_step_unique`
-- `restart_exhaustion_stops_admission`
-- `stale_generation_rows_rejected`
-- `shutdown_eventually_reaches_terminal_state_under_assumptions`
-- `implementation_trace_refines_model_trace`
-
-The first package does not need to prove every theorem. It should define the vocabulary and enough statements for later
-Rust refactors to cite. Every proof theorem must avoid `sorry`, `admit`, and project axioms before it is treated as
-checked evidence.
-
-## Ownership
-
-The proof package belongs to the worker runtime architecture, not to downstream hosts. Changes to `supervisor.rs`,
-`session.rs`, `pool.rs`, `lean-rs-worker-child`, or `lean-rs-worker-protocol` that change a model clause must update
-both the prose model and the proof package once the package exists.
-
-Proof files should follow mathlib-style discipline: narrow imports, meaningful theorem names, explicit statements, small
-helper lemmas with real mathematical content, and build-clean files. Performance-sensitive proofs should be profiled
-before increasing heartbeat budgets.
+A change to supervisor, session, pool, child, or protocol behavior that changes a model clause must update both the
+prose contract and the corresponding abstract model. Keep the formal package import-light and independent of
+`libleanshared`, fixture packages, host shims, and runtime integration tests. New claims need explicit assumptions and
+small meaningful lemmas; profile expensive elaboration before increasing heartbeat budgets.

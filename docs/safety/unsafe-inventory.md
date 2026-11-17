@@ -1,58 +1,31 @@
-# Unsafe Inventory
+# Unsafe inventory
 
-Every `unsafe` block and `pub unsafe fn` in the workspace, paired with two things: the caller's **precondition** (what
-the call site must guarantee before invoking) and the block's **invariant** (what it promises in return). Audience:
-auditors reviewing the safety story, and maintainers about to change an unsafe boundary.
+This is the review map for unsafe production boundaries. Function-level `# Safety` documentation and local `// SAFETY:`
+comments state the precise obligations; the tables here group those obligations by implementation owner. Update the
+affected entry when a change adds, removes, or reshapes unsafe code. The workspace lint `missing_safety_doc` checks
+public unsafe function documentation; it does **not** verify safety comments on blocks.
 
-**Maintenance rule.** Any commit that adds, removes, or reshapes an `unsafe` block must update the matching row in this
-file in the same commit. CI catches `unsafe` without a `// SAFETY:` comment (the `missing_safety_doc` lint at `warn`);
-this file catches the inverse—invariants that drifted away from what the code actually relies on.
+The [safety model](../architecture/01-safety-model.md) defines the policy. Raw `lean_*` symbols enter only through
+`lean-rs-sys`. `lean-rs` discharges their runtime, object, ABI, loader, and callback obligations. `lean-rs-host`,
+`lean-rs-abi`, and `lean-rs-worker-protocol` forbid unsafe code; `lean-toolchain` and `lean-rs-worker-parent` deny it
+with narrow native-process/descriptor opt-outs.
 
-The thesis these invariants serve is in [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
-Raw `lean_*` symbols enter the workspace only through `lean-rs-sys`; `lean-rs` consumes them through narrow per-file
-`#![allow(unsafe_code)]` opt-outs; `lean-rs-host` forbids unsafe code crate-wide and consumes checked `lean-rs` facades;
-`lean-toolchain`, `lean-rs-worker-parent`, and `lean-rs-worker-protocol` also forbid unsafe code crate-wide.
-
-## Safety boundary audit, 2026-05-27
-
-This section classifies the production search surface requested for the pre-1.0 migration series:
+To locate the current surface, inspect declarations and blocks, then distinguish production code from tests, comments,
+examples, and the fuzz harness:
 
 ```sh
-rg -n "unsafe|lean_rs_sys|exported_unchecked<" crates/lean-rs crates/lean-rs-host crates/lean-toolchain
+rg -n '\bunsafe\b|allow[(]unsafe_code' crates/lean-rs-sys/src crates/lean-rs/src \
+  crates/lean-rs-host/src crates/lean-toolchain/src crates/lean-rs-worker-*/src
 ```
 
-Tests, examples, fuzz targets, compile-fail stderr snapshots, and generated fixture/shim source are not counted as
-production Rust below unless explicitly named. Lean-side `unsafe Lean.enableInitializersExecution` in bundled shims is a
-Lean initialisation permission, not Rust memory-unsafe code; it is tracked as an unrelated host-shim invariant.
-
-### Inventory by classification
-
-| Classification | Production sites | Current status |
-| --- | --- | --- |
-| Lean runtime ownership/lifetime management that belongs in `lean-rs` | `lean-rs/src/runtime/{init,obj,thread}.rs`; `lean-rs/src/abi/traits.rs`; handle wrappers in `lean-rs/src/handle/{name,level,expr,declaration}.rs` | Correctly centralised in `lean-rs`. Host argument-only impls name `Obj`'s associated C representation and reject impossible owned-return decoding without touching raw pointers. |
-| Lean object layout decoding that belongs behind safe `lean-rs` view APIs | `lean-rs/src/abi/{array,bytearray,except,int,nat,option,scalar,string,structure,tuple}.rs`; `lean-rs/src/error/io.rs`; `lean-rs/src/callback.rs`; `lean-rs-host/src/host/elaboration/{diagnostic,failure}.rs`; `lean-rs-host/src/host/evidence/status.rs`; `lean-rs-host/src/host/process/query.rs` | Expected inside `lean-rs`. `lean-rs::abi::structure::{ObjView, CtorView}` now centralises scalar/nullary tag, ctor-tag, ctor-arity, and scalar-tail reads; host production decoders consume those views instead of direct `lean_rs_sys` object-layout helpers. |
-| Dynamic symbol dispatch that must be checked or explicitly unsafe | `lean-rs/src/module/library.rs`; `lean-rs/src/module/exported.rs`; `lean-rs/src/module/capability.rs` | `lean-rs` owns `dlopen`, global-vs-function classification, `dlsym`, initializer lookup, and the unsafe function-pointer cast. Checked lookup is safe only when backed by trusted export signature metadata. Arbitrary dynamic lookup remains `LeanModule::exported_unchecked` and is named unsafe. `lean-rs-host` resolves bundled shims through manifest-backed `HostShimBindings`; `lean-rs-worker-child` resolves user worker exports through manifest-backed worker bindings. Neither exposes arbitrary dispatch wrappers. |
-| Callback or context-pointer handling that belongs behind a safe callback API | `lean-rs/src/callback.rs` | `lean-rs` owns the callback registry, status bytes, panic containment, and string/progress payload trampolines. `lean-rs-host` uses that safe callback surface for progress reporting. |
-| Unrelated unsafe that needs its own justification | `lean-rs/src/module/initializer.rs` `from_utf8_unchecked` for prevalidated symbol bytes and initializer call; `lean-rs/src/module/library.rs` platform loader calls including `RTLD_GLOBAL`; bundled Lean shims call `unsafe Lean.enableInitializersExecution` | Keep documented locally. These are not Lean object layout or Rust callback lifetime leaks, but each remains load-bearing and should stay isolated. |
-| `lean_rs_sys` constants only, no unsafe | `lean-toolchain/src/{discover,fingerprint,lib,manifest_validation,modules}.rs`; selected docs/tests | Build-time version, digest, required-symbol, and supported-toolchain metadata. This is not raw object access and does not by itself expand the unsafe boundary. |
-
-### Information leakage to remove
-
-- **Lean object layout leakage:** closed for the current host decoders. `lean-rs` owns scalar-vs-constructor tags and
-  constructor scalar-tail reads through `ObjView` / `CtorView`; diagnostic severity, elaboration failures, evidence
-  status, module-query cache facts, timings, booleans, and sum tags now decode through that API.
-- **Symbol ABI leakage:** closed for host and worker dispatch. The ABI fact lives in Lean shim/worker declarations and
-  generated capability manifests; `HostShimBindings` and worker checked bindings consume trusted signature metadata
-  rather than raw address comments.
-- **Callback lifetime leakage:** closed for host progress callbacks. `lean-rs` owns callback handles and trampolines;
-  host passes progress sinks through that safe surface.
-- **Ownership/drop leakage:** closed for host request-only `LeanAbi` impls. They still name the C-ABI representation
-  through `Obj`'s associated type, but owned-result wrapping and dropping is handled by `Obj::from_c`.
+Lean-side `unsafe Lean.enableInitializersExecution` is a separate initialization permission, not Rust memory-unsafe
+code. Static symbols, toolchain-window entries, and layout metadata belong to `lean-rs-abi`; discovery uses them without
+raw Lean object access.
 
 ## `lean-rs-sys`—the load-bearing boundary
 
-`lean-rs-sys` is the one crate-wide `#[allow(unsafe_code)]` opt-out (`crates/lean-rs-sys/src/lib.rs:32`). `lean_object`
-is opaque (`[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`) and downstream code reaches state only through
+`lean-rs-sys` is the one crate-wide `#[allow(unsafe_code)]` opt-out in `crates/lean-rs-sys/src/lib.rs`. `lean_object` is
+opaque (`[u8; 0] + PhantomData<(*mut u8, PhantomPinned)>`) and downstream code reaches state only through
 `pub unsafe fn` helpers. Each helper documents its caller obligations in a `# Safety` block; each in-body
 `unsafe { ... }` restates the ABI/layout invariant it relies on.
 
@@ -65,253 +38,214 @@ The blanket allow is justified by two cross-checks:
 Each table below groups blocks by `pub unsafe fn`; the function-level `# Safety` doc is the authoritative statement, and
 in-body blocks rely on the same caller obligations.
 
-### `crates/lean-rs-sys/src/object.rs`—13 `pub unsafe fn`, 12 blocks
+### `crates/lean-rs-sys/src/object.rs`
 
 Object inspection, tagging, and runtime-mode reads. Mirrors `lean.h:312–630`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_is_scalar` (51) | `o` is any Lean object pointer | pointer-bit math, no deref |
-| `lean_box` (63) | `n` fits the scalar payload width | result is a scalar-tagged non-null pointer |
-| `lean_unbox` (74) | `o` is scalar-tagged (`lean_is_scalar(o)` is true) | pointer-bit math, no deref |
-| `header` (82) | `o` is a live non-scalar Lean object | layout cast `*o.cast::<LeanObjectRepr>()`; layout pinned by `SUPPORTED_TOOLCHAINS` |
-| `lean_alloc_object` extern wrapper (91) | `size` is non-zero | result is owned or null on OOM (Lean aborts internally) |
-| `lean_ptr_tag` (103) | `o` is a live non-scalar object | reads `header(o).m_tag` |
-| `lean_ptr_other` (114) | `o` is a live non-scalar object whose `m_other` byte is defined for its tag | reads `header(o).m_other` |
+| `lean_is_scalar` | `o` is any Lean object pointer | pointer-bit math, no deref |
+| `lean_box` | `n` fits the scalar payload width | result is a scalar-tagged non-null pointer |
+| `lean_unbox` | `o` is scalar-tagged (`lean_is_scalar(o)` is true) | pointer-bit math, no deref |
+| `header` | `o` is a live non-scalar Lean object | layout cast `*o.cast::<LeanObjectRepr>()`; layout pinned by `SUPPORTED_TOOLCHAINS` |
+| `lean_alloc_object` extern wrapper | `size` is non-zero | result is owned; Lean aborts on allocation failure |
+| `lean_ptr_tag` | `o` is a live non-scalar object | reads `header(o).m_tag` |
+| `lean_ptr_other` | `o` is a live non-scalar object whose `m_other` byte is defined for its tag | reads `header(o).m_other` |
 | `lean_is_*` predicates (macro-stamped) | `o` is a live non-scalar object | `lean_ptr_tag(o) == TAG` |
-| `lean_is_ctor` (141) | `o` is a live non-scalar object | `lean_ptr_tag(o) <= LEAN_MAX_CTOR_TAG` |
-| `lean_obj_tag` (197) | `o` is a live non-scalar constructor | reads `m_tag`, saturating to `u32` |
-| `lean_is_st` / `_mt` / `_persistent` / `_exclusive` / `_shared` (214–259) | `o` is a live non-scalar object | refcount sign rules per `refcount.rs` module doc |
+| `lean_is_ctor` | `o` is a live non-scalar object | `lean_ptr_tag(o) <= LEAN_MAX_CTOR_TAG` |
+| `lean_obj_tag` | `o` is scalar-tagged or a live heap object | returns the unboxed scalar payload cast to `u32`, or the heap tag |
+| `lean_is_st` / `_mt` / `_persistent` / `_exclusive` / `_shared` | `o` is a live non-scalar object | refcount sign rules per `refcount.rs` module doc |
 
-### `crates/lean-rs-sys/src/refcount.rs`—6 `pub unsafe fn`, 8 blocks
+### `crates/lean-rs-sys/src/refcount.rs`
 
 Refcount fast paths. The atomic operations go through `AtomicI32::from_ptr(&raw mut (*repr).m_rc)` (Rust 1.75+), so the
 load/store/`fetch_sub` sites see a safe `&AtomicI32`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `rc_atom` (private, ~38) | `o` is a live non-scalar object; layout pinned | `AtomicI32::from_ptr` over `(*LeanObjectRepr).m_rc` |
-| `lean_inc_ref_n` (68) | `o` is a live non-scalar object; `n >= 1` | calls `lean_inc_ref_n_cold` for the MT slow path |
-| `lean_inc_ref` (91) | as `lean_inc_ref_n` with `n = 1` | delegates to `lean_inc_ref_n` |
-| `lean_inc` (105) | `o` is a live object (scalar or non-scalar) | scalar short-circuit; otherwise `lean_inc_ref` |
-| `lean_inc_n` (122) | `o` is a live object; `n >= 1` | scalar short-circuit; otherwise `lean_inc_ref_n` |
-| `lean_dec_ref` (148) | `o` is a live non-scalar object whose RC the caller transfers | calls `lean_dec_ref_cold` for MT/free path |
-| `lean_dec` (172) | `o` is a live object whose RC the caller transfers | scalar short-circuit; otherwise `lean_dec_ref` |
+| `rc_atom` | `o` is a live non-scalar object; layout pinned | `AtomicI32::from_ptr` over `(*LeanObjectRepr).m_rc` |
+| `lean_inc_ref_n` | `o` is a live non-scalar object; `n >= 1` | calls `lean_inc_ref_n_cold` for the MT slow path |
+| `lean_inc_ref` | as `lean_inc_ref_n` with `n = 1` | delegates to `lean_inc_ref_n` |
+| `lean_inc` | `o` is a live object (scalar or non-scalar) | scalar short-circuit; otherwise `lean_inc_ref` |
+| `lean_inc_n` | `o` is a live object; `n >= 1` | scalar short-circuit; otherwise `lean_inc_ref_n` |
+| `lean_dec_ref` | `o` is a live non-scalar object whose RC the caller transfers | calls `lean_dec_ref_cold` for MT/free path |
+| `lean_dec` | `o` is a live object whose RC the caller transfers | scalar short-circuit; otherwise `lean_dec_ref` |
 
-### `crates/lean-rs-sys/src/ctor.rs`—24 `pub unsafe fn`, 36 blocks
+### `crates/lean-rs-sys/src/ctor.rs`
 
 Constructor objects, polymorphic boxing, per-width scalar getters and setters. Mirrors `lean.h:642–760` and
 `lean.h:2811–2873`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_alloc_ctor` (121) | `tag <= LEAN_MAX_CTOR_TAG`; `num_objs <= 256`; `scalar_sz <= u16::MAX`; aligned object size <= `LEAN_MAX_SMALL_OBJECT_SIZE` | calls `lean_alloc_object`; writes `m_rc`, aligned `m_cs_sz`, `m_tag`, and `m_other` so refcounting, constructor arity, and object-size helpers see a well-formed small ctor; result owns one refcount |
-| `lean_ctor_num_objs` (59) | `o` is a live ctor | reads `lean_ptr_other(o)` |
-| `lean_ctor_obj_cptr` (72) | `o` is a live ctor with `num_objs` slots | layout cast to `LeanCtorObjectRepr.objs` |
-| `lean_ctor_scalar_cptr` (86) | `o` is a live ctor whose scalar payload follows `num_objs * sizeof(ptr)` | layout cast past the object pointer array |
-| `lean_box_uint32` / `_uint64` / `_usize` / `_float` (140–229) | `v` fits the boxed width | calls `lean_alloc_ctor(0, 0, sizeof(v))` + scalar write |
-| `lean_unbox_uint32` / `_uint64` / `_usize` / `_float` (160–246) | `o` was produced by the matching `lean_box_*` | calls `lean_ctor_get_*(o, 0)` |
-| `lean_ctor_get_usize` (259) | `o` is a ctor; `i` indexes a slot wide enough for `usize` | `lean_ctor_obj_cptr(o).add(i).cast::<usize>().read_unaligned()` |
-| `lean_ctor_get_uint8` / `_16` / `_32` / `_64` (276–) | `o` is a ctor; `offset` is in-range and aligned for the ctor tag | `lean_ctor_scalar_cptr(o).add(offset).cast::<…>().read_unaligned()` |
+| `lean_alloc_ctor` | `tag <= LEAN_MAX_CTOR_TAG`; `num_objs` fits the `u8` field; `scalar_sz <= u16::MAX`; aligned object size <= `LEAN_MAX_SMALL_OBJECT_SIZE` | calls `lean_alloc_object`; writes `m_rc`, aligned `m_cs_sz`, `m_tag`, and `m_other` so refcounting, constructor arity, and object-size helpers see a well-formed small ctor; result owns one refcount |
+| `lean_ctor_num_objs` | `o` is a live ctor | reads `lean_ptr_other(o)` |
+| `lean_ctor_obj_cptr` | `o` is a live ctor with `num_objs` slots | layout cast to `LeanCtorObjectRepr.objs` |
+| `lean_ctor_scalar_cptr` | `o` is a live ctor whose scalar payload follows `num_objs * sizeof(ptr)` | layout cast past the object pointer array |
+| `lean_box_uint32` / `_uint64` / `_usize` / `_float` | `v` fits the boxed width | calls `lean_alloc_ctor(0, 0, sizeof(v))` + scalar write |
+| `lean_unbox_uint32` / `_uint64` / `_usize` / `_float` | `o` was produced by the matching `lean_box_*` | calls `lean_ctor_get_*(o, 0)` |
+| `lean_ctor_get_usize` | `o` is a ctor; `i` indexes a slot wide enough for `usize` | `lean_ctor_obj_cptr(o).add(i).cast::<usize>().read_unaligned()` |
+| `lean_ctor_get_uint8` / `_16` / `_32` / `_64` | `o` is a ctor; `offset` is in-range and aligned for the ctor tag | `lean_ctor_scalar_cptr(o).add(offset).cast::<…>().read_unaligned()` |
 | `lean_ctor_set_*` family | `i` / `offset` is in-range; object writes transfer one refcount | symmetric writes to scalar/object slots |
 
-### `crates/lean-rs-sys/src/array.rs`—11 `pub unsafe fn`, 13 blocks
+### `crates/lean-rs-sys/src/array.rs`
 
 Object arrays (`Array α`) and scalar arrays (`ByteArray`, `FloatArray`, …). Mirrors `lean.h:815–1028`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_alloc_array` (44) | `capacity >= size`; both fit `usize` | `lean_alloc_object` + writes `{size, capacity}`; result owns one refcount with `size` pointer slots logically reserved |
-| `lean_alloc_sarray` (82) | `elem_size > 0`; `capacity >= size` | `lean_alloc_object` + writes `{elem_size, size, capacity}`; payload bytes uninit until written |
-| `as_array` (105, private) | `o` is a live array | layout cast `*o.cast::<LeanArrayObjectRepr>()` |
-| `as_sarray` (111, private) | `o` is a live scalar-array | layout cast `*o.cast::<LeanSArrayObjectRepr>()` |
-| `lean_array_size` (122) | `o` is a live array | reads `as_array(o).size` |
-| `lean_array_capacity` (133) | as above | reads `as_array(o).capacity` |
-| `lean_array_cptr` (145) | `o` is a live array | pointer past header; valid for `size` reads/writes |
-| `lean_array_get_core` (157) | `i < lean_array_size(o)` | `*lean_array_cptr(o).add(i)`; returned pointer is a borrow (no RC transfer) |
-| `lean_array_set_core` (169) | `i < lean_array_capacity(o)`; `v` owns one refcount transferred into the slot | `*lean_array_cptr(o).add(i) = v` |
-| `lean_sarray_elem_size` / `lean_sarray_size` / `lean_sarray_capacity` / `lean_sarray_cptr` (180–214) | `o` is a live scalar-array | symmetric reads against `LeanSArrayObjectRepr`; `cptr` valid for `size * elem_size` bytes |
+| `lean_alloc_array` | `capacity >= size`; allocation size does not overflow; first `size` owned slots are initialized before observation | `lean_alloc_object` + writes `{size, capacity}`; result owns one refcount with `size` pointer slots logically reserved |
+| `lean_alloc_sarray` | `elem_size` is one of `{1,2,4,8}` and below `0x80`; `capacity >= size`; allocation size does not overflow; payload initialized before observation | `lean_alloc_object` + writes `{elem_size, size, capacity}`; payload bytes uninit until written |
+| `as_array` | `o` is a live array | layout cast `*o.cast::<LeanArrayObjectRepr>()` |
+| `as_sarray` | `o` is a live scalar-array | layout cast `*o.cast::<LeanSArrayObjectRepr>()` |
+| `lean_array_size` | `o` is a live array | reads `as_array(o).size` |
+| `lean_array_capacity` | as above | reads `as_array(o).capacity` |
+| `lean_array_cptr` | `o` is a live array | pointer past header; valid for `size` reads/writes |
+| `lean_array_get_core` | `i < lean_array_size(o)` | `*lean_array_cptr(o).add(i)`; returned pointer is a borrow (no RC transfer) |
+| `lean_array_set_core` | `i < lean_array_capacity(o)`; `v` owns one refcount transferred into the slot | `*lean_array_cptr(o).add(i) = v` |
+| `lean_sarray_elem_size` / `lean_sarray_size` / `lean_sarray_capacity` / `lean_sarray_cptr` | `o` is a live scalar-array | symmetric reads against `LeanSArrayObjectRepr`; `cptr` valid for `size * elem_size` bytes |
 
-### `crates/lean-rs-sys/src/closure.rs`—7 `pub unsafe fn`, 8 blocks
+### `crates/lean-rs-sys/src/closure.rs`
 
 Closure objects. Mirrors `lean.h:762–813`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_alloc_closure` (290) | `fun` is a valid function pointer expecting `arity` Lean args; `num_fixed <= arity` | `lean_alloc_object` + writes `{fun, arity, num_fixed}`; payload uninit until filled |
-| `as_closure` (~200, private) | `o` is a live closure | layout cast |
-| `lean_closure_fun` / `lean_closure_arity` / `lean_closure_num_fixed` (212–234) | `o` is a live closure | header reads |
-| `lean_closure_arg_cptr` (246) | `o` is a live closure | pointer past header; valid for `num_fixed` reads/writes |
-| `lean_closure_get` (257) | `i < num_fixed` | indexed read |
-| `lean_closure_set` (269) | `i < num_fixed`; write transfers one refcount | indexed write |
+| `lean_alloc_closure` | `fun` is a valid function pointer expecting `arity` Lean args; `num_fixed <= arity` | `lean_alloc_object` + writes `{fun, arity, num_fixed}`; payload uninit until filled |
+| `as_closure` | `o` is a live closure | layout cast |
+| `lean_closure_fun` / `lean_closure_arity` / `lean_closure_num_fixed` | `o` is a live closure | header reads |
+| `lean_closure_arg_cptr` | `o` is a live closure | pointer past header; valid for `num_fixed` reads/writes |
+| `lean_closure_get` | `i < num_fixed` | indexed read |
+| `lean_closure_set` | `i < num_fixed`; write transfers one refcount | indexed write |
 
-### `crates/lean-rs-sys/src/string.rs`—5 `pub unsafe fn`, 6 blocks
+### `crates/lean-rs-sys/src/string.rs`
 
 String objects. Mirrors `lean.h:1157–1234`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `as_string` (~38, private) | `o` is a live string (`lean_is_string(o)` is true) | layout cast `*o.cast::<LeanStringObjectRepr>()` |
-| `lean_string_size` / `lean_string_len` / `lean_string_capacity` (48–70) | `o` is a live string | header reads |
-| `lean_string_cstr` (82) | as above | pointer past header to NUL-terminated UTF-8; valid for `lean_string_size(o)` bytes including NUL |
-| `lean_string_byte_size` (100) | as above | `size_of::<LeanStringObjectRepr>() + lean_string_capacity(o)` (saturating) |
+| `as_string` | `o` is a live string (`lean_is_string(o)` is true) | layout cast `*o.cast::<LeanStringObjectRepr>()` |
+| `lean_string_size` / `lean_string_len` / `lean_string_capacity` | `o` is a live string | header reads |
+| `lean_string_cstr` | as above | pointer past header to NUL-terminated UTF-8; valid for `lean_string_size(o)` bytes including NUL |
+| `lean_string_byte_size` | as above | `size_of::<LeanStringObjectRepr>() + lean_string_capacity(o)` (saturating) |
 
-### `crates/lean-rs-sys/src/scalar.rs`—12 `pub unsafe fn`, 12 blocks
+### `crates/lean-rs-sys/src/scalar.rs`
 
 Boxed-scalar conversions. Mirrors `lean.h:1356–2065`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_usize_to_nat` (29) |—| `lean_box(n)` if `n <= LEAN_MAX_SMALL_NAT`; else extern `lean_cstr_to_nat_*`; result owns one refcount |
-| `lean_unsigned_to_nat` (47) |—| delegates to `lean_usize_to_nat` |
-| `lean_uint64_to_nat` (59) |—| scalar fast path or `lean_cstr_to_nat` for the 64-bit overflow region |
-| `lean_uint8_of_nat` (77) | `a` is a `Nat` (scalar or bignum) | `lean_obj_tag` + scalar / bignum dispatch; result truncates to `u8` |
-| `lean_uint8_to_nat` / `_16` / `_32` (94–116) |—| widening to `usize` then `lean_usize_to_nat` |
-| `lean_int_to_int` (128), `lean_int64_to_int` (150) | `n` fits the requested representation | scalar fast path or extern `lean_cstr_to_int`; result owns one refcount |
-| `lean_nat_to_int` (168) | `a` is an owned `Nat` | extern coercion; result owns one refcount |
-| `lean_scalar_to_int64` (189), `lean_scalar_to_int` (206) | `a` is a scalar-tagged `Int` | unbox + sign-extend |
+| `lean_usize_to_nat` |—| `lean_box(n)` if `n <= LEAN_MAX_SMALL_NAT`; else extern `lean_big_usize_to_nat`; result owns one refcount |
+| `lean_unsigned_to_nat` |—| delegates to `lean_usize_to_nat` |
+| `lean_uint64_to_nat` |—| scalar fast path or `lean_big_uint64_to_nat` for values outside the small-Nat range |
+| `lean_uint8_of_nat` | `a` is a `Nat` (scalar or bignum) | `lean_is_scalar` selects unboxing or `lean_uint8_of_big_nat`; result narrows to `u8` |
+| `lean_uint8_to_nat` / `_16` / `_32` |—| widening to `usize` then `lean_usize_to_nat` |
+| `lean_int_to_int`, `lean_int64_to_int` | `n` fits the requested representation | scalar fast path or matching `lean_big_int_to_int` / `lean_big_int64_to_int` extern; result owns one refcount |
+| `lean_nat_to_int` | `a` is an owned `Nat` | scalar fast path or `lean_big_size_t_to_int`; consumed/result reference ownership follows the documented branch |
+| `lean_scalar_to_int64`, `lean_scalar_to_int` | `a` is a scalar-tagged `Int` | unbox + sign-extend |
 
-### `crates/lean-rs-sys/src/io.rs`—5 `pub unsafe fn`, 6 blocks
+### `crates/lean-rs-sys/src/io.rs`
 
 `IO` result helpers. Mirrors `lean.h:2893–2907`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `ctor_get0` (~20, private) | `r` is a live ctor with at least one object slot | `lean_ctor_obj_cptr(r).read()` |
-| `lean_io_result_is_ok` (35), `lean_io_result_is_error` (46) | `r` is a live non-scalar `IO α` result (tag 0 = `ok`, tag 1 = `error`) | `lean_ptr_tag(r) == {0, 1}` |
-| `lean_io_result_get_value` (59), `lean_io_result_get_error` (70) | as above | borrowed `ctor_get0(r)`; no RC transfer |
-| `lean_io_result_take_value` (83) | `r` is an owned `IO α` result | move out then `lean_dec(r)`; caller owns the returned value's refcount |
+| `ctor_get0` | `r` is a live ctor with at least one object slot | `lean_ctor_obj_cptr(r).read()` |
+| `lean_io_result_is_ok`, `lean_io_result_is_error` | `r` is a live non-scalar `IO α` result (tag 0 = `ok`, tag 1 = `error`) | `lean_ptr_tag(r) == {0, 1}` |
+| `lean_io_result_get_value`, `lean_io_result_get_error` | as above | borrowed `ctor_get0(r)`; no RC transfer |
+| `lean_io_result_take_value` | `r` is an owned `IO α` result | move out then `lean_dec(r)`; caller owns the returned value's refcount |
 
-### `crates/lean-rs-sys/src/external.rs`—3 `pub unsafe fn`, 3 blocks
+### `crates/lean-rs-sys/src/external.rs`
 
 External objects (C `void*` payloads). Mirrors `lean.h:295–1332`.
 
-| `pub unsafe fn` (line) | Precondition | Invariant |
+| Function | Precondition | Invariant |
 | --- | --- | --- |
-| `lean_alloc_external` (35) | `cls` is a valid `lean_external_class` pointer for `data` | `lean_alloc_object` + writes `{class, data}` |
-| `lean_get_external_class` (58), `lean_get_external_data` (70) | `o` is a live external object | header reads |
+| `lean_alloc_external` | `cls` is a valid `lean_external_class` pointer for `data` | `lean_alloc_object` + writes `{class, data}` |
+| `lean_get_external_class`, `lean_get_external_data` | `o` is a live external object | header reads |
 
 ### Other `lean-rs-sys` files
 
-- **`init.rs`**—0 blocks; 7 extern declarations (`lean_initialize`, `lean_initialize_runtime_module`,
-  `lean_initialize_thread`, `lean_finalize_thread`, `lean_setup_args`, `lean_init_task_manager`,
-  `lean_init_task_manager_using`, `lean_finalize_task_manager`). Calling any of them is `unsafe` per Lean's runtime
-  entry-point rules: `lean_initialize` exactly once per process; `lean_initialize_thread` paired with
-  `lean_finalize_thread` on every worker thread; `lean_setup_args` argv must outlive readers.
-- **`nat_int.rs`**—0 blocks; bignum externs from `lean.h:1334–1853` (`lean_cstr_to_nat`, `lean_cstr_to_int`, bignum
-  arithmetic helpers).
-- **`repr.rs`**—1 block in a `#[cfg(test)]` layout assertion that the in-memory layout matches the bytes pinned by every
-  `SUPPORTED_TOOLCHAINS` entry. Production paths never touch `repr` directly except through layout casts in the inline
-  accessors of the sibling modules.
-- **`lib.rs`**—1 block and 2 `pub unsafe fn`; the block forwards a discovery helper returning a `&'static` view of the
-  `REQUIRED_SYMBOLS` table. The `unsafe` is the caller's invariant that the link-time test has succeeded.
-- **`consts.rs`**, **`types.rs`**—0 blocks. `consts.rs` holds the `build.rs`-resolved version and digest constants.
-  `types.rs` defines opaque `lean_object` and calling-convention typedefs; its one `pub unsafe fn` is a `Default`-like
-  constructor stub with no body that callers cannot reach.
-
----
+- `init.rs`, `io.rs`, and `memory.rs` declare runtime entry points. Initialization is process-once; thread attach and
+  finalize pair on the same OS thread; argument storage must outlive its readers. The memory-limit setter mutates
+  process-global state and can lead to a fatal foreign exception on overrun.
+- `nat_int.rs` declares bignum operations with the ownership and representation obligations documented at each extern.
+- `repr.rs` holds crate-private layout mirrors and layout tests. Layout literals and supported header digests come from
+  `lean-rs-abi`.
+- `lib.rs` re-exports raw categories and safe static metadata queries. `consts.rs` exposes build-resolved identity;
+  `types.rs` defines opaque `lean_object` and argument/result ownership aliases. They do not manufacture Lean objects.
 
 ## `lean-rs`—per-file opt-outs
 
-Every block below ultimately calls a `pub unsafe fn` from `lean-rs-sys`; the invariant is what that `# Safety` doc
-requires, satisfied by the call site's local context. Per-file `#![allow(unsafe_code)]` keeps the opt-out as narrow as
-the safety model demands.
+Lean object operations discharge the raw bindings' obligations locally. Other blocks handle native loading, callback
+context pointers, or zero-sized runtime references. Keep each unsafe opt-out at the narrow boundary that owns it.
 
-### Runtime—`crates/lean-rs/src/runtime/`
+### Runtime — `crates/lean-rs/src/runtime/`
 
-#### `runtime/obj.rs`—19 blocks (`#![allow(unsafe_code)]` at line 20)
-
-Owned (`Obj<'lean>`) and borrowed (`ObjRef<'lean, 'a>`) handles. Six production blocks plus test-module RC observations.
-
-| Line | Block | Calls (`lean-rs-sys`) | Precondition |
-| --- | --- | --- | --- |
-| 91 | `Obj::from_owned_raw` non-null wrap | `NonNull::new_unchecked` | caller-documented non-null + one-refcount transfer |
-| 148 | `Obj::runtime` ZST borrow synthesis | `NonNull::dangling().as_ref()` | `LeanRuntime` is zero-sized; `'lean` witnesses initialisation |
-| 167 | `Clone for Obj::clone` | `lean_inc` | `self.ptr` is a live owned object (refcount ≥ 1) |
-| 182 | `Drop for Obj::drop` | `lean_dec` | `self.ptr` owns exactly one refcount about to be released |
-| 229 | test `scalar_obj` | `lean_box` | `7` fits scalar payload |
-| 239 | test `heap_string` | `lean_mk_string` | `c"abc"` is a valid NUL-terminated UTF-8 cstring |
-| 258, 262, 263, 267 | `clone_increments_heap_refcount` predicates | `lean_is_exclusive`, `lean_is_shared` | header-only inspection of live owned object |
-| 277, 283, 288, 290 | `into_raw_does_not_decrement` body | `lean_is_shared`, `lean_dec` | header-only predicates; `lean_dec` releases the count from `into_raw` |
-| 298, 305, 311 | `borrow_does_not_adjust_refcount` predicates | `lean_is_exclusive` | header-only inspection |
-| 378 | `_lifetime_anchored_to_runtime_borrow` sentinel | `lean_box` | scalar pointer arithmetic |
-
-#### `runtime/init.rs`—3 blocks (`#![allow(unsafe_code)]` at line 14)
-
-`LeanRuntime::init` calls `lean_initialize_runtime_module`, `lean_initialize`, and `lean_init_task_manager`. The triple
-block at line 106 carries one `// SAFETY:` comment covering all three: process-once initialisation, sequenced as Lake's
-compiler expects.
-
-Line 128—`unsafe { NonNull::<LeanRuntime>::dangling().as_ref() }`—synthesises the ZST `&LeanRuntime` from the runtime
-cell pointer; sound because `LeanRuntime` is zero-sized and the caller has just verified the cell is initialised.
-
-#### `runtime/thread.rs`—3 blocks (`#![allow(unsafe_code)]` at line 13)
-
-`LeanThreadGuard::attach` calls `lean_initialize_thread`; `Drop` calls `lean_finalize_thread`. The blocks at lines 67
-and 84 each pair an `attach` / `finalize` on the **same** OS thread, guarded by an RAII handle that cannot be `Send`
-(the FFI calls require thread-local Lean state).
+| File | Precondition | Invariant |
+| --- | --- | --- |
+| `obj.rs` | `from_owned_raw` receives a non-null live Lean value with one transferred reference count. | `Obj` owns that count, `Clone` increments it, and `Drop` decrements it; borrowed views do not transfer ownership. The lifetime witnesses initialized runtime state. |
+| `init.rs` | Initialization precedes all Lean work; process-once sequencing is owned by `OnceLock`. | Runtime-module initialization, Lean initialization, end-of-initialization marking, and task-manager startup run once. The static runtime reference uses a valid aligned non-null pointer to a zero-sized type. |
+| `thread.rs` | Foreign OS-thread attachment and finalization occur on the same thread. | The non-Send RAII guard pairs native attach/finalize when it owns attachment. `init()` on a later thread marks local permission; it does not rerun native process initialization. |
+| `memory.rs` | The hidden sibling bridge configures only an isolated worker/profiling process. | The setter changes Lean's process-global limit; it does not reclaim memory or promise a recoverable Rust error on overrun. |
 
 ### ABI—`crates/lean-rs/src/abi/`
 
-Every block in this directory either (a) wraps a freshly-allocated Lean value as a fresh `Obj<'lean>` via
-`Obj::from_owned_raw` (sys symbol is the matching `lean_alloc_*` or `lean_*_to_nat`), or (b) inspects a borrowed
-object's header via a sys predicate (`lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_ctor_num_objs`, …).
+ABI implementations encode owned arguments and decode owned results using the declared `CRepr`. Borrowed object
+inspection keeps the source owner live. The signature metadata and implementation must agree on scalar width,
+constructor shape, and owned/borrowed conventions.
 
-| File | Blocks | Opt-out | Calls (`lean-rs-sys`) | Notes |
-| --- | ---: | --- | --- | --- |
-| `abi/scalar.rs` | 22 | `#![allow(unsafe_code)]` line 26 | `lean_box*` / `lean_unbox*` + predicates | per-block `// SAFETY:` is "pointer-bit math" or "boxed above; layout pinned" |
-| `abi/nat.rs` | 8 | line 17 | `lean_uint64_to_nat`, `lean_usize_to_nat`, `lean_unbox`, `lean_is_scalar`, `lean_obj_tag` | bignum branches return `Conversion` error rather than read the MPZ payload |
-| `abi/int.rs` | 4 | line 10 | `lean_int64_to_int`, `lean_scalar_to_int64`, `lean_is_scalar`, `lean_obj_tag` |—|
-| `abi/string.rs` | 11 | line 20 | `lean_mk_string`, `lean_is_string`, `lean_string_cstr`, `lean_string_len`, `lean_is_scalar`, `lean_obj_tag` | slice constructions at lines 100 and 174 carry lifetime-bound `// SAFETY:` (`'a` tied to source `ObjRef`) |
-| `abi/bytearray.rs` | 9 | line 22 | `lean_alloc_sarray`, `lean_sarray_elem_size`, `lean_sarray_cptr`, `lean_sarray_size`, `lean_is_scalar`, `lean_is_sarray`, `lean_obj_tag` | alloc block (line 45) writes payload with the same `elem_size = 1` precondition the read side checks |
-| `abi/array.rs` | 9 | line 28 | `lean_alloc_array`, `lean_array_size`, `lean_array_cptr`, `lean_array_set_core`, `lean_array_get_core`, `lean_is_array`, `lean_is_scalar`, `lean_obj_tag` | `from_iter_exact` write loop (line 56) relies on `lean_alloc_array(n, n)` so every slot is written exactly once |
-| `abi/option.rs` | 8 | line 27 | `lean_box(0)` for `None`, `lean_is_scalar`, `lean_unbox`, `lean_is_ctor`, `lean_obj_tag` | encodes Lean's mixed-arity nullary-scalar `Option` |
-| `abi/except.rs` | 2 | per-block | `Obj::from_owned_raw` (×2) | invariant is "`c` is a `lean_obj_res` owning one refcount per Lake's contract"—established by the typed function-pointer cast in `LeanExported::call` |
-| `abi/structure.rs` | 24 | line 38 | `lean_alloc_ctor`, `lean_ctor_obj_cptr`, `lean_ctor_scalar_cptr`, `lean_ctor_num_objs`, `lean_ctor_get_uint8`, `lean_ctor_get_uint64`, `lean_object_data_byte_size`, `lean_is_scalar`, `lean_is_ctor`, `lean_obj_tag`, `lean_unbox` | `ObjView` / `CtorView` perform borrow-only shape, tag, and scalar-tail reads with explicit bounds checks; `take_ctor_objects::<N>` reads field slots and pairs each `lean_inc` with the parent drop so returned `Obj`s own their refcounts |
-| `abi/traits.rs` | 1 | per-block line 162 | `Obj::from_owned_raw` | blanket `LeanAbi for Obj<'lean>` identity impl |
-| `abi/tests.rs` | 2 | per-block line 582 |— | borrowed-view pointer-equality assertion; no header deref |
+| Files | Required shape or ownership | Invariant |
+| --- | --- | --- |
+| `scalar.rs` | Matching primitive width and scalar/boxed convention. | Box/unbox helpers use the corresponding ABI representation; decoded `Char` values are checked. |
+| `nat.rs`, `int.rs` | A matching Lean `Nat` or `Int`. | Scalar fast paths use the tagged representation; unsupported large conversions return conversion errors rather than inspecting arbitrary MPZ payload. |
+| `string.rs` | Live Lean string, checked before payload access. | Byte slices borrow the source object, size bounds are checked, and UTF-8 decoding does not outlive that borrow. |
+| `bytearray.rs` | Scalar array with element size one. | Allocation fills the promised bytes; reads use the checked length and preserve the parent lifetime. |
+| `array.rs` | Live object array with valid size/capacity and initialized slots. | Construction writes every slot; reads borrow fields or acquire a reference before returning an owned object. |
+| `option.rs` | Lean's nullary scalar `none` or constructor `some` with the expected field. | Tag and field shape determine which payload may be read. |
+| `except.rs` | Owned result from the corresponding typed Lean export. | Wrapping transfers one reference count into `Obj`; decoding follows the error/success constructor contract. |
+| `structure.rs`, `tuple.rs` | Expected constructor tag, object arity, and scalar tail. | `ObjView`/`CtorView` check shape and scalar bounds; `take_ctor_objects` acquires child references before the parent is dropped. |
+| `traits.rs`, `handle/{name,level,expr,declaration}.rs` | `from_c` receives a value of the declared representation with owned-result convention. | Wrapping a boxed result transfers exactly one reference; semantic handles retain the runtime lifetime. |
+
+`LeanAbi`'s hidden sibling extension is an implementation convention, not Rust-enforced sealing: its supertrait module
+is public. In addition, the hidden `LeanAbi::from_c` conversion hook is a public **safe** method. The `Obj`
+implementation accepts a raw pointer and calls `Obj::from_owned_raw` without establishing validity or ownership itself.
+Direct external calls can therefore violate the wrapping preconditions through a safe signature. This remains an
+unresolved API soundness gap; checked export dispatch's controlled call path does not close that public entry point.
+Review representation and dispatch changes against the actual visibility and caller obligations.
 
 ### Module—`crates/lean-rs/src/module/`
 
-#### `module/library.rs`—6 blocks (`#![allow(unsafe_code)]` at line 32)
-
-Calls `libloading::Library::new` (line 112) and `library.get` (lines 186, 212, 233, 253). All `unsafe` for dlopen-time
-reasons: the loaded library may run constructors, and resolved symbols are typed by the caller.
-
-#### `module/initializer.rs`—4 blocks (`#![allow(unsafe_code)]` at line 34)
-
-Calls a Lake-emitted module initializer function pointer (line 198, wrapped in `catch_unwind`) and wraps the returned
-`IO α` result as an `Obj` (line 218). Block 116 is a `from_utf8_unchecked` on bytes already validated by the
-symbol-bytes builder.
-
-#### `module/exported.rs`—7 blocks (`#![allow(unsafe_code)]` at line 59)
-
-The typed `LeanExported::call` machinery. Each block at lines 246, 310, 314, 473, 489, 512, 517 either wraps a
-freshly-returned `lean_object*` as an `Obj`, transmutes between `R::CRepr` and `*mut lean_object` (line 517—sound
-because `R: LeanAbi` constrains `CRepr` to either a scalar primitive or `*mut lean_object`), or dispatches the
-function-pointer call through the per-arity macro.
+| File | Precondition | Invariant |
+| --- | --- | --- |
+| `module/library.rs` | A trusted native library and matching symbol kind. | `libloading` calls may run native constructors; function/global addresses remain tied to their loaded library. Dependency loading preserves the required symbol visibility. |
+| `module/initializer.rs` | Correct Lake initializer name and ABI; validated symbol bytes. | The initializer result is wrapped with owned IO-result convention, and initializer ordering/idempotence remains tracked. `from_utf8_unchecked` is used only after byte validation. |
+| `module/exported.rs` | Signature metadata or the unsafe caller establishes arity, primitive/boxed representations, ownership, and result convention. | Function-pointer casts and calls match that ABI; returned boxed values acquire one Rust owner. |
+| `module/capability.rs` | Build manifests and signature metadata come from trusted capability authors. | Checked lookup compares declared signatures and preserves library/dependency lifetimes. Arbitrary dynamic lookup remains explicitly unsafe. |
 
 ### Fuzzing entry—`crates/lean-rs/src/fuzz_entry.rs`
 
-Feature-gated by `fuzzing` (off by default, not semver-stable). Seven `pub unsafe fn` wrappers (`decode_string`,
-`decode_bytearray`, `decode_array_u64`, `decode_option_u64`, `decode_except`, `decode_nat_u64`, `decode_ctor_tag`) plus
-seven matching inner blocks. Each takes a `*mut lean_object` owning one transferred refcount and wraps it in an
-`Obj<'lean>` via `unsafe { Obj::from_owned_raw(runtime, raw) }`; the invariant is the same as `Obj::from_owned_raw`'s
-`# Safety` doc, discharged by the fuzz harness constructing inputs through `lean-rs-sys`'s public allocators. The module
-sits at the crate root so the `pub(crate) abi` boundary stays intact when the feature is off.
+The `fuzzing` feature (off by default, not semver-stable) exposes unsafe decode entry points for strings, byte arrays,
+arrays, options, exceptions, naturals, and constructor tags. Each receives a pointer owning one transferred reference
+and wraps it with `Obj::from_owned_raw`. The fuzz harness must construct a live input through the raw allocator helpers
+and discharge the same validity/ownership preconditions as that constructor. The feature does not make malformed raw
+pointers acceptable inputs.
 
 ### Error—`crates/lean-rs/src/error/`
 
-#### `error/io.rs`—16 blocks (`#![allow(unsafe_code)]` at line 28)
+`error/io.rs` requires the outer value to be a live owned `IO` result with the expected tag and payload shape,
+established by the export ABI. The outer decoder trusts that precondition when reading its tag and first payload slot;
+it does not validate arbitrary object shapes. Nested `IO.Error` message extraction checks constructor/string/scalar
+shape and bounds while the source owner remains live. `error/panic.rs` uses safe `catch_unwind`; it does not catch C++
+exceptions.
 
-The `IO α` result decoder. Blocks at lines 64, 69, 73, 80, 125, 136, 153, 158, 163, 165, 169, 175 read the `IO.Error`
-constructor's fields via `lean_io_result_*`, `lean_obj_tag`, `lean_ctor_num_objs`, `lean_ctor_obj_cptr`,
-`lean_is_scalar`, `lean_is_string`, `lean_string_cstr`/`lean_string_len`. The test-support block at line 247 transmutes
-a resolved `dlsym` address into a typed function pointer.
+### Callbacks — `crates/lean-rs/src/callback.rs`
 
-#### `error/panic.rs`—0 blocks
-
-`catch_callback_panic` is pure safe Rust around `std::panic::catch_unwind`.
+String payload pointers borrow a Lean `String` for the synchronous trampoline call. The callback checks scalar/string
+shape before building a byte slice. Scoped progress context pointers refer to the stack-owned context only while the
+synchronous registration is active; RAII unregisters the entry before that context can drop. User callback panics are
+caught and converted to status bytes before returning to C. Callbacks must not outlive their registry entry or move
+Lean-derived handles across threads.
 
 ### Host—`crates/lean-rs-host/src/host/`
 
@@ -328,14 +262,27 @@ through `Obj`'s `LeanAbi` implementation.
 
 ---
 
-## `lean-toolchain`—0 unsafe blocks
+## Native process and descriptor boundaries
 
-`rg -n "unsafe" crates/lean-toolchain/src` returns nothing. The crate is build-time-only (toolchain discovery,
-fingerprinting, link diagnostics) and consumes `lean-rs-sys` constants through their safe re-export. Any new `unsafe`
-here would require a `#![allow(unsafe_code)]` opt-out with reviewer sign-off per
-[`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
+These APIs do not call raw Lean symbols. They use narrow platform FFI for process identity, private process groups,
+accounting, and descriptor custody. This is an additional unsafe surface beyond the Lean object bridge.
 
----
+| File | Precondition | Invariant |
+| --- | --- | --- |
+| `lean-toolchain/src/process_group.rs` | The owner retains its actual child and group identity until closure; inherited descriptor borrows outlive spawn. | `pre_exec` only performs async-signal-safe descriptor operations. macOS `waitid(WNOWAIT)` observes without reaping; fixed-size libproc buffers are checked. Signals target the still-owned private group. Passive stored-ID observations grant no signal authority. |
+| `lean-toolchain/src/process_group/measured_child.rs` | `MeasuredChild` exclusively owns the actual unreaped child. | `wait4` output is read only after a terminal result for that exact PID; status/accounting have one reaping owner. |
+| `lean-toolchain/src/inherited_pipe.rs` | Supplied private pipe descriptor exceeds standard I/O. | Numeric `fcntl` rejects invalid descriptors, preserves existing descriptor flags, and creates one unique CLOEXEC duplicate; shape/access/nonblocking checks precede use. |
+| `lean-toolchain/src/shared_writer.rs` | Inherited loan metadata and stable lock identity validate. | A successful `fcntl` creates one uniquely owned duplicate without closing the supplied descriptor; file/device/inode and lock checks establish the accepted loan. |
+| `lean-toolchain/src/native_guardian.rs` | The live guardian pins the worker session and remains outside the payload group. | Scalar scope queries validate each signal target; control descriptor adoption owns only a successful duplicate. |
+| `lean-toolchain/src/native_guardian/ownership.rs` | A valid PID and adequately sized native output storage. | Kernel process snapshots validate returned size and identity; scalar SID/PGID observations retain no pointers and send no signals. |
+| `lean-rs-worker-parent/src/pipe.rs` | The parent owns the pipe end throughout both calls. | `fcntl` preserves flags while enabling nonblocking I/O on that end. |
+| `lean-rs-worker-parent/src/supervisor.rs` | Writable POD output buffers for macOS CPU accounting. | `proc_pidinfo` size and Mach timebase are checked before deriving milliseconds; failure yields unavailable accounting. |
+| `lean-rs-worker-child/src/parent_watchdog.rs` | Fresh bootstrap before Lean starts. | `setsid` failure prevents runtime work; legacy lifeline EOF/error exits only the current process with `_exit`. Guardian cleanup has its separate ownership protocol. |
+| `lean-rs-worker-child/src/child.rs` | Platform startup code acts only on the current process. | Signal handlers use async-signal-safe writes/exits; signal structures are initialized before installation; resource/core-dump and Linux parent-death settings affect this child. |
+
+Test-only process-control opt-outs occur in native-guardian, measured-child, crash-ownership, and parent-watchdog
+regressions. Synthetic object/layout tests and the fuzz entry points have separate input-generation obligations; they do
+not expand the production API. Inspect their local safety comments when changing a harness.
 
 ## Sanitizer and leak-check coverage
 
@@ -365,9 +312,15 @@ cargo install cargo-fuzz                 # one-shot
 (cd crates/lean-rs/shims/lean-rs-interop-shims && lake build)
 (cd fixtures/lean && lake build)
 cd crates/lean-rs/fuzz
-cargo +nightly fuzz run abi_decode -- \
+ASAN_OPTIONS=detect_leaks=0 cargo +nightly fuzz run abi_decode -- \
   -runs=200000 -max_total_time=120
 ```
+
+The existing Linux fuzz gate sets `ASAN_OPTIONS=detect_leaks=0` because Lean intentionally retains process-lifetime
+allocations. This suppresses exit-time leak reports, not ABI bounds/ownership faults; macOS does not run LSan in this
+configuration. Match the
+[sanitizer workflow](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/sanitizer.yml) when reproducing a
+gate result.
 
 `abi_decode` drives `lean_rs::abi`'s `{string, bytearray, array, option, except, structure}` decoders with
 `Arbitrary`-generated Lean-shaped inputs constructed via `lean-rs-sys`'s public helpers. Every input must decode to

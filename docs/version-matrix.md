@@ -1,71 +1,47 @@
-# Version Matrix
+# Version matrix
 
-Tested configurations for the published `lean-rs` workspace crates. Configurations outside these tables are unsupported,
-even if they happen to compile.
+The supported Lean releases are the explicit entries in
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs), currently 4.30.0 through 4.35.0 including the listed
+release candidates. The interval is shorthand; an unlisted version is unsupported even if it compiles.
 
-- Policy: [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md)
-- Release procedure: [`docs/release.md`](release.md)
-- Bump procedure: [`docs/bump-toolchain.md`](bump-toolchain.md)
+## Lean ABI
 
-## Lean toolchain window
+The table contains twelve distinct `lean.h` digests. Releases with identical headers share an entry. The comments beside
+those entries record the verified changes to atomic fields, refcount helpers, and the 4.35 array linearity marker; use
+that source when extending the window rather than copying digest history into documentation.
 
-Supported window: Lean 4.30.0–4.35.0 (twelve entries; 4.31.0-rc1/4.31.0-rc2, 4.32.0-rc1/4.32.0/4.32.2,
-4.33.0-rc1/4.33.0-rc2/4.33.0, 4.34.0-rc2/4.34.0, and 4.35.0-rc3/4.35.0-rc4/4.35.0 each ship a byte-identical `lean.h` and share one entry). 4.33.0-rc1 ships a new digest whose only change is two C11 `_Atomic(...)`
-field qualifiers that leave every mirrored struct byte-identical in size, alignment, and field offsets. 4.34.0-rc1
-ships a new digest whose only change is TSan-instrumented refcount inlines (`lean_internal_*_rc` helpers) with no
-struct layout change. 4.33.1 backports that same TSan instrumentation (plus sticky-rc comments) with no struct
-layout change. 4.34.0-rc2 implements the sticky-rc band (`LEAN_RC_STICKY` thresholds, unsigned wrap-around
-refcount arithmetic, cold-path `lean_inc_ref_huge_n`) and adds the exported `lean_nat_size_in_bytes`; no struct
-layout change. 4.35.0-rc1 reserves the top bit of `m_other` in arrays, scalar arrays, and strings as a linearity
-marker (`LEAN_LINEAR_MARK_MASK`), which the `lean_sarray_elem_size` mirror masks out; no struct layout change.
-4.35.0-rc2 adds only the exported `lean_nat_powmod`. 4.34.1 and 4.35.0-rc3 carry the same refcount-helper
-patch (`lean_is_unstuck_mt`, `lean_is_never_freed`, `LEAN_RC_STUCK_ST`) with unchanged mirrored inline behavior and
-no struct layout change. Authoritative
-list, including `lean.h` SHA-256 digests, lives in
-[`crates/lean-rs-abi/src/supported.rs`](../crates/lean-rs-abi/src/supported.rs). Releases that ship a byte-identical
-`lean.h` share one entry. CI verifies every row × `{ubuntu-latest, macos-latest}` cell. The header is
-platform-independent; digests are identical across the two target triples.
+[`REQUIRED_SYMBOLS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/symbols.rs) lists 88 exported symbols. Every supported entry has an empty
+`missing_symbols` list. [`lean-rs-sys/tests/linkage.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/tests/linkage.rs) takes their addresses
+to force link-time resolution; `lean-toolchain`'s version-window tests check the static support metadata.
 
-Extending the window is the [bump procedure](bump-toolchain.md). Untested versions are not supported.
+The same window applies to bundled shims and worker capabilities. A worker child, its Lean runtime, and loaded
+capability artifacts must agree on the supported toolchain. See the [interop release checks](release.md#interop-checks).
 
-The bundled Lake packages under `crates/lean-rs/shims/` and `crates/lean-rs-host/shims/`, plus `fixtures/lean` and
-`fixtures/interop-shims`, use the same toolchain window. The worker crates use the same window because the child process
-loads the standard service layer and fixture/capability dylibs built against that toolchain. The reusable interop
-release contract is documented in
-[`docs/architecture/14-interop-release-contract.md`](architecture/14-interop-release-contract.md).
+## Rust and platforms
 
-## `lean-rs-sys` symbol coverage
-
-`pub const REQUIRED_SYMBOLS` in [`crates/lean-rs-abi/src/symbols.rs`](../crates/lean-rs-abi/src/symbols.rs) enumerates
-the **88** `LEAN_EXPORT`'d symbols that `lean-rs-sys`'s `extern "C"` blocks declare. `tests/linkage.rs` resolves every
-entry against `libleanshared` at link time on every version × OS cell; the parallel test in `lean-toolchain` imports the
-same set via `lean_rs_sys::REQUIRED_SYMBOLS`. All 88 symbols are present in every release in the window
-(`SupportedToolchain::missing_symbols` is empty for every entry).
-
-## Rust
-
-| Field | Value |
+| Setting | Supported value |
 | --- | --- |
-| MSRV | `1.94` (from `[workspace.package].rust-version`) |
-| Channel | `stable` (pinned by [`rust-toolchain.toml`](../rust-toolchain.toml)) |
-| Captured at release | `rustc 1.99.0 (b940084d7 2026-09-28)` |
+| Rust MSRV | `1.94`, from `[workspace.package].rust-version` |
+| Rust channel used by CI | `stable`, from [`rust-toolchain.toml`](https://github.com/jcreinhold/lean-rs/blob/main/rust-toolchain.toml) |
+| Linux | GitHub Actions `ubuntu-latest`, `x86_64-unknown-linux-gnu` |
+| macOS | GitHub Actions `macos-latest`, `aarch64-apple-darwin` |
 
-The MSRV is the floor a downstream consumer can rely on; the CI release matrix runs on the current stable.
+Windows, BSD, embedded, and WASM targets are unsupported. Adding a platform requires an explicit compatibility decision
+and CI coverage. The opt-in managed native-reader completion check currently requires the macOS process-group census;
+Linux qualification for that mode remains open, as recorded in the [unreleased changelog](https://github.com/jcreinhold/lean-rs/blob/main/CHANGELOG.md#unreleased).
 
-## Platforms
+## CI coverage
 
-| Platform | Triple | Status |
+| Trigger | Lean versions | Platforms |
 | --- | --- | --- |
-| Ubuntu Latest (GitHub Actions) | `x86_64-linux-gnu` | supported, CI |
-| macOS Latest (GitHub Actions) | `aarch64-apple-darwin` | supported, CI |
+| Ordinary code push or PR | Head (`4.35.0`) | Ubuntu |
+| CI dispatch with `full_matrix: true` | Every listed version | Ubuntu and macOS |
+| Release verification | Head | Ubuntu and macOS |
 
-Explicitly unsupported (do not file as bugs without a compatibility-decision proposal):
+Documentation-only changes skip the Rust CI workflow and build the mdBook when `docs/**` changes. The workflow
+definitions are authoritative: [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml), [release](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/release.yml), and
+[docs](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/docs.yml). These configurations describe coverage, not a claim that every dispatch has
+passed.
 
-- Windows (any toolchain). Adding requires a CI cell and a compatibility-decision proposal against
-  [`docs/architecture/02-versioning-and-compatibility.md`](architecture/02-versioning-and-compatibility.md).
-- BSDs, embedded targets, WASM.
-
-## See also
-
-For how to run the benchmarks and detect regressions, see [`docs/performance.md`](performance.md). For the frozen public
-API of each crate, see [`docs/api-review/`](api-review/).
+See the [compatibility policy](architecture/02-versioning-and-compatibility.md),
+[toolchain change procedure](bump-toolchain.md), and [release checklist](release.md).

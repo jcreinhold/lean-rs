@@ -1,44 +1,18 @@
-# lean-rs
+# lean-rs documentation
 
-A Lean runtime bridge for Rust. Use it to load Lean-built shared libraries, call typed `@[export]` functions, run
-standard Lean services such as elaboration and kernel checking, or isolate Lean work in a child process.
+`lean-rs` hosts Lean 4 in Rust applications. Lean owns elaboration, kernel checking, proof objects, and dependent-type
+meaning; Rust owns the runtime bridge, error boundaries, scheduling, and packaging.
 
-Lean remains the authority for elaboration, kernel checking, proof objects, universes, `MetaM`, and dependent-type
-meaning. This project handles the Rust hosting work around Lean: linking, runtime initialization, ABI conversion, module
-loading, error and panic boundaries, scheduling, diagnostics, batching, process isolation, and packaging.
+For a runnable project, start with [Ship a crate with Lean](recipes/ship-crate-with-lean.md). Use
+[Downstream interop](recipes/downstream-interop.md) for custom exports and callbacks, or
+[Worker capability runner](recipes/worker-capability-runner.md) for supervised commands and live rows.
+[Production hosting](production-hosting.md) covers long-running services with bounded workers and warm sessions.
 
-This site collects the architecture charter, design notes, recipes, safety audits, and operational runbooks that ship in
-the [`lean-rs` repository](https://github.com/jcreinhold/lean-rs).
+For design work, read the [charter](architecture/00-charter.md) and [safety model](architecture/01-safety-model.md),
+then the owning subsystem in the sidebar. Architecture numbers are stable identifiers, not a reading order. Measurements
+and audit records retain their dates and workload limits; they are evidence for those workloads rather than universal
+performance guarantees.
 
-## Start Here
-
-For a runnable project path, start with the [repository README](https://github.com/jcreinhold/lean-rs#readme). It shows
-the crate layout, a minimal same-process example, and the worked examples.
-
-If you are reviewing the design, read these next:
-
-1. [Charter](architecture/00-charter.md)—the design boundary between Lean and `lean-rs`, what is hidden, what is
-   preserved, and which alternatives were rejected.
-1. [Safety model](architecture/01-safety-model.md)—the unsafe boundary, refcount ownership, and the workspace
-   concurrency stance.
-
-Everything else is reference for a subsystem. The numeric prefix on each architecture document is an identifier, not a
-reading order; use the sidebar groupings instead.
-
-## How the site is organized
-
-- **Foundations**—charter, safety model, versioning, raw FFI rationale.
-- **Same-process FFI (`lean-rs`)**—runtime, typed exports, concurrency, panic containment, callbacks, loader.
-- **Standard Lean services (`lean-rs-host`)**—sessions, elaboration, kernel checking, `MetaM`, capability contract.
-- **Worker (`lean-rs-worker-protocol` / `-parent` / `-child`)**—the process-boundary supervisor and its scale and
-  observability story.
-- **Recipes**—task-oriented walkthroughs for shipping a Lean-backed crate or wiring a worker capability.
-- **[Production hosting](production-hosting.md)**—the worker-pool pattern for long-running Rust hosts: warm reuse,
-  bounded fresh imports, child cycling, batching, and typed resource reporting.
-- **Safety audits**—long-session memory bounds and the workspace `unsafe` inventory.
-- **Operations**—testing strategy, performance baselines, diagnostics, release process, toolchain bumps.
-
-## Versions and platforms
-
-`lean-rs` targets stable Rust (MSRV 1.91) on macOS and Linux. The supported Lean toolchain window is enumerated in
-[Version matrix](version-matrix.md); the procedure for extending it is [Bump toolchain](bump-toolchain.md).
+The [repository README](https://github.com/jcreinhold/lean-rs#readme) maps crates to tasks. The
+[version matrix](version-matrix.md) defines supported Lean releases and platforms, and [Testing](testing.md) describes
+verification. See [Diagnostics](diagnostics.md) when a run fails.

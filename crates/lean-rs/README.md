@@ -9,7 +9,12 @@ you want sessions, `MetaM`, and kernel-checked evidence, add [`lean-rs-host`](ht
 
 ## Quick start
 
-Inside the workspace, run the canonical shipped-crate template first:
+Shared-source build helpers require `LEAN_HOST_MCP_WRITER_EXECUTABLE`; the in-tree examples and template do not
+configure that helper themselves. The
+[shipping recipe](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/ship-crate-with-lean.md) shows this
+prerequisite and the typed package-private bootstrap alternative.
+
+With the writer configured, run the shipped-crate template from the workspace:
 
 ```sh
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml
@@ -19,8 +24,7 @@ That template is the shortest executable path for a crate that owns Lean source.
 and `LeanCapability` at runtime so application code does not hand-write Lake output paths or dylib env-var plumbing.
 
 The minimum consumer is five pieces: a Lean module declaring an `@[export]`, a `lakefile.lean` that builds it into a
-shared library, a Rust `build.rs` that emits the link and rpath directives, a `Cargo.toml`, and a Rust caller. All five
-together fit on one screen.
+shared library, a Rust `build.rs` that emits the link and rpath directives, a `Cargo.toml`, and a Rust caller.
 
 **`Cargo.toml`**:
 
@@ -125,12 +129,14 @@ For a complete advanced same-process example that also lets Lean call a Rust cal
 `cargo run -p lean-rs --example interop_callback` in the workspace and read
 [`docs/recipes/downstream-interop.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md).
 For a trusted same-process string callback example, run `cargo run -p lean-rs --example string_streaming` and read
-[`docs/recipes/string-callback-streaming.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/string-callback-streaming.md).
+[the string callback recipe](https://github.com/jcreinhold/lean-rs/blob/main/docs/recipes/downstream-interop.md#string-callbacks).
 Worker tools that need process isolation, live rows, diagnostics, terminal summaries, timeouts, or memory cycling should
 use `lean-rs-worker-parent` typed commands instead of exposing callback handles.
 
-The `Args` and `R` generics on `LeanModule::exported_unchecked` are sealed by the `LeanAbi` / `LeanArgs` /
-`DecodeCallResult` traits, so unsupported types fail at compile time rather than producing wrong decodes at runtime.
+`LeanModule::exported_unchecked` still requires the caller to establish the native ABI. The conversion traits constrain
+dispatch shape, but `LeanAbi` exposes hidden public conversion hooks and a public marker; see the
+[current safety gaps](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/01-safety-model.md) before
+extending that internal boundary.
 
 ## See also
 

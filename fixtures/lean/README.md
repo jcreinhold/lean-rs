@@ -1,50 +1,39 @@
-# `LeanRsFixture`—ABI Boundary Fixtures
+# Lean ABI Fixtures
 
-In-tree Lake package the workspace's tests, benchmarks, and example binaries load. It exists so the `lean-rs` Rust
-crates have a stable set of compiled Lean symbols to call when exercising every distinct ABI behavior at the C boundary.
+`lean_rs_fixture` is the Lake package whose `LeanRsFixture` library is loaded by workspace tests, benchmarks, and
+examples. Its exported symbols use the `lean_rs_fixture_` prefix; changing a symbol requires updating its Rust callers.
 
-`lakefile.lean` here also doubles as a template for a consumer's own Lake package—the structure transfers verbatim.
-Rename the package and module to taste, then add your own `@[export]` declarations. `lean-rs-host` ships its host shims
-separately; consumer Lake packages do not require them.
-
-## What's exported
-
-Each submodule under `LeanRsFixture/` covers one ABI category:
-
-| Submodule | Covers |
+| Module | Coverage |
 | --- | --- |
 | `Scalars` | `UInt8`/`16`/`32`/`64`, `USize`, `Nat`, `Int`, `Bool`, `Unit`, `Char`, `Float` |
 | `Strings` | `String`, `ByteArray` |
-| `Containers` | `Array String`, `Option Nat`, `Except String Nat`, a two-field structure |
-| `Effects` | `IO` success (`Unit`, `Nat`), `IO` inner `Except` failure, `IO` exception via `throw` |
-| `Evidence` | A structure carrying a `Prop` witness, surfaced to Rust as an opaque handle |
-| `Capability` | `CoreM`/`MetaM` declarations compiled (via `import Lean`) but never exported |
+| `Containers` | `Array String`, `Option Nat`, `Except String Nat`, and a two-field structure |
+| `Effects` | `IO` success (`Unit`, `Nat`), inner `Except` failure, and thrown `IO` errors |
+| `Evidence` | A `Prop` witness returned as an opaque handle |
+| `Capability` | Imported `CoreM`/`MetaM` declarations, without direct exports |
+| `Handles` | Name, level, expression, and declaration handles |
+| `Meta` | Expressions used by bounded meta-service tests |
+| `SourceRanges` | Source positions, docstrings, attributes, and declarations without ranges |
 
-Every exported symbol is prefixed `lean_rs_fixture_`. Renaming the prefix is a contract change, not a refactor—the
-workspace's `@[export]` declarations and Rust call sites are synchronised against it.
+[`LeanRsFixtureLateExtension.lean`](LeanRsFixtureLateExtension.lean) is a separate default library target. Its
+initializer registers an environment extension during `Lean.importModules`; keep it out of the roll-up library so
+capability loading does not run that initializer too early.
 
-## Build
+## Build and use
 
 ```sh
 cd fixtures/lean
 lake build
 ```
 
-Artifacts land under `.lake/build/`:
+Lake writes the shared library and serialized `.olean` modules under `.lake/build/`. Its underscore escaping turns
+package `lean_rs_fixture` into `lean__rs__fixture`, giving a shared-library stem `liblean__rs__fixture_LeanRsFixture`
+and initializer `initialize_lean__rs__fixture_LeanRsFixture`. Use the build helpers to discover artifact paths rather
+than hard-coding a platform extension or output subdirectory.
 
-- `.lake/build/lib/liblean__rs__fixture_LeanRsFixture.{dylib,so}`—the shared library Rust will link.
-- `.lake/build/lib/lean/LeanRsFixture/*.olean` and `.lake/build/lib/lean/LeanRsFixture.olean`—per-submodule object
-  files.
+The [lakefile](lakefile.lean) shows the shared-library target shape for a consumer package. For a complete downstream
+example, use [the interop recipe](../../docs/recipes/downstream-interop.md).
 
-Lake mangles each underscore in the package name to a double underscore in emitted symbol and filename strings; the
-module initializer is therefore `initialize_lean__rs__fixture_LeanRsFixture`. Rust callers derive these names
-mechanically from the package name via Lake's mangling rule (`s/_/__/g`).
-
-`lake build` is also the verification command for the contract.
-
-## Why `Capability` has no exports
-
-`MetaM` and `CoreM` carry compiler state (`Environment`, options, traces) that has no meaningful C ABI representation,
-so they cannot appear in an `@[export]` signature. The module exists so the package's module-initializer pipeline
-imports `Lean`; the `MetaM` capability is exposed to Rust through the bounded `lean_rs_host_meta_*` services declared in
-the bundled `lean-rs-host` shim package, not through direct `@[export]` here.
+The fixture does not import host shims. `lean-rs-host` builds and loads its bundled shims separately, preserving the
+fixture's use by L1 tests that open the dylib directly. `CoreM` and `MetaM` services cross the ABI through those bounded
+host shims, rather than as monadic compiler state in this fixture's export signatures.

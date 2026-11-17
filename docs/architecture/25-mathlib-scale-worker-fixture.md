@@ -1,88 +1,79 @@
-# Mathlib-Scale Worker Fixture
+# Worker Scale and Replacement Fixtures
 
-A large-workload fixture for the worker capability layer. It is deliberately not a `lean-dup` implementation; it uses
-mathlib-style module names and command-like exports to stress the operational boundary:
+The fixtures exercise the operational path used by downstream worker tools:
 
 ```text
-import planner -> LeanWorkerPool -> session lease -> typed command
+LeanWorkerImportPlanner -> LeanWorkerPool -> LeanWorkerSessionLease -> typed command
 ```
 
-## Boundary
+They use small, deterministic schemas. Command names such as `extract`, `features`, `index`, and `probe` resemble a
+`lean-dup`-class tool, but the fixtures define no downstream extraction algorithm, cache policy, ranking, reporting, or
+source-provenance contract.
 
-The fixture may simulate `version`, `doctor`, `index`, `extract`, `features`, and `probe` commands, but the row schemas
-remain small test data owned by the worker fixtures. It does not copy `lean-dup` declaration rows, feature rows, cache
-rules, ranking, reporting, or source-provenance policy.
+## Scale workload
 
-The normal path is the pool path:
+`lean_rs_interop_consumer_worker_shape_mathlib_scale_index` emits declaration-like rows on `declarations`, feature-like
+rows on `features`, and probe-like rows on `probes`, with start/finish diagnostics, chunk progress, and terminal
+metadata. The fallback uses 16 mathlib-style module names and emits 47 rows: 16 declarations, 16 features, and 15 probes.
 
-- `LeanWorkerImportPlanner` groups module work into stable session batches.
-- `LeanWorkerPool` chooses a compatible local child and returns a lease.
-- A typed command runs through the lease.
-- Rows, diagnostics, progress, terminal metadata, cancellation, timeout, fatal exits, and cycling use the same worker
-  capability contracts as downstream callers.
+With `LEAN_RS_MATHLIB_ROOT`, `mathlib_scale_probe` discovers a real mathlib module list for planning. It still emits
+fixture rows. Such a run measures planning, leases, and session reuse; it does not index mathlib semantics.
 
-Low-level worker calls remain useful for focused tests, but they are not the source-of-truth scale path.
+The probe covers cancellation, fatal-exit recovery, post-cycle replay, and a slow sink. Snapshots report delivered rows,
+payload bytes, elapsed time, backpressure, restart counts, and available parent/child RSS. The fallback creates one
+planned batch: `pool_max_2` exercises the pool API without demonstrating parallel speedup.
 
-## Workload
+## Downstream replacement coverage
 
-The fixture export `lean_rs_interop_consumer_worker_shape_mathlib_scale_index` emits:
+`lean_dup_readiness` runs typed JSON `version`/`doctor` commands and streaming `extract`/`features`/`index`/`probe`
+commands through pool leases. It checks completion metadata, diagnostics, progress, timeout, cancellation, fatal exits,
+explicit cycling, and backpressure. The division of work is:
 
-- declaration-like rows on the `declarations` stream;
-- feature-like rows on the `features` stream;
-- probe-like rows on the `probes` stream;
-- start/finish diagnostics;
-- chunk progress for the simulated import/index pass;
-- terminal metadata with fixture name, command, row count, and module count.
+| Responsibility | Worker primitive |
+| --- | --- |
+| Child lifecycle and warm reuse | Pool and supervisor |
+| Build/load capability | Capability builder and `lean-toolchain` |
+| Group compatible module work | Import planner |
+| Request/response and live rows | Typed commands and data sinks |
+| Diagnostics and progress | Separate worker sinks |
+| Mark output committable | Terminal success summary |
+| Deadline, crash recovery, memory reset | Watchdog and worker cycling |
+| Observe and bound slow sinks | Snapshots and bounded reader buffer |
 
-The fallback workload uses 16 mathlib-style module names and emits 47 rows: 16 declarations, 16 features, and 15 probes.
-This keeps CI deterministic while still exercising mixed streams and terminal accounting.
+Downstream code keeps command algorithms, schemas, metadata compatibility policy, persistence, semantic cache keys,
+reporting, provenance, and CLI behavior. The fixture replaces operational subprocess plumbing, not those decisions.
 
-When `LEAN_RS_MATHLIB_ROOT` points at a mathlib checkout, the `mathlib_scale_probe` example uses the discovered mathlib
-module list as the planning workload. The current fixture still emits deterministic test rows; a run with a mathlib
-module list is evidence about planning, pool leases, and session reuse, not a claim that the worker crates have indexed
-mathlib semantics.
+`LEAN_RS_LEAN_DUP_ROOT` optionally supplies a downstream git checkout whose revision is printed. Separately,
+`LEAN_RS_WORKER_COMPARE_COMMAND` runs a caller-provided shell comparison and reports its status and elapsed time. A
+meaningful comparison records that exact command, checkout revision, workload, and limits.
 
 ## Commands
 
-Build the fixture and run the focused tests:
+Run focused integration tests with nextest:
 
 ```sh
-cd fixtures/interop-shims && lake build
-cargo test -p lean-rs-worker-child --test mathlib_scale_fixture -- --nocapture
+cargo nextest run -p lean-rs-worker-child --test mathlib_scale_fixture --no-capture
+cargo nextest run -p lean-rs-worker-child --test lean_dup_readiness --no-capture
 ```
 
-Run the local scale probe:
+The probes and benchmark require the worker binary in the corresponding profile:
 
 ```sh
 cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
 cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-```
+cargo run -p lean-rs-worker-child --example lean_dup_readiness
 
-Use a real mathlib module list when available:
-
-```sh
 LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4 \
 LEAN_RS_MATHLIB_SCALE_LIMIT=128 \
 cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-```
 
-Run the benchmark group:
-
-```sh
 cargo build --release -p lean-rs-worker-child --bin lean-rs-worker-child
 cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
 ```
 
-## Sample capture
+## Recorded capture
 
-On macOS/aarch64 with Lean 4.29.1, the fallback probe (16 modules, 47 rows) ran at ~140 rows/s for both `single_worker`
-and `pool_max_2` (the fallback produces one planned batch, so `pool_max_2` is a pool-API smoke test, not evidence of
-parallel speedup). Cancellation, fatal-exit recovery, and post-cycle replay all worked; RSS sampling was unavailable
-from `ps` on that machine. A claim about mathlib-scale performance must record the command, module limit, Lean version,
-and whether RSS sampling was available. Re-capture on the same hardware before declaring a regression.
-
-## Non-Goals
-
-This fixture does not add remote workers, search/ranking/cache semantics, downstream row schemas, or new callback
-payloads. Worker throughput still flows through worker IPC, pool leases, scheduling, row formats, and batching
-decisions; same-process object callbacks are not a worker-scale shortcut.
+On macOS/aarch64 with Lean 4.29.1, the fallback's 16 modules and 47 rows ran at about 140 rows/s for both `single_worker`
+and `pool_max_2`. Cancellation, fatal-exit recovery, and post-cycle replay succeeded; `ps` RSS sampling was unavailable.
+This is a historical local capture. A new scale claim must record the command, revision, module limit, platform, Lean
+version, row count, and RSS availability. Re-capture before declaring a regression.

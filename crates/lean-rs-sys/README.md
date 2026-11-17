@@ -8,11 +8,11 @@ the `pub unsafe fn` surface, and the supported-window metadata re-exported from 
 layout struct is `pub(crate)` and may be updated to track Lean version bumps without breaking downstream code that uses
 the `pub unsafe fn` helpers.
 
-**Calling any function in this crate is `unsafe`.** Public types are opaque (`lean_object` is `[u8; 0]` plus phantom
-markers, `!Send + !Sync + !Unpin`); downstream code reaches refcount, tag, and payload state only through
-`pub unsafe fn` helpers, each of which carries a `# Safety` section naming the invariant the caller must uphold. Prefer
-the safe layers in `lean-rs` for almost every use case; reach for this crate only when the safe surface is missing a
-capability you need.
+**Calling raw Lean runtime functions is `unsafe`; static metadata queries are safe.** Public types are opaque
+(`lean_object` is `[u8; 0]` plus phantom markers, `!Send + !Sync + !Unpin`); downstream code reaches refcount, tag, and
+payload state only through `pub unsafe fn` helpers, each of which carries a `# Safety` section naming the invariant the
+caller must uphold. Prefer the safe layers in `lean-rs` for almost every use case; reach for this crate only when the
+safe surface is missing a capability you need.
 
 ## Supported Lean window
 
@@ -23,13 +23,13 @@ The build script computes a SHA-256 digest over the discovered `lean.h` and acce
 Releases that ship a byte-identical `lean.h` share one entry. A miss fails the build with a bounded diagnostic naming
 the discovered digest and the full window.
 
-The build script emits `cargo:rustc-cfg=lean_v_X_Y_Z` for the matched entry's resolved version, so downstream code can
-`#[cfg]`-gate per-version divergences. As of v0.1.0 no divergence requires gating: layout structs are byte-identical and
-all 88 `REQUIRED_SYMBOLS` entries are present across the entire window.
+The build script emits crate-local `cargo:rustc-cfg=lean_v_X_Y_Z` and `lean_at_least_X_Y` flags for the resolved
+version. Cargo does not propagate dependency cfg flags to consumers; downstream gates need their own build-script
+configuration. Layout mirrors and required symbols are checked against the supported window.
 
 Bumping the window is the [bump procedure](https://github.com/jcreinhold/lean-rs/blob/main/docs/bump-toolchain.md): add
-a row to `SUPPORTED_TOOLCHAINS`, add a CI matrix entry, run the local sweep (`scripts/test-all-toolchains.sh`), open a
-PR.
+a row to `SUPPORTED_TOOLCHAINS`, update CI coverage, perform the focused checks, and run CI's full matrix. The optional
+local sweep skips uninstalled toolchains and deletes build outputs; read its documented effects before running it.
 
 ## Build environment
 

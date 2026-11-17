@@ -1,71 +1,47 @@
-# Public-API Review
+# Public API Review
 
-`docs/api-review/*-public.txt` are `cargo public-api --simplified` baselines for the published crates. CI diffs the live
-surface against these files on every PR; intentional changes regenerate the matching baseline in the same commit.
+[`api-review/*-public.txt`](https://github.com/jcreinhold/lean-rs/tree/main/docs/api-review) contains `cargo public-api --simplified` baselines for the eight crates
+currently gated by [CI](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml). Intentional API changes update the matching baseline in the same
+commit. `lean-rs-abi` currently has no committed baseline or CI comparison.
 
 ## Regenerate
 
+Use the pinned pair: `cargo-public-api@0.52.0` and `nightly-2026-06-18`. Nightly rustdoc output, including derived
+generic bounds, varies with the toolchain. Update both pins consistently in `ci.yml`, `release.yml`, and
+[`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh), then regenerate all baselines when either changes.
+
 ```sh
-for c in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs \
-         lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent \
-         lean-rs-worker-child; do
-  cargo +nightly-2026-06-18 public-api -p "$c" --simplified 2>/dev/null > "docs/api-review/${c}-public.txt"
+cargo install cargo-public-api@0.52.0 --locked
+rustup toolchain install nightly-2026-06-18 --profile minimal
+```
+
+From the repository root, generate each baseline into a temporary file first so a failed build cannot replace it with
+partial output. Keep stderr visible for build failures:
+
+```sh
+set -eu
+actual=$(mktemp)
+trap 'rm -f "$actual"' EXIT
+for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs \
+             lean-rs-host lean-rs-worker-protocol lean-rs-worker-parent \
+             lean-rs-worker-child; do
+  cargo +nightly-2026-06-18 public-api --simplified -p "$crate" > "$actual"
+  cp "$actual" "docs/api-review/${crate}-public.txt"
 done
 ```
 
-The `2>/dev/null` matters on a cold target dir: `cargo public-api` triggers a build and the progress lines would
-otherwise land in the baseline file and trip the next diff. The prerelease script's internal regeneration drops stderr
-the same way.
+## Review the change first
 
-**Use the pinned toolchain.** The CI gate (`ci.yml`, `release.yml`) and `prerelease.sh` pin **both**
-`cargo-public-api@0.52.0` **and** the nightly rustdoc toolchain (`nightly-2026-06-18`), invoked explicitly as
-`cargo +nightly-2026-06-18 public-api`. Both are part of the baseline: nightly rustdoc renders the auto-derived
-`StructuralPartialEq` impl on generic types with a `T: PartialEq` bound that shifts across nightlies and tool versions,
-so an unpinned gate diffs on toolchain churn alone. Regenerate with the pinned pair (`cargo install
-cargo-public-api@0.52.0 --locked`; `rustup toolchain install nightly-2026-06-18 --profile minimal`). Bumping either pin
-is a deliberate change: update it in all three places and regenerate every baseline in the same commit.
+Check that the new API owns a coherent responsibility, hides ABI and lifecycle details, and lets callers pay only for
+the work they request. Avoid pass-through wrappers, speculative traits, broad crate-root re-exports, and separate error
+variants for internal stages of one failure. A reader should be able to explain the entry point and use it in a short
+example. Comments describe current invariants rather than implementation history.
 
-## Red-flag checklist (review before regenerating)
-
-Walk the diff with these questions. Any "yes" is a stop-and-discuss signal, not necessarily a block.
-
-1. **Shallow module.** Does a new module own enough state and behaviour to be its own concept, or is it a
-   file-per-symbol split?
-2. **Pass-through wrapper.** Does a new wrapper type add real transformation, or just rename an existing one?
-3. **Temporal decomposition.** Do new error variants model lifecycle stages of one concern (Ousterhout ch. 5.3), instead
-   of independent failure classes?
-4. **Information leakage.** Does per-call C ABI shape (unboxed vs boxed, IO-wrap vs pure) leak into the caller's types?
-5. **Special-general mixture.** Are optional or specialised items being mixed into the crate root alongside mandatory
-   ones?
-6. **Conjoined methods.** Does a single method bundle two operations callers should be able to pay for independently?
-7. **Hard-to-describe API.** Can a new reader reduce the surface to one sentence and a five-line snippet?
-8. **Implementation history in comments.** Comments should explain current invariants, not when work landed or which
-   planning artifact requested it.
-
-## Doc rules
-
-Each `pub` item carries:
-
-- `# Errors` on every fallible function returning `LeanResult`, naming failure modes.
-- `# Safety` on every `pub unsafe fn` in `lean-rs-sys`, naming the precondition. No placeholder patterns ("see lean.h",
-  "uphold all Lean invariants").
-- Doc links: bare ``[`Type`]`` for crate-root items; `crate::`-qualified for sub-modules.
-
-`RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items` must be clean.
-
-## Verification
+Fallible public functions document their errors. Every public unsafe function documents concrete safety preconditions;
+"see lean.h" is insufficient. Use resolvable rustdoc links and run the [workspace gates](https://github.com/jcreinhold/lean-rs/blob/main/CONTRIBUTING.md), including
+`cargo nextest run --workspace` and doctests. Broad same-process `cargo test` is not the workspace test gate; see
+[testing](testing.md). For a review that changes private documentation, also check:
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --document-private-items
-test -f docs/api-review/lean-rs-sys-public.txt
-test -f docs/api-review/lean-toolchain-public.txt
-test -f docs/api-review/lean-rs-interop-shims-public.txt
-test -f docs/api-review/lean-rs-public.txt
-test -f docs/api-review/lean-rs-host-public.txt
-test -f docs/api-review/lean-rs-worker-protocol-public.txt
-test -f docs/api-review/lean-rs-worker-parent-public.txt
-test -f docs/api-review/lean-rs-worker-child-public.txt
 ```

@@ -1,9 +1,9 @@
-# Ship A Crate With Lean Code
+# Ship a crate with Lean code
 
-Use this recipe when a Rust crate owns Lean source code and should build on another developer's machine with ordinary
-Cargo commands.
+Use a Cargo build script to build crate-owned Lean source, then open its artifact manifest in process or in an app-owned
+worker child. The template is [`templates/shipped-lean-crate/`](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate).
 
-## Run The Template
+## Template and dependencies
 
 From the repository root:
 
@@ -13,44 +13,30 @@ cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shippe
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
 ```
 
-The first command builds the Lean shared library in `build.rs` and calls a Lean export in process. The second builds the
-app-owned worker child binary. The third starts that worker child and opens the same capability behind the worker
-crates.
+The current template's build script requires a configured shared-writer helper through
+`LEAN_HOST_MCP_WRITER_EXECUTABLE`; its build script does not select the package-local bootstrap shown below. The first
+command calls Lean in process; the other two build and run the app-owned worker child.
 
-The template uses path dependencies because it lives inside this repository. Published crates use normal version
-dependencies:
+The template uses repository path dependencies. A published consumer uses matching released versions:
 
 ```toml
 [dependencies]
-lean-rs = "0.2"
-lean-rs-worker-parent = "0.2" # worker apps: supervisor and pool
-lean-rs-worker-child = "0.2"  # worker apps: the child runtime binary
+lean-rs = "0.9"
+lean-rs-worker-parent = "0.9" # for worker applications
+lean-rs-worker-child = "0.9"  # for the app-owned child binary
 
 [build-dependencies]
-lean-toolchain = "0.2"
+lean-toolchain = "0.9"
 ```
 
-## File Layout
+The snippets below describe the current checkout's build and loader APIs. Keep parent, child, and capability artifacts
+on compatible versions when packaging them together.
 
-The canonical shape is build-time first:
+## Build the capability
 
-1. `build.rs` builds the Lake shared-library target.
-2. Rust opens the built dylib through `lean-rs`, or starts it behind the worker crates.
-3. Worker applications ship their own tiny worker-child binary.
-
-The crate author names the Lake root, package, module, imports, and worker child binary. The helper APIs hide Lean link
-directives, Lake output paths, dylib env-var plumbing, worker protocol frames, pipes, and child startup sequencing.
-
-## Build The Lean Capability
-
-Add `lean-toolchain` as a build dependency:
-
-```toml
-[build-dependencies]
-lean-toolchain = "0.2"
-```
-
-Use the high-level helper in `build.rs`:
+`CargoLeanCapability` names the Lake root, target, package, module, and trusted export ABI. For Lean sources and all
+materialized dependencies strictly below one Cargo package, an explicit `PrivateLakeBootstrap` permits package-local
+builds before a shared-writer executable exists:
 
 ```rust,ignore
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,7 +45,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LeanExportSignature,
     };
 
-    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
+    let lean_root = owner.join("lean");
+    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
+    lean_toolchain::CargoLeanCapability::new(&lean_root, "MyCapability")
+        .private_bootstrap(bootstrap)
         .package("my_app")
         .module("MyCapability")
         .export_signature(LeanExportSignature::function(
@@ -79,22 +69,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-This emits Lean link directives, Cargo rerun triggers, runs `lake build MyCapability:shared`, resolves Lake's supported
-dylib naming conventions, writes a JSON artifact manifest with trusted export signature metadata, and emits:
+For shared project roots or dependencies outside the Cargo owner, use the configured shared-writer helper instead;
+`private_bootstrap` rejects escaped roots. The helper emits Lean link directives and Cargo rerun triggers, builds or
+reuses the Lake shared target, and writes a JSON capability manifest. Its compile-time outputs are:
 
 ```text
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST=<manifest path>
 cargo:rustc-env=LEAN_RS_CAPABILITY_MY_CAPABILITY_DYLIB=<built dylib path>
 ```
 
-The manifest path is the canonical runtime handoff. The dylib env var remains for compatibility and simple low-level
-callers.
+Use the manifest as the runtime handoff. The dylib output supports low-level compatibility callers. The export metadata
+is supplied by the crate author; it must match the compiled Lean export. Checked lookup compares Rust's call shape with
+that trusted metadata.
 
-Use `build_lake_target` directly only when a crate really needs lower-level control over the build-script policy.
-
-## Open The Capability In Process
-
-For trusted same-process interop, embed the compile-time path with `env!`:
+## Open in process
 
 ```rust,ignore
 let runtime = lean_rs::LeanRuntime::init()?;
@@ -104,22 +92,22 @@ let capability = lean_rs::LeanCapability::from_build_manifest(
         env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
     ),
 )?;
-
 let add = capability.exported::<(u64, u64), u64>("my_app_add")?;
 let answer = add.call(40, 2)?;
 ```
 
-`LeanCapability` is a convenience layer over `LeanLibrary`: it reads the manifest, opens the primary dylib and
-dependency bundle, initializes the configured module, and keeps the initializer names and trusted export signatures with
-the opened library. `LeanCapability::exported` fails before dispatch when the manifest lacks `my_app_add` or records a
-different ABI shape. For doctor commands or installer checks, run `LeanCapabilityPreflight` against the same manifest
-descriptor first; it reports missing package files, unsupported toolchain fingerprints, stale manifests, and missing
-initializers with stable loader codes and repair hints.
+`LeanCapability` loads the primary library and dependency bundle, initializes the module, and retains its trusted export
+signatures. A missing or mismatched signature fails before dispatch. `LeanCapabilityPreflight` checks artifacts,
+fingerprints, manifests, and initializer symbols for installer or doctor commands; the report uses stable loader codes
+and repair hints.
 
-## Run The Capability In A Worker
+Use a compile-time `env!` for paths emitted by this crate's build script. These are local build-artifact paths;
+relocating a prebuilt application requires packaging its libraries and a descriptor that resolves their installed
+locations.
 
-Worker applications should ship an app-owned child binary. Do not rely on a dependency binary being installed
-automatically.
+## Open in a worker
+
+Cargo does not install a dependency's binary for an application. Ship a child binary of your own:
 
 ```rust,ignore
 // src/bin/my_app_lean_worker.rs
@@ -128,37 +116,34 @@ fn main() -> std::process::ExitCode {
 }
 ```
 
-Then point the worker builder at that binary:
+Point the builder at that binary and the same manifest:
 
 ```rust,ignore
 let spec = lean_rs::LeanBuiltCapability::manifest_path(
     env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST"),
 )
 .manifest_env_var("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST");
-
-let builder =
-    lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["MyCapability"])?
-        .worker_child(
-            lean_rs_worker_parent::LeanWorkerChild::sibling("my_app_lean_worker")
-                .env_override("MY_APP_LEAN_WORKER"),
-        );
-
+let builder = lean_rs_worker_parent::LeanWorkerCapabilityBuilder::from_built_capability(
+    &spec,
+    ["MyCapability"],
+)?
+.worker_child(
+    lean_rs_worker_parent::LeanWorkerChild::sibling("my_app_lean_worker")
+        .env_override("MY_APP_LEAN_WORKER"),
+);
 let report = builder.check();
 if let Some(first) = report.first_error() {
     return Err(format!("worker bootstrap check failed: {}", first.message()).into());
 }
-
 let mut capability = builder.open()?;
 ```
 
-The builder consumes the same manifest-backed descriptor as `LeanCapability`. It checks the worker child, capability
-artifact, protocol handshake, import session, and optional metadata expectation without exposing child pids, pipes,
-protocol frames, or loader environment variables. Typed commands, rows, diagnostics, timeout, and cycling remain behind
-the worker API.
+The active bootstrap probe checks the child, artifacts, handshake, import session, and any metadata expectation. See the
+[worker runner](worker-capability-runner.md) for command signatures, typed rows, diagnostics, and lifecycle behavior.
 
-## Publishing Checklist
+## Publish the source package
 
-Keep the Lean source and Lake metadata in the published crate:
+Include the Rust build script and Lean package inputs:
 
 ```toml
 include = [
@@ -172,20 +157,6 @@ include = [
 ]
 ```
 
-Do not include `.lake/`; each downstream build should materialize Lake outputs for its local platform and Lean
-toolchain.
-
-## Gotchas
-
-- Use `env!("LEAN_RS_CAPABILITY_MY_CAPABILITY_MANIFEST")`, not a runtime environment lookup, when the manifest is
-  emitted by your own `build.rs`.
-- Include Lean sources, `lakefile.lean`, `lean-toolchain`, and `lake-manifest.json` in the published crate.
-- Exclude `.lake/`; it is platform- and toolchain-specific build output.
-- Worker applications should ship an app-owned worker child binary that calls
-  `lean_rs_worker_child::run_worker_child_stdio`.
-- Do not rely on dependency binaries for the worker child; normal Cargo packaging does not install them as part of your
-  application.
-- Avoid nullary unboxed scalar exports in examples and app APIs. Give exported functions at least one argument, as in
-  `my_app_add`, so Lake emits a function symbol rather than a persistent global.
-
-The checked-in template under `templates/shipped-lean-crate/` shows the full layout.
+Exclude `.lake/`; downstream builds need outputs for their own platform and Lean toolchain. If the package includes
+examples, include their source files too. Give scalar exports at least one argument: a nullary unboxed scalar may be
+emitted as a persistent global rather than a callable function symbol.

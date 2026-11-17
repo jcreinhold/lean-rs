@@ -1,285 +1,137 @@
-# Standard Lean Service Layer (`lean-rs-host`)
+# Standard Lean Service Layer
 
-The curated public API of the standard Lean service layer—the published [`lean-rs-host`](https://docs.rs/lean-rs-host)
-crate. This layer sits above the typed FFI crate (`lean-rs`) and provides common Lean services: imports, elaboration,
-kernel checks, declaration queries, bounded `MetaM`, info-tree projections, sessions, and pooling.
+`lean-rs-host` provides imports, declaration inspection and search, elaboration, kernel-checked evidence, bounded
+`MetaM`, module-query projections, proof attempts, cancellation, progress, and session reuse. It builds on the typed FFI
+in `lean-rs` and forbids unsafe Rust. Applications that only call explicit Lean `@[export]` functions can use `lean-rs`
+directly.
 
-The classification table below is the **semver surface**: which items cross the crate root, which stay at module paths,
-which stay `pub(crate)`. Refactors that reshape internal modules are free as long as the curated re-exports stay stable.
+The public API lives in the [crate root](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/lib.rs), public `host` modules, and
+[API baseline](../api-review/lean-rs-host-public.txt). This note records the behavioral boundaries rather than
+maintaining a second list of Rust signatures.
 
-See [`05-raw-sys-design.md`](05-raw-sys-design.md) for `lean-rs-sys`'s sibling rationale.
-
-## Layering
-
-`lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`. The `lean-rs` crate ships the typed `@[export]`-calling
-machinery and the structured error boundary; `lean-rs-host` adds standard Lean services through `LeanHost`,
-`LeanCapabilities`, `LeanSession`, and `SessionPool`. It depends on the 28 + 9 `lean_rs_host_*` `@[export]` Lean shims
-bundled with `lean-rs-host`, resolved from manifest-backed trusted signature metadata, and loaded alongside consumer
-capability dylibs.
-
-Downstream applications that just need to call a `@[export]` Lean function with typed arguments—the norm for Rust
-bindings to GC-hosted languages—depend on `lean-rs` directly and skip this crate.
-
-Reusable interop machinery belongs below this crate; see [`08-reusable-interop.md`](08-reusable-interop.md). The
-`lean_rs_host_*` shim contract remains the standard service contract, not the generic callback or build substrate.
-
-## Shared host ABI declaration metadata
-
-The standard host export rows live once in `lean-toolchain::host_shim_exports!`. The macro passes the same Rust
-argument/return type tokens and symbols to the actual host typed-binding generator and to a closed ABI-only metadata
-projection. The latter uses private marker types, never a Lean runtime, loaded manifest or cached receipt. An all-row
-host test independently computes `LeanArgs`/`DecodeCallResult` signatures and compares them with the projection.
-Unknown argument shapes have no marker trait implementation, so adding a new shape requires an explicit projection
-change rather than silently assuming a boxed object.
-
-`lean_toolchain::host_shim_abi::expected_checked_bindings()` selects the three proof-workflow requirements by generated
-field access, making missing required rows a compile error. Actual loaded binding receipts and compiled expectations
-use one canonical JSON/SHA encoder, with recursive key sorting independent of `serde_json` map features. The parent can
-therefore enforce the expected ABI on its first host session and every replacement while remaining free of
-`libleanshared`. Header and runtime-version checks remain separate requirements. Only static declaration metadata moves
-below the host layer; host runtime operations and semantic types remain in `lean-rs-host`.
-
-## Curated crate-root surface
+## Construction and lifetime
 
 ```rust
-// crates/lean-rs-host/src/lib.rs (illustrative)
-pub use crate::host::{
-    LeanHost, LeanCapabilities, LeanSession, LeanCancellationToken,
-    LeanDeclarationFilter, LeanSourceRange,
-    SessionPool, PooledSession, SessionStats, PoolStats,
-};
-pub use crate::host::elaboration::{
-    LeanElabOptions, LeanElabFailure, LeanDiagnostic, LeanSeverity, LeanPosition,
-    LEAN_HEARTBEAT_LIMIT_DEFAULT, LEAN_HEARTBEAT_LIMIT_MAX,
-    LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX,
-};
-pub use crate::host::evidence::{
-    LeanEvidence, EvidenceStatus, LeanKernelOutcome, ProofSummary,
-    LEAN_PROOF_SUMMARY_BYTE_LIMIT,
-};
+let runtime = lean_rs::LeanRuntime::init()?;
+let host = lean_rs_host::LeanHost::from_lake_project(runtime, lake_root)?;
+let capabilities = host.load_shims_only()?;
+let mut session = capabilities.session(&["MyProject"], None, None)?;
+let declaration = session.query_declaration("MyProject.example", None)?;
 ```
 
-The handle types (`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`) and the error model live on `lean_rs::*`;
-callers needing both surfaces write `use lean_rs::{LeanRuntime, LeanName}` and
-`use lean_rs_host::{LeanHost, LeanSession}` side by side. The `lean-rs` crate root re-exports them; no module-path
-import needed.
+`from_lake_project` validates the root directory. `load_shims_only` prepares the bundled host and generic interop
+libraries without opening a user capability dylib. `load_capabilities(package, lib_name)` also opens and initializes
+that capability's shared library; both names are needed to resolve Lake's artifact naming convention.
 
-## Specialised sub-module surfaces
+`LeanHost<'lean>` borrows the runtime. `LeanCapabilities<'lean, 'h>` borrows the host, and `LeanSession<'lean, 'c>`
+borrows capabilities while owning its imported environment. Semantic handles from `lean-rs` and `LeanEvidence<'lean>`
+retain the runtime lifetime. `PooledSession` additionally borrows its pool. The
+[compile-fail fixtures](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/tests/compile_fail) pin these lifetimes and the `!Send + !Sync`
+contract. All Lean work stays on the thread where the handles were constructed.
 
-The crate root names mandatory session capabilities and entry points only. Sub-module paths host **specialised or
-optional** capabilities so the import path names the extra service explicitly.
+## Service boundaries
 
-- **`lean_rs_host::meta`**—the bounded `MetaM` capability. Five host-shim bindings (`meta_infer_type`, `meta_whnf`,
-  `meta_heartbeat_burn`, `meta_is_def_eq`, `meta_pp_expr`) are optional, and `run_meta` is the only call site that
-  touches the meta types. Surfacing `LeanMetaOptions`, `LeanMetaResponse`, `LeanMetaService`, `LeanMetaTransparency`,
-  `MetaCallStatus`, and the five factories at the crate root would pollute the namespace of every caller for the benefit
-  of the subset that opts into `MetaM`. Meta callers write `use lean_rs_host::meta::{...}`; everyone else is
-  undisturbed.
-- **`lean_rs_host::process`**—the optional module-query projection capability. Optional checked bindings
-  (`process_module_query`) and the query/result types for diagnostics, cursor type lookup, cursor goal lookup, and name
-  references live under `process` rather than at the crate root. The public boundary is one query-shaped operation, so
-  callers do not pay for whole-file raw info-tree rendering when they only need one bounded projection.
+| Surface | Responsibility |
+| --- | --- |
+| Crate-root `LeanHost`, `LeanCapabilities`, `LeanSession` | Project binding, prepared capabilities, imports, and session dispatch |
+| Crate-root declaration request/result types | Bounded inspection, search, verification, and proof-attempt data |
+| `lean_rs_host::host::elaboration` and root re-exports | `LeanElabOptions`, diagnostics, and elaboration failures |
+| `lean_rs_host::host::evidence` and root re-exports | Opaque checked evidence, outcome tags, and display summaries |
+| `lean_rs_host::meta` | Opt-in bounded `MetaM` services |
+| `lean_rs_host::host::process` | Module queries, selector batches, snapshot-cache policy, and proof-workflow projections |
+| Crate-root `SessionPool`, `PooledSession`, configuration and statistics | Per-thread environment reuse and memory-retention policy |
 
-## Mandatory entry points
+`LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`, the runtime, and `LeanError` belong to `lean-rs`. Host methods
+reuse these types without re-exporting a parallel handle model. Low-level export dispatch and callback mechanisms remain
+there; host methods expose named services rather than arbitrary symbol calls.
 
-| Item | Module path | Notes |
-| --- | --- | --- |
-| `LeanHost<'lean>` | `lean_rs_host::host::LeanHost` | Entry point: `from_lake_project(runtime, path)`. |
-| `LeanCapabilities<'lean, 'h>` | `lean_rs_host::host::LeanCapabilities` | Loaded capability module reference. |
-| `LeanSession<'lean, 'c>` | `lean_rs_host::host::LeanSession` | Long-lived imports and queries; owns bulk/pool methods. |
-| `LeanCancellationToken` | `lean_rs_host::host::cancellation::LeanCancellationToken` | `Clone + Send + Sync` cooperative cancellation flag checked by session operations. |
-| `LeanProgressSink`, `LeanProgressEvent` | `lean_rs_host::host::progress` | Structured in-thread progress callback surface for long-running session operations. |
-| `LeanSourceRange` | `lean_rs_host::host::session::LeanSourceRange` | 1-based source range for a declaration, with Lean-recorded file path or module-label fallback. |
-| `LeanDeclarationFilter` | `lean_rs_host::host::session::LeanDeclarationFilter` | User-facing declaration-list filter; default keeps private names and drops generated/internal names. |
-| `LeanElabOptions` | `lean_rs_host::host::elaboration::LeanElabOptions` | Bounded options bundle for `elaborate` / `kernel_check`. Saturating setters. |
-| `LeanElabFailure` | `lean_rs_host::host::elaboration::LeanElabFailure` | Typed diagnostic payload; carries `&[LeanDiagnostic]` and a `truncated()` flag. |
-| `LeanDiagnostic` | `lean_rs_host::host::elaboration::LeanDiagnostic` | One Lean-emitted diagnostic: severity, bounded message, optional position, file label. |
-| `LeanSeverity` | `lean_rs_host::host::elaboration::LeanSeverity` | `#[non_exhaustive]` enum mirroring `Lean.MessageSeverity`. |
-| `LeanPosition` | `lean_rs_host::host::elaboration::LeanPosition` | 1-indexed line/column with optional end. |
-| `LeanEvidence<'lean>` | `lean_rs_host::host::evidence::LeanEvidence` | Opaque checked-evidence handle. Construct via `LeanSession::kernel_check`; operate via `check_evidence` / `summarize_evidence`. |
-| `EvidenceStatus` | `lean_rs_host::host::evidence::EvidenceStatus` | `#[non_exhaustive]`: `Checked` / `Rejected` / `Unavailable` / `Unsupported`. |
-| `LeanKernelOutcome<'lean>` | `lean_rs_host::host::evidence::LeanKernelOutcome` | Sum returned by `kernel_check`; `LeanEvidence` on `Checked`, `LeanElabFailure` otherwise. |
-| `ProofSummary` | `lean_rs_host::host::evidence::ProofSummary` | Lean-authored display projection: declared name, kind string, pretty-printed type signature. Owns bounded `String`s. Diagnostic-only—not a proof certificate outside the session that produced it. |
+The host owns and packages its Lean shims. Sessions resolve mandatory bindings once; unavailable optional operations
+return their documented `Unsupported` outcome. The exact export rows and ABI shapes are defined in
+[`host_shim_abi.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/host_shim_abi.rs) and described in the
+[host capability contract](../lean-rs-host-capability-contract.md).
 
-## Pooling and observability
+## Checked host ABI metadata
 
-| Item | Module path | Notes |
-| --- | --- | --- |
-| `SessionPool<'lean>` | `lean_rs_host::host::pool::SessionPool` | Capacity-bounded reuse pool. `with_capacity(runtime, capacity)`; `acquire(caps, imports) -> PooledSession`; `drain()` drops cached environments. `!Send + !Sync`. |
-| `PooledSession<'lean, 'p, 'c>` | `lean_rs_host::host::pool::PooledSession` | `Deref`/`DerefMut` to `LeanSession`; `Drop` returns the environment to the pool (or releases at capacity). |
-| `SessionStats` | `lean_rs_host::host::session::SessionStats` | Per-session metrics (`ffi_calls`, `batch_items`, `elapsed_ns`). `Copy + Default + PartialEq`; snapshot semantics. |
-| `PoolStats` | `lean_rs_host::host::pool::PoolStats` | Per-pool reuse and drain metrics. `Copy + Default + PartialEq`. |
+`lean_toolchain::host_shim_exports!` supplies the same symbol and Rust argument/return tokens to the host binding
+generator and an ABI-only projection. The projection uses private marker types and needs no Lean runtime or loaded
+manifest. An all-row host test independently computes `LeanArgs` / `DecodeCallResult` signatures and compares them with
+that projection. An unknown shape requires an explicit marker implementation.
 
-## Limits
+`host_shim_abi::expected_checked_bindings()` selects required proof-workflow bindings by generated field access.
+Compiled expectations and loaded receipts use the same canonical JSON/SHA encoder, including recursive key sorting. The
+worker parent can check those receipts at startup and replacement without linking `libleanshared`. Runtime and header
+checks remain separate. Only declaration metadata moves below the host layer; operations and semantic types remain in
+`lean-rs-host`.
 
-| Constant | Module path | Value |
-| --- | --- | ---: |
-| `LEAN_HEARTBEAT_LIMIT_DEFAULT` | `host::elaboration` | 200,000 (matches Lean's `maxHeartbeats` at 4.29.1) |
-| `LEAN_HEARTBEAT_LIMIT_MAX` | `host::elaboration` | 200,000,000 (saturating ceiling) |
-| `LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT` | `host::elaboration` | 64 KiB (per-call cumulative budget) |
-| `LEAN_DIAGNOSTIC_BYTE_LIMIT_MAX` | `host::elaboration` | 1 MiB (saturating ceiling) |
-| `LEAN_PROOF_SUMMARY_BYTE_LIMIT` | `host::evidence` | 4 KiB per `ProofSummary` field (UTF-8 boundary truncation) |
+## Query and bulk semantics
 
-## Internal types
+The [session implementation](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/session.rs) owns dispatch accounting and the following
+bulk behavior:
 
-| Item | Module path | Notes |
-| --- | --- | --- |
-| `LakeProject` | `lean_rs_host::host::lake::LakeProject` | `pub(crate)`: Lake discovery helper used by `LeanHost`. |
-| `meta::{LeanMetaOptions, LeanMetaService, LeanMetaResponse, LeanMetaTransparency, MetaCallStatus, infer_type, whnf, heartbeat_burn, is_def_eq}` | `lean_rs_host::meta::*` (re-exports `host::meta::*`) | Opt-in `MetaM` surface—see *Specialised sub-module surfaces*. |
+| Method | Missing declaration or failed item |
+| --- | --- |
+| `query_declarations_bulk` | First missing name fails the entire batch with a conversion error naming it |
+| `declaration_type_bulk` | `None` at the corresponding input position |
+| `declaration_kind_bulk` | `"missing"` at the corresponding position |
+| `declaration_name_bulk` | The input name at the corresponding position |
+| `elaborate_bulk` | Per-source `Result<LeanExpr, LeanElabFailure>`; budgets apply separately to each source |
 
-## Methods on the Curated Types
+Without a cancellation token, bulk operations dispatch the batch in Lean. `query_declarations_bulk` first constructs one
+name per input, so its recorded FFI count is `N + 1`, compared with `2N` singular calls. Progress uses additive
+Lean-side bulk shims. With a cancellation token, these bulk methods use singular per-item calls so Rust can check
+between items and discard partial output. Empty bulk input returns immediately without dispatch or progress. See
+[cancellation](07-cooperative-cancellation.md) and [progress](13-structured-progress.md) for their limits.
 
-Each requires doc comments and `# Errors` / `# Panics` sections.
+`declaration_source_range` returns Lean's recorded 1-based range, with a resolved source path where available and a
+module-label fallback. Filtered declaration listing folds the environment in Lean before allocating returned Rust
+handles. Module queries and proof workflows return bounded Lean-authored projections; they do not expose raw info trees.
+Their cache, options, and degraded-result rules live in [`09-info-tree-projection.md`](09-info-tree-projection.md).
 
-- `LeanHost::from_lake_project(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self>`
-- `LeanHost::load_capabilities(&self, package: &str, lib_name: &str) -> LeanResult<LeanCapabilities<'lean, '_>>`—two-arg
-  because Lake's compiled dylib basename is `lib{escaped_package}_{lib_name}.{dylib,so}` with `_` → `__` escaping on the
-  package; both pieces are required to resolve the on-disk artifact.
-- `LeanCapabilities::session(&self, imports: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<LeanSession<'lean, '_>>`
-- `LeanSession::query_declaration(&mut self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<LeanDeclaration<'lean>>`
-- `LeanSession::elaborate(&mut self, source: &str, expected_type: Option<&LeanExpr<'lean>>, options: &LeanElabOptions, cancellation: Option<&LeanCancellationToken>) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>>`
-- `LeanSession::kernel_check(&mut self, source: &str, options: &LeanElabOptions, cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<LeanKernelOutcome<'lean>>`
-- `LeanSession::check_evidence(&mut self, handle: &LeanEvidence<'lean>, cancellation: Option<&LeanCancellationToken>) -> LeanResult<EvidenceStatus>`
-- `LeanSession::summarize_evidence(&mut self, handle: &LeanEvidence<'lean>, cancellation: Option<&LeanCancellationToken>) -> LeanResult<ProofSummary>`
-- `LeanSession::run_meta<Req, Resp>(&mut self, service: &LeanMetaService<Req, Resp>, request: Req, options: &LeanMetaOptions, cancellation: Option<&LeanCancellationToken>) -> LeanResult<LeanMetaResponse<Resp>>`
-  where `Req: LeanAbi<'lean>` and `Resp: TryFromLean<'lean>`.
-- `LeanSession::query_declarations_bulk(&mut self, names: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<LeanDeclaration<'lean>>>`—strict
-  semantics; first missing name errors the batch with `Host(Conversion)` naming it. With no token and no progress, the
-  method keeps the `N + 1` FFI-call cost (one bulk dispatch + N `name_from_string`) vs `2N` for the singular fold. With
-  a token, it loops through the singular path so it can check between names and discard partial output on cancellation.
-  With progress and no token, it uses one Lean-side progress dispatch.
-- `LeanSession::declaration_source_range(&mut self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<Option<LeanSourceRange>>`—returns
-  Lean's 1-based declaration range when recorded. The shim resolves module source paths from Lake source roots when
-  possible and falls back to Lean's module label when the source file cannot be found.
-- `LeanSession::list_declarations_filtered(&mut self, filter: &LeanDeclarationFilter, cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<LeanName<'lean>>>`—one
-  Lean-side environment fold that excludes private, generated, and internal names according to the filter before Rust
-  allocates returned handles.
-- `LeanSession::declaration_type_bulk(&mut self, names: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<Option<LeanExpr<'lean>>>>`—with
-  no token, one bulk dispatch over `Array String`; with `Some(token)`, loops through `declaration_type` so cancellation
-  can be checked between names. Missing declarations are `None` in place.
-- `LeanSession::declaration_kind_bulk(&mut self, names: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<String>>`—with
-  no token, one bulk dispatch over `Array String`; with `Some(token)`, loops through `declaration_kind`. Missing
-  declarations are `"missing"` in place.
-- `LeanSession::declaration_name_bulk(&mut self, names: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<String>>`—with
-  no token, one bulk dispatch over `Array String`; with `Some(token)`, loops through `declaration_name`. Missing
-  declarations render as their input name.
-- `LeanSession::elaborate_bulk(&mut self, sources: &[&str], options: &LeanElabOptions, cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>>`—per-source
-  `Result` mirrors `elaborate` exactly. No `expected_type` parameter; a concrete second caller would justify the
-  per-source `&[Option<&LeanExpr>]` surface. With no token, this is one Lean-side bulk dispatch; with `Some(token)`,
-  this loops per source to create cancellation check points.
-- `LeanSession::stats(&self) -> SessionStats`—snapshot of per-session dispatch metrics.
-- `SessionPool::with_capacity(runtime: &'lean LeanRuntime, capacity: usize) -> Self`
-- `SessionPool::acquire<'p, 'c>(&'p self, caps: &'c LeanCapabilities<'lean, 'c>, imports: &[&str], cancellation: Option<&LeanCancellationToken>, progress: Option<&dyn LeanProgressSink>) -> LeanResult<PooledSession<'lean, 'p, 'c>>`—capability-agnostic
-  storage; entries are bare `Obj<'lean>` environments rewrapped under the supplied capability borrow at acquire time.
-  FIFO on take, LIFO on push.
-- `SessionPool::drain(&self) -> usize`—drops every cached free-list environment and returns the number removed.
-  Checked-out `PooledSession`s remain valid and may return to the pool later. This releases Rust-owned environment refs
-  only; it does not reset Lean's process-global import/runtime state.
-- `SessionPool::stats(&self) -> PoolStats`, `len()`, `is_empty()`, `capacity()`—observability. `PoolStats` tracks
-  imports, reuse, release-at-capacity drops, explicit drain calls, and entries removed by drains.
+## Evidence and resource bounds
 
-None leak raw `lean_*` types, raw refcount obligations, or initializer-symbol order.
+`kernel_check` returns `LeanKernelOutcome`: checked evidence or diagnostics classified as rejected, unavailable, or
+unsupported. `LeanEvidence` remains opaque; `check_evidence` asks Lean to revalidate it, and `summarize_evidence`
+produces bounded display strings. A `ProofSummary` is diagnostic data, not a proof certificate outside its producing
+session. `LeanKernelOutcome` contains evidence and is therefore thread-bound; its `EvidenceStatus` projection is plain
+Rust data.
 
-## Lifetime cascade
+The current bounds are defined in [shared metadata](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/lib.rs) and
+[proof summaries](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/evidence/summary.rs):
 
-```rust
-LeanRuntime                 ::init() -> LeanResult<&'static LeanRuntime>
-LeanHost<'lean>             ::from_lake_project(&'lean LeanRuntime, path) -> ...
-LeanCapabilities<'lean, 'h> ::load_capabilities(&'h LeanHost<'lean>, package, lib_name)
-LeanSession<'lean, 'c>      ::session(&'c LeanCapabilities<'lean, '_>, imports, cancellation, progress)
-LeanExpr<'lean>             // and the other `lean-rs` handles
-```
+| Limit | Default | Ceiling |
+| --- | ---: | ---: |
+| Elaboration heartbeats | 200,000 | 200,000,000 |
+| Cumulative diagnostics per call | 64 KiB | 1 MiB |
+| Each `ProofSummary` string | 4 KiB | 4 KiB |
 
-`'lean` is invisible at typical call sites (inferred from the runtime borrow). Compile-time enforcement, pinned by the
-trybuild suite in `crates/lean-rs-host/tests/compile_fail/` (run by the pinned `compile-fail` CI job under
-`RUN_TRYBUILD=1`): no handle outlives the runtime borrow (`handle_outlives_runtime.rs`); a `LeanSession` does not
-outlive its `LeanCapabilities` borrow (`session_outlives_capabilities.rs`); a `PooledSession` does not outlive its
-`SessionPool` (`pooled_session_outlives_pool.rs`); and no service-layer type escapes to another thread—all types are
-`!Send + !Sync` by default (`runtime_is_not_send_or_sync.rs`).
+Option setters saturate at their ceilings. Heartbeats bound Lean work that consumes them; they are not a wall-clock
+watchdog. `LeanElabOptions::lean_options` supplies typed project options for source processing, with the host heartbeat
+limit taking precedence over `maxHeartbeats`.
 
-## Error model
+## Pooling
 
-`LeanError` lives on `lean-rs`. It is the only public error type that crosses either crate's boundary. Two variants:
-`LeanException(LeanException)` for Lean-thrown `IO` errors that callers may surface to end users, and
-`Host(HostFailure)` for any host failure (init, link, load, conversion, contained callback panic, internal invariant).
-Payload structs have private fields and `pub(crate)` constructors that run the bounding helper, so the
-`LEAN_ERROR_MESSAGE_LIMIT` (4 KiB) cap on `message()` is a structural invariant—external callers receive `LeanError`
-values but cannot mint one with an unbounded message. `lean-rs-host` constructs `Host(...)` variants via the
-`lean_rs::__host_internals` internal bridge.
+`SessionPool` caches environment references by canonical project root, ordered imports, import profile, and extension
+registry safety state. Import order is significant. The pool rewraps reusable environments under the supplied capability
+borrow rather than retaining old capability references. Acquiring and returning sessions is single-threaded.
 
-`Except<E, T>` is a **value type**, not an error. When an exported function returns `IO (Except E T)`:
+Capacity bounds cached entries; `SessionPoolMemoryPolicy` can additionally refuse a fresh cache-miss import after an
+import-count or RSS admission limit is reached. It does not impose an RSS-based release policy on warm entries. Pool
+statistics distinguish reuse, key misses, releases, and drains. `drain()` releases cached Rust-owned environment
+references and returns the number removed. Checked-out sessions stay valid and may return later. Draining does not reset
+Lean's process-global import/runtime state or promise reclaimed RSS; see
+[long-session memory](../safety/long-session-memory.md).
 
-1. Outer `IO` failure → `LeanError::LeanException` (host failure).
-2. Inner `Except` decodes via `TryFromLean` into Rust `Result<T, E>` (application semantics).
+## Errors and implementation boundary
 
-The caller sees `LeanResult<Result<T, E>>` and decides how to flatten. Rule: runtime / host failures are `LeanError`;
-application semantics are values.
+`LeanError` is shared by the typed FFI and host layers: `LeanException` for Lean `IO` errors, `Host` for host failures,
+and `Cancelled` for observed cancellation. Messages are bounded to `LEAN_ERROR_MESSAGE_LIMIT` (4 KiB). An exported
+`IO (Except E T)` decodes to `LeanResult<Result<T, E>>`: outer runtime failures are errors, inner application outcomes
+are values.
 
-## Consumed `lean-rs` Surface
+The host uses `lean_rs::__host_internals` for bounded error construction and other sibling support. Host-defined ABI
+records use the hidden `SealedAbi` extension convention. These hidden public paths support the sibling crate; they are
+not a general downstream ABI extension API. In particular, a public hidden marker is not a Rust visibility barrier.
 
-`lean-rs-host` reaches into `lean_rs::*` as a normal downstream consumer. None of these belong to this crate's semver
-surface—they are listed so the dependency is visible.
-
-- `LeanRuntime`—process-once init; lifetime anchor for every service-layer type.
-- `LeanThreadGuard`—RAII attach for worker threads not started inside Lean.
-- `LeanLibrary`—RAII handle over the capability dylib `LeanCapabilities` opens.
-- `LeanModule`—initialized module handle used behind the closed host-shim binding table.
-- `LeanExported`—cached typed function handle stored inside private `HostShimBindings`, never exposed as a session-level
-  arbitrary dispatcher.
-- `LeanArgs`, `LeanIo`, `DecodeCallResult`, `LeanAbi`—bounds and markers used by internal checked host bindings and
-  host-defined ABI records.
-- `LeanName`, `LeanLevel`, `LeanExpr`, `LeanDeclaration`—opaque handles reused as service-layer method return types.
-- `lean_rs::error::*`—`LeanError`, `LeanResult`, `LeanException`, `LeanCancelled`, `HostFailure`, `HostStage`,
-  `LeanExceptionKind`, `LeanDiagnosticCode`, `LEAN_ERROR_MESSAGE_LIMIT`, `DiagnosticCapture`, `CapturedEvent`,
-  `DIAGNOSTIC_CAPTURE_DEFAULT_CAPACITY`. The shared error model.
-
-Two `#[doc(hidden)] pub` bridges substitute for Cargo's missing "friend crate" visibility:
-
-- `lean_rs::__host_internals::{host_module_init,host_cancelled}`—the narrow support facade this crate calls from
-  `host/lake.rs` and `host/cancellation.rs`. They preserve the bounding invariant (external callers receive `LeanError`
-  values but cannot mint one with an unbounded message) without forcing this crate to re-implement error construction.
-  It is not raw Lean runtime binding access. Re-add wrappers the same way (single-call `#[doc(hidden)] pub fn` +
-  re-export) if a future call site needs one.
-- `lean_rs::error::bound_message`—UTF-8-boundary truncation helper used at six sites in
-  `host/{elaboration,meta}/options.rs` and `host/elaboration/diagnostic.rs` to bound Lean-authored strings before they
-  flow into `Host(...)` payloads. Lives on the `lean-rs` surface (not at `__host_internals`) because it is a string
-  utility, not a constructor wrapper.
-
-The supertrait `lean_rs::abi::traits::sealed::SealedAbi` is similarly `pub` so this crate can implement `LeanAbi` for
-its own host-defined types (`LeanEvidence`, etc.); external crates are blocked by Rust's coherence rules (the orphan
-rule prevents implementing a foreign trait you do not own) plus the `#[doc(hidden)]` marker on the parent module.
-
-## Rejected approaches
-
-- **Re-export every `pub` item from every internal module at the crate root.** Path-shortening dressed up as curation;
-  gives mandatory and specialised items equal status. Consistency requires dissimilar things to be done differently.
-- **One `LeanHost` god-type with every operation as a method.** Braids runtime, modules, sessions, semantic handles, and
-  error policy into one mechanism. Kills the `'lean` cascade—`LeanExpr<'lean>` cannot outlive its session, but a god
-  type would have to be `'static` to host every method—and forces caller code to thread one large `&mut` through every
-  layer.
-- **Hide `lean-rs-host`'s internal modules behind a top-level façade.** Over-encapsulates for hypothetical safety wins.
-  Advanced users already have a clean escape hatch via `lean-rs-sys`, but that drops them to raw FFI. Keeping
-  `lean-rs::module` visible at module paths preserves the middle tier: typed handles, no raw `lean_*` symbols.
-- **Keep `LeanHost` / `LeanCapabilities` / `LeanSession` in `lean-rs` itself.** Conflated two layers behind one default
-  entry point and made it impossible for an external typed-FFI consumer to depend on `lean-rs = "0.1"` without
-  satisfying the 28 + 9 `lean_rs_host_*` shim contract.
-
-## Naming convention
-
-- **Crate-root re-exports use the `Lean` prefix.** Disambiguates `use lean_rs_host::*` in mixed-language projects.
-- **Module-path types drop the prefix when the module path disambiguates.** `lean_rs_host::host::session::SessionStats`,
-  `lean_rs_host::host::pool::PoolStats`. If a power-user item is later elevated to the crate root, re-export with the
-  `Lean` prefix where that improves disambiguation (e.g., `pub use ... as LeanSessionStats`).
-- **Internal `pub(crate)` types use short names.** They never appear in docs.
-
-## Verification
-
-The classification is satisfied when:
-
-1. `rg -n "^pub use" crates/lean-rs-host/src/lib.rs` matches the curated set above.
-2. `crates/lean-rs-host/tests/curated_surface.rs` uses only `use lean_rs::{...}` and `use lean_rs_host::{...}`
-   crate-root items (no module-path access).
-3. `crates/lean-rs-host/tests/compile_fail/runtime_is_not_send_or_sync.rs` confirms every service-layer type is neither
-   `Send` nor `Sync`.
-4. `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` is clean and every curated item has a doc comment.
-5. `docs/api-review/lean-rs-host-public.txt` matches the curated surface 1:1.
+New service APIs must preserve these boundaries. Keep specialised operations at explicit module paths, curate root
+re-exports, and update the API baseline with intentional public changes. Verify the curated surface, lifetime fixtures,
+and rustdoc checks using the commands in [testing](../testing.md).

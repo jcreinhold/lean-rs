@@ -1,13 +1,10 @@
 # Performance
 
-Benchmarks and the regression-detection recipe. Numbers themselves are not tracked here; they are non-portable across
-machines and ship with each capture.
+Use the workload that exercises the changed path and compare captures on the same machine. For retained import memory,
+CPU profiles, and generated baseline reports, use the [profiling guide](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md). For deployment budgets,
+use [production hosting](production-hosting.md).
 
-For production hosting policy, start with [`docs/production-hosting.md`](production-hosting.md). The worker and pool
-profiling workloads below validate that pattern: bounded child processes, warm session reuse, batching through a lease,
-and typed resource refusals when the configured budget is exhausted.
-
-## Run the benches
+## Criterion benchmarks
 
 ```sh
 cargo bench -p lean-rs --bench hot_paths
@@ -16,226 +13,131 @@ cargo bench -p lean-rs-worker-child --bench row_payload
 cargo bench -p lean-rs-worker-child --bench worker_capability
 ```
 
-`hot_paths` covers `lean_rs::module` and `lean_rs::abi`: cached `LeanExported::call` (`module::scalar_dispatch_u32_add`)
-and the `String`/`Vec<String>` round-trip decoders. `session` covers `LeanSession::*`: `query_declarations_bulk`,
-`query_declarations_bulk_progress/16` for progress callback delivery, the three `declaration_*_bulk` 5k-vs-loop
-comparisons, `elaborate_small`, `run_meta_whnf`, `host::process::module_query_batch_cached_decode` for host
-constructor/scalar decoding, and `SessionPool` hits.
+| Bench | Paths measured |
+| --- | --- |
+| `hot_paths` | Cached typed-export dispatch and string/array conversion. |
+| `session` | Bulk declarations, progress callbacks, bulk-versus-loop introspection, elaboration, meta dispatch, cached module-query decoding, and pool hits. |
+| `row_payload` | JSON representations, typed row decoding, allocations, batching candidates, and data-plane formats. |
+| `worker_capability` | Startup, import, streaming, shutdown, cancellation, fatal-exit recovery, cycling, and scale fixtures. |
 
-For the safety-boundary migration, the numbers that matter are:
+Useful filters for changes to the safe ABI boundary:
 
-- cached export floor: `cargo bench -p lean-rs --bench hot_paths -- module::scalar_dispatch_u32_add`;
-- ABI string decode: `cargo bench -p lean-rs --bench hot_paths -- abi::string_roundtrip`;
-- ABI array string decode: `cargo bench -p lean-rs --bench hot_paths -- abi::array_string_roundtrip`;
-- host shim dispatch: `cargo bench -p lean-rs-host --bench session -- host::session::query_declarations_bulk`;
-- host object decoding:
-  `cargo bench -p lean-rs-host --bench session -- host::process::module_query_batch_cached_decode`;
-- progress callback delivery:
-  `cargo bench -p lean-rs-host --bench session -- host::session::query_declarations_bulk_progress`.
+| Path | Filter |
+| --- | --- |
+| Cached export floor | `module::scalar_dispatch_u32_add` |
+| String decode | `abi::string_roundtrip` |
+| Array string decode | `abi::array_string_roundtrip` |
+| Host dispatch | `host::session::query_declarations_bulk` |
+| Host object decoding | `host::process::module_query_batch_cached_decode` |
+| Progress delivery | `host::session::query_declarations_bulk_progress` |
 
-`row_payload` covers the worker row transport hot path: JSON tree rows versus validated raw-JSON rows, typed command
-decode, row throughput, and allocation pressure. Two guards live alongside it: `worker::row_payload::protocol_batching`
-compares per-row raw JSON frames with batched raw JSON frames so any future batch protocol must justify itself against
-the current per-row baseline. `worker::row_payload::data_plane` compares JSON, raw JSON, simulated binary envelopes,
-MessagePack, and CBOR so any future format change must show a measured win. `worker_capability` covers the
-downstream-style worker fixture: cold startup, first import, import-once streaming, graceful shutdown latency,
-cancellation latency, fatal-exit recovery, worker cycling, row throughput, and memory growth.
+Save a baseline before editing, then compare it after the change:
 
-Progress changes must benchmark the no-progress path explicitly. The retained fast path for bulk introspection is:
+```sh
+cargo bench -p lean-rs-host --bench session -- --save-baseline before
+# Make the change, then run on the same machine:
+cargo bench -p lean-rs-host --bench session -- --baseline before
+```
+
+Investigate workload-specific changes outside Criterion's confidence interval. A uniform shift across unrelated paths
+can reflect CPU state; recapture before attributing it to code.
+
+Progress changes must also measure the no-progress path:
 
 ```sh
 cargo bench -p lean-rs-host --bench session -- \
   host::session::declaration_kind_bulk_vs_loop/bulk_5000 --save-baseline before
-# ... make progress changes ...
+# After the change:
 cargo bench -p lean-rs-host --bench session -- \
   host::session::declaration_kind_bulk_vs_loop/bulk_5000 --baseline before
 ```
 
-`progress = None` should stay within Criterion noise because it allocates no callback handle and dispatches the same
-bulk shim as before.
+With `progress = None`, bulk introspection allocates no callback handle and uses the ordinary bulk shim. A retained
+macOS/Lean 4.29.1 capture measured 100.0 µs before and 101.1 µs after, with Criterion reporting no change. This is
+historical local evidence, not a portable latency target.
 
-Worker row-performance changes must benchmark the worker row path explicitly:
+## Worker transport
+
+Measure row changes on both representation and real worker paths:
 
 ```sh
 cargo bench -p lean-rs-worker-child --bench row_payload -- --save-baseline before
-# ... make row transport changes ...
+# After the change:
 cargo bench -p lean-rs-worker-child --bench row_payload -- --baseline before
-```
-
-Do not add public worker batch sinks or private row-batch protocol frames from a microbenchmark alone. The
-`protocol_batching` and `typed_many_512` measurements showed no improvement over per-row delivery on the real worker
-path; row delivery stays per-row. See
-[`docs/architecture/22-worker-row-batching.md`](architecture/22-worker-row-batching.md). Do not replace the worker
-data-plane format from a microbenchmark alone either. Small- and large-row format candidates were measured; the raw-JSON
-typed decode path stays until an end-to-end worker workload justifies a replacement. See
-[`docs/architecture/23-worker-data-plane-format.md`](architecture/23-worker-data-plane-format.md).
-
-The Lean-side worker envelope helper fixture runs through the typed command path:
-
-```sh
-cargo test -p lean-rs-worker-child --test typed_command helper_ -- --nocapture
-```
-
-The focused chunked-stream test prints the named helper workload as `helper_chunked_stream rows=<n> chunks=<n>
-chunk_size=<n> parallelism=1 elapsed_ms=<n>`. Keep `parallelism=1`; Rust worker pools are the supported parallelism
-boundary. A safe Lean-side parallel chunk emitter would have to be proved out before raising this.
-
-Capability-layer changes should also run the downstream-style scenario bench:
-
-```sh
 cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 10
 ```
 
-Record parent/child RSS alongside throughput with:
+`worker::row_payload::protocol_batching` and `typed_many_512` found no improvement that justified replacing per-row
+worker delivery. The `data_plane` workloads compare JSON, validated raw JSON, simulated binary envelopes, MessagePack,
+and CBOR. A microbenchmark alone does not justify a new wire format or public batch sink: demonstrate an end-to-end
+worker win. The decisions are recorded under
+[row batching](architecture/18-worker-data-streaming.md#per-row-framing-evidence) and
+[data-plane format](architecture/18-worker-data-streaming.md#data-plane-format-evidence).
+
+The Lean-side envelope/chunk helpers use the typed-command tests:
 
 ```sh
-cargo run --release -p lean-rs-worker-child --example worker_capability_probe
-cargo run --release -p lean-rs-worker-child --example row_perf_probe
+cargo nextest run -p lean-rs-worker-child --test typed_command -E 'test(helper_)'
 ```
 
-The mathlib-scale fixture runs through the planner, pool, session lease, and typed command path:
+The chunked helper reports `helper_chunked_stream rows=<n> chunks=<n> chunk_size=<n> parallelism=1 elapsed_ms=<n>`.
+Lean-side emission stays sequential; worker pools supply supported parallelism.
 
-```sh
-cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
-cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
-```
-
-Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` and `LEAN_RS_MATHLIB_SCALE_LIMIT=<n>` to use a real mathlib module list as
-the planning workload. The fixture emits deterministic generic rows, so only claim mathlib-scale behavior for the parts
-actually measured: planning, pool leases, session reuse, row throughput, cancellation, fatal-exit recovery, worker
-cycling, and RSS sampling availability.
-
-The same probe records pool snapshots and bounded row-delivery backpressure. The `single_worker`, `pool_max_2`, and
-`post_cycle` lines print active workers, warm leases, the stable queue-depth field, stream request outcomes, delivered
-rows, payload bytes, stream elapsed time, and backpressure counters. The queue-depth field is currently always `0`
-because pool admission is synchronous rather than mailbox-backed. The `slow_sink` line runs a deliberately slow row sink
-and records parent RSS before/after, child RSS, delivered row count, payload bytes, and backpressure waits/failures:
-
-```sh
-cargo build -p lean-rs-worker-child --bin lean-rs-worker-child
-cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-```
-
-Rows are not dropped under backpressure. A delivered row is still tentative until terminal success. Use the snapshot
-counters as operating evidence and terminal summaries as committed row counts.
-
-For runtime-model release validation, run these three worker probes together:
+## Worker operating probes
 
 ```sh
 cargo run --release -p lean-rs-worker-child --example worker_capability_probe
 cargo run --release -p lean-rs-worker-child --example row_perf_probe
 cargo run --release -p lean-rs-worker-child --example proof_candidate_probe
 cargo run -p lean-rs-worker-child --example mathlib_scale_probe
-```
-
-Together they cover cold worker startup, first import, request dispatch, graceful shutdown, cancellation latency,
-fatal-exit recovery, explicit cycling, pool admission/reuse, row throughput, proof-candidate batch latency and partial
-outcomes, parent/child RSS status, and slow-sink backpressure. Treat them as operating checks, not portable benchmark
-baselines; compare before/after on the same machine when a change is expected to move hot request dispatch, row
-streaming, or proof-candidate evaluation.
-
-The `lean-dup`-class readiness fixture exercises the full path end to end:
-
-```sh
 cargo run -p lean-rs-worker-child --example lean_dup_readiness
 ```
 
-It drives the planner, pool, session lease, and typed command facade for generic `version`, `doctor`, `extract`,
-`features`, `index`, and `probe` commands, and records row throughput, diagnostics, progress, terminal summaries,
-timeout/cancellation/fatal-exit recovery, explicit cycling, backpressure, pool stats, parent/child RSS when available,
-and optional subprocess comparison status. Treat its rows as generic fixture data, not downstream schemas.
+These cover startup/import cost, warm dispatch, row throughput, proof-candidate batch outcomes, shutdown/cancellation,
+fatal-exit recovery, cycling, pool reuse, RSS availability, and slow-sink backpressure. Compare before/after on the same
+machine; report the named workload, row counts, throughput, relevant allocation/payload evidence, and parent/child RSS
+or explicit unavailable status.
 
-The supported scale path is planner → pool → session lease → typed command → live rows → terminal summary → pool stats.
-Any throughput change must report a named workload, row counts, throughput, allocation or payload-size evidence where
-relevant, and parent/child RSS (or explicit RSS-unavailable status). The standing scale contract is
-[`docs/architecture/28-production-scale-release.md`](architecture/28-production-scale-release.md).
+The scale fixture exercises planner → pool → session lease → typed command → live rows → terminal summary → pool stats.
+Set `LEAN_RS_MATHLIB_ROOT=/path/to/mathlib4` and `LEAN_RS_MATHLIB_SCALE_LIMIT=<n>` to plan from real mathlib module
+names. Its rows remain deterministic fixture data: the probe does not measure arbitrary mathlib elaboration. A
+corresponding Criterion filter is:
 
-Sample capture (macOS, Lean 4.29.1, `declaration_kind_bulk_vs_loop/bulk_5000`): baseline 100.0 µs vs. comparison 101.1
-µs; Criterion reports no change. Re-capture on the same hardware before declaring a regression.
+```sh
+cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
+```
 
-The cold-path probes (`runtime_init`, `library_open`, `module_initialize`) are not Criterion benches because they only
-fire once per process. Run them via:
+The readiness fixture drives generic `version`, `doctor`, `extract`, `features`, `index`, and `probe` commands. Its
+schemas are fixture schemas. See
+[readiness](architecture/25-mathlib-scale-worker-fixture.md#downstream-replacement-coverage) and the
+[scale contract](architecture/20-worker-pool.md#validation-evidence) for coverage limits.
+
+Rows reach sinks before terminal success and remain tentative until the terminal summary. Pool snapshots expose request
+outcomes, delivered rows, payload bytes, timing, and backpressure counters. Admission is synchronous, so the stable
+queue-depth field is currently zero. See [diagnostics](diagnostics.md) for interpreting partial streams.
+
+## Cold paths and allocations
+
+Measure first runtime, library, and module startup in separate processes. Repeated library opens and initializer calls
+can reuse warmed loader state or idempotent initialization, so a Criterion loop would measure a different path:
 
 ```sh
 cargo build --release -p lean-rs --example cold_probe
 for i in $(seq 1 25); do ./target/release/examples/cold_probe; done
 ```
 
-Output is one `name=<workload> elapsed_us=<u64>` line per stage.
+Each stage prints `name=<workload> elapsed_us=<u64>`.
 
-## Long-session RSS reproducer
-
-`long_session_memory` is the retained-memory counterpart to the latency benches. It runs one long-lived process through
-fresh imports, pooled reuse, bulk introspection, and elaboration, printing RSS checkpoints and `SessionPool` counters:
+For Rust allocation attribution, run the dhat probe from a separate output directory:
 
 ```sh
-LEAN_RS_NUM_THREADS=1 cargo run --release -p lean-rs-host --example long_session_memory
-```
-
-The default workload is intentionally small and memory-bounded. Use the profiling wrappers for repeatable captures:
-
-```sh
-./profiling/scripts/profile_memory.sh long-session
-./profiling/scripts/profile_with_samply.sh long-session
-./profiling/scripts/profile_memory.sh long-session-derived
-LEAN_RS_WORKER_MEMORY_MAX_IMPORTS=1 \
-LEAN_RS_WORKER_MEMORY_MAX_RSS_KIB=1572864 \
-./profiling/scripts/profile_memory.sh worker-cycling
-LEAN_RS_POOL_MEMORY_MAX_WORKERS=1 \
-LEAN_RS_POOL_MEMORY_TOTAL_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_PER_WORKER_RSS_KIB=1572864 \
-LEAN_RS_POOL_MEMORY_MAX_IMPORTS=1 \
-./profiling/scripts/profile_memory.sh pool-memory
-```
-
-This is deliberately not a Criterion bench. Criterion answers per-iteration latency questions; this workload answers
-whether RSS returns at lifetime boundaries after `LeanSession`, `SessionPool`, and `Obj<'lean>` drops. See
-[`docs/safety/long-session-memory.md`](safety/long-session-memory.md) for the measured `LEAN_RESOLVED_VERSION` result
-and consumer guidance. Use `long-session-derived` when the question is whether a query phase initialized source-range,
-pretty-printer, proof-search, parser/elaborator, module-snapshot, or lazy discriminator derived work after import. Use
-the worker and pool runs when changing `LeanWorkerRestartPolicy::memory_bounded` or `LeanWorkerPoolConfig` guidance.
-Their `admission=...` rows distinguish cold worker/session attempts, typed refusals, import-like requests, and RSS
-before/after admission. Their `session_reuse=...` rows distinguish equivalent warm reuse from fragmented keys. Their
-`replacement=...` rows break synchronous worker replacement into spawn/handshake, capability-load, session-open/import,
-first-command, warm-command, and total replacement timings. Prewarming is not enabled by default or implemented in this
-baseline; overlap must be admitted by RSS-budget evidence before adding that lifecycle behavior. Their `batch=...` rows
-cover the warm `process_module_query_batch` proof-agent workload through one pool lease. These rows report selector
-counts, request/import deltas, elapsed time, parent/child RSS, bounded item counts, item-level failures, truncation, and
-`worker_frames=unavailable` until protocol frame counters exist. Batching here reduces request/session churn on warm
-sessions; it is not Lean memory reclamation and does not replace worker cycling. The repo defaults now use a 1,572,864
-KiB local cap and one worker/import job at a time. On the 2026-06-08 local rebaseline, full-session worker cycling
-stayed within the older 2 GiB cap only at `max_imports=1`; warm pool reuse stayed flat and the pool fixture kept one
-child under about 421 MiB. These are local KiB, not portable limits.
-
-## Detect a regression
-
-Save a baseline before any change you suspect of moving the numbers:
-
-```sh
-cargo bench -p lean-rs-host --bench session -- --save-baseline before
-# ... make changes ...
-cargo bench -p lean-rs-host --bench session -- --baseline before
-```
-
-Criterion's report calls out per-workload deltas with confidence intervals. Treat any change outside the 95% CI on a
-workload that exercises the changed code path as load-bearing; treat uniform shifts across unrelated workloads as
-CPU-state noise between captures.
-
-## Allocation snapshots
-
-dhat output for the conversion-heavy workloads, when an allocation question needs an answer:
-
-```sh
-# Run from the workspace root.
 WORKSPACE=$(pwd)
 cargo build --release -p lean-rs --example alloc_probe
-mkdir -p /tmp/dhat-runs && cd /tmp/dhat-runs
+mkdir -p /tmp/dhat-runs
+cd /tmp/dhat-runs
 "$WORKSPACE/target/release/examples/alloc_probe" string_identity_4096
-# dhat-heap.json carries per-call-site backtraces; inspect with
-# https://nnethercote.github.io/dh_view/dh_view.html
 ```
 
-dhat sees Rust allocations only. Lean's internal mimalloc is statically linked into `libleanrt.a` and is invisible to
-`#[global_allocator]`; allocation numbers capture ABI conversions, `Vec`/`String` buffers, and error-message bounding on
-the Rust service layer, not the Lean kernel heap.
+Inspect `dhat-heap.json` with [dh_view](https://nnethercote.github.io/dh_view/dh_view.html). It records Rust-side
+conversion buffers and service allocations. Lean's internal allocator is invisible to Rust's global allocator; use the
+[import-memory probes](https://github.com/jcreinhold/lean-rs/blob/main/profiling/README.md) for Lean retention and RSS.

@@ -1,145 +1,133 @@
-# `lean-rs-host` Capability Contract
+# Host Shim Contract
 
-The 34 mandatory + 13 optional `@[export] lean_rs_host_*` symbols are the standard host-shim surface
-[`lean-rs-host`](https://docs.rs/lean-rs-host) resolves through checked manifest-backed bindings. The `lean-rs-host`
-crate ships the implementation under `crates/lean-rs-host/shims/lean-rs-host-shims/` and a bundled generic interop
-dependency under `crates/lean-rs-host/shims/lean-rs-interop-shims/`. External consumers do not add a
-`lean_rs_host_shims` require line to their own `lakefile.lean`; the Rust loader builds and opens the crate-owned shim
-dylibs. Expected host-shim dylib name: `liblean__rs__host__shims_LeanRsHostShims.{dylib,so}`.
+`lean-rs-host` bundles the Lean implementation of its session services under
+[`shims/lean-rs-host-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/crates/lean-rs-host/shims/lean-rs-host-shims). Consumers do not add a
+`lean_rs_host_shims` dependency to their Lake package. The host loads the shim capability and its generic interop
+dependency separately from the consumer dylib.
 
-This document covers the **wire-level contract**: each Lean signature, the typed Rust shape `LeanSession::*` exposes on
-top, and the Rust call-site mapping. The architectural rationale (generic interop dylib, host shim dylib, `RTLD_GLOBAL`,
-the consumer `lakefile.lean` shape) lives in [`architecture/03-host-stack.md`](architecture/03-host-stack.md).
+The authoritative export table is [`host_shim_exports!`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-toolchain/src/host_shim_abi.rs). It declares 34
+mandatory and 17 optional exports, including their Rust argument and result types. That one table generates manifest
+signatures, cached typed bindings, and link-free startup expectations. Tests in
+[`shim_bindings.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/src/host/shim_bindings.rs) compare the generated ABI projection with the
+real typed signatures and the packaged Lean exports. Change the table, Lean implementation, and Rust decoding together.
 
-## Resolution
+## Loading and resolution
 
-`LeanCapabilities::new` performs:
+`LeanHost::load_capabilities` prepares the bundled artifacts, loads their manifest-backed capability, and initializes
+the consumer's root module. `load_shims_only` omits the consumer dylib. Prepared-artifact entry points load an existing
+snapshot without running a build. Session import uses search paths for the consumer project and both shim packages. See
+[the host architecture](architecture/03-host-stack.md) for ownership and loading rationale.
 
-1. `LakeProject::shim_capability(...)` builds the bundled host shim target and writes a capability manifest containing
-   the generated `lean_rs_host_*` export signatures.
-2. `LeanCapability::from_build_manifest(...)` opens the host shim dylib and its generic interop dependency from that
-   manifest, then initializes `LeanRsHostShims`.
-3. `user_library.initialize_module(<package>, <lib_name>)` runs the consumer's root initializer and keeps the user dylib
-   loaded as the session's project anchor. The consumer does not require or initialize host shims.
-4. `HostShimBindings::resolve(&shim_capability)` constructs typed checked bindings for every bundled shim symbol used by
-   `LeanSession`. User-authored arbitrary `@[export]` dispatch is not a host-session surface; use lower-level `lean-rs`
-   for custom same-process ABI calls.
+Each session resolves `HostShimBindings` once. A missing mandatory symbol fails construction. A missing optional symbol
+leaves an empty binding; its operation reports unsupported or uses its documented fallback. Other checked-lookup errors,
+including signature mismatches, fail construction even for optional exports. Arbitrary consumer `@[export]` dispatch
+belongs to the lower-level `lean-rs` API.
 
-`LeanSession::import` passes three `.olean` roots to the import shim: the consumer project, `lean_rs_interop_shims`, and
-`lean_rs_host_shims`.
+## Mandatory exports
 
-A missing or signature-mismatched mandatory symbol fails session construction. A missing optional symbol stores `None`
-in the typed binding table; the relevant `LeanSession` method returns its `Unsupported` response at dispatch time.
+Every symbol below has the prefix `lean_rs_host_`. Argument and result layouts come from the authoritative table and the
+linked Lean definitions; the names here map the contract to its callers.
 
-## Mandatory contract (32 symbols)
+### Imports and names
 
-Lean structure types (`ElabOpts`, `ElabResult`, `Evidence`, `EvidenceStatus`, `KernelOutcome`, `ProofSummary`,
-`MetaOpts`, `MetaResponse`, `DeclarationFilter`, `SourceRange`) live in
-[`crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean)
-and [`Meta.lean`](../crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Meta.lean). Rust counterparts and the
-`TryFromLean` / `IntoLean` impls crossing the ABI live in `crates/lean-rs-host/src/host/{elaboration,evidence,meta}/`.
-`DeclarationFilter` is a private wire record whose three flags are Nat-backed `0`/`1` values so it uses the same
-object-slot structure ABI as the rest of the host-defined records; Rust callers see ordinary `bool` fields.
+Defined in [Environment.lean](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Environment.lean).
 
-### Environment and declaration queries
+| Export suffix | Rust operation |
+| --- | --- |
+| `session_import` | Default session import |
+| `session_import_progress` | Default import with a progress sink |
+| `session_import_profile` | Explicit import profile or profiler options |
+| `session_import_profile_progress` | Explicit profile with progress |
+| `env_import_stats` | `LeanSession::import_stats` |
+| `extension_registry_epoch` | Captured/live extension-registry epoch queries |
+| `bracketed_import_query` | `LeanCapabilities::bracketed_import_query` |
+| `name_from_string` | Internal conversion for name-bearing queries |
+| `name_to_string` | `name_to_string`, `name_to_string_bulk`, `list_declarations_strings` |
 
-| Lean symbol | Lean signature | Rust method on `LeanSession` |
-| --- | --- | --- |
-| `lean_rs_host_session_import` | `(searchPaths : Array String) (importNames : Array String) : IO Environment` | called once by `LeanCapabilities::session(imports, cancellation, None)` |
-| `lean_rs_host_session_import_progress` | `(searchPaths : Array String) (importNames : Array String) (handle trampoline : USize) : IO (Except UInt8 Environment)` | `LeanCapabilities::session(imports, cancellation, Some(progress))` |
-| `lean_rs_host_session_import_profile` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (loadExts profiler traceProfiler : Bool) (traceProfilerOutput : String) : IO Environment` | explicit profile and profiling imports |
-| `lean_rs_host_session_import_profile_progress` | `(searchPaths : Array String) (importNames : Array String) (importAll : Bool) (levelCode : UInt8) (handle trampoline : USize) : IO (Except UInt8 Environment)` | explicit profile imports with progress |
-| `lean_rs_host_env_import_stats` | `(env : Environment) (importLevel : String) (loadExts : Bool) : IO ImportStats` | `LeanSession::import_stats()` attribution |
-| `lean_rs_host_extension_registry_epoch` | `(_unit : Unit) : IO UInt64` | `LeanSession::extension_registry_epoch()` / `live_extension_registry_epoch()` — opaque, monotone, equality-only |
-| `lean_rs_host_bracketed_import_query` | `(searchPaths : Array String) (importNames : Array String) (declarationNames : Array String) (handle trampoline : USize) : IO (Except UInt8 String)` | `LeanCapabilities::bracketed_import_query(...)` |
-| `lean_rs_host_name_from_string` | `(s : String) : Name` | internal helper for every name-bearing query |
-| `lean_rs_host_name_to_string` | `(n : Name) : String` | `name_to_string(name, cancellation)` (and `name_to_string_bulk` / `list_declarations_strings`) |
-| `lean_rs_host_env_query_declaration` | `(env : Environment) (name : Name) : IO (Option Declaration)` | `query_declaration(name, cancellation)` |
-| `lean_rs_host_env_query_declarations_bulk` | `(env : Environment) (names : Array Name) : IO (Array (Option Declaration))` | `query_declarations_bulk(names, cancellation, None)` |
-| `lean_rs_host_env_query_declarations_bulk_progress` | `(env : Environment) (names : Array Name) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Declaration)))` | `query_declarations_bulk(names, None, Some(progress))` |
+Full sessions load extensions. The bracketed query imports without extensions, returns serialized owned metadata, and
+frees regions before returning. Its lifetime restriction is described in
+[same-process controls](same-process-controls.md). `ImportStats.importedBytes` is a compatibility alias for total
+compacted-region bytes; separate fields report mapped and non-mapped regions. The registry epoch is opaque and monotone;
+callers compare epochs for equality.
 
-`ImportStats.importedBytes` is retained as a compatibility alias for total compacted-region bytes. Newer shims also
-report `compactedRegionBytes`, `memoryMappedRegionBytes`, and `nonMemoryMappedRegionBytes`, all computed from
-`env.header.regions`. | `lean_rs_host_env_list_declarations` | `(env : Environment) : IO (Array Name)` |
-`list_declarations(cancellation)` | | `lean_rs_host_env_list_declarations_filtered` |
-`(env : Environment) (filter : DeclarationFilter) : IO (Array Name)` |
-`list_declarations_filtered(filter, cancellation, None)` | | `lean_rs_host_env_list_declarations_filtered_progress` |
-`(env : Environment) (filter : DeclarationFilter) (handle trampoline : USize) : IO (Except UInt8 (Array Name))` |
-`list_declarations_filtered(filter, cancellation, Some(progress))` | | `lean_rs_host_env_declaration_source_range` |
-`(env : Environment) (name : Name) (sourceRoots : Array String) : IO (Option SourceRange)` |
-`declaration_source_range(name, cancellation)` | | `lean_rs_host_env_declaration_type` |
-`(env : Environment) (name : Name) : IO (Option Expr)` | `declaration_type(name, cancellation)` | |
-`lean_rs_host_env_declaration_type_bulk` | `(env : Environment) (names : Array String) : IO (Array (Option Expr))` |
-`declaration_type_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_type_bulk_progress` |
-`(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array (Option Expr)))` |
-`declaration_type_bulk(names, None, Some(progress))` | | `lean_rs_host_env_declaration_kind` |
-`(env : Environment) (name : Name) : IO String` | `declaration_kind(name, cancellation)` | |
-`lean_rs_host_env_declaration_kind_bulk` | `(env : Environment) (names : Array String) : IO (Array String)` |
-`declaration_kind_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_kind_bulk_progress` |
-`(env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` |
-`declaration_kind_bulk(names, None, Some(progress))` | | `lean_rs_host_env_declaration_name` |
-`(_env : Environment) (name : Name) : IO String` | `declaration_name(name, cancellation)` | |
-`lean_rs_host_env_declaration_name_bulk` | `(_env : Environment) (names : Array String) : IO (Array String)` |
-`declaration_name_bulk(names, cancellation, None)` | | `lean_rs_host_env_declaration_name_bulk_progress` |
-`(_env : Environment) (names : Array String) (handle trampoline : USize) : IO (Except UInt8 (Array String))` |
-`declaration_name_bulk(names, None, Some(progress))` | | `lean_rs_host_env_expr_to_string_raw` | `(e : Expr) : String` |
-`expr_to_string_raw(expr, cancellation)` |
+### Declaration queries
 
-### Elaboration, kernel check, evidence (7)
+Also defined in [Environment.lean](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Environment.lean).
 
-| Lean symbol | Lean signature | Rust method on `LeanSession` |
-| --- | --- | --- |
-| `lean_rs_host_elaborate` | `(env) (src : String) (expectedType : Option Expr) (opts : ElabOpts) : IO ElabResult` | `elaborate(source, expected_type, options, cancellation)` |
-| `lean_rs_host_elaborate_bulk` | `(env) (sources : Array String) (opts : ElabOpts) : IO (Array ElabResult)` | `elaborate_bulk(sources, options, cancellation, None)` |
-| `lean_rs_host_elaborate_bulk_progress` | `(env) (sources : Array String) (opts : ElabOpts) (handle trampoline : USize) : IO (Except UInt8 (Array ElabResult))` | `elaborate_bulk(sources, options, None, Some(progress))` |
-| `lean_rs_host_kernel_check` | `(env) (src : String) (opts : ElabOpts) : IO KernelOutcome` | `kernel_check(source, options, cancellation, None)` |
-| `lean_rs_host_kernel_check_progress` | `(env) (src : String) (opts : ElabOpts) (handle trampoline : USize) : IO (Except UInt8 KernelOutcome)` | `kernel_check(source, options, cancellation, Some(progress))` |
-| `lean_rs_host_check_evidence` | `(env) (ev : Evidence) : IO EvidenceStatus` | `check_evidence(evidence, cancellation)` |
-| `lean_rs_host_evidence_summary` | `(_env) (ev : Evidence) : IO ProofSummary` | `summarize_evidence(evidence, cancellation)` |
+| Export suffix | `LeanSession` operation |
+| --- | --- |
+| `env_query_declaration` | `query_declaration` |
+| `env_query_declarations_bulk` | `query_declarations_bulk` |
+| `env_query_declarations_bulk_progress` | Bulk query with progress |
+| `env_list_declarations` | `list_declarations` |
+| `env_list_declarations_filtered` | `list_declarations_filtered` |
+| `env_list_declarations_filtered_progress` | Filtered list with progress |
+| `env_declaration_source_range` | `declaration_source_range` |
+| `env_declaration_type` | `declaration_type` |
+| `env_declaration_type_bulk` | `declaration_type_bulk` |
+| `env_declaration_type_bulk_progress` | Bulk type query with progress |
+| `env_declaration_kind` | `declaration_kind` |
+| `env_declaration_kind_bulk` | `declaration_kind_bulk` |
+| `env_declaration_kind_bulk_progress` | Bulk kind query with progress |
+| `env_declaration_name` | `declaration_name` |
+| `env_declaration_name_bulk` | `declaration_name_bulk` |
+| `env_declaration_name_bulk_progress` | Bulk name query with progress |
+| `env_search_declarations` | `search_declarations` |
+| `env_expr_to_string_raw` | `expr_to_string_raw` |
 
-Declaration inspection carries two attribution subrecords in its result: `proofSearch`, which reports whether
-proof-search facts were computed, and `derivedWork`, which reports source-range, docstring, raw rendering,
-pretty-printing, proof-search, parser/elaborator, module-snapshot, and lazy discriminator derived work. The inspection
-request's `fields.proofSearch` flag defaults off on the Rust side; `attributes` alone must not force proof-search facts.
+`DeclarationFilter` uses Nat-backed `0`/`1` flags in its private wire record; callers see Rust `bool` fields.
 
-## Optional contract (10 symbols)
+### Elaboration and evidence
 
-If absent when checked bindings are resolved, the optional binding stores `None` for that slot; the dispatching call
-site degrades gracefully—`LeanSession::run_meta` synthesises `LeanMetaResponse::Unsupported` for the meta services, and
-module-query methods return their `Unsupported` outcome for bounded module projections.
+Defined in [Elaboration.lean](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Elaboration.lean).
 
-| Lean symbol | Lean signature | Rust method on `LeanSession` |
-| --- | --- | --- |
-| `lean_rs_host_meta_infer_type` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::infer_type(), expr, options, cancellation)` |
-| `lean_rs_host_meta_whnf` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::whnf(), expr, options, cancellation)` |
-| `lean_rs_host_meta_heartbeat_burn` | `(env) (_expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::heartbeat_burn(), expr, options, cancellation)` |
-| `lean_rs_host_meta_is_def_eq` | `(env) (request : Expr × Expr × UInt8) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::is_def_eq(), (lhs, rhs, transparency), options, cancellation)` |
-| `lean_rs_host_meta_pp_expr` | `(env) (expr : Expr) (opts : MetaOpts) : IO MetaResponse` | `run_meta(&meta::pp_expr(), expr, options, cancellation)` |
-| `lean_rs_host_env_inspect_declaration` | `(env) (request : DeclarationInspectionRequest) (sourceRoots : Array String) (heartbeats : UInt64) : IO DeclarationInspectionResult` | `inspect_declaration(request, cancellation)` |
-| `lean_rs_host_process_module_query` | `(env) (src : String) (query : ModuleQuery) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryOutcome` | `process_module_query(source, query, options, cancellation)` |
-| `lean_rs_host_process_module_query_batch` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) : IO ModuleQueryBatchOutcome` | `process_module_query_batch(source, selectors, budgets, options, cancellation)` |
-| `lean_rs_host_process_module_query_batch_cached` | `(env) (src : String) (selectors : Array ModuleQuerySelector) (budgets : ModuleQueryOutputBudgets) (ns : String) (label : String) (heartbeats : UInt64) (diagBytes : USize) (policy : String) : IO ModuleQueryBatchCachedOutcome` | `process_module_query_batch_cached(source, selectors, budgets, options, policy, cancellation)` |
-| `lean_rs_host_clear_module_snapshot_cache` | `IO ModuleSnapshotCacheClearResult` | `clear_module_snapshot_cache()` |
+| Export suffix | `LeanSession` operation |
+| --- | --- |
+| `elaborate` | `elaborate` |
+| `elaborate_bulk` | `elaborate_bulk` |
+| `elaborate_bulk_progress` | Bulk elaboration with progress |
+| `kernel_check` | `kernel_check` |
+| `kernel_check_progress` | Kernel check with progress |
+| `check_evidence` | `check_evidence` |
+| `evidence_summary` | `summarize_evidence` |
 
-The proof-state payload returned by the module-query symbols includes bounded `proofBoundaries` and
-`proofBoundariesTruncated` fields on both the successful proof-state case and the unavailable selector-failure case. The
-candidates are source-ordered recovery points for proof-position selection. They are part of the host shim contract
-because Rust decodes the Lean structure layout directly.
+Options are passed through the scalar/string argument shapes in the export table, rather than as a single C-ABI options
+record. Lean-authored result structures are decoded by the Rust elaboration and evidence modules.
 
-## Forking the shim package
+## Optional exports
 
-The shim package is small (~700 LOC across four files). A fork that customises behaviour (e.g., different heartbeat
-policy, extra logging on the kernel-check path) must keep:
+The five meta services are defined in
+[Meta.lean](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/Meta.lean); inspection and runtime version
+are in `Environment.lean`; module processing and caches are in
+[InfoTree.lean](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-host/shims/lean-rs-host-shims/LeanRsHostShims/InfoTree.lean).
 
-- Same Lake package name (`lean_rs_host_shims`) and `lean_lib` name (`LeanRsHostShims`) so `LeanCapabilities` can
-  initialize the module and interpret symbol names consistently.
-- Same 34 mandatory `@[export]` symbol names with manifest-compatible signatures.
-- The 13 optional symbols are truly optional; omitting any collapses the corresponding session method to its
-  `Unsupported` arm (`run_meta` for the five meta services, module-query methods for bounded module projections, or
-  cache-clear reporting unsupported).
+| Export suffix | Rust operation |
+| --- | --- |
+| `meta_infer_type` | `run_meta(&meta::infer_type(), ...)` |
+| `meta_whnf` | `run_meta(&meta::whnf(), ...)` |
+| `meta_heartbeat_burn` | `run_meta(&meta::heartbeat_burn(), ...)` |
+| `meta_is_def_eq` | `run_meta(&meta::is_def_eq(), ...)` |
+| `meta_pp_expr` | `run_meta(&meta::pp_expr(), ...)` |
+| `env_inspect_declaration` | `inspect_declaration` |
+| `process_module_query` | `process_module_query` |
+| `process_module_query_batch` | `process_module_query_batch` |
+| `process_module_query_batch_cached` | `process_module_query_batch_cached` |
+| `attempt_proof` | `attempt_proof` |
+| `verify_declaration` | `verify_declaration` |
+| `verify_declaration_batch` | `verify_declaration_batch` |
+| `configure_header_import_budget` | Worker header-import budget setup |
+| `header_import_state` | Worker header-import accounting |
+| `clear_module_header_cache` | Header cache cleanup at session release |
+| `runtime_version` | Loaded Lean runtime version check |
+| `clear_module_snapshot_cache` | `clear_module_snapshot_cache` |
 
-A fork that changes the Lean structure layouts also needs corresponding Rust changes—this is why the shim package isn't
-framed as "compatibility shims" but as the **implementation** of the wire contract.
+Inspection results include `proofSearch` availability and `derivedWork` attribution. Requesting attributes alone does
+not compute proof-search facts; `fields.proofSearch` defaults off. Module proof-state results include bounded,
+source-ordered `proofBoundaries` recovery points and an explicit truncation flag, including selector-failure results.
 
-Forks should keep reusable callback/string/name/object ABI helpers in the generic `lean-rs-interop-shims` package when
-those helpers are not host-policy-specific.
+## Custom implementations
+
+A replacement shim package must preserve package/library names, mandatory exports, manifest-compatible signatures, and
+all structure layouts Rust decodes. Optional exports can be omitted only with their caller's unsupported/fallback
+behavior understood. Layout changes require matching Rust changes. Keep reusable callback and ABI helpers in
+`lean-rs-interop-shims`; host policy belongs here.

@@ -1,34 +1,67 @@
 # Worker Session Adapter
 
-The worker crates expose a narrow host-session adapter over the process boundary. It is not a remote `LeanSession`. The
-in-process session remains the richer API for trusted callers; the worker adapter serves production callers that need
-crash isolation, memory cycling, and typed IPC.
+`LeanWorker::open_session` returns a borrowing `LeanWorkerSession`. Configure it with a Lake project and imports,
+a manifest-backed capability, or `LeanWorkerSessionConfig::shims_only` for host services without a downstream
+capability. The child performs Lean work; the parent receives copied, serializable results.
 
-## Public Shape
+## Supported operations
 
-Callers open a session with `LeanWorker::open_session` and a `LeanWorkerSessionConfig` naming the Lake project, package,
-library, and import list. The returned `LeanWorkerSession` borrows the supervisor and exposes the supported
-cross-process subset:
+The adapter exposes bounded service operations rather than runtime-bound handles:
 
-- `elaborate` returns `LeanWorkerElabResult`;
-- `kernel_check` returns `LeanWorkerKernelResult`;
-- `declaration_kinds` returns `Vec<String>`;
-- `declaration_names` returns `Vec<String>`.
+| Area | Methods |
+| --- | --- |
+| Elaboration and kernel checking | `elaborate`, `kernel_check` |
+| Meta operations | `infer_type`, `whnf`, `is_def_eq` |
+| Declarations | `declaration_kinds`, `declaration_names`, `list_declarations_strings`, `describe`, `describe_bulk`, `search_declarations`, `declaration_type`, `inspect_declaration` |
+| Source queries | `process_module_query`, `process_module_query_batch`, `clear_module_snapshot_cache` |
+| Proof work | `attempt_proof`, `verify_declaration`, `verify_declaration_batch` |
+| Downstream capabilities | Typed JSON and streaming commands, capability metadata and doctor checks |
+| Loaded host contract | `host_runtime_metadata` |
 
-These outputs are deliberately serializable. The worker does not send `LeanExpr`, `LeanEvidence`, `LeanDeclaration`, or
-`LeanName` handles to the parent because those handles are tied to the child Lean runtime. Diagnostics are copied into
-`LeanWorkerDiagnostic` values with severity, message, file label, and optional source positions.
+`LeanExpr`, `LeanEvidence`, `LeanDeclaration`, and `LeanName` handles remain inside the child. Meta operations return
+rendered values or booleans with structured status. Each meta pass, including notation-aware pretty-printing, has its
+own heartbeat limit. Only an unsupported pretty-printer falls back to raw rendering; a pretty-printer failure fails
+the whole call. Proof attempts use in-memory source overlays and never write source files.
 
-## Hidden Boundary
+`LeanWorkerDiagnostic` copies severity, message, file label, and available source positions. Ordinary source diagnostics
+use `original_source` and may carry `original_range`. Proof-overlay diagnostics use `synthetic_buffer`: their line and
+column refer to generated text and must not be used as editable positions in the original file. Missing coordinate
+metadata from older peers decodes as `unknown`.
 
-The private protocol carries frames for opening a host session and for the supported operations. That protocol is
-versioned and tested, but it is not the caller-facing API. Callers do not manage `Command`, pipe reads, frame encoding,
-child stderr parsing, or restart bookkeeping.
+Proof-state results include bounded source-order proof boundaries for retrying a selector when an `after_text` or
+default position cannot be resolved. These are recovery points, not a general source map; their cap is independent of
+the diagnostic cap. For example:
+
+```json
+{
+  "diagnostics": [{
+    "severity": "error",
+    "message": "unknown identifier 'missingIdentifier'",
+    "line": 2,
+    "column": 9,
+    "coordinate_space": "synthetic_buffer",
+    "original_range": null
+  }],
+  "proof_boundaries": [{
+    "index": 0,
+    "kind": "entry",
+    "source": { "start_line": 2, "start_column": 3, "end_line": 2, "end_column": 10 },
+    "excerpt": { "value": "exact h", "truncated": false }
+  }],
+  "proof_boundaries_truncated": false
+}
+```
+
+## Protocol boundary
+
+The supervisor hides pipe reads, frame encoding, stderr parsing, and restart bookkeeping from session callers.
+`lean-rs-worker-protocol` separately publishes the versioned codec and wire types for alternative peers, recorders, and
+harnesses; ordinary host calls do not require that interface.
 
 Inside the child, the adapter calls `lean-rs-host`. This keeps theorem-prover policy in `lean-rs-host` and process
 policy in the worker crates.
 
-## Progress And Cancellation
+## Progress and cancellation
 
 Worker progress is a parent-side IPC event, not a cross-process callback handle. `LeanWorkerProgressSink` receives
 `LeanWorkerProgressEvent` values with a string phase, current count, optional total, and elapsed duration measured in
@@ -50,11 +83,11 @@ cancellation, timeout, or setup error strings.
 This is a worker-safe boundary. It does not share an in-process `LeanCancellationToken` or `LeanCallbackHandle` with the
 child.
 
-## Current Limits
+## Extension boundary
 
-The adapter intentionally does not mirror every `LeanSession` method. It does not support arbitrary capability
-protocols, cross-process callback handles, `MetaM` services, evidence handles, source-range handles, or expression
-transport. Add operations only when a production worker use case needs a process-safe value shape.
+New host operations need a process-safe result shape and explicit output/resource budgets. Runtime handles,
+cross-process callback handles, and arbitrary access to child-local `MetaM` state are outside this adapter. Downstream
+exports use the [capability layer](19-worker-capability-layer.md).
 
 ## Loaded host-runtime metadata
 
@@ -70,25 +103,24 @@ boundary, not a certificate against library substitution or hostile metaprograms
 a required subset before exposing each host session, including session opens after an internal recycle.
 Capability builders also include the requirement in their pool reuse key, so an existing unguarded or differently
 constrained session cannot satisfy a newly required contract.
-`LeanWorkerHostHandle::set_host_runtime_expectation` installs the broker's one current contract on an existing actor
+`LeanWorkerHostHandle::set_host_runtime_expectation` installs a contract on a retained host handle
 without replacing its worker. It validates any cached actual metadata before changing the configuration. Extra
 compatible bindings do not invalidate the subset. The parent retains metadata only after successful validation and
 clears it before every new session open and shutdown/replacement attempt; old metadata never authorizes a new
 generation. Inspection itself does not consume the request-cycle budget. An old worker that lacks this extension cannot
 satisfy an opted-in requirement and receives no body command through that session.
 
-The broker may advertise its expected contract while cold. Actual loaded metadata exists only after a session has opened
-and must be bound to that actor/generation when projected into an execution receipt. It does not prove a submitted
-command ran, a child exited, or a proof succeeded.
-
+An embedder may advertise its expected contract before opening a session. Actual loaded metadata exists only after a
+session has opened and must be bound to that owner/generation when projected into an execution receipt. It does not
+prove a submitted command ran, a child exited, or a proof succeeded.
 
 ## Shared artifact read custody
 
 `LeanWorkerChild::shared_artifact_reads(true)` requires the actual child to hold shared artifact locks while it imports
-or runs a host operation. Generic library configuration defaults to false; the server's main and semantic worker
-builders opt in. The configured helper owns the one read/write admission algorithm. The actual worker receives shared
-lock descriptors through a private Unix socket and makes them inheritable only in that controlled process. The broker
-uses atomic close-on-exec file opens for its pure-Rust cache and index reads; native children use guardian-owned loans.
+or runs a host operation. Generic library configuration defaults to false; embedders opt in on each worker builder
+that requires this coordination. The configured helper owns the read/write admission algorithm. The actual worker
+receives shared lock descriptors through a private Unix socket and makes them inheritable only in that controlled process. Native
+children use guardian-owned loans; broker-side Rust cache/index readers use atomic close-on-exec opens.
 Multithreaded embedders may instead use the helper proxy, without receiving a lock descriptor. Canonical sibling lock
 files also admit a genuinely cold root without creating `.lake`; an existing `.lake` must remain an unaliased directory
 in that root.
@@ -148,6 +180,6 @@ whether the failure occurred during session import or runtime validation before 
 change does not by itself make this returned outcome unknown.
 
 Unconfirmed transport, shutdown or descendant cleanup retains its exact pending exit observation and capacity fence. A
-completed body result remains known even if subsequent read-scope release fails: the server keeps the recorded result
-and retires that owner. A stopped receipt remains bound to its own request and generation; it cannot settle a new
+completed body result remains known even if subsequent read-scope release fails: an embedder preserves the recorded
+result and retires that owner. A stopped receipt remains bound to its own request and generation; it cannot settle a new
 request, a replacement startup, or another semantic companion.
