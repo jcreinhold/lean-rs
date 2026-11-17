@@ -62,10 +62,10 @@ All published crates share the workspace version; dependency examples use `"0.9"
 
 The safe layers hide Lean object layout, reference counting, and raw dispatch. Checked export lookup relies on trusted
 ABI metadata; arbitrary symbol lookup remains explicitly unsafe. The
-[safety model](docs/architecture/01-safety-model.md) records the required guarantees and current boundary gaps; Lean
+[safety model](docs/architecture/safety.md) records the required guarantees and current boundary gaps; Lean
 remains responsible for semantic correctness. Resource exhaustion and fatal Lean exits require a process boundary. Read
-the [charter](docs/architecture/00-charter.md) and [safety model](docs/architecture/01-safety-model.md) before changing
-these boundaries.
+the [architecture map](docs/architecture/README.md), [charter](docs/architecture/charter.md), and
+[safety model](docs/architecture/safety.md) before changing these boundaries.
 
 ## Documentation and examples
 
@@ -78,7 +78,7 @@ The [documentation index](docs/SUMMARY.md) is the complete reading map; the same
 | Run typed commands with live rows, diagnostics, and deadlines | [Worker capability runner](docs/recipes/worker-capability-runner.md) |
 | Work with raw worker requests and frames | [Worker transport](docs/recipes/worker-capability-runner.md#wire-and-raw-rows) |
 | Fan out through a local pool | `cargo run -p lean-rs-worker-child --example worker_pool` |
-| Inspect import planning and scale probes | [Scale fixtures](docs/architecture/25-mathlib-scale-worker-fixture.md) |
+| Inspect import planning and scale probes | [Scale fixtures](docs/testing.md#worker-fixtures) |
 | Diagnose a failure | [Diagnostics](docs/diagnostics.md); start with `RUST_LOG=lean_rs=debug` |
 | Measure performance or memory | [Performance](docs/performance.md) and [retention measurements](docs/safety/long-session-memory.md) |
 

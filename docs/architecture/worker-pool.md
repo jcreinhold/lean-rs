@@ -6,7 +6,7 @@ policy, lease invalidation, and aggregate observations.
 
 The API is synchronous: acquiring a lease mutably borrows the pool, and the lease borrows its selected entry. It has
 no public mailbox, reserved queue slot, scheduler, fairness guarantee, or global FIFO order. Remote workers are outside
-the supported backend. See [runtime semantics](30-worker-runtime-semantics.md) for the lifecycle model.
+the supported backend. See [runtime semantics](worker-runtime.md) for the lifecycle model.
 
 ## Leases and reuse
 
@@ -72,7 +72,7 @@ Timeout or cancellation can terminate a blocked request through the normal lifec
 - `data_rows_delivered` counts successful sink deliveries; terminal summaries define committed counts.
 
 Diagnostics, progress, data rows, and snapshots remain separate channels. A slow-sink probe prints parent/child RSS,
-rows, bytes, and waits; see the [fixture commands](25-mathlib-scale-worker-fixture.md#commands).
+rows, bytes, and waits; see the [fixture commands](../testing.md#worker-fixture-commands).
 
 ## Validation evidence
 
@@ -88,9 +88,9 @@ policy cycling, memory admission, typed commands, and bounded backpressure. Rele
 `session_reuse`, `import_planning`, `observability_backpressure`, `mathlib_scale_fixture`, and `lean_dup_readiness`.
 The parent `worker_shutdown` suite checks import-light lifecycle conformance.
 
-The [scale and replacement fixtures](25-mathlib-scale-worker-fixture.md) use deterministic test schemas, including when
+The [scale and replacement fixtures](../testing.md#worker-fixtures) use deterministic test schemas, including when
 planning with a real mathlib module list. They establish operational coverage, not mathlib indexing semantics or a
-portable throughput guarantee. [Streaming measurements](18-worker-data-streaming.md) justify the retained per-row,
+portable throughput guarantee. [Streaming measurements](worker-streaming.md) justify the retained per-row,
 raw-JSON path.
 
 Performance reports must name the command, revision, platform, row/module counts, throughput, RSS availability, and

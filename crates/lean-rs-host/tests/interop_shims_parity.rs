@@ -4,7 +4,7 @@
 //! The package is duplicated, not shared, because a published crate's
 //! `Cargo.toml` `include` cannot reach outside its own directory, so each crate
 //! must vendor its own self-contained copy (see
-//! `docs/architecture/11-generic-interop-shims.md`). The canonical copy is also
+//! `docs/architecture/callbacks.md#generic-shim-package`). The canonical copy is also
 //! a Rust crate; the host copy intentionally is not. Duplication without a
 //! payload guard drifts: `LeanRsInterop/Worker/Stream.lean` was once added to
 //! the canonical copy alone. This test makes the "two runtime payloads,

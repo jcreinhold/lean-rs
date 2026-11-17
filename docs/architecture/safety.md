@@ -18,7 +18,7 @@ callers to inspect object headers, manage reference counts, or cast symbol addre
 Safe export lookup requires trusted signature metadata, such as a build manifest for a known capability contract.
 `LeanModule::exported_unchecked::<Args, R>(name)` is unsafe: a symbol name and caller-selected Rust types do not prove
 that the compiled C ABI matches. Manifest and loader checks are described in
-[`29-loader-and-artifact-boundary.md`](29-loader-and-artifact-boundary.md).
+[`loading.md`](loading.md).
 
 The current public hidden `LeanAbi` conversion hooks do not fully enforce the intended boundary: `Obj`'s safe `from_c`
 implementation accepts a raw C representation without a caller-side unsafe requirement. The sibling-crate marker
@@ -42,7 +42,7 @@ knowledge belongs in `lean-rs` conversion/view APIs rather than in the host serv
 Lean-derived handles inherit `!Send + !Sync` from `LeanRuntime`. Opting a handle into either trait is a per-type
 contract change requiring justification against Lean's thread and reference-count rules. Initialize and use runtime
 handles on the calling thread; use `LeanThreadGuard` to scope explicit attach/detach. See
-[`04-concurrency.md`](04-concurrency.md) for the precise contract and async embedding pattern.
+[`concurrency.md`](concurrency.md) for the precise contract and async embedding pattern.
 
 ## Unsafe-code review
 
@@ -70,8 +70,8 @@ status plus a bounded `LeanError`. Lean `IO` exceptions and ABI-shape failures a
 
 Lean internal panics, aborting Rust panics, generated unreachable paths, foreign unwinds, `std::exit`, and `abort` have
 no in-process recovery guarantee. Use the worker process boundary when the application must survive them; see
-[`06-panic-containment.md`](06-panic-containment.md).
+[`worker-processes.md`](worker-processes.md).
 
 Non-test code must not use `unwrap()`, `expect()`, or `panic!` unless a comment states the proof obligation making the
 operation infallible. Lean-to-Rust callbacks use `LeanCallbackHandle`, with the lifetime and reentrancy rules in
-[`10-callback-registry.md`](10-callback-registry.md).
+[`callbacks.md`](callbacks.md).

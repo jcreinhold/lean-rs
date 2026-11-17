@@ -77,15 +77,13 @@ bulk behavior:
 | `elaborate_bulk` | Per-source `Result<LeanExpr, LeanElabFailure>`; budgets apply separately to each source |
 
 Without a cancellation token, bulk operations dispatch the batch in Lean. `query_declarations_bulk` first constructs one
-name per input, so its recorded FFI count is `N + 1`, compared with `2N` singular calls. Progress uses additive
-Lean-side bulk shims. With a cancellation token, these bulk methods use singular per-item calls so Rust can check
-between items and discard partial output. Empty bulk input returns immediately without dispatch or progress. See
-[cancellation](07-cooperative-cancellation.md) and [progress](13-structured-progress.md) for their limits.
+name per input, so its recorded FFI count is `N + 1`, compared with `2N` singular calls. See
+[same-process controls](../same-process-controls.md) for cancellation, progress, batching changes, and their limits.
 
 `declaration_source_range` returns Lean's recorded 1-based range, with a resolved source path where available and a
 module-label fallback. Filtered declaration listing folds the environment in Lean before allocating returned Rust
 handles. Module queries and proof workflows return bounded Lean-authored projections; they do not expose raw info trees.
-Their cache, options, and degraded-result rules live in [`09-info-tree-projection.md`](09-info-tree-projection.md).
+Their cache, options, and degraded-result rules live in [`module-queries.md`](module-queries.md).
 
 ## Evidence and resource bounds
 

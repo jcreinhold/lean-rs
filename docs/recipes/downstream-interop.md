@@ -16,7 +16,7 @@ not configure it themselves. Both build the generic interop shim and
 [`fixtures/interop-shims/`](https://github.com/jcreinhold/lean-rs/tree/main/fixtures/interop-shims), open their shared libraries, and call explicit Lean exports.
 The fixture's Lake dependency points at the repository's bundled shim copy; a published consumer should materialize the
 package from `lean-rs-interop-shims` as described in the
-[generic shim contract](../architecture/11-generic-interop-shims.md).
+[generic shim contract](../architecture/callbacks.md#generic-shim-package).
 
 ## Build and load
 

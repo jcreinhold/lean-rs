@@ -85,7 +85,7 @@ worker's contribution is to make each per-file query's worst case predictable:
   `elaboration_micros` is 0.
 
 The remaining cross-query cost on a large scan is the *cold header re-import*: when the worker is recycled mid-scan by
-the RSS cap (`16-production-boundary.md`, memory cycling and restart policy), the replacement child must re-load the
+the RSS cap (`worker-processes.md`, memory cycling and restart policy), the replacement child must re-load the
 import closure from `.olean`, which for heavy closures can dominate a per-file query. That is RSS-policy behaviour, not
 a projection cost; mitigate it by building the project first or by capping the scan with the caller's `limit`, so the
 worker re-imports a closure once and answers many files against it before the next cycle.
@@ -164,7 +164,7 @@ prove that memory pressure evicted a particular declaration. Three layers handle
    — and record a `ChildAbort` restart (`stable_cause = "child_abort"`). A successful restart yields the degraded verdict
    and a fresh child for subsequent calls; a failed restart or non-abort error still propagates. This is the
    process-boundary half of the panic-containment contract; see
-   [`06-panic-containment.md`](06-panic-containment.md).
+   [`worker-processes.md`](worker-processes.md).
 
 No new status variant is introduced: `BudgetExceeded` already names "the worker could not complete this within its
 resource envelope," which is exactly the degraded case. `LEAN_RS_VERIFY_RSS_TAINT_KIB` is an internal child environment

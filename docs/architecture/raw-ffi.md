@@ -2,8 +2,8 @@
 
 `lean-rs-sys` publishes the curated Lean C ABI declarations, Rust mirrors of required `lean.h` inlines, opaque FFI
 types, and runtime link directives. `lean-rs-abi` supplies static symbol, toolchain-window, and layout metadata without
-linking or probing Lean. `lean-toolchain` owns discovery and build helpers. The [charter](00-charter.md),
-[safety model](01-safety-model.md), and [compatibility policy](02-versioning-and-compatibility.md) govern changes to
+linking or probing Lean. `lean-toolchain` owns discovery and build helpers. The [charter](charter.md),
+[safety model](safety.md), and [compatibility policy](compatibility.md) govern changes to
 those boundaries.
 
 ## Published escape hatch
@@ -45,7 +45,7 @@ arithmetic to expose invariant violations in debug and release builds.
 
 Each inline is a maintained ABI assumption, not generated evidence. A new header digest requires reviewing both layout
 and inline semantics: unchanged struct offsets alone do not prove refcount equivalence. See the
-[compatibility notes](02-versioning-and-compatibility.md) for version-specific changes, including the scalar-array
+[compatibility notes](compatibility.md) for version-specific changes, including the scalar-array
 linearity marker.
 
 ## Discovery, headers, and linking
@@ -89,4 +89,4 @@ Verification is split by what each check can prove:
 - The [toolchain bump procedure](../bump-toolchain.md) covers header/layout comparison and required-symbol probes.
 
 Windows and toolchains outside the supported window have no compatibility commitment. Keep platform support and version
-policy in [versioning and compatibility](02-versioning-and-compatibility.md).
+policy in [versioning and compatibility](compatibility.md).

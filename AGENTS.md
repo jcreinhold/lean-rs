@@ -4,9 +4,9 @@ Rust bindings for hosting Lean 4. Lean owns elaboration, kernel checking, proof 
 dependent-type meaning. This workspace owns linking, runtime initialization, ABI conversion, loading, error boundaries,
 scheduling, diagnostics, batching, and packaging.
 
-Before changing code, read the [architecture charter](docs/architecture/00-charter.md), the
-[safety model](docs/architecture/01-safety-model.md), and the owning topic in the
-[documentation index](docs/SUMMARY.md).
+Before changing code, read the [architecture charter](docs/architecture/charter.md), the
+[safety model](docs/architecture/safety.md), and the owning topic in the
+[architecture map](docs/architecture/README.md).
 
 ## Boundaries
 

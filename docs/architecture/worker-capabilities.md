@@ -5,7 +5,7 @@ completion. Applications define command names and serde request, row, and termin
 validity, persistence, indexing, and user-facing behavior.
 
 Use `LeanWorkerJsonCommand<Req, Resp>` and `LeanWorkerStreamingCommand<Req, Row, Summary>` through a capability or
-[pool lease](20-worker-pool.md). `run_data_stream` remains a lower-level option for fixtures and schema-less tools.
+[pool lease](worker-pool.md). `run_data_stream` remains a lower-level option for fixtures and schema-less tools.
 Command-specific methods such as `extract`, `features`, `index`, or `probe` belong downstream.
 
 ## Setup and deployment
@@ -13,7 +13,7 @@ Command-specific methods such as `extract`, `features`, `index`, or `probe` belo
 `LeanWorkerCapabilityBuilder` describes the capability Lake project, package, target, and imports. It resolves or builds
 the capability, resolves the worker child, checks startup, opens the import session, applies restart/timeout policy, and
 optionally validates capability metadata. Packaged applications should use the manifest-backed artifact path from the
-[loader contract](29-loader-and-artifact-boundary.md).
+[loader contract](loading.md).
 
 The default child resolver checks `LEAN_RS_WORKER_CHILD`, sibling Cargo profile paths, and the workspace development
 build. Applications ship an app-owned child binary. `LeanWorker` remains available for custom supervision, diagnostics,
@@ -34,13 +34,13 @@ selected workspace.
 
 Streaming commands deliver typed rows live, diagnostics and progress on separate sinks, and terminal metadata on
 success. Typed row decode errors identify the command export, stream, and sequence. Rows remain tentative until terminal
-success; [streaming mechanics and measurements](18-worker-data-streaming.md) define that contract.
+success; [streaming mechanics and measurements](worker-streaming.md) define that contract.
 
 Startup and request deadlines are separate. `LeanWorkerConfig::startup_timeout` covers the child handshake.
 `LeanWorkerConfig::request_timeout`, `LeanWorker::set_request_timeout`, and `LeanWorkerSession::set_request_timeout`
 set the parent watchdog for a request. Timeout retires the child, records
 `LeanWorkerRestartReason::RequestTimeout`, returns `LeanWorkerError::Timeout`, and invalidates the session. Replacement
-failure does not erase pending cleanup ownership; [runtime semantics](30-worker-runtime-semantics.md) govern recovery.
+failure does not erase pending cleanup ownership; [runtime semantics](worker-runtime.md) govern recovery.
 
 ## Metadata
 
@@ -49,9 +49,9 @@ failure does not erase pending cleanup ownership; [runtime semantics](30-worker-
 version, and diagnostic envelopes. Applications decide how those facts affect compatibility, caches, and support.
 
 Loaded host-runtime metadata is a third contract: it describes manifest-checked host shim bindings and can be required
-before a body runs. It is documented with the [session adapter](17-worker-session-adapter.md#loaded-host-runtime-metadata).
+before a body runs. It is documented with the [session adapter](worker-sessions.md#loaded-host-runtime-metadata).
 It is separate from capability version metadata and from evidence that a command executed.
 
 The [capability recipe](../recipes/worker-capability-runner.md) is the normal worked example. The
-[scale and replacement fixtures](25-mathlib-scale-worker-fixture.md) exercise these generic primitives without adopting
-downstream schemas. Lean authors can use the [envelope helpers](18-worker-data-streaming.md#lean-envelope-helpers).
+[scale and replacement fixtures](../testing.md#worker-fixtures) exercise these generic primitives without adopting
+downstream schemas. Lean authors can use the [envelope helpers](worker-streaming.md#lean-envelope-helpers).

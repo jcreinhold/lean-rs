@@ -87,7 +87,7 @@ child.
 
 New host operations need a process-safe result shape and explicit output/resource budgets. Runtime handles,
 cross-process callback handles, and arbitrary access to child-local `MetaM` state are outside this adapter. Downstream
-exports use the [capability layer](19-worker-capability-layer.md).
+exports use the [capability layer](worker-capabilities.md).
 
 ## Loaded host-runtime metadata
 

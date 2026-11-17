@@ -38,7 +38,7 @@ sha2 = { workspace = true }
 # `SIGABRT` handler in the worker child so abort-triggered termination does
 # not block on the kernel's core-dump pipe handler (e.g. apport,
 # systemd-coredump). See `child::install_immediate_abort_exit` and
-# `docs/architecture/06-panic-containment.md`.
+# `docs/architecture/worker-processes.md`.
 libc = "0.2"
 
 [dev-dependencies]

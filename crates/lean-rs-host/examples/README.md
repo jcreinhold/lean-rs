@@ -56,5 +56,5 @@ cargo run -p lean-rs --example string_streaming
 ```
 
 Follow [Downstream interop](../../../docs/recipes/downstream-interop.md) for export signatures, shim packaging, callback
-lifetimes, and string payloads. Read the [concurrency contract](../../../docs/architecture/04-concurrency.md) before
+lifetimes, and string payloads. Read the [concurrency contract](../../../docs/architecture/concurrency.md) before
 moving integration work to another OS thread.

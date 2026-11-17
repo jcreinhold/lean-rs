@@ -5,7 +5,7 @@ comments state the precise obligations; the tables here group those obligations 
 affected entry when a change adds, removes, or reshapes unsafe code. The workspace lint `missing_safety_doc` checks
 public unsafe function documentation; it does **not** verify safety comments on blocks.
 
-The [safety model](../architecture/01-safety-model.md) defines the policy. Raw `lean_*` symbols enter only through
+The [safety model](../architecture/safety.md) defines the policy. Raw `lean_*` symbols enter only through
 `lean-rs-sys`. `lean-rs` discharges their runtime, object, ABI, loader, and callback obligations. `lean-rs-host`,
 `lean-rs-abi`, and `lean-rs-worker-protocol` forbid unsafe code; `lean-toolchain` and `lean-rs-worker-parent` deny it
 with narrow native-process/descriptor opt-outs.
@@ -358,4 +358,4 @@ build and `LD_LIBRARY_PATH` setup.
   (refcount mirror's `AtomicI32::from_ptr`, header-field casts, scalar-pointer encoding), but Miri cannot interpret
   `libleanshared`, so the live refcount discipline of `Obj`/`ObjRef`, callback unwinding, and thread-attach soundness
   remain out of its scope. Those paths are covered by the sanitizer, fuzz, and stress tests named in
-  [`docs/architecture/01-safety-model.md`](../architecture/01-safety-model.md).
+  [`docs/architecture/safety.md`](../architecture/safety.md).

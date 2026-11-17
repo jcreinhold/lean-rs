@@ -2,59 +2,52 @@
 
 [Introduction](introduction.md)
 
-# Foundations
-
-- [Charter](architecture/00-charter.md)
-- [Safety model](architecture/01-safety-model.md)
-- [Versioning and compatibility](architecture/02-versioning-and-compatibility.md)
-- [Raw FFI design](architecture/05-raw-sys-design.md)
-
-# Same-process FFI (`lean-rs`)
-
-- [Concurrency](architecture/04-concurrency.md)
-- [Callback registry and payloads](architecture/10-callback-registry.md)
-- [Generic interop shims](architecture/11-generic-interop-shims.md)
-- [Interop build and link](architecture/12-interop-build-and-link.md)
-- [Loader and artifact boundary](architecture/29-loader-and-artifact-boundary.md)
-
-# Standard Lean services (`lean-rs-host`)
-
-- [Service-layer surface](architecture/03-host-stack.md)
-- [Capability contract](lean-rs-host-capability-contract.md)
-- [Cooperative cancellation](architecture/07-cooperative-cancellation.md)
-- [Structured progress](architecture/13-structured-progress.md)
-- [Module-query projection](architecture/09-info-tree-projection.md)
-- [Same-process controls](same-process-controls.md)
-
-# Worker services
-
-- [Production boundary](architecture/16-production-boundary.md)
-- [Panic containment](architecture/06-panic-containment.md)
-- [Worker session adapter](architecture/17-worker-session-adapter.md)
-- [Worker data streaming](architecture/18-worker-data-streaming.md)
-- [Worker capability layer](architecture/19-worker-capability-layer.md)
-- [Worker pool and observability](architecture/20-worker-pool.md)
-- [Import-set planning](architecture/21-import-set-planning.md)
-- [Scale and downstream fixtures](architecture/25-mathlib-scale-worker-fixture.md)
-- [Worker runtime semantics](architecture/30-worker-runtime-semantics.md)
-
-# Recipes
+# Guides
 
 - [Ship a crate with Lean](recipes/ship-crate-with-lean.md)
 - [Exports and callbacks](recipes/downstream-interop.md)
 - [Worker commands and raw transport](recipes/worker-capability-runner.md)
+- [Production hosting](production-hosting.md)
+- [Diagnostics](diagnostics.md)
 
-# Safety audits
+# Architecture
 
+- [Architecture map](architecture/README.md)
+- [Charter](architecture/charter.md)
+- [Safety model](architecture/safety.md)
+- [Compatibility](architecture/compatibility.md)
+
+# Runtime and FFI
+
+- [Raw FFI](architecture/raw-ffi.md)
+- [Concurrency](architecture/concurrency.md)
+- [Callbacks and interop shims](architecture/callbacks.md)
+- [Build and link](architecture/build-and-link.md)
+- [Loading](architecture/loading.md)
+
+# Standard host services
+
+- [Host services](architecture/host-services.md)
+- [Host capability contract](lean-rs-host-capability-contract.md)
+- [Module queries](architecture/module-queries.md)
+- [Same-process controls](same-process-controls.md)
+
+# Worker services
+
+- [Worker processes](architecture/worker-processes.md)
+- [Worker capabilities](architecture/worker-capabilities.md)
+- [Worker sessions](architecture/worker-sessions.md)
+- [Worker streaming](architecture/worker-streaming.md)
+- [Worker pool](architecture/worker-pool.md)
+- [Import planning](architecture/import-planning.md)
+- [Worker runtime](architecture/worker-runtime.md)
+
+# Verification and maintenance
+
+- [Testing and fixtures](testing.md)
+- [Performance](performance.md)
 - [Long-session memory](safety/long-session-memory.md)
 - [Unsafe inventory](safety/unsafe-inventory.md)
-
-# Operations
-
-- [Production hosting](production-hosting.md)
-- [Testing](testing.md)
-- [Performance](performance.md)
-- [Diagnostics](diagnostics.md)
 - [Release](release.md)
 - [Bump toolchain](bump-toolchain.md)
 - [Version matrix](version-matrix.md)

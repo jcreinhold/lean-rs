@@ -5,7 +5,7 @@
 //! `impl Sync` anywhere in the handle chain gets caught at CI time.
 //!
 //! Coverage: the full set of public handles per
-//! `docs/architecture/04-concurrency.md`.
+//! `docs/architecture/concurrency.md`.
 
 use lean_rs::{LeanDeclaration, LeanExpr, LeanLevel, LeanName, LeanRuntime, LeanThreadGuard};
 use lean_rs_host::{LeanCapabilities, LeanEvidence, LeanHost, LeanSession, PooledSession, SessionPool};

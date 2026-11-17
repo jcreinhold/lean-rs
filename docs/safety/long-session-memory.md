@@ -421,8 +421,8 @@ an environment across a registering import can otherwise cause Lean to index pas
 
 `stats.imports` counts imports rather than opens. Snapshot caches survive parking and clear when the corresponding
 session drops; cache identity includes mode. A failed open can leave the child sessionless while other parked sessions
-remain reusable. See [Worker session adapter](../architecture/17-worker-session-adapter.md) for the supported session
-operations and [Worker pool](../architecture/20-worker-pool.md) for lease and admission behavior.
+remain reusable. See [Worker session adapter](../architecture/worker-sessions.md) for the supported session
+operations and [Worker pool](../architecture/worker-pool.md) for lease and admission behavior.
 
 The retained-memory measurements above explain why pooling helps: an extra live environment cost 30–50 MB in the fixture
 sample, far less than the 0.8–1.0 GiB additional import residue in that run. These observations support reuse; they do

@@ -40,7 +40,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
 // single `pub(crate)` site that runs Lean-generated module initializers
-//—a per-file opt-out per `docs/architecture/01-safety-model.md`.
+//—a per-file opt-out per `docs/architecture/safety.md`.
 #![allow(unsafe_code)]
 
 use std::ffi::CString;

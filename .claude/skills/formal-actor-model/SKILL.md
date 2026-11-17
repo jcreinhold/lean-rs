@@ -9,8 +9,8 @@ An actor owns private state, processes messages serially, and exposes a narrow h
 capacity, failure, and ownership before choosing runtime mechanisms.
 
 For work in this repository, read the
-[worker runtime contract](../../../docs/architecture/30-worker-runtime-semantics.md) and
-[safety model](../../../docs/architecture/01-safety-model.md) first. The references below are design guidance, not a
+[worker runtime contract](../../../docs/architecture/worker-runtime.md) and
+[safety model](../../../docs/architecture/safety.md) first. The references below are design guidance, not a
 claim that lean-rs implements a generic actor framework or a Tokio runtime.
 
 ## References

@@ -4,7 +4,7 @@
 and emit `tracing` events against the `lean_rs` target. Branch on `err.code()` for a stable failure family; internal
 stage tags can grow. Worker process outcomes use the separate `LeanWorkerError` surface. Lean runtime panics can
 terminate a process and are not recoverable session errors; see
-[panic containment](architecture/06-panic-containment.md).
+[panic containment](architecture/worker-processes.md).
 
 ## Diagnostic codes
 
@@ -169,8 +169,8 @@ from a successful terminal summary, rather than from callbacks alone.
 
 Progress sink panics become `LeanError::Host`, stage `CallbackPanic`, code `lean_rs.internal`. Cancellation is checked
 when Rust regains control; it cannot pre-empt an in-flight Lean call. See
-[callbacks](architecture/10-callback-registry.md), [progress](architecture/13-structured-progress.md), and
-[cancellation](architecture/07-cooperative-cancellation.md).
+[callbacks](architecture/callbacks.md), [progress](same-process-controls.md#progress), and
+[cancellation](same-process-controls.md#cancellation).
 
 ## Tracing
 

@@ -1,8 +1,14 @@
-# Panic Containment
+# Worker processes and failure containment
 
-A child process is the recovery boundary for fatal Lean failures. A session call may terminate its process after an
-internal panic, generated unreachable path, runtime assertion, foreign unwind, `std::exit`, or `abort`. Applications
-that must survive those failures use the worker crates and recover through the supervisor.
+Use `lean-rs-host` for same-process Lean services. Use worker children to survive fatal Lean failures, enforce request
+deadlines, or reset process-global memory. The child runs `lean-rs-host`; the parent owns supervision, framed IPC,
+cancellation, timeouts, streaming, restart policy, and diagnostics. Lean handles and callback registrations stay in the
+child; the parent receives owned, serializable values.
+
+Each child processes requests serially. The local pool provides synchronous leases with bounded admission waits. See
+[runtime semantics](worker-runtime.md) for lifecycle rules, the
+[session adapter](worker-sessions.md) for host operations, and the
+[capability recipe](../recipes/worker-capability-runner.md) for downstream commands.
 
 ## Failure channels
 
@@ -23,6 +29,16 @@ valid, or whether global initializer, import, task-manager, and allocator state 
 anchor also cannot invalidate every existing handle and then start a new runtime. Neither session poisoning nor
 `SessionPool::drain()` proves recovery. Draining only releases normal cached references; see
 [long-session memory](../safety/long-session-memory.md).
+
+## Memory reset
+
+Dropping sessions or calling `SessionPool::drain()` releases Rust-owned environment references. Lean may retain memory
+in imported modules, compacted regions, interned names, allocator state, and other process-global structures. Only
+process exit resets that state; see the [recorded memory investigation](../safety/long-session-memory.md).
+
+Worker policies can cycle a child on request count, import-like request count, idle time, sampled RSS, explicit request,
+or in-flight cancellation. RSS sampling is best effort. Cleanup must confirm the owned child has exited before a
+replacement can be treated as usable; an unconfirmed replacement retains its ownership and capacity fence.
 
 ## Worker panic defaults
 
@@ -67,7 +83,7 @@ renderer does not catch that panic. The safeguards have distinct responsibilitie
 3. For supported read-only verify and batched-query operations, the supervisor catches a fatal child exit, restarts the
    child, and returns an unavailable/`BudgetExceeded` result. Other errors and a failed restart still propagate.
 
-The exact policies live in [module-query projection](09-info-tree-projection.md). They prevent or classify failures at
+The exact policies live in [module-query projection](module-queries.md). They prevent or classify failures at
 the layer that has the needed information; they do not make an interrupted Lean process reusable.
 
 An ambiguous name alone is not evidence of this panic. The

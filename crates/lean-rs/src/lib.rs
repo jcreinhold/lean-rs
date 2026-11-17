@@ -34,7 +34,7 @@
 //!
 //! Worker threads that did not start inside Lean must be attached for
 //! the duration of their Lean work via [`LeanThreadGuard::attach`];
-//! see `docs/architecture/04-concurrency.md` for the contract.
+//! see `docs/architecture/concurrency.md` for the contract.
 //!
 //! ## Module map
 //!

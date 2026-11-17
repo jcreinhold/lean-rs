@@ -20,7 +20,7 @@ trusted export signatures. `LeanBuiltCapability` is the link-free descriptor sha
 Declare separately built dependency dylibs through the builder so both loading paths see the same order and visibility
 requirements. `build_lake_target` and raw link directives remain available for custom build systems; the
 [shipped-crate template](https://github.com/jcreinhold/lean-rs/tree/main/templates/shipped-lean-crate) demonstrates the normal path. Shared build coordination
-belongs to the [build-and-link contract](12-interop-build-and-link.md).
+belongs to the [build-and-link contract](build-and-link.md).
 
 ## Runtime loading
 
@@ -35,7 +35,7 @@ protection against malicious libraries or substituted native code.
 
 `LeanCapability::from_manifest_snapshot` consumes captured bytes without rereading the manifest path. Artifact custody
 must span loading and initializers; a storage descriptor alone is not evidence of the loaded ABI. Guarded worker
-sessions apply the [read-custody protocol](17-worker-session-adapter.md#shared-artifact-read-custody).
+sessions apply the [read-custody protocol](worker-sessions.md#shared-artifact-read-custody).
 
 `LeanCapabilityPreflight` and `LeanRuntimePreflight` expose doctor-style checks. `LeanLibrary::open`,
 `LeanLibrary::open_globally`, direct dylib descriptors, and unchecked exports remain advanced paths whose callers take
@@ -55,7 +55,7 @@ examples should not require callers to set dynamic-loader variables or open Lean
 `LeanWorkerCapabilityBuilder::check()` validates child resolution/executable status, artifact preflight, handshake,
 import startup, and optional metadata expectations before a body command. Current import startup still needs Lean
 tooling on `PATH`; the report exposes that deployment requirement. Process isolation and memory-reset semantics remain
-with the [worker boundary](16-production-boundary.md).
+with the [worker boundary](worker-processes.md).
 
 ## Package and regression checks
 

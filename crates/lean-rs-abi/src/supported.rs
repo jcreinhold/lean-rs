@@ -10,7 +10,7 @@
 //! one entry), and the set of [`REQUIRED_SYMBOLS`](crate::REQUIRED_SYMBOLS)
 //! that are absent from this toolchain. Runtime layout assumptions in
 //! `lean-rs-sys` are checked against this same window (see
-//! `docs/architecture/02-versioning-and-compatibility.md`).
+//! `docs/architecture/compatibility.md`).
 //!
 //! See `docs/bump-toolchain.md` for the procedure to extend the window.
 

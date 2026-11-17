@@ -135,7 +135,7 @@ use `lean-rs-worker-parent` typed commands instead of exposing callback handles.
 
 `LeanModule::exported_unchecked` still requires the caller to establish the native ABI. The conversion traits constrain
 dispatch shape, but `LeanAbi` exposes hidden public conversion hooks and a public marker; see the
-[current safety gaps](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/01-safety-model.md) before
+[current safety gaps](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/safety.md) before
 extending that internal boundary.
 
 ## See also

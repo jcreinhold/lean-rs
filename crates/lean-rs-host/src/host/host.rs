@@ -8,7 +8,7 @@
 //! sessions resolve checked host-shim bindings once and dispatch subsequent
 //! calls without per-call `dlsym`.
 //!
-//! See `docs/architecture/03-host-stack.md` for the full classification
+//! See `docs/architecture/host-services.md` for the full classification
 //! and the host → capabilities → session lifetime cascade.
 
 use core::fmt;

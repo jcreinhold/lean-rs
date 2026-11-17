@@ -5,8 +5,8 @@ tools: Read, Grep, Glob, Bash
 ---
 
 Review the caller's diff, revision range, or named files. If no scope is supplied, inspect staged and unstaged changes
-against `HEAD`. Read `docs/architecture/00-charter.md`, `01-safety-model.md`, and `05-raw-sys-design.md` in that
-architecture directory before reviewing.
+against `HEAD`. Read `docs/architecture/charter.md`, `docs/architecture/safety.md`, and
+`docs/architecture/raw-ffi.md` before reviewing.
 
 Check:
 

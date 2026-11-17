@@ -15,7 +15,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the invariant. The blanket allow keeps
 // the unsafe surface inside the smallest scope that compiles, per
-// `docs/architecture/01-safety-model.md`.
+// `docs/architecture/safety.md`.
 #![allow(unsafe_code)]
 // `Obj` / `ObjRef` and their methods are infrastructure consumed by the
 // `pub(crate) abi` module and by the typed `LeanExported` /

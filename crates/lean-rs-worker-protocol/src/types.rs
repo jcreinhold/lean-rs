@@ -5,7 +5,7 @@
 //! wire type → public worker mirror) collapsed once it became clear that the
 //! worker's "different abstraction" from the host is process supervision—
 //! not data shape—so the wire format and the public surface are the same
-//! concern. See `docs/architecture/16-production-boundary.md` for the boundary
+//! concern. See `docs/architecture/worker-processes.md` for the boundary
 //! contract.
 //!
 //! Conversion from opaque host types (`LeanExpr`, `LeanName`, …) into these

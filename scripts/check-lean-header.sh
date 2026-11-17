@@ -8,7 +8,7 @@
 #
 # Empty output = layouts unchanged, safe to add as another window entry.
 # Non-empty output = stop and revisit
-# docs/architecture/02-versioning-and-compatibility.md.
+# docs/architecture/compatibility.md.
 
 set -euo pipefail
 

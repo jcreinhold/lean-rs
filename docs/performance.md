@@ -71,8 +71,8 @@ cargo bench -p lean-rs-worker-child --bench worker_capability -- --sample-size 1
 worker delivery. The `data_plane` workloads compare JSON, validated raw JSON, simulated binary envelopes, MessagePack,
 and CBOR. A microbenchmark alone does not justify a new wire format or public batch sink: demonstrate an end-to-end
 worker win. The decisions are recorded under
-[row batching](architecture/18-worker-data-streaming.md#per-row-framing-evidence) and
-[data-plane format](architecture/18-worker-data-streaming.md#data-plane-format-evidence).
+[row batching](architecture/worker-streaming.md#per-row-framing-evidence) and
+[data-plane format](architecture/worker-streaming.md#data-plane-format-evidence).
 
 The Lean-side envelope/chunk helpers use the typed-command tests:
 
@@ -109,8 +109,8 @@ cargo bench -p lean-rs-worker-child --bench worker_capability -- mathlib_scale
 
 The readiness fixture drives generic `version`, `doctor`, `extract`, `features`, `index`, and `probe` commands. Its
 schemas are fixture schemas. See
-[readiness](architecture/25-mathlib-scale-worker-fixture.md#downstream-replacement-coverage) and the
-[scale contract](architecture/20-worker-pool.md#validation-evidence) for coverage limits.
+[readiness](testing.md#worker-readiness) and the
+[scale contract](architecture/worker-pool.md#validation-evidence) for coverage limits.
 
 Rows reach sinks before terminal success and remain tentative until the terminal summary. Pool snapshots expose request
 outcomes, delivered rows, payload bytes, timing, and backpressure counters. Admission is synchronous, so the stable

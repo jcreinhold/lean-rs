@@ -1,8 +1,9 @@
 # Contributing to lean-rs
 
-Read the [architecture charter](docs/architecture/00-charter.md), [safety model](docs/architecture/01-safety-model.md),
-and the owning topic in the [documentation index](docs/SUMMARY.md) before changing a boundary. Repository coding
-invariants live in [AGENTS.md](AGENTS.md); keep the owning documentation current when behavior changes.
+Use the [architecture map](docs/architecture/README.md) to find the owning contract. Read the
+[charter](docs/architecture/charter.md), [safety model](docs/architecture/safety.md), and the owning topic before changing
+a boundary. Repository coding invariants live in [AGENTS.md](AGENTS.md); keep the owning documentation current when
+behavior changes.
 
 ## Build and verify
 

@@ -43,5 +43,5 @@ definitions are authoritative: [CI](https://github.com/jcreinhold/lean-rs/blob/m
 [docs](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/docs.yml). These configurations describe coverage, not a claim that every dispatch has
 passed.
 
-See the [compatibility policy](architecture/02-versioning-and-compatibility.md),
+See the [compatibility policy](architecture/compatibility.md),
 [toolchain change procedure](bump-toolchain.md), and [release checklist](release.md).

@@ -2,7 +2,7 @@
 
 [`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs) owns the supported versions and header digests. The
 [version matrix](version-matrix.md) describes the tested platforms; the
-[compatibility policy](architecture/02-versioning-and-compatibility.md) governs ABI changes and version drops.
+[compatibility policy](architecture/compatibility.md) governs ABI changes and version drops.
 
 ## Verify a candidate
 

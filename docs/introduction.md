@@ -8,10 +8,9 @@ For a runnable project, start with [Ship a crate with Lean](recipes/ship-crate-w
 [Worker capability runner](recipes/worker-capability-runner.md) for supervised commands and live rows.
 [Production hosting](production-hosting.md) covers long-running services with bounded workers and warm sessions.
 
-For design work, read the [charter](architecture/00-charter.md) and [safety model](architecture/01-safety-model.md),
-then the owning subsystem in the sidebar. Architecture numbers are stable identifiers, not a reading order. Measurements
-and audit records retain their dates and workload limits; they are evidence for those workloads rather than universal
-performance guarantees.
+For design work, use the [architecture map](architecture/) to find the owning contract. Start with the
+[charter](architecture/charter.md) and [safety model](architecture/safety.md). Measurements and audit records retain
+their dates and workload limits; they are evidence for those workloads rather than universal performance guarantees.
 
 The [repository README](https://github.com/jcreinhold/lean-rs#readme) maps crates to tasks. The
 [version matrix](version-matrix.md) defines supported Lean releases and platforms, and [Testing](testing.md) describes

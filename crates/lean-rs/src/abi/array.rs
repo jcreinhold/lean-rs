@@ -24,7 +24,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the invariant. The blanket allow keeps the
 // unsafe surface inside the smallest scope that compiles, per
-// `docs/architecture/01-safety-model.md`.
+// `docs/architecture/safety.md`.
 #![allow(unsafe_code)]
 
 use lean_rs_sys::array::{lean_alloc_array, lean_array_cptr, lean_array_set_core, lean_array_size};

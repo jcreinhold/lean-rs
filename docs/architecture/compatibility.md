@@ -30,7 +30,7 @@ Linkage tests and toolchain probes cover symbols separately.
 
 A supported-window change must review object layouts, inline semantics, ownership conventions, initialization, shim
 builds, and actual loading. A digest change alone need not mean an ABI break; an unchanged struct layout does not prove
-that inline behavior stayed compatible. See [raw FFI design](05-raw-sys-design.md).
+that inline behavior stayed compatible. See [raw FFI design](raw-ffi.md).
 
 ## Compatibility evidence that explains the window
 
@@ -86,7 +86,7 @@ so callers need not encode the naming policy themselves:
 | From 4.27 | `lib{escaped_package}_{LibName}.{dylib,so}` | `initialize_{MangledPackage}_{MangledModule}` |
 
 Probing the old shape does not extend the supported toolchain window. Use the
-[build/link helpers](12-interop-build-and-link.md), not hand-built paths.
+[build/link helpers](build-and-link.md), not hand-built paths.
 
 ## Crate and protocol compatibility
 

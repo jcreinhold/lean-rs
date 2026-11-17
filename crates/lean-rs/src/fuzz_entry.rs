@@ -7,7 +7,7 @@
 //! them for an external test harness—and only when the `fuzzing`
 //! feature is enabled.
 //!
-//! Per `docs/architecture/01-safety-model.md`'s "fuzz arbitrary raw
+//! Per `docs/architecture/safety.md`'s "fuzz arbitrary raw
 //! pointers" non-goal, every entry point takes a `*mut lean_object`
 //! that the caller must have produced from a real `lean-rs-sys`
 //! allocator. The wrappers do not validate provenance; they only

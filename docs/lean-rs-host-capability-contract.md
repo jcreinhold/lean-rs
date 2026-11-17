@@ -16,7 +16,7 @@ real typed signatures and the packaged Lean exports. Change the table, Lean impl
 `LeanHost::load_capabilities` prepares the bundled artifacts, loads their manifest-backed capability, and initializes
 the consumer's root module. `load_shims_only` omits the consumer dylib. Prepared-artifact entry points load an existing
 snapshot without running a build. Session import uses search paths for the consumer project and both shim packages. See
-[the host architecture](architecture/03-host-stack.md) for ownership and loading rationale.
+[the host architecture](architecture/host-services.md) for ownership and loading rationale.
 
 Each session resolves `HostShimBindings` once. A missing mandatory symbol fails construction. A missing optional symbol
 leaves an empty binding; its operation reports unsupported or uses its documented fallback. Other checked-lookup errors,

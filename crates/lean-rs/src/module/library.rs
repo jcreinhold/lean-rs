@@ -27,7 +27,7 @@
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment. The blanket allow exists because this is the
 // single `pub` doorway into the dlopen/dlsym path; per
-// `docs/architecture/01-safety-model.md` the opt-out lives at the
+// `docs/architecture/safety.md` the opt-out lives at the
 // smallest scope that compiles.
 #![allow(unsafe_code)]
 

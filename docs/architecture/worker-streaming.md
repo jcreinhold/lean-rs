@@ -27,7 +27,7 @@ when atomic commit is required and the request fails, times out, is cancelled, o
 
 Diagnostics and progress use separate sinks. Sink panics are contained by the worker API. A bounded reader event buffer
 propagates slow-sink pressure through the child pipe; committed streams never drop rows. The parent request watchdog
-also covers silent streams. See [pool observability](20-worker-pool.md#observability-and-backpressure) for counters and
+also covers silent streams. See [pool observability](worker-pool.md#observability-and-backpressure) for counters and
 [the capability recipe](../recipes/worker-capability-runner.md) for normal use.
 
 Raw stdout JSONL would expose framing, EOF, crash, and completion rules to each consumer. Cross-process callback

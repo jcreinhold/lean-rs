@@ -35,14 +35,14 @@ Use the highest layer that fits the job:
 
 Downstream applications own their semantic commands and row schemas. The worker API is a supervised process service, not
 a remote mirror of every `LeanSession` operation. Its model is specified in
-[Worker runtime semantics](30-worker-runtime-semantics.md).
+[Worker runtime semantics](worker-runtime.md).
 
 ## Ownership and lifetime
 
 `Obj<'lean>` owns a Lean reference count and carries a lifetime tied to a `LeanRuntime` borrow. Semantic handles and
 host/session types propagate that lifetime. `LeanRuntime::init` initializes the process once and returns a static
-anchor; Lean-derived handles remain thread-confined. [Concurrency](04-concurrency.md) describes initialization and
-thread attachment, and the [safety model](01-safety-model.md) defines the unsafe obligations.
+anchor; Lean-derived handles remain thread-confined. [Concurrency](concurrency.md) describes initialization and
+thread attachment, and the [safety model](safety.md) defines the unsafe obligations.
 
 Dropping an object or session releases its owned references. It does not reset Lean's process-global imports,
 initializers, extension registries, or allocator state. Full-session workloads reuse environments and bound fresh

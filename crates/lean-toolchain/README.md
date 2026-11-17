@@ -73,7 +73,7 @@ See
 for the canonical shipped-crate layout.
 
 See the [workspace README](https://github.com/jcreinhold/lean-rs) for the workspace architecture overview and
-[`docs/architecture/02-versioning-and-compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/02-versioning-and-compatibility.md)
+[`docs/architecture/compatibility.md`](https://github.com/jcreinhold/lean-rs/blob/main/docs/architecture/compatibility.md)
 for the supported Lean window.
 
 ## License

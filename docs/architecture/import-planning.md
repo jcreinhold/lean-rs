@@ -25,7 +25,7 @@ package/target, source root, ordered import set, import profile, and restart-pol
 expectations are carried into each batch's session key. Each `LeanWorkerPlannedBatch` includes sorted modules, a batch
 fingerprint, and material for `capability_builder()`.
 
-The [pool reuse key](20-worker-pool.md#leases-and-reuse) also carries build-baked toolchain identity. There is no separate
+The [pool reuse key](worker-pool.md#leases-and-reuse) also carries build-baked toolchain identity. There is no separate
 worker protocol fingerprint in the planner or session-key structure. Work planned from one capability project defaults
 to that project's import workspace; a caller configuring a different workspace must set that on the derived builder.
 

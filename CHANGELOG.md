@@ -785,7 +785,7 @@ churn as the bottleneck.
   not candidate-local. For `proof_state`, `Entry` renders `goals_before == goals_after`. The variant is additive on the
   `#[non_exhaustive]` `LeanWorkerProofPositionSelector` (wire) and `ProofPositionSelector` (host); `Index { index }`
   keeps its existing "index-th tactic state" meaning. See
-  [`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md).
+  [`docs/architecture/module-queries.md`](docs/architecture/module-queries.md).
 
 ### Worker robustness: no verify crash, honest degraded verdict, pretty proof-state locals
 
@@ -816,9 +816,9 @@ cap surfaced three defects in the read-only query path; all three are fixed.
 No new verification-status variant or protocol version bump: `BudgetExceeded` is reused for the degraded case and
 `locals_raw` is backward compatible via `#[serde(default)]`. The internal env var `LEAN_RS_VERIFY_RSS_TAINT_KIB`
 (plumbed from the pool's per-worker RSS ceiling) gates the child-side taint and defaults to off. See
-[`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md) for the degraded-verdict
+[`docs/architecture/module-queries.md`](docs/architecture/module-queries.md) for the degraded-verdict
 semantics and locals rendering modes, and
-[`docs/architecture/06-panic-containment.md`](docs/architecture/06-panic-containment.md) for the supervisor
+[`docs/architecture/worker-processes.md`](docs/architecture/worker-processes.md) for the supervisor
 verdict-on-abort contract.
 
 ## [0.1.19] - 2026-05-31
@@ -832,7 +832,7 @@ discards as a `needs_build` / `files_skipped` degrade. The Lean shim now short-c
 `elaboration_micros = 0`, bounding each per-file query in a project-scope scan to header parsing instead of a full
 failing elaboration. No protocol or API change; the `MissingImports` outcome and `missing` list are unchanged. The
 remaining cross-query cost on a large scan — cold header re-import after an RSS-driven worker cycle — is documented in
-[`docs/architecture/09-info-tree-projection.md`](docs/architecture/09-info-tree-projection.md) with its mitigations
+[`docs/architecture/module-queries.md`](docs/architecture/module-queries.md) with its mitigations
 (`limit`, or build the project first).
 
 ### Worker robustness: read-only resolution queries inside the panic boundary
@@ -842,7 +842,7 @@ during a genuine-ambiguity `verify_declaration`. A faithful deterministic reprod
 namespaces exporting the same short name, a bare reference forcing Lean's ambiguous-overload error, the offending
 message rendered) does not abort the child: the verdict resolves with both candidates and the supervisor performs no
 restart. The abort was therefore incidental metavar churn, not a defect of the resolution path. A regression test pins
-the no-restart invariant, and [`docs/architecture/06-panic-containment.md`](docs/architecture/06-panic-containment.md)
+the no-restart invariant, and [`docs/architecture/worker-processes.md`](docs/architecture/worker-processes.md)
 records why a read-only query is still inside the process panic boundary (a Lean `panic!` under `LEAN_ABORT_ON_PANIC=1`
 is uncatchable across the FFI, and relaxing it would let a defaulted value masquerade as a real verdict).
 
@@ -1566,7 +1566,7 @@ Known gaps:
 
 - Lean's header layout (`LeanObjectRepr` field order) is intentionally **not** part of this crate's public semver.
   Layout-tracking updates to track a new Lean point release are minor bumps; the opaque public types are unchanged.
-- Windows is unsupported (`docs/architecture/02-versioning-and-compatibility.md`).
+- Windows is unsupported (`docs/architecture/compatibility.md`).
 
 ### `lean-toolchain` 0.1.0
 
@@ -1613,7 +1613,7 @@ theorem-prover-host stack lives in the sibling `lean-rs-host` crate.
 
 Known gaps:
 
-- Windows is unsupported (`docs/architecture/02-versioning-and-compatibility.md`).
+- Windows is unsupported (`docs/architecture/compatibility.md`).
 - The `fuzzing` feature opens a narrow set of `pub(crate)` ABI decoders as `pub fn` entry points for the in-tree `fuzz/`
   crate (cargo-fuzz, nightly-only). It is **not** semver-stable and is intentionally invisible in the published docs.
 

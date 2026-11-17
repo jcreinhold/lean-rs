@@ -1,7 +1,7 @@
 //! Compile-fail tests pinning the published-opacity guarantees of
 //! `lean-rs-sys`: downstream code can hold a `lean_object` only by pointer and
 //! cannot name the crate-private layout mirror. These back the safety-model
-//! claim (`docs/architecture/01-safety-model.md`) that object state is reached
+//! claim (`docs/architecture/safety.md`) that object state is reached
 //! exclusively through the `pub unsafe fn` helpers.
 //!
 //! Each negative case is a standalone `.rs` file with a matching `.stderr`

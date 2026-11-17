@@ -79,5 +79,5 @@ threads.
 
 `!Send` values cannot be retained across an `await` in a future that must be `Send`. Even on a local executor, keep the
 Lean operation synchronous and on its attached thread. Async cancellation does not pre-empt a running Lean call; see
-[cooperative cancellation](07-cooperative-cancellation.md). Use the worker crates for process timeouts and fatal-exit
+[cooperative cancellation](../same-process-controls.md#cancellation). Use the worker crates for process timeouts and fatal-exit
 containment.
