@@ -595,7 +595,11 @@ impl Guardian {
     fn drain(&self) {
         loop {
             match crate::process_group::group_present(self.worker) {
-                Ok(false) => return,
+                Ok(false) => {
+                    #[cfg(all(test, target_os = "macos"))]
+                    tests::pause_after_payload_closed(self);
+                    return;
+                }
                 Ok(true) => {
                     let _requested = native::kill_payload(self.worker);
                 }
@@ -700,9 +704,9 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
         if !matches!(version, Some(1 | 2)) {
             return Err(invalid("unknown native owner record version"));
         }
-        // Prove physical closure before consulting former artifact paths. A
-        // closed generation can outlive a deleted checkout or renamed package.
-        if ownership::owner_closed(&value)? || field(&value, "phase") == "preparing" {
+        // A closed payload needs no access to former artifact paths. Its live
+        // guardian may still retain SH and a recovery record; callers hold EX.
+        if ownership::payload_closed(&value)? || field(&value, "phase") == "preparing" {
             continue;
         }
         let process = field(&value, "process");

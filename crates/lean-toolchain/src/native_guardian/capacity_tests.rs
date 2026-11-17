@@ -40,13 +40,15 @@ fn running(record: &Path, child: &Child) {
     let mut owner = read_owner(record).unwrap();
     owner["phase"] = json!("running");
     owner["process"] = json!(NativeProcessIdentity::capture(child.id()).unwrap().unwrap());
-    // Header-only fault fixtures do not signal or query this synthetic guardian.
+    // Header-only fixture, not physical custody evidence. Collection queries
+    // THIS test process with a deliberately mismatched birth, so the synthetic
+    // old guardian is absent without looking up an unrelated guessed PID.
     owner["guardian"] = json!(NativeProcessIdentity {
         version: 1,
-        pid: child.id() + 1,
+        pid: std::process::id(),
         start: "fixture-guardian-header".to_owned(),
         session: child.id(),
-        process_group: child.id() + 1,
+        process_group: std::process::id(),
     });
     persist_owner(record, &owner).unwrap();
 }

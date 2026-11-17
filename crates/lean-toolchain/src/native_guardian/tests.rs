@@ -142,8 +142,11 @@ struct Generation {
 }
 impl Generation {
     fn start(root: &Path) -> Self {
+        Self::start_with_slot(root, None)
+    }
+    fn start_with_slot(root: &Path, slot: Option<&NativeCapacitySlot>) -> Self {
         let registry = root.join("owners");
-        let record = reserve_owner_record(&registry, NONCE, Duration::from_secs(2)).unwrap();
+        let record = reserve_owner_record_with_slot(&registry, NONCE, Duration::from_secs(2), slot).unwrap();
         let socket = root.join("parent.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -177,7 +180,7 @@ impl Generation {
             &record,
             &json!({"version":2,"scope":"inherited-process-group-v2",
             "phase":"running","generation_id":NONCE,"parent":server,"process":process,
-            "guardian":guardian,"protected_domains":[]}),
+            "guardian":guardian,"protected_domains":[],"capacity_slot":slot}),
         )
         .unwrap();
         write_frame(
@@ -255,6 +258,9 @@ fn fixture_guardian() {
     } else {
         run_guardian_cli()
     };
+    if result.is_ok() {
+        record_lifetime_tests::record_cli_return(&root);
+    }
     if let Err(error) = result {
         let _saved = fs::write(root.join("guardian-error"), error.to_string());
         eprintln!("private guardian: {error}");
@@ -564,3 +570,10 @@ fn pure_protocol_limits_reject_ambiguous_or_unbounded_control() {
 
 #[path = "capacity_tests.rs"]
 mod capacity_tests;
+
+#[path = "record_lifetime_tests.rs"]
+mod record_lifetime_tests;
+
+pub(super) fn pause_after_payload_closed(guardian: &Guardian) {
+    record_lifetime_tests::pause_after_payload_closed(guardian);
+}

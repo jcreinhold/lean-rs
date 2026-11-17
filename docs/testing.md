@@ -102,6 +102,28 @@ Run the focused tests with an isolated Cargo target if another task owns build o
 CARGO_TARGET_DIR=/tmp/lean-rs-guardian-tests cargo nextest run --offline -p lean-toolchain --lib -E 'test(native_guardian::tests::)'
 ```
 
+## Guardian record retention after payload exit
+
+The macOS `record_lifetime_tests` regression pauses the **real guardian inside drain**, after complete payload-group
+absence and before its actual SH descriptors drop. This is a running test barrier, not SIGSTOP or process recovery.
+The controller holds no SH alias. It proves EX is still blocked, then reserves another actor under a limit of one:
+the original record and complete domain list must survive while compute capacity becomes available. After normal
+barrier release, actual guardian exit permits same-inode EX acquisition and later collection of the old record.
+
+The test also fills a private namespace with 128 synthetic records referring to this one actual live custodian. This
+checks the metadata bound, not 128 processes or transfers. Header-only capacity fixtures use deliberately mismatched
+births and remain distinct from the real-custody regression. Existing malformed-record cases still reject admission.
+
+The original collector failed this regression while the guardian still held SH: it removed the recovery record.
+An unwind release and a five-second self-kill deadline bound the responsive barrier fixture. Safety use, missing normal
+CLI return, a still-live guardian or an unobserved lock release cannot supply a pass. This does not qualify a frozen
+last owner, guardian takeover, boot/token recovery or a kernel-stuck process.
+
+```sh
+cargo nextest run --offline -p lean-toolchain --lib \
+  -E 'test(native_guardian::tests::record_lifetime_tests::)' --test-threads 1 --no-capture
+```
+
 ## Import-heavy test inventory
 
 Use this inventory when adding or selecting tests:

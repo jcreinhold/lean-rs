@@ -221,7 +221,7 @@ fn validate_owner_header(value: &Value) -> io::Result<()> {
     }
     Ok(())
 }
-pub(super) fn owner_closed(value: &Value) -> io::Result<bool> {
+pub(super) fn payload_closed(value: &Value) -> io::Result<bool> {
     validate_owner_header(value)?;
     if field(value, "phase") == "preparing_closed" {
         return Ok(true);
@@ -231,6 +231,17 @@ pub(super) fn owner_closed(value: &Value) -> io::Result<bool> {
     }
     let process = checked_identity(field(value, "process"))?;
     crate::process_group::group_present(process.process_group).map(|present| !present)
+}
+// Record retention includes the descriptor custodian, independently of compute
+// occupancy. A closed payload may leave a live guardian holding artifact loans.
+fn record_can_be_removed(value: &Value) -> io::Result<bool> {
+    if !payload_closed(value)? {
+        return Ok(false);
+    }
+    if field(value, "version") == 2 && field(value, "phase") == "running" {
+        return checked_identity(field(value, "guardian"))?.is_live().map(|live| !live);
+    }
+    Ok(true)
 }
 /// Retire only this caller's exact undispatched Preparing reservation.
 ///
@@ -358,6 +369,11 @@ fn admit_slot(
     let mut slots: BTreeMap<String, OccupiedSlot> = BTreeMap::new();
     let mut preparation_key: Option<String> = None;
     for value in values {
+        // A retained guardian record still counts toward the namespace bound,
+        // but a confirmed-closed payload no longer consumes actor capacity.
+        if payload_closed(value)? {
+            continue;
+        }
         let recorded = match value.get("capacity_slot").filter(|value| !value.is_null()) {
             Some(value) => Some(serde_json::from_value::<NativeCapacitySlot>(value.clone()).map_err(io::Error::other)?),
             None => None,
@@ -429,6 +445,7 @@ pub fn reserve_owner_record(root: &Path, nonce: &str, timeout: Duration) -> io::
 ///
 /// Live groups keep their actor slot after server death. A successful passive
 /// whole-group absence observation releases capacity, never a proof outcome.
+/// A still-live guardian retains its recovery record without occupying that slot.
 /// Preparing records certify no body dispatch and may be collected after their
 /// exact parent dies. A child paused before its startup ACK may still exist, but
 /// cannot load runtime/artifacts or execute a request before promotion to Running.
@@ -495,7 +512,7 @@ pub fn reserve_owner_record_with_slot(
             }
             Err(error) => return Err(error),
         };
-        if owner_closed(&value)? {
+        if record_can_be_removed(&value)? {
             // Keep the committed record parseable through partial asset cleanup.
             super::cleanup_generation_inputs(&entry.path())?;
             for name in ["owner.write", "owner.guardian-write"] {

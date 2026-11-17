@@ -472,8 +472,15 @@ published before admission returns. The union is retained until that whole gener
 request release. All multi-domain readers and writers acquire locks in stable lock-path order. Managed writers check the
 same registry after taking EX: a guardian's death can close its descriptors while a payload descendant is still alive,
 so successful EX alone does not grant write admission. Live legacy records without an independent descriptor custodian
-fence every domain. Closed valid records need no filesystem access to former artifact roots; malformed committed records
+fence every domain. Closed payloads need no filesystem access to former artifact roots; malformed committed records
 remain unavailable.
+
+Payload closure and record collection are separate. A Running v2 record stays until the whole payload group is absent
+and the exact guardian is no longer live: that guardian can retain SH descriptors after its payload has stopped.
+Collection retains the record and private inputs through that interval. Actor capacity ignores confirmed-closed
+payloads even while their guardian metadata remains, including before checking old slot keys or configured limits.
+The finite namespace limit still counts every retained record. Validation and observation errors propagate rather
+than authorizing removal or a new reservation; no historical result supplies a closure fact.
 
 When the original parent survives a guardian failure, its existing idle/request/cleanup polls observe the exact guardian
 birth becoming absent or zombie and request the same owned-group stop primitive used for external native readers. Root
@@ -483,7 +490,8 @@ numeric-PID recovery path. All failed signal or closure observations retain actu
 
 Optional `NativeCapacitySlot` admission bounds actor keys in that same registry. A key belongs to one exact server
 incarnation while occupied and permits one main and one semantic generation. All occupied keys agree on the configured
-limit; existing generations survive server restart in the count until whole-group absence is observed. One global
+limit; existing active payload groups survive server restart in the count until whole-group absence is observed.
+Retained guardian-only records do not count as occupied actor keys. One global
 `preparation` utility group may coexist without consuming a resident actor key, allowing configuration discovery at a
 full resident quota. It uses a disjoint fresh key and the same configured limit agreement, owner record and admission
 mutex; a second preparation group gets backpressure. Main/semantic actor limits are unchanged. Admission returns
