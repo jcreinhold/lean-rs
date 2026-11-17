@@ -1,79 +1,55 @@
 # Lean/Rust FFI Actor Boundaries
 
-An FFI actor boundary is unsafe until the ownership and thread-safety story is explicit. Keep the ABI small and move
-semantic work into Lean or Rust modules that can be tested in their native language.
+Keep the ABI small and document ownership and threads before making it safe. In lean-rs, follow the established
+[safety model](../../../../docs/architecture/01-safety-model.md), conversion APIs, and callback registry rather than
+adding a parallel raw boundary.
 
-## Boundary Shape
+## Handles and ownership
 
-Prefer opaque handles:
+Use opaque handles with explicit lifecycle operations. The owning runtime keeps its state private; callers receive
+capabilities to send, call, query status, or destroy. Specify whether destroy is idempotent and what happens to later
+calls and stale generations.
 
-- Rust owns the actor runtime and exports a pointer-like opaque handle.
-- Lean receives a handle token but cannot inspect Rust state.
-- Every handle has explicit `create`, `send/call`, `status`, and `destroy` operations.
-- Destroy is idempotent when possible; if not, document the exact precondition.
+At a raw Lean ABI crossing:
 
-Avoid passing Rust structs or Lean objects by layout. Use stable serialized messages or handles.
+- Owned object parameters transfer a reference-count token to the callee.
+- Borrowed parameters (`@&` in Lean) retain that token with the caller.
+- Object returns carry an owned token.
+- Each token has one owner responsible for releasing it.
 
-## Lean ABI Ownership
+Keep this bookkeeping inside the existing safe layer. Do not duplicate Rust struct layouts or Lean object-layout
+knowledge in actor code. Serialize or copy payloads when that keeps ownership local.
 
-For `lean_object *` values:
+## Initialization and threads
 
-- Owned parameters transfer a virtual reference-count token to the callee.
-- Borrowed parameters (`@&` on the Lean side) do not transfer ownership.
-- Return values are owned.
-- The side that owns a value must decrement/free it exactly once.
-
-When in doubt, copy/serialize at the boundary and keep ownership local.
-
-## Initialization
-
-Before calling Lean from Rust-created code:
-
-- Initialize the Lean runtime and imported modules exactly once.
-- Run required module initializers before using exported declarations.
-- Initialize any non-Lean-created thread before it touches Lean objects.
-- Finalize threads that were initialized for Lean when they exit.
-
-Never call Lean declarations from a foreign thread and assume the runtime is already prepared.
+The runtime wrapper must initialize Lean, attach foreign threads as required, and initialize modules before using
+exports. Finalize attached threads according to the wrapper's lifetime contract. A prepared thread still does not make
+an existing Lean object transferable from another thread.
 
 ## Callbacks
 
-Callbacks are the highest-risk part of the design.
+- Register callbacks through an owned registration handle and unregister before destroying the target.
+- Prevent callbacks after destruction, including races with unregister and restart.
+- For a foreign-thread callback, enqueue owned Rust data permitted by the thread contract. Do not enqueue Lean-derived
+  handles or directly mutate another actor's state.
+- Do not call back into Lean while holding a Rust mutex unless reentrancy and lock order are documented and tested.
+- Catch Rust panics before the C boundary and define how callback failure reaches the caller.
 
-Rules:
+## Message representation
 
-- Register callbacks with explicit user data/handle.
-- Unregister callbacks before destroying the target object.
-- Ensure no callback can run after destruction.
-- If a callback arrives on a foreign thread, enqueue an actor message; do not mutate Lean or Rust actor state directly.
-- Do not call back into Lean while holding a Rust mutex unless the lock order is documented and tested.
+Choose a representation policy for each crossing:
 
-## Message Representation
+- Serialized bytes keep runtimes independent; measure their cost for the workload.
+- Opaque IDs need side-table lifetime and generation checks.
+- Lean inductive objects need both sides to enforce the same ownership, initialization, and thread contract.
 
-Choose one:
+Document any translation between representations instead of mixing them implicitly.
 
-- Serialized JSON/CBOR/bytes: stable and robust, slower, easiest across versions.
-- Opaque IDs plus side tables: efficient but requires lifecycle proofs.
-- Lean inductive values crossing the ABI: only when both sides tightly control Lean object ownership and initialization.
+## Safety contract and checks
 
-Do not mix all three casually. One boundary should have one representation policy.
+For each unsafe boundary, state the owner of every handle, allowed threads, reentrancy, post-destroy behavior, panic and
+exception handling, worker-death behavior, delivery/ordering guarantees, and cancellation/shutdown semantics.
 
-## Safety Contract Template
-
-Each unsafe FFI module should state:
-
-- Who owns every handle and object.
-- Which functions may be called from which threads.
-- Whether functions are reentrant.
-- What happens after `destroy`.
-- What happens on panic, exception, or worker death.
-- Whether messages may be lost, duplicated, or reordered.
-- How cancellation and shutdown are observed.
-
-## Tests
-
-- Create/destroy repeatedly.
-- Send after destroy returns a structured error.
-- Callback after unregister is impossible or ignored safely.
-- Foreign-thread callback enqueues into the actor and does not mutate state directly.
-- Runtime restart invalidates or refreshes stale handles according to the documented policy.
+Check repeated create/destroy, calls after destroy, unregister races, foreign callbacks, and generation changes after
+restart. The tests should fail under a plausible ownership or lifecycle violation. A runtime model does not replace
+memory-safety review of the FFI implementation.

@@ -1,17 +1,12 @@
-exclude = [
-  "**/target/**/*.toml",
-  "tools/refactor/crates/cli/tests/fixtures/**/*.toml",
-  "tools/refactor/examples/**/*.toml",
-]
+exclude = ["**/target/**/*.toml"]
 include = [
   "*.toml",
+  ".cargo/**/*.toml",
   ".config/**/*.toml",
   "crates/**/*.toml",
   "docs/**/*.toml",
-  "fuzz/Cargo.toml",
   "profiling/**/*.toml",
-  "std/**/*.toml",
-  "tools/kan-nano/Cargo.toml",
+  "templates/**/*.toml",
 ]
 
 [formatting]

@@ -1,43 +1,29 @@
 # lean-rs
 
-A Rust binding stack for hosting Lean 4 capabilities. Lean owns elaboration, kernel checking, proof objects, universes,
-`MetaM`, and dependent-type meaning; this project owns linking, runtime initialization, ABI conversion, module loading,
-error and panic boundaries, scheduling, diagnostics, batching, and packaging.
+Rust bindings for hosting Lean 4. Lean owns elaboration, kernel checking, proof objects, universes, `MetaM`, and
+dependent-type meaning. This workspace owns linking, runtime initialization, ABI conversion, loading, error boundaries,
+scheduling, diagnostics, batching, and packaging.
 
-## Read first
+Before changing code, read the [architecture charter](docs/architecture/00-charter.md), the
+[safety model](docs/architecture/01-safety-model.md), and the owning topic in the
+[documentation index](docs/SUMMARY.md).
 
-Before writing code, read the architecture charter and any topic-specific docs that govern the area you are touching:
+## Boundaries
 
-1. [`docs/architecture/00-charter.md`](docs/architecture/00-charter.md) — the design boundary between Lean and
-   `lean-rs`: hidden knowledge, preserved capability, rejected alternatives.
-1. [`docs/architecture/01-safety-model.md`](docs/architecture/01-safety-model.md) — the workspace unsafe policy.
-1. The topic doc that owns the area you are changing (host stack, callbacks, worker, etc.). See the index in
-   [`README.md`](README.md).
+- Raw `lean_*` declarations belong only in `lean-rs-sys`. Add symbols in the matching
+  `crates/lean-rs-sys/src/<category>.rs`, the `REQUIRED_SYMBOLS` allowlist in `crates/lean-rs-abi/src/symbols.rs`, and
+  the probes in `crates/lean-rs-sys/tests/linkage.rs`.
+- `lean-rs-abi` is static, link-free metadata: no build script, extern declarations, linker directives, or installed
+  toolchain probes. `lean-toolchain` owns discovery and live toolchain identity.
+- `lean-rs` owns safe runtime handles, conversions, loading, and callbacks; `lean-rs-host` adds standard Lean services.
+  The worker protocol and parent crates do not link `libleanshared`; the worker child does.
+- Public FFI types stay opaque. Never expose `LeanObjectRepr` outside `lean-rs-sys` or add public fields to FFI types.
+  Safe layers do not re-export raw symbols; callers needing raw FFI depend on `lean-rs-sys` explicitly.
+- Keep `lean_rs::*` re-exports curated. Add a trait when a second concrete type needs it.
 
-## Workspace shape
+## Verification
 
-Nine published crates plus two workspace-internal helpers:
-
-| Crate | Role |
-| --- | --- |
-| `lean-rs-sys` | Raw Lean 4 C ABI bindings: extern declarations, opaque public types, `#[repr(C)]` layout mirrors (`pub(crate) LeanObjectRepr`), pure-Rust refcount mirrors. Opt-in unsafe raw FFI. |
-| `lean-rs-abi` | Link-free, **purely static** Lean ABI metadata: `REQUIRED_SYMBOLS` allowlist, the `SUPPORTED_TOOLCHAINS` window, and `lean.h` layout literals. No build script, no `extern "C"`, no linker directives, no toolchain probe — builds with no Lean present. |
-| `lean-toolchain` | Toolchain discovery, typed fingerprint, fixture digest, link diagnostics, Lake module discovery, build helpers. Its `build.rs` probes the active toolchain to bake the live identity (`LEAN_VERSION`, `LEAN_HEADER_PATH`, `LEAN_HEADER_DIGEST`, `LEAN_RESOLVED_VERSION`), degrading to the latest supported entry when none is installed. Re-exports `lean-rs-abi`'s static metadata. |
-| `lean-rs` | L1 safe front door. Runtime, object handles, ABI conversions, module loading, exported functions, semantic handles, callbacks, error boundary. |
-| `lean-rs-interop-shims` | Package-owned Lean source for the generic interop shims; `materialize_source_package` copies the `LeanRsInterop` Lake package into a caller-owned build root. |
-| `lean-rs-host` | L2 theorem-prover-host stack: `LeanHost` / `LeanCapabilities` / `LeanSession`, kernel-checked evidence, bounded `MetaM`, session pool. |
-| `lean-rs-worker-protocol` | Wire-stable parent/child IPC types and frame codec. Does not link `libleanshared`. |
-| `lean-rs-worker-parent` | Parent-side supervisor and pool: child lifecycle, request timeouts, memory cycling, typed commands, row streaming. Does not link `libleanshared`. |
-| `lean-rs-worker-child` | Child runtime and the `lean-rs-worker-child` binary; the only worker crate that links `libleanshared`. |
-
-Workspace-internal (`publish = false`): the `lean-rs-profiling` harness and the `lean-rs-fuzz` target.
-
-Layering: `lean-rs-sys` → `lean-toolchain` → `lean-rs` → `lean-rs-host`, with `lean-rs-abi` underneath as link-free
-metadata. The worker boundary is three sibling crates: `-protocol` (wire types), `-parent` (supervisor and pool),
-`-child` (Lean-linked runtime). Raw `lean_*` symbols enter only through `lean-rs-sys`; the safe layers never re-export
-them. Advanced users who need raw FFI depend on `lean-rs-sys` directly (opt-in unsafe).
-
-## Build and verify
+The primary workspace gates are:
 
 ```sh
 cargo fmt --check
@@ -47,30 +33,18 @@ cargo test --doc --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 ```
 
-CI runs the same commands on `ubuntu-latest` and `macos-latest`, stable Rust only. `cargo test` (single-process) is
-**not** the gate: cumulative Lean state OOMs the binary after ~150 tests. See [`docs/testing.md`](docs/testing.md) for
-the rationale and the per-test debugging escape hatch.
+Use nextest for runtime tests: cumulative Lean state can exhaust memory in a shared `cargo test` process. See
+[testing.md](docs/testing.md) for focused runs and [.github/workflows/ci.yml](.github/workflows/ci.yml) for the complete
+CI matrix and additional checks. Runtime gates use stable Rust on Linux and macOS; API and sanitizer jobs also use
+nightly.
 
-## Discipline
+## Safety and completion
 
-- **Raw `lean_*` symbols enter the workspace only via `lean-rs-sys`.** If a symbol is missing or has a different
-  signature in the active Lean header, extend the extern declarations in the appropriate
-  `crates/lean-rs-sys/src/<category>.rs` file and the `REQUIRED_SYMBOLS` allowlist in
-  `crates/lean-rs-abi/src/symbols.rs`.
-- **`lean-rs-sys` is published with opaque public types.** Downstream users see `lean_object` as `[u8; 0] + PhantomData`
-  and reach state only through `pub unsafe fn` helpers. Never expose `LeanObjectRepr` outside the crate; never add
-  public fields to FFI types. Every `unsafe { ... }` block carries a `// SAFETY:` comment; every `pub unsafe fn`
-  carries a `# Safety` section.
-- **No broad `pub use` facade.** Re-exports at `lean_rs::*` are curated public API, not path-shortening.
-- **No speculative traits with one implementor.** Add a trait when a second concrete type needs it.
-- **No `unwrap()`, `expect()`, or `panic!`** in non-test code unless a comment names a proof obligation.
-- **`unsafe-code = "deny"`** at workspace level. `lean-rs-sys` is the one crate-wide opt-out; new `unsafe` elsewhere
-  needs justification, a `// SAFETY:` comment naming the invariant, and reviewer sign-off.
-- **No `TODO`, `unimplemented!()`, `todo!()`.** Build the intended functionality or stop.
-- **Fix bugs at their root.** If the cause lives in a different module, fix it there.
-- **Update the relevant architecture doc** in the same PR when its design changes.
-
-## When this file is wrong
-
-This file should drift slowly. If a session reveals something here is stale, fix it in the same PR. The same rule
-applies to architecture docs and contract claims.
+- Workspace `unsafe_code` is denied. `lean-rs-sys` has the sole crate-wide opt-out. Elsewhere, allow unsafe at the
+  smallest scope, justify it, and obtain reviewer sign-off as required by the safety model.
+- Every unsafe block needs a `// SAFETY:` comment naming its invariant; every public unsafe function needs a `# Safety`
+  section.
+- Non-test `unwrap()`, `expect()`, and `panic!` require a comment stating the proof obligation that makes them
+  infallible. Do not leave `TODO`, `todo!()`, or `unimplemented!()` placeholders.
+- Fix the cause in its owning module. Update the relevant architecture or contract doc when the design changes, and
+  correct stale repository guidance in the same change.

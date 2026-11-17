@@ -5,7 +5,8 @@ the first pass; isolate a small transition boundary and grow from there.
 
 ## Recommended Shape
 
-Start with abstract, finite or finitely supported state:
+Start with abstract, finite or finitely supported state. The following sketches use domain-specific placeholder types;
+they are specification shapes, not a standalone Lean module:
 
 ```lean
 structure ActorSpec where

@@ -1,6 +1,5 @@
 {
   "skills": ["../.claude/skills"],
-  "prompts": ["../.claude/commands"],
   "compaction": {
     "enabled": true,
     "reserveTokens": 24000,

@@ -1,22 +1,14 @@
 # Rust Runtime
 
-Use Rust to implement the actor runtime as a deep boundary. Callers should see handles and typed outcomes, not channels,
-locks, join handles, or scheduler internals.
+Keep state, receivers, lifecycle flags, and receive loops private. Expose concrete handles and typed outcomes. Choose an
+owning task, thread, or process that fits the existing runtime; an actor boundary does not require Tokio.
 
-## Runtime Structure
-
-Recommended default:
-
-- `ActorHandle<M>`: cloneable sending capability.
-- `ActorRef`: erased or enum-based handle when heterogeneous actors are needed.
-- Private `ActorCell`: owns state, receiver, lifecycle flags, metrics, and supervisor link.
-- Private receive loop: processes one message at a time.
-- `Supervisor`: owns start/stop/restart policy and observes actor exits.
-- `Registry`: optional mapping from logical actor IDs to handles; use only when lookup is a real requirement.
+In lean-rs, inspect `crates/lean-rs-worker-parent/src/supervisor.rs` and `pool.rs` before proposing a new scheduler.
+Their reader threads and bounded event channels are implementation details of the worker contract.
 
 ## Message API
 
-Prefer a typed enum for each actor boundary:
+A typed message enum can carry a reply channel. For example, in a Tokio-based design (schematic types):
 
 ```rust
 enum WorkerMsg {
@@ -30,74 +22,39 @@ enum WorkerMsg {
 }
 ```
 
-Use `call` for request/reply and `send` for fire-and-forget:
+Expose domain operations on a concrete handle. Request/reply operations await a typed result; fire-and-forget operations
+still report whether admission succeeded. Do not expose the sender unless callers are meant to construct the protocol.
+Add erased handles, registries, or generic traits only when actual callers need them.
 
-```rust
-impl WorkerHandle {
-    pub async fn call(&self, input: Work) -> Result<WorkDone, ActorError>;
-    pub async fn send_stop(&self, reason: StopReason) -> Result<(), ActorError>;
-}
-```
+## Mailboxes and backpressure
 
-Do not expose `mpsc::Sender<WorkerMsg>` unless the caller is meant to participate in protocol construction.
+- Use bounded queues by default. Justify unbounded storage with a memory bound and overload policy.
+- Define whether full queues wait, reject, drop, or route to dead letters.
+- Expose capacity as a parameter only when callers need to choose it.
+- Measure queue depth and admission wait time; admission is not proof of processing.
 
-## Mailboxes And Backpressure
+## Failure and cancellation
 
-- Use bounded `mpsc` by default.
-- Make capacity a constructor parameter only if real callers need different values.
-- Define overload behavior: await capacity, fail fast, drop oldest, drop newest, or route to dead letters.
-- Instrument queue depth and send wait time.
-- Avoid unbounded queues for convenience. They turn overload into memory growth and hide backpressure from callers.
+Represent failures through typed outcomes: stopped, unavailable, cancelled, panic, worker exit, timeout, or restart
+exhaustion, as appropriate to the boundary.
 
-## Failure And Cancellation
+- Specify whether dropping the last handle stops the owner.
+- Return an error for a closed mailbox.
+- Catch Rust panics at the owner boundary when the contract promises reporting or restart; this does not recover a
+  process from a Lean fatal exit.
+- Give cancellation a bounded shutdown path. Use a forced-stop fallback only when supported by the owner.
 
-Represent actor outcomes explicitly:
+Use [supervision and failure](supervision-and-failure.md) for restart strategies, limits, retries, and shutdown order.
+The supervisor owns recovery; each actor should not restart itself.
 
-```rust
-enum ActorExit {
-    Normal,
-    Stopped(StopReason),
-    Failed(ActorFailure),
-    Cancelled,
-    RestartLimitExceeded,
-}
-```
+## Thread safety
 
-Rules:
-
-- Dropping a handle should not silently abort an actor unless that is the declared lifecycle policy.
-- A closed mailbox is a structured `ActorError::Stopped` or `ActorError::Unavailable`, not a panic.
-- Panics should be caught at the task boundary if the runtime promises restart/reporting.
-- Cancellation should have a bounded shutdown path and a forced-abort fallback if the runtime supports it.
-
-## Supervision
-
-Supervisor responsibilities:
-
-- Start children in dependency order.
-- Observe normal and abnormal exits.
-- Apply restart strategy and intensity window.
-- Escalate when restart limits are exceeded.
-- Publish health/freshness after restart so callers know cached state may be stale.
-
-Do not make each actor manually restart itself. Self-restart tangles lifecycle with business logic.
-
-## Thread Safety
-
-- Actor state should be owned by the actor task, not shared through `Arc<Mutex<State>>`.
-- Handles must be `Send + Sync` only if their internals make that sound.
-- Raw pointers are not `Send`/`Sync` by default; wrap them only with a documented safety proof.
-- If a foreign callback enters Rust from another thread, immediately enqueue into the owning actor/runtime.
+State belongs to its owner. A handle may be `Send` or `Sync` only when its contents and operations make that sound.
+Audit raw pointers and every unsafe thread-safety implementation. For foreign callbacks, enqueue only data permitted by
+the thread contract; Lean-derived handles remain thread-bound. See [Lean/Rust FFI](lean-rust-ffi.md).
 
 ## Observability
 
-Expose:
-
-- actor ID/logical name;
-- lifecycle status;
-- restart generation;
-- queue depth or overload counters;
-- last error summary;
-- structured event log for tests.
-
-Do not expose task IDs, OS thread IDs, channel internals, or raw pointer addresses as stable semantics.
+Expose logical identity, lifecycle, restart generation, overload counters, and bounded error summaries. Structured
+runtime events can support tests and model observations. Task IDs, channel types, OS thread IDs, and pointer addresses
+may aid debugging but are not stable actor semantics.
