@@ -33,7 +33,7 @@
 # child process instead of returning synchronously).
 FROM ubuntu:24.04
 
-ARG LEAN_VERSION=4.30.0
+ARG LEAN_VERSION=4.35.0
 ARG RUST_CHANNEL=stable
 
 # Reproducibility:
@@ -97,15 +97,17 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain "${RUST_CHANNEL}" \
         --component rustfmt --component clippy --component rust-src
 
-# Rust nightly is required by `cargo public-api` (drives `cargo
-# +nightly rustdoc` internally) and by `cargo fuzz` (rust-src). The
-# rust-src component is gated on nightly.
+# Keep nightly + rust-src for the existing ABI fuzz gate.
 RUN /root/.cargo/bin/rustup toolchain install nightly --profile minimal \
         --component rust-src
 
-# Workspace tools the verify job uses. `--locked` keeps the install
-# reproducible by honoring each crate's Cargo.lock.
-RUN /root/.cargo/bin/cargo install --locked cargo-nextest cargo-public-api cargo-fuzz
+# Public-API baselines require this exact rustdoc/tool pair. Keep both pins
+# in lockstep with ci.yml, release.yml, and scripts/prerelease.sh.
+RUN /root/.cargo/bin/rustup toolchain install nightly-2026-06-18 --profile minimal
+RUN /root/.cargo/bin/cargo install --locked --version 0.52.0 cargo-public-api
+
+# Other workspace tools the verify job uses.
+RUN /root/.cargo/bin/cargo install --locked cargo-nextest cargo-fuzz
 
 # elan + the pinned Lean toolchain. The toolchain landing dir
 # (`/root/.elan/toolchains/leanprover--lean4---v${LEAN_VERSION}`) is
@@ -126,7 +128,7 @@ RUN cargo --version \
  && lake --version \
  && lean --version \
  && cargo nextest --version \
- && cargo public-api --version \
+ && cargo +nightly-2026-06-18 public-api --version \
  && cargo fuzz --version \
  && actionlint --version \
  && python3 --version

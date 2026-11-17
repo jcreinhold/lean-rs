@@ -498,49 +498,61 @@ run_gate "Package tarball docs.rs simulation" \
 	python3 "$REPO_ROOT/scripts/check_package_docsrs.py" --allow-dirty
 
 if [[ "$RUN_PUBLIC_API" == 1 ]]; then
-	# The CI gate pins both cargo-public-api (PUBLIC_API_PIN) and the nightly
-	# rustdoc toolchain (PUBLIC_API_NIGHTLY) so the diff is reproducible: the
-	# auto-derived `StructuralPartialEq` bound on generic types is rendered
-	# differently across nightlies / tool versions and would report spurious
-	# drift against the committed baselines. Mirror both pins locally; warn
-	# (don't fail) on a tool mismatch so a stray version isn't misread as a
-	# real API change. Keep these in lockstep with ci.yml / release.yml.
+	# The CI gate pins both cargo-public-api and nightly rustdoc. An enabled
+	# API gate must fail when that pair is unavailable or mismatched rather
+	# than report success without checking the committed baselines.
+	# Keep these pins in lockstep with ci.yml / release.yml / Dockerfile.prerelease.
 	PUBLIC_API_PIN="0.52.0"
 	PUBLIC_API_NIGHTLY="nightly-2026-06-18"
-	if ! command -v cargo-public-api >/dev/null 2>&1; then
-		log_warn "cargo-public-api not installed; skipping (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
-		SKIPPED+=("public-API baseline diff")
-	elif ! rustup toolchain list | grep -q "^${PUBLIC_API_NIGHTLY}"; then
-		log_warn "pinned ${PUBLIC_API_NIGHTLY} not installed; skipping public-API diff (install: rustup toolchain install ${PUBLIC_API_NIGHTLY} --profile minimal)"
-		SKIPPED+=("public-API baseline diff")
-	else
-		if [[ "$(cargo public-api --version 2>/dev/null | awk '{print $2}')" != "$PUBLIC_API_PIN" ]]; then
-			log_warn "cargo-public-api version differs from the CI pin ${PUBLIC_API_PIN}; a drift here may be tooling noise (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
+	run_public_api_diff() {
+		if ! command -v cargo-public-api >/dev/null 2>&1; then
+			log_err "cargo-public-api not installed (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
+			return 1
 		fi
-		run_public_api_diff() {
-			local fail=0
-			for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host \
-				lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
-				local baseline="$REPO_ROOT/docs/api-review/${crate}-public.txt"
-				if [[ ! -f "$baseline" ]]; then
-					log_err "Missing baseline: $baseline"
-					fail=1
-					continue
-				fi
-				local actual
-				actual="$(mktemp)"
-				cargo "+${PUBLIC_API_NIGHTLY}" public-api --simplified -p "$crate" >"$actual"
-				if ! diff -u "$baseline" "$actual"; then
-					log_err "Public-API drift for $crate. Regenerate $baseline before tagging."
-					fail=1
-				fi
-				rm -f "$actual"
-			done
-			return "$fail"
-		}
-		run_gate "Public-API baseline diff" \
-			run_public_api_diff
-	fi
+		if ! rustup run "$PUBLIC_API_NIGHTLY" rustc --version >/dev/null 2>&1; then
+			log_err "pinned ${PUBLIC_API_NIGHTLY} unavailable (install: rustup toolchain install ${PUBLIC_API_NIGHTLY} --profile minimal)"
+			return 1
+		fi
+		local tool_version
+		if ! tool_version="$(cargo "+${PUBLIC_API_NIGHTLY}" public-api --version 2>/dev/null | awk '{print $2}')"; then
+			log_err "could not query cargo-public-api with ${PUBLIC_API_NIGHTLY}"
+			return 1
+		fi
+		if [[ "$tool_version" != "$PUBLIC_API_PIN" ]]; then
+			log_err "cargo-public-api version ${tool_version} differs from required ${PUBLIC_API_PIN} (install: cargo install cargo-public-api@${PUBLIC_API_PIN} --locked)"
+			return 1
+		fi
+
+		local fail=0
+		for crate in lean-rs-sys lean-toolchain lean-rs-interop-shims lean-rs lean-rs-host \
+			lean-rs-worker-protocol lean-rs-worker-parent lean-rs-worker-child; do
+			local baseline="$REPO_ROOT/docs/api-review/${crate}-public.txt"
+			if [[ ! -f "$baseline" ]]; then
+				log_err "Missing baseline: $baseline"
+				fail=1
+				continue
+			fi
+			local actual
+			if ! actual="$(mktemp)"; then
+				log_err "Could not create temporary API output for $crate"
+				return 1
+			fi
+			if ! cargo "+${PUBLIC_API_NIGHTLY}" public-api --simplified -p "$crate" >"$actual"; then
+				log_err "Public-API generation failed for $crate"
+				fail=1
+			elif ! diff -u "$baseline" "$actual"; then
+				log_err "Public-API drift for $crate. Review the change before regenerating its baseline."
+				fail=1
+			fi
+			if ! rm -f "$actual"; then
+				log_err "Could not remove temporary API output for $crate"
+				fail=1
+			fi
+		done
+		return "$fail"
+	}
+	run_gate "Public-API baseline diff" \
+		run_public_api_diff
 else
 	SKIPPED+=("public-API baseline diff (--no-publicapi)")
 fi
