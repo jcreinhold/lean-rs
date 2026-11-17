@@ -124,6 +124,26 @@ cargo nextest run --offline -p lean-toolchain --lib \
   -E 'test(native_guardian::tests::record_lifetime_tests::)' --test-threads 1 --no-capture
 ```
 
+## Writer retry regressions
+
+The Unix `writer_lock::tests::admission_tests` use private files and actual owned dummy child processes. An observation
+barrier pauses the writer after its real ownership check refuses admission, or after a real later-domain lock blocks.
+A separate SH contender must first observe blockage, then acquire during the retry while the writer still announces
+its complete demand. The owner remains live and the post-admission write must not run. A held recovery SH also blocks
+the writer after that owner exits. The original algorithm failed all three lock-release cases.
+
+The record headers are synthetic but refer to real live private process groups. They test passive admission, not a
+writer helper's custody protocol or guardian recovery. A raw-EX control deliberately ignores the owner fence and writes
+in the private fixture, proving that the write marker detects this unsafe action; it is not a source-mutation test.
+Other cases cover timeout/cancellation cleanup, inode replacement/removal, unlocked anchors, a free zero-budget pass,
+and hard rejection of a malformed committed record. Cleanup acts only through actual owned child handles. No test
+converts a live artifact lock or explicitly unlocks a retained alias.
+
+```sh
+cargo nextest run --offline -p lean-toolchain --lib \
+  -E 'test(writer_lock::tests::) | test(writer_demand::tests::) | test(write_domains::tests::)' --no-capture
+```
+
 ## Import-heavy test inventory
 
 Use this inventory when adding or selecting tests:

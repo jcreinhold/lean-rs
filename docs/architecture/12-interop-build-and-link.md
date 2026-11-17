@@ -154,8 +154,24 @@ cancellation predicate cover all rounds. A warm owner retaining earlier guardian
 `try_acquire_union` and must retire that generation on typed contention rather than wait on its own old locks.
 No metadata, import, initializer, guardian acknowledgement or target body is replayed by these admission loops.
 
-Writers acquire all project locks in globally sorted path order, revalidate the graph under those locks, and retry a
-changed graph only before launch within the original admission budget. The helper validates every borrowed domain before
+Writers try all project locks in globally sorted path order. Each pass independently opens each candidate, tries EX,
+and checks prior writer/native ownership once. Contention or an explicit false ownership check closes the candidate
+and every earlier ungranted artifact guard before any wait. Other errors propagate. The complete union's compatible
+writer demand stays held across these retries; cancellation and the original time budget bound waiting. Zero timeout
+still permits one immediate pass. Retrying never runs a command or turns an unknown outcome into success.
+
+An initial **unlocked** file handle pins each target's original inode across retry passes. It is never flocked, cloned or
+lent, and its descriptor closes on exec; every EX attempt opens a separate description without creating a replacement. Admission compares the
+anchor, candidate and named inode before and after ownership checks. Anchors remain for domains present across a graph
+refresh; removed domains close their anchors, matching the existing changed-graph restart policy. This is distinct from
+keeping an ungranted EX lock. A caller may still own a separate cache-entry lock during project admission.
+
+Writers revalidate the graph under the complete granted set and retry a changed graph only before launch within the
+original admission budget, announcing the new complete union before another EX attempt. Returned loans name the primary
+project first. Releasing retry candidates does not let ordinary readers bypass writer demand or grant permission to read
+artifacts still in use; a recovery reader requires a separate reviewed path.
+
+The helper validates every borrowed domain before
 ACK and rechecks graph coverage and inode identity before each GO. Loan order still names the primary project first,
 with up to 64 project/source-entry descriptions. `open_with_write_roots` also binds independently runnable prepared
 workspaces. `project_artifact_root_union` validates their combined graph; `write_roots` exposes the held domains and

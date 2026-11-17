@@ -284,3 +284,12 @@ fn owned_child_contention_timeout_and_cancellation_preserve_its_lock() {
     holder.wait();
     drop(acquired(&path));
 }
+
+#[cfg(unix)]
+#[path = "admission_tests.rs"]
+mod admission_tests;
+
+#[cfg(unix)]
+pub(super) fn admission_wait(path: &Path, reason: &str) {
+    admission_tests::admission_wait(path, reason);
+}
