@@ -1,7 +1,7 @@
 # Testing
 
-The workspace gate is [`cargo-nextest`](https://nexte.st/), not `cargo test`. `cargo test` (single-process) is not the
-gate—cumulative Lean state OOMs the binary after ~150 tests (see [Why nextest](#why-nextest) below).
+The workspace gate is [`cargo-nextest`](https://nexte.st/). Earlier same-process `cargo test` runs exhausted memory after
+about 150 tests as Lean state accumulated; see [Why nextest](#why-nextest).
 
 ## Run the suite
 
@@ -39,8 +39,8 @@ cargo check --profile profiling -p lean-rs-profiling --bins
 
 ## Tuning
 
-The workspace's [`.config/nextest.toml`](../.config/nextest.toml) caps concurrent test processes at **1**. The
-workspace's [`.cargo/config.toml`](../.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
+The workspace's [`.config/nextest.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.config/nextest.toml) caps concurrent test processes at **1**. The
+workspace's [`.cargo/config.toml`](https://github.com/jcreinhold/lean-rs/blob/main/.cargo/config.toml) also sets `build.jobs=1`, `RUST_TEST_THREADS=1`,
 `LEAN_RS_NUM_THREADS=1`, and a default `LEAN_RS_LEAN_MAX_MEMORY_KIB=1572864` guardrail for worker children. These
 defaults make normal `cargo nextest`, worker examples, and profiling examples use the local low-memory shape without
 manual shell exports. Focused same-process `cargo test` runs that open full host sessions now fail before Lean import
@@ -52,8 +52,8 @@ unless the developer explicitly opts into that risk.
 | `CARGO_BUILD_JOBS=4`            | Use more compile parallelism when the machine has memory to spare.                    |
 | `cargo test -p lean-rs --lib …` | Single-test debug loop for crates that do not open full host sessions.                |
 | `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1 cargo test -p lean-rs-host …` | Explicitly budgeted one-off host-session debug run. Do not use as a full-suite gate. |
-| `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1 cargo nextest run -p lean-rs-host --test session_leak_loop --include-ignored` | Run ignored leak-loop diagnostics intentionally. Tune `LEAN_RS_LEAK_LOOP_ITERS` first. |
-| `cargo bench -p lean-rs`        | Bench that wants real Lean parallelism. Unset `LEAN_RS_NUM_THREADS` first (see below).|
+| `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1 cargo nextest run -p lean-rs-host --test session_leak_loop --run-ignored all` | Run ignored leak-loop diagnostics intentionally. Tune `LEAN_RS_LEAK_LOOP_ITERS` first. |
+| `LEAN_RS_NUM_THREADS=8 cargo bench -p lean-rs` | Select explicit Lean parallelism for a budgeted benchmark. |
 
 Do not use broad or file-shaped `cargo test` filters for import-heavy host tests, including:
 
@@ -70,12 +70,13 @@ process isolation, or set `LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS=1` only for one
 memory budget.
 
 Ignored import-heavy diagnostics add a second opt-in: `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1`. This prevents accidental
-`--include-ignored` runs from executing long fresh-import loops in one test process. The ignored loops remain available
-for sanitizer or explicitly budgeted diagnostics; routine coverage comes from nextest-isolated small tests and
-worker/pool checks.
+`--run-ignored all` runs from executing long fresh-import loops in one test process. These are explicitly budgeted
+import diagnostics; the current ASan job does not run host-session loops or instrument the Lean runtime. Routine coverage
+comes from nextest-isolated small tests and worker/pool checks.
 
-Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
-`LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
+Set a positive `LEAN_RS_NUM_THREADS` to select benchmark parallelism. For Lean's compiled-in heuristic, prefix the
+Cargo command with `LEAN_RS_NUM_THREADS=`; the current parser warns about the empty value and falls back. Merely unsetting
+the shell variable lets Cargo restore the configured value `1`.
 
 ## Native guardian service-loss regressions
 
@@ -152,8 +153,8 @@ Use this inventory when adding or selecting tests:
 | --- | --- | --- | --- |
 | `lean-rs`, `lean-toolchain`, `lean-rs-worker-protocol` unit tests | cheap/unit | `cargo test -p <crate>` or nextest | No full host-session imports. |
 | `lean-rs-host` unit tests that do not call `LeanCapabilities::session` | cheap/unit | nextest or focused `cargo test` | Same-process host import guard does not affect these. |
-| `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | single fresh import or bounded pool reuse | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
-| `session_create_drop_loop_long`, `pool_acquire_release_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Intended for sanitizer/explicit diagnostics, not routine local smoke tests. |
+| `crates/lean-rs-host/tests/session_leak_loop.rs` small tests | bounded per-test imports or pool reuse | `cargo nextest run -p lean-rs-host --test session_leak_loop --profile ci` | Each selected test process resets Lean state. |
+| `session_create_drop_loop_long`, `pool_acquire_release_loop_long` | import-heavy diagnostic | ignored plus `LEAN_RS_RUN_IMPORT_HEAVY_TESTS=1` | Explicitly budgeted diagnostics; not part of the current ASan job or routine smoke tests. |
 | `crates/lean-rs-host/tests/batching_and_pool.rs` | many host-session service tests | `cargo nextest run -p lean-rs-host --test batching_and_pool --profile ci` | Do not run the whole integration binary through plain `cargo test`; use nextest isolation. |
 | `long_session_memory` example and profiling collectors | profiling-only | `cargo check` locally; run with explicit `LEAN_RS_LONG_SESSION_MAX_RSS_KIB` when measuring | Runtime profiling must be capped and opt-in. |
 | Worker child/parent pool and capability tests | worker process boundary | `cargo test -p lean-rs-worker-child pool`, `cargo test -p lean-rs-worker-child capability_builder`, or nextest | Fresh imports happen in worker children or isolated test processes. |
@@ -163,13 +164,13 @@ Use this inventory when adding or selecting tests:
 The Lean task manager starts in `LeanRuntime::init`. By default worker count is Lean's compiled-in heuristic (typically
 one worker per hardware core). Set `LEAN_RS_NUM_THREADS` to a positive integer **before** the first `init` call to pin
 the count for the process; invalid values fall back to the Lean default with a `tracing::warn!`. See the
-`LeanRuntime::init` docstring at [`crates/lean-rs/src/runtime/init.rs`](../crates/lean-rs/src/runtime/init.rs) for the
+`LeanRuntime::init` docstring at [`crates/lean-rs/src/runtime/init.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/src/runtime/init.rs) for the
 full contract.
 
 ## CI
 
 CI runs the `ci` nextest profile (`cargo nextest run --workspace --profile ci`), which adds one automatic retry on
-transient failures. See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+transient failures. See [`.github/workflows/ci.yml`](https://github.com/jcreinhold/lean-rs/blob/main/.github/workflows/ci.yml).
 
 Per-test memory still matters under nextest's process isolation: a single worker child that performs several
 compiler-environment imports in one test can exceed the CI runner's memory on its own. The `session_reuse` pool-key
@@ -182,31 +183,20 @@ behavior they pin.
 
 ## Why nextest
 
-Each test that exercises a `LeanSession` imports `LeanRsFixture.Handles`, which transitively imports the full Lean
-compiler environment. Per-test working set is several hundred megabytes. In single-process `cargo test`, Lean's interned
+Import-heavy host fixture tests can load the full Lean compiler environment through `LeanRsFixture.Handles`. Their
+working set can reach several hundred megabytes before repeated imports. In single-process `cargo test`, Lean's interned
 name table, mimalloc heap, and globally-registered environments grow monotonically across tests—`Drop` releases
-per-session refcounts but cannot reclaim what Lean's process-global tables hold. After ~150 of ~225 tests, a developer
-machine or CI runner with limited memory OOMs (observed: macOS `memorystatus` kills the process at ~30 GB compressed
-memory).
+per-session refcounts but cannot reclaim what Lean's process-global tables hold. In a recorded earlier suite of about
+225 tests, macOS `memorystatus` killed the process after about 150 tests at roughly 30 GB compressed memory. Those counts
+are historical observations, not a current suite size or memory limit.
 
 `cargo nextest run` runs each test in its own process, so cumulative Lean state resets at every process boundary. The
 same memory fact applies outside tests: long-running applications should use the worker crates with restart/RSS policy,
 or a same-process `SessionPool` with a fresh-import memory policy, when they may open many distinct import sets.
 
+Shared per-binary host state also conflicts with [thread affinity](architecture/04-concurrency.md): `LeanHost` is
+`!Send + !Sync`, while static `OnceLock`/`LazyLock` storage requires `Sync`.
+
 The host-session guard is intentionally narrow: it only blocks `LeanCapabilities::session`, `session_with_profile`, and
 `profiling_session` from Cargo/libtest binaries. It does not affect normal `cargo run` profiling commands, worker child
 processes, bracketed no-extension queries, or nextest runs.
-
-## Why not fix the cumulative growth instead
-
-Two alternatives, both rejected:
-
-- **Hoist `LeanHost` / `LeanCapabilities` into per-binary shared state.** The `LeanHost: !Send + !Sync` contract
-  ([`docs/architecture/04-concurrency.md`](architecture/04-concurrency.md)) prevents this; `OnceLock`/`LazyLock` require
-  `Sync`.
-- **Find and fix the leak.** Lean's interned name table and mimalloc retention are process-global by design; the
-  work-to-payoff ratio is poor compared to process isolation.
-
-Nextest's process-per-test model dissolves both problems with no public-API churn. The trade-off is wall-clock cost from
-repeated cold `LeanRuntime::init` calls; on a 12-core M4 Pro the full suite runs in ~30 seconds—well under the
-inner-loop attention threshold.

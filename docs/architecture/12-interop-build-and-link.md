@@ -6,11 +6,17 @@ mangling.
 
 ## Build Script Contract
 
-Use `CargoLeanCapability` for downstream crates that ship Lean source:
+Every build call acquires writer custody before cache inspection, including cache hits. Bind a shared-writer helper
+with `.writer_executable(...)` or `LEAN_HOST_MCP_WRITER_EXECUTABLE`. A crate may instead select `PrivateLakeBootstrap`
+when its Lean root and all dependencies lie strictly below the owning Cargo package:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
+    let lean_root = owner.join("lean");
+    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
+    lean_toolchain::CargoLeanCapability::new(&lean_root, "MyCapability")
+        .private_bootstrap(bootstrap)
         .package("my_app")
         .module("MyCapability")
         .build()?;
@@ -30,15 +36,15 @@ It runs `lake build MyCapability:shared`, resolves Lake's supported dylib naming
 artifact manifest, and returns `BuiltLeanCapability` for build scripts that want to inspect the result. The manifest is
 the canonical runtime handoff for shipped crates; the direct dylib path remains a lower-level compatibility path.
 
-If the capability imports another shipped Lean shared library that was built separately, record it before building the
-manifest:
+For a dependency outside the Cargo owner, use the configured writer rather than a package-local bootstrap. Record
+separately built dependency libraries in the artifact manifest. Hosts selecting their own Lean toolchain can also pass
+the matching sysroot:
 
-```rust
+```rust,ignore
 use lean_toolchain::LeanLibraryDependency;
 
-let dependency_dylib = "/path/to/libdependency.dylib";
-
 lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
+    .writer_executable(configured_writer)
     .package("my_app")
     .module("MyCapability")
     .dependency(
@@ -46,21 +52,12 @@ lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
             .export_symbols_for_dependents()
             .initializer("dependency_pkg", "Dependency"),
     )
-    .build()?;
-```
-
-This is only dependency metadata for the loader. The owning crate still decides how the dependency source is packaged,
-which Lake package/module names it uses, and which exports are trusted.
-
-Hosts that pin the Lean toolchain themselves can pass the matching sysroot explicitly:
-
-```rust
-lean_toolchain::CargoLeanCapability::new("lean", "MyCapability")
-    .package("my_app")
-    .module("MyCapability")
     .lean_sysroot(consumer_lean_sysroot)
     .build()?;
 ```
+
+The dependency and explicit sysroot are optional. Dependency metadata tells the loader what to open; the owning crate
+still decides how sources are packaged, the Lake package/module names, and which exports are trusted.
 
 The selected sysroot is scoped to this helper call. Link-directive discovery uses that prefix, and the Lake build runs
 `<sysroot>/bin/lake build <target>:shared` with `LEAN_SYSROOT` set only on the child command. The helper does not set
@@ -72,8 +69,8 @@ Lower-level helpers remain available for custom build flows:
   failure.
 - `emit_lean_link_directives` preserves the warning-on-failure behavior.
 - `build_lake_target` builds one Lake shared-library target and emits Cargo rerun directives.
-- `build_lake_target_quiet` uses the same cache and path resolver without emitting Cargo directives; `lean-rs-host` uses
-  it when it materializes bundled shims at runtime.
+- `build_lake_target_quiet` uses the same cache and path resolver without emitting Cargo directives. The host's bundled
+  shim path uses `CargoLeanCapability::build_quiet` so its manifest also carries trusted export signatures.
 
 `build_lake_target` emits `cargo:rerun-if-changed` lines for the Lake files and Lean source files it scans. It captures
 Lake stdout and stderr, so stdout stays limited to Cargo directives and caller-chosen `cargo:` lines.
@@ -96,10 +93,12 @@ The version 2 cache key covers the Lake project and its bounded declared depende
 
 - SHA-256 of `lake-manifest.json`;
 - target name and Lake package name;
+- explicit Lean sysroot path, or the ambient-toolchain selector;
 - count of scanned source files;
 - maximum mtime of `lakefile.lean`, `lakefile.toml`, `lean-toolchain`, and every `*.lean` file below the project root,
   excluding `.lake/`;
-- streaming content SHA-256 of each canonical dependency's supported owned file tree, excluding `.lake` and `.git`,
+- streaming content SHA-256 of the primary project and each canonical dependency's supported owned file tree, excluding
+  `.lake` and `.git`,
   including C/header/resource inputs, Lake configuration, toolchain pin, manifest and supported override metadata; this
   detects content changes even when size and modification timestamps are preserved;
 - file and directory identity observations, including Unix device, inode and change time, which also detect ordinary
@@ -141,7 +140,7 @@ refuse a fresh reader. Neither demand nor its disappearance is evidence that any
 The configured helper retains its own compatible demand through writer cleanup; artifact EX aliases and the existing
 process fences remain authoritative after helper or caller loss. Demand files are private, close-only kernel locks and
 are never unlinked as recovery. Embedders retaining warm readers must fence matching new admissions and retire those
-readers only after their admitted calls finish; the MCP broker performs this automatically without a manual pool drain.
+readers only after their admitted calls finish.
 
 Whole-domain readers use `SharedReader::acquire_union` or `SharedReadProxy::acquire_union` before any body. The
 complete canonical input union stays fixed; acquisition sorts lock paths but returns guards in input order. A complete
@@ -236,7 +235,7 @@ Each diagnostic renders as one line, so callers may print it through `cargo:warn
 
 ## Generic Interop Example
 
-[`crates/lean-rs/examples/interop_callback.rs`](../../crates/lean-rs/examples/interop_callback.rs) builds two Lake
+[`crates/lean-rs/examples/interop_callback.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs/examples/interop_callback.rs) builds two Lake
 targets through the helper:
 
 - `crates/lean-rs/shims/lean-rs-interop-shims` target `LeanRsInterop`;
@@ -245,7 +244,8 @@ targets through the helper:
 The example opens the generic shim dylib globally, opens the downstream-style consumer dylib, calls an ordinary Lean
 export from Rust, and invokes a Lean callback loop through `LeanCallbackHandle`. It uses no `lean-rs-host` session API.
 
-Run it twice to see the cache miss and cache hit paths:
+The example requires a configured `LEAN_HOST_MCP_WRITER_EXECUTABLE`; it does not select a helper itself. With that
+prerequisite in place, run it against a cold cache and repeat to exercise the cache-hit path:
 
 ```sh
 cargo run -p lean-rs --example interop_callback
