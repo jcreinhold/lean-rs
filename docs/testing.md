@@ -77,6 +77,31 @@ worker/pool checks.
 Unset `LEAN_RS_NUM_THREADS` (`unset LEAN_RS_NUM_THREADS` in the shell, or prefix the command with
 `LEAN_RS_NUM_THREADS=`) when you need Lean to use its own worker-count heuristic—typically for benchmarks.
 
+## Native guardian service-loss regressions
+
+The macOS-only `lean-toolchain` guardian tests start an independent writer before killing the actual service, separately
+with a stopped worker. The service and test controller retain no artifact lock; the real guardian alone retains SH after
+the worker drops its local loan handles. The contender records group presence after its first EX acquisition, appends to
+the leaf's actual heartbeat file, and retains the same EX descriptor through observed cleanup. It never explicitly
+unlocks or changes a live lock mode. The test requires no old group or later payload writes.
+
+A separate guardian-loss control proves that raw EX can succeed while the managed writer's owner-record check still
+rejects work. That control deliberately ignores the check to test the write oracle; it is not a production writer
+violating it. Its leaf's fixed safety expiry only cleans up the negative case.
+
+Positive setup and recovery must finish within three seconds, before the leaf's four-second safety exit. A test-only
+thread in that same guardian can stop its own pinned payload group after three seconds; any rescue use or guardian error
+fails the positive test. The outer controller never signals the worker after service death. Failed fixture directories
+remain under `/tmp/native-guard-*` for inspection. These tests need no Lean fixture, runtime import or Mathlib build.
+They are excluded on other platforms because their stopped-state query and inherited-session cleanup observations are
+macOS-specific; they make no Linux, restart or lease claim.
+
+Run the focused tests with an isolated Cargo target if another task owns build output:
+
+```sh
+CARGO_TARGET_DIR=/tmp/lean-rs-guardian-tests cargo nextest run --offline -p lean-toolchain --lib -E 'test(native_guardian::tests::)'
+```
+
 ## Import-heavy test inventory
 
 Use this inventory when adding or selecting tests:
@@ -107,11 +132,11 @@ transient failures. See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml
 Per-test memory still matters under nextest's process isolation: a single worker child that performs several
 compiler-environment imports in one test can exceed the CI runner's memory on its own. The `session_reuse` pool-key
 tests import the `Init`-only fixture modules (`LeanRsFixture.Scalars`/`Strings`) rather than
-`LeanRsHostShims.Elaboration` wherever the test pins key/eviction behavior and never elaborates: measured locally,
-the compiler-environment variant of the capacity tests peaked at ~7.2 GiB of child RSS and was SIGKILLed by
-`memorystatus` on the 7 GB macOS runner (empty diagnostics, exit `signal: 9`); the `Init`-only variant peaks at
-~1.3 GiB. Tests that genuinely elaborate keep the heavy imports. New worker tests should pick the lightest import
-profile that exercises the behavior they pin.
+`LeanRsHostShims.Elaboration` wherever the test pins key/eviction behavior and never elaborates: measured locally, the
+compiler-environment variant of the capacity tests peaked at ~7.2 GiB of child RSS and was SIGKILLed by `memorystatus`
+on the 7 GB macOS runner (empty diagnostics, exit `signal: 9`); the `Init`-only variant peaks at ~1.3 GiB. Tests that
+genuinely elaborate keep the heavy imports. New worker tests should pick the lightest import profile that exercises the
+behavior they pin.
 
 ## Why nextest
 

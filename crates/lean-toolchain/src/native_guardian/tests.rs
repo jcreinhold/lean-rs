@@ -22,6 +22,9 @@ const ROOT_ENV: &str = "LEAN_NATIVE_GUARDIAN_TEST_ROOT";
 const NONCE: &str = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef";
 const LIMIT: Duration = Duration::from_secs(7);
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+#[path = "service_loss_regressions.rs"]
+mod service_loss_regressions;
 const LEAF: &str = r"
 import os, pathlib, signal, sys, time
 root = pathlib.Path(sys.argv[1])
@@ -98,6 +101,10 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if thread::panicking() {
+            eprintln!("preserved failed native guardian fixture: {}", self.root.display());
+            return;
+        }
         let _removed = fs::remove_dir_all(&self.root);
     }
 }
@@ -240,10 +247,16 @@ impl Drop for Generation {
 
 #[test]
 fn fixture_guardian() {
-    if std::env::var_os(ROOT_ENV).is_none() {
+    let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) else {
         return;
-    }
-    if let Err(error) = run_guardian_cli() {
+    };
+    let result = if root.join("service-loss-watchdog").exists() {
+        service_loss_regressions::guardian_fixture(&root)
+    } else {
+        run_guardian_cli()
+    };
+    if let Err(error) = result {
+        let _saved = fs::write(root.join("guardian-error"), error.to_string());
         eprintln!("private guardian: {error}");
         std::process::exit(91);
     }
@@ -409,38 +422,27 @@ fn root_death_is_detected_while_a_descendant_keeps_the_control_endpoint() {
 
 #[test]
 fn independent_guardian_closes_scope_after_actual_server_sigkill() {
-    let fixture = Fixture::new();
-    let mut server = fixture_command(&fixture.root, "native_guardian::tests::fixture_server")
-        .spawn()
-        .unwrap();
-    wait_until(|| fixture.root.join("server-ready").exists());
-    let info: Value = serde_json::from_reader(File::open(fixture.root.join("server-ready")).unwrap()).unwrap();
-    let worker = pid(field(&info, "worker")).unwrap();
-    let guardian: NativeProcessIdentity = serde_json::from_value(field(&info, "guardian").clone()).unwrap();
-    assert!(crate::process_group::group_present(worker).unwrap());
-    server.kill().unwrap();
-    assert_eq!(server.wait().unwrap().signal(), Some(libc::SIGKILL));
-    wait_until_within(Duration::from_secs(2), || {
-        !crate::process_group::group_present(worker).unwrap()
-    });
-    wait_until_within(Duration::from_secs(2), || !guardian.is_live().unwrap());
-    let before = fixture.heartbeat();
-    thread::sleep(Duration::from_millis(30));
-    assert_eq!(fixture.heartbeat(), before);
-    let exclusive = fixture.exclusive();
-    let metadata = exclusive.metadata().unwrap();
-    assert!(
-        protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (metadata.dev(), metadata.ino())).unwrap()
-    );
+    service_loss_regressions::assert_service_loss(false);
+}
+
+#[test]
+fn independent_guardian_closes_frozen_worker_after_actual_server_sigkill() {
+    service_loss_regressions::assert_service_loss(true);
 }
 
 #[test]
 fn guardian_failure_releases_fd_but_durable_domain_fences_actual_ex_writer() {
     let fixture = Fixture::new();
     let mut generation = Generation::start(&fixture.root);
+    let contender = service_loss_regressions::Contender::start(&fixture, generation.worker.id());
     generation.kill_guardian_through_its_actual_owner();
-    let exclusive = fixture.exclusive();
-    let metadata = exclusive.metadata().unwrap();
+    let acquired = contender.acquired();
+    assert!(acquired.group_present && acquired.worker_live, "{acquired:?}");
+    assert!(
+        !acquired.managed_writer_ready,
+        "bare EX is not writer admission: {acquired:?}"
+    );
+    let metadata = fs::metadata(fixture.lock()).unwrap();
     assert!(
         !protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (metadata.dev(), metadata.ino())).unwrap()
     );
@@ -456,6 +458,11 @@ fn guardian_failure_releases_fd_but_durable_domain_fences_actual_ex_writer() {
     // No guardian remains to stop the leaf. Its bounded self-expiry is the only
     // cleanup here; do not signal a serialized PGID after losing its pin.
     wait_until(|| !crate::process_group::group_present(generation.worker.id()).unwrap());
+    let observed = contender.finish();
+    assert!(
+        observed.payload_bytes_after_marker > 0,
+        "lock-only control must detect live writes: {observed:?}"
+    );
     assert!(
         protected_native_reads_stopped(&fixture.registry, &fixture.lock(), (metadata.dev(), metadata.ino())).unwrap()
     );
