@@ -37,7 +37,6 @@
 - [Import-set planning](architecture/21-import-set-planning.md)
 - [Scale and downstream fixtures](architecture/25-mathlib-scale-worker-fixture.md)
 - [Worker runtime semantics](architecture/30-worker-runtime-semantics.md)
-- [Runtime model proof package](architecture/31-runtime-model-proof-home.md)
 
 # Recipes
 

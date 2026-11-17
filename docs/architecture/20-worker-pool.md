@@ -91,8 +91,7 @@ The parent `worker_shutdown` suite checks import-light lifecycle conformance.
 The [scale and replacement fixtures](25-mathlib-scale-worker-fixture.md) use deterministic test schemas, including when
 planning with a real mathlib module list. They establish operational coverage, not mathlib indexing semantics or a
 portable throughput guarantee. [Streaming measurements](18-worker-data-streaming.md) justify the retained per-row,
-raw-JSON path. [Runtime-model verification](31-runtime-model-proof-home.md#verification) records the separate formal
-package check.
+raw-JSON path.
 
 Performance reports must name the command, revision, platform, row/module counts, throughput, RSS availability, and
 whether the workload used the deterministic fallback or `LEAN_RS_MATHLIB_ROOT`; use the probes in

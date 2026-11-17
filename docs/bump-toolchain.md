@@ -42,7 +42,7 @@ When the candidate becomes the head, update these together:
 - `LEAN_VERSION_HEAD` in `release.yml`, `release-recover.yml`, `sanitizer.yml`, and `compile-fail.yml`; the release
   verification matrix; and `DEFAULT_LEAN_VERSION` in [`scripts/prerelease.sh`](https://github.com/jcreinhold/lean-rs/blob/main/scripts/prerelease.sh).
 - Every tracked `lean-toolchain` file. Find the pins with `git ls-files '*lean-toolchain'`; this includes bundled shims,
-  fixtures, the shipped-crate template, and the runtime model.
+  fixtures, and the shipped-crate template.
 
 Keep the committed pins equal to the head. The sanitizer and compile-fail workflows install that version without
 repinning the workspace, so mismatched pins can mix headers and runtime-library search paths.

@@ -4,9 +4,9 @@ This is the canonical model for `lean-rs-worker-protocol`, `lean-rs-worker-paren
 worker runtime is a resource-bounded supervised process service with affine leases, generation-indexed requests,
 parent-owned cleanup, restart intensity limits, and bounded streaming buffers.
 
-This prose contract guides worker, pool, session, and protocol changes. The Lean package in `formal/RuntimeModel/`
-represents part of the abstract model; [Runtime model proof package](31-runtime-model-proof-home.md) describes its
-current scope and separate verification procedure. Preserve the stable labels when changing the runtime contract.
+This prose contract guides worker, pool, session, and protocol changes. Preserve its stable labels when changing the
+runtime contract. Named Rust conformance tests supply selected implementation evidence, with the limits described in
+[Proof status](#proof-status).
 
 ## Glossary
 
@@ -132,7 +132,7 @@ Preserve or extend these named conformance tests when refactoring their behavior
 - `conformance_stale_generation_output_is_protocol_failure`.
 
 The stale-generation test is a unit test in `supervisor.rs`; the other names above belong to the worker-shutdown
-integration harness. These tests provide implementation evidence, separately from the abstract Lean theorems.
+integration harness. These tests provide selected implementation evidence, not a mechanized trace-refinement proof.
 
 ## Worker Transition System
 
@@ -374,11 +374,14 @@ The table maps the control and cleanup contracts above to their implementation o
 
 ## Proof Status
 
-`formal/RuntimeModel/` defines the abstract worker/lease vocabulary, `WorkerStep`, and `WorkerTrace`, with five theorem
-declarations about generation agreement, terminal-ledger lookup uniqueness, and consumed/released lease reuse. They do
-not establish refinement of Rust executions, shutdown liveness, or the full native guardian contract. Preserve the model
-labels when extending that package. [Runtime model proof package](31-runtime-model-proof-home.md) lists the precise
-claims and the separate build and axiom checks required before citing checked evidence.
+This document states the SDK worker and pool contract. Its named Rust conformance tests exercise selected
+implementation behaviors; they do not establish trace refinement, shutdown liveness, or the full native guardian
+contract. No maintained mechanized proof of those SDK guarantees is provided here.
+
+The separate [native-execution TLA+ models](https://github.com/jcreinhold/lean-host-mcp/tree/main/specs/native-execution)
+describe bounded abstract protocols in `lean-host-mcp`. Their documented assumptions and checked cases have their own
+scope; they neither replace this SDK contract nor prove its Rust implementation or a refinement mapping between the
+two.
 
 ## Worker pipe I/O (macOS and Linux)
 
