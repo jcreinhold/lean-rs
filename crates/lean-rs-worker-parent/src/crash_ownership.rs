@@ -406,6 +406,11 @@ impl ParentLifetime {
     }
 }
 impl ParentLifetimeLease {
+    /// Correlation with the actual guarded admission, not authority to signal.
+    pub(crate) fn guarded_generation_id(&self) -> Option<&str> {
+        self.guarded.then_some(self.nonce.as_str())
+    }
+
     pub(crate) fn acknowledge(&mut self) -> io::Result<()> {
         if self.guarded {
             let mut bytes = serde_json::to_vec(

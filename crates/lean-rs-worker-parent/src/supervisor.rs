@@ -1645,6 +1645,32 @@ impl WorkerRequestId {
     }
 }
 
+/// A transmission restriction, independent of outcomes, custody and capacity.
+/// Activation is private/test-only until the public error contract and actual
+/// host retirement adapter are reviewed together. No reply or Drop clears it.
+#[derive(Debug)]
+struct GenerationDispatchRestriction {
+    owner: Arc<()>,
+    native_generation_id: String,
+    generation: WorkerGeneration,
+    sealed: bool,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
+struct GenerationDispatchBinding {
+    owner: Arc<()>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Eq, PartialEq)]
+enum GenerationDispatchRejection {
+    NativeGenerationUnavailable,
+    NativeGenerationMismatch,
+    AlreadyBound,
+    ForeignBinding,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct InFlightRequest {
     id: WorkerRequestId,
@@ -1716,6 +1742,10 @@ pub struct LeanWorker {
     stderr: Option<StderrCapture>,
     last_exit: Option<LeanWorkerExit>,
     request_scope: Arc<()>,
+    /// Snapshot of the guarded lease attached to this exact current child.
+    /// Cleared with that child; never reconstructed from a saved owner record.
+    native_generation_id: Option<String>,
+    generation_dispatch: Option<GenerationDispatchRestriction>,
     last_request: Option<InFlightRequest>,
     last_request_stop: Option<LeanWorkerRequestStopReceipt>,
     last_request_exit: Option<LeanWorkerPendingRequestStop>,
@@ -1770,6 +1800,117 @@ pub struct LeanWorker {
     reason = "Response and Message are #[non_exhaustive] across the lean-rs-worker-protocol crate boundary; every wildcard arm here uniformly converts an unexpected variant into a protocol-level error rather than enumerating each known variant"
 )]
 impl LeanWorker {
+    #[cfg(test)]
+    fn arm_generation_dispatch(
+        &mut self,
+        expected_native_generation: &str,
+    ) -> Result<GenerationDispatchBinding, GenerationDispatchRejection> {
+        if self.generation_dispatch.is_some() {
+            return Err(GenerationDispatchRejection::AlreadyBound);
+        }
+        if !matches!(self.state, WorkerSupervisorState::Idle { .. }) {
+            return Err(GenerationDispatchRejection::NativeGenerationUnavailable);
+        }
+        let native_generation_id = self
+            .current_native_generation_id()
+            .ok_or(GenerationDispatchRejection::NativeGenerationUnavailable)?;
+        if native_generation_id != expected_native_generation {
+            return Err(GenerationDispatchRejection::NativeGenerationMismatch);
+        }
+        let binding = GenerationDispatchBinding {
+            owner: Arc::clone(&self.request_scope),
+        };
+        self.generation_dispatch = Some(GenerationDispatchRestriction {
+            owner: Arc::clone(&binding.owner),
+            native_generation_id: native_generation_id.to_owned(),
+            generation: self.generation,
+            sealed: false,
+        });
+        Ok(binding)
+    }
+
+    #[cfg(test)]
+    fn seal_generation_dispatch(
+        &mut self,
+        binding: &GenerationDispatchBinding,
+    ) -> Result<(), GenerationDispatchRejection> {
+        let Some(restriction) = &self.generation_dispatch else {
+            return Err(GenerationDispatchRejection::ForeignBinding);
+        };
+        if !Arc::ptr_eq(&restriction.owner, &binding.owner) {
+            return Err(GenerationDispatchRejection::ForeignBinding);
+        }
+        self.seal_generation_dispatch_internal();
+        Ok(())
+    }
+
+    fn current_native_generation_id(&self) -> Option<&str> {
+        if self.child.is_none() || self.cleanup_pending() {
+            return None;
+        }
+        self.native_generation_id.as_deref()
+    }
+
+    fn seal_generation_dispatch_internal(&mut self) {
+        if let Some(restriction) = &mut self.generation_dispatch {
+            restriction.sealed = true;
+        }
+    }
+
+    fn seal_dispatch_error<T>(&mut self, result: Result<T, LeanWorkerError>) -> Result<T, LeanWorkerError> {
+        if result.is_err() {
+            self.seal_generation_dispatch_internal();
+        }
+        result
+    }
+
+    fn unexpected_dispatch_response(&mut self, operation: &'static str, response: &Response) -> LeanWorkerError {
+        self.seal_generation_dispatch_internal();
+        unexpected_response(operation, response)
+    }
+
+    fn check_request_cancelled(
+        &mut self,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+    ) -> Result<(), LeanWorkerError> {
+        let result = check_cancelled(operation, cancellation);
+        self.seal_dispatch_error(result)
+    }
+
+    fn is_dispatch_cleanup(request: &Request) -> bool {
+        matches!(request, Request::Terminate | Request::ReleaseHostRead)
+    }
+
+    fn check_generation_dispatch(&mut self, operation: &'static str, cleanup: bool) -> Result<(), LeanWorkerError> {
+        // Cleanup is authorized by the actual currently owned child, even if
+        // the pin detects a mismatch. It neither discharges the pin nor proves
+        // closure of the generation named by the pin.
+        if cleanup {
+            return Ok(());
+        }
+        let refused = self.generation_dispatch.as_ref().is_some_and(|restriction| {
+            restriction.sealed
+                || !Arc::ptr_eq(&restriction.owner, &self.request_scope)
+                || restriction.generation != self.generation
+                || self.current_native_generation_id() != Some(restriction.native_generation_id.as_str())
+                || !matches!(
+                    self.state,
+                    WorkerSupervisorState::Idle { .. }
+                        | WorkerSupervisorState::Busy { .. }
+                        | WorkerSupervisorState::Streaming { .. }
+                )
+        });
+        if refused {
+            self.seal_generation_dispatch_internal();
+            // This class is internal to test-only activation. No new public
+            // refusal contract or changed pool LeaseInvalidated semantics is
+            // exported before the paired host adapter is reviewed.
+            return Err(LeanWorkerError::ShutdownInProgress { operation });
+        }
+        Ok(())
+    }
+
     /// Spawn a worker child and wait for its protocol handshake.
     ///
     /// # Errors
@@ -1882,7 +2023,7 @@ impl LeanWorker {
         })?)));
         let initialized = (|| {
             #[cfg(unix)]
-            if let Some(lifetime) = lifetime {
+            let native_generation_id = if let Some(lifetime) = lifetime {
                 let remaining = config.startup_timeout.saturating_sub(spawn_started.elapsed());
                 let lease =
                     lifetime
@@ -1890,6 +2031,7 @@ impl LeanWorker {
                         .map_err(|source| LeanWorkerError::Setup {
                             message: format!("worker parent lifeline startup failed: {source}"),
                         })?;
+                let native_generation_id = lease.guarded_generation_id().map(str::to_owned);
                 // Install ownership before ACK: a partial ACK must retain the
                 // exact inherited-group fence through startup cleanup.
                 child
@@ -1904,8 +2046,13 @@ impl LeanWorker {
                     .map_err(|source| LeanWorkerError::Setup {
                         message: format!("worker parent lifeline ACK failed: {source}"),
                     })?;
-            }
-            Self::initialize_child(config, spawn_started, &mut child)
+                native_generation_id
+            } else {
+                None
+            };
+            #[cfg(not(unix))]
+            let native_generation_id = None;
+            Self::initialize_child(config, spawn_started, &mut child, native_generation_id)
         })();
         initialized.map_err(|error| SpawnFailure::after_spawn(child, error, StartupChild::cleanup))
     }
@@ -1914,6 +2061,7 @@ impl LeanWorker {
         config: &LeanWorkerConfig,
         spawn_started: Instant,
         child: &mut StartupChild,
+        native_generation_id: Option<String>,
     ) -> Result<Self, LeanWorkerError> {
         let mut stdin = child
             .child_mut()?
@@ -2023,6 +2171,8 @@ impl LeanWorker {
             stderr,
             last_exit: None,
             request_scope: Arc::new(()),
+            native_generation_id,
+            generation_dispatch: None,
             last_request: None,
             last_request_stop: None,
             last_request_exit: None,
@@ -2059,10 +2209,11 @@ impl LeanWorker {
         self.prepare_host_request(false, None, None)?;
         self.send_request("health", Request::Health)?;
         self.record_request(false);
-        match self.read_response("health")? {
+        let result = match self.read_response("health")? {
             Response::HealthOk => Ok(()),
             other => Err(unexpected_response("health", &other)),
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     /// Load the in-tree fixture capability in the worker child.
@@ -2076,7 +2227,8 @@ impl LeanWorker {
     /// Returns `LeanWorkerError` if the worker is dead, fixture loading fails,
     /// or protocol communication fails.
     pub fn load_fixture_capability(&mut self, fixture_root: impl AsRef<Path>) -> Result<(), LeanWorkerError> {
-        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
+        let prepared = fixture_capability_manifest(fixture_root.as_ref());
+        let manifest_path = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true)?;
         self.send_request(
             "load_fixture_capability",
@@ -2085,10 +2237,11 @@ impl LeanWorker {
             },
         )?;
         self.record_request(true);
-        match self.read_response("load_fixture_capability")? {
+        let result = match self.read_response("load_fixture_capability")? {
             Response::CapabilityLoaded => Ok(()),
             other => Err(unexpected_response("load_fixture_capability", &other)),
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     /// Call the fixture multiplication export in the worker child.
@@ -2103,7 +2256,8 @@ impl LeanWorker {
         lhs: u64,
         rhs: u64,
     ) -> Result<u64, LeanWorkerError> {
-        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
+        let prepared = fixture_capability_manifest(fixture_root.as_ref());
+        let manifest_path = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true)?;
         self.send_request(
             "call_fixture_mul",
@@ -2114,10 +2268,11 @@ impl LeanWorker {
             },
         )?;
         self.record_request(true);
-        match self.read_response("call_fixture_mul")? {
+        let result = match self.read_response("call_fixture_mul")? {
             Response::U64 { value } => Ok(value),
             other => Err(unexpected_response("call_fixture_mul", &other)),
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     /// Return the current worker lifecycle status.
@@ -2126,6 +2281,11 @@ impl LeanWorker {
     ///
     /// Returns `LeanWorkerError` if checking the process status fails.
     pub fn status(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
+        let result = self.status_inner();
+        self.seal_dispatch_error(result)
+    }
+
+    fn status_inner(&mut self) -> Result<LeanWorkerStatus, LeanWorkerError> {
         if self.pending_startup.is_some() {
             return Err(self.dead_error());
         }
@@ -2416,7 +2576,8 @@ impl LeanWorker {
         mut self,
         fixture_root: impl AsRef<Path>,
     ) -> Result<LeanWorkerExit, LeanWorkerError> {
-        let manifest_path = fixture_capability_manifest(fixture_root.as_ref())?;
+        let prepared = fixture_capability_manifest(fixture_root.as_ref());
+        let manifest_path = self.seal_dispatch_error(prepared)?;
         self.prepare_request(true)?;
         self.send_request(
             "trigger_lean_panic",
@@ -2426,7 +2587,7 @@ impl LeanWorker {
         )?;
         self.record_request(true);
         match self.read_response("trigger_lean_panic") {
-            Ok(response) => Err(unexpected_response("trigger_lean_panic", &response)),
+            Ok(response) => Err(self.unexpected_dispatch_response("trigger_lean_panic", &response)),
             Err(LeanWorkerError::ChildPanicOrAbort { exit }) => Ok(exit),
             Err(err) => Err(err),
         }
@@ -2446,7 +2607,7 @@ impl LeanWorker {
         data: Option<&dyn LeanWorkerDataSink>,
     ) -> Result<u64, LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows";
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
         self.send_request_cancellable(Request::EmitTestRows { streams }, OPERATION, cancellation)?;
         self.record_request(false);
@@ -2458,7 +2619,7 @@ impl LeanWorker {
             None,
         )? {
             Response::RowsComplete { count } => Ok(count),
-            other => Err(unexpected_response(OPERATION, &other)),
+            other => Err(self.unexpected_dispatch_response(OPERATION, &other)),
         }
     }
 
@@ -2474,7 +2635,7 @@ impl LeanWorker {
         data: Option<&dyn LeanWorkerDataSink>,
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows_then_exit";
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
         self.send_request_cancellable(Request::EmitTestRowsThenExit, OPERATION, cancellation)?;
         self.record_request(false);
@@ -2485,7 +2646,7 @@ impl LeanWorker {
             data.map(LeanWorkerDataSinkTarget::Value),
             None,
         )?;
-        Err(unexpected_response(OPERATION, &response))
+        Err(self.unexpected_dispatch_response(OPERATION, &response))
     }
 
     #[doc(hidden)]
@@ -2500,7 +2661,7 @@ impl LeanWorker {
         data: Option<&dyn LeanWorkerDataSink>,
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "emit_test_rows_then_panic";
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.prepare_request(false)?;
         self.send_request_cancellable(Request::EmitTestRowsThenPanic, OPERATION, cancellation)?;
         self.record_request(false);
@@ -2511,7 +2672,7 @@ impl LeanWorker {
             data.map(LeanWorkerDataSinkTarget::Value),
             None,
         )?;
-        Err(unexpected_response(OPERATION, &response))
+        Err(self.unexpected_dispatch_response(OPERATION, &response))
     }
 
     /// How many session keys the reuse hint may remember.
@@ -2555,6 +2716,7 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<(), LeanWorkerError> {
+        self.check_generation_dispatch("open_worker_session", false)?;
         self.host_runtime_metadata = None;
         self.last_host_session_refusal = None;
         let mut observed_pre_body_refusal = None;
@@ -2611,7 +2773,7 @@ impl LeanWorker {
             drop(self.release_host_read());
             self.last_host_session_refusal = refusal;
         }
-        result
+        self.seal_dispatch_error(result)
     }
 
     fn open_worker_session_attempt(
@@ -2622,7 +2784,7 @@ impl LeanWorker {
         allow_retry: bool,
     ) -> Result<(), LeanWorkerError> {
         const OPERATION: &str = "open_worker_session";
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.release_host_read()?;
         // An explicit switch needs only its requested profile in the new child.
         if self.budget.accounting_unknown {
@@ -2688,6 +2850,12 @@ impl LeanWorker {
             }
         };
         match response {
+            Response::HostArtifactEpochChanged | Response::HeaderImportRecycle
+                if self.generation_dispatch.is_some() =>
+            {
+                self.seal_generation_dispatch_internal();
+                Err(LeanWorkerError::ShutdownInProgress { operation: OPERATION })
+            }
             Response::HostArtifactEpochChanged if allow_retry => {
                 self.host_read_active = false;
                 // No body ran. A full process cycle invalidates every pooled
@@ -3170,7 +3338,7 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<Vec<String>, LeanWorkerError> {
         const OPERATION: &str = "worker_list_declarations_strings";
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.prepare_host_request(false, cancellation, progress)?;
         self.send_request_cancellable(
             Request::ListDeclarationsStrings {
@@ -3190,23 +3358,24 @@ impl LeanWorker {
             None,
         )?;
         if let Some(message) = collector.decode_error.lock().ok().and_then(|guard| guard.clone()) {
-            return Err(LeanWorkerError::Protocol { message });
+            return self.seal_dispatch_error(Err(LeanWorkerError::Protocol { message }));
         }
-        match response {
+        let result = match response {
             Response::RowsComplete { count } => {
                 let names = collector.into_inner();
                 let observed = u64::try_from(names.len()).unwrap_or(u64::MAX);
                 if observed != count {
-                    return Err(LeanWorkerError::Protocol {
+                    return self.seal_dispatch_error(Err(LeanWorkerError::Protocol {
                         message: format!(
                             "worker_list_declarations_strings: parent collected {observed} rows but child reported {count}"
                         ),
-                    });
+                    }));
                 }
                 Ok(names)
             }
             other => Err(unexpected_response(OPERATION, &other)),
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     #[expect(
@@ -3386,10 +3555,11 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerStreamSummary, LeanWorkerError> {
         const OPERATION: &str = "worker_run_data_stream";
-        check_cancelled(OPERATION, cancellation)?;
-        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+        self.check_request_cancelled(OPERATION, cancellation)?;
+        let encoded = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker data-stream request JSON encode failed: {err}"),
-        })?;
+        });
+        let request_json = self.seal_dispatch_error(encoded)?;
         self.prepare_host_request(false, cancellation, progress)?;
         self.send_request_cancellable(
             Request::RunDataStream {
@@ -3402,7 +3572,7 @@ impl LeanWorker {
         )?;
         self.record_request(false);
         self.stats.stream_requests = self.stats.stream_requests.saturating_add(1);
-        match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
+        let result = match self.read_response_with_events(OPERATION, progress, cancellation, Some(rows), diagnostics)? {
             Response::StreamComplete { summary } => Ok(summary.into()),
             Response::StreamExportFailed { status_byte } => {
                 Err(LeanWorkerError::StreamExportFailed { status: status_byte })
@@ -3416,7 +3586,8 @@ impl LeanWorker {
             }),
             Response::StreamRowMalformed { message } => Err(LeanWorkerError::StreamRowMalformed { message }),
             other => Err(unexpected_response(OPERATION, &other)),
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     pub(crate) fn worker_host_runtime_metadata(
@@ -3427,17 +3598,18 @@ impl LeanWorker {
         const OPERATION: &str = "worker_host_runtime_metadata";
         // Session opening just established the generation. Do not recycle in
         // between its acknowledgement and this metadata-only inspection.
-        check_cancelled(OPERATION, cancellation)?;
+        self.check_request_cancelled(OPERATION, cancellation)?;
         self.send_request_cancellable(Request::HostRuntimeMetadata, OPERATION, cancellation)?;
         // This inspection is part of opening a session, not another body
         // request for max_requests/import policy. Charging it could force a
         // recycle immediately before the body whose session we just checked.
         let response = self.read_response_with_progress(OPERATION, progress, cancellation)?;
-        if let Response::HostRuntimeMetadata { metadata } = response {
+        let result = if let Response::HostRuntimeMetadata { metadata } = response {
             Ok(metadata)
         } else {
             Err(unexpected_response(OPERATION, &response))
-        }
+        };
+        self.seal_dispatch_error(result)
     }
 
     /// Close this child's read aliases after an observed terminal host operation.
@@ -3449,6 +3621,7 @@ impl LeanWorker {
             return Ok(());
         }
         if !matches!(self.state, WorkerSupervisorState::Idle { .. }) || self.cleanup_pending() {
+            self.seal_generation_dispatch_internal();
             return Err(LeanWorkerError::ShutdownInProgress {
                 operation: "release_host_read",
             });
@@ -3467,7 +3640,7 @@ impl LeanWorker {
                 generation: self.generation,
             };
         }
-        result
+        self.seal_dispatch_error(result)
     }
 
     /// Last metadata validated for this generation; absent before a checked
@@ -3484,9 +3657,10 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerCapabilityMetadata, LeanWorkerError> {
-        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+        let encoded = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker capability metadata request JSON encode failed: {err}"),
-        })?;
+        });
+        let request_json = self.seal_dispatch_error(encoded)?;
         self.round_trip(
             "worker_capability_metadata",
             Request::CapabilityMetadata {
@@ -3517,9 +3691,10 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         progress: Option<&dyn LeanWorkerProgressSink>,
     ) -> Result<LeanWorkerDoctorReport, LeanWorkerError> {
-        let request_json = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
+        let encoded = serde_json::to_string(request).map_err(|err| LeanWorkerError::Protocol {
             message: format!("worker capability doctor request JSON encode failed: {err}"),
-        })?;
+        });
+        let request_json = self.seal_dispatch_error(encoded)?;
         self.round_trip(
             "worker_capability_doctor",
             Request::CapabilityDoctor {
@@ -3576,9 +3751,11 @@ impl LeanWorker {
         operation: &'static str,
         cancellation: Option<&LeanWorkerCancellationToken>,
     ) -> Result<(), LeanWorkerError> {
-        check_cancelled(operation, cancellation)?;
+        self.check_generation_dispatch(operation, Self::is_dispatch_cleanup(&request))?;
+        self.check_request_cancelled(operation, cancellation)?;
         self.ensure_running()?;
-        self.begin_in_flight(operation)?;
+        let admitted = self.begin_in_flight(operation);
+        self.seal_dispatch_error(admitted)?;
         if !matches!(&request, Request::ReleaseHostRead) {
             // A later dispatched request supersedes a prior pre-body refusal.
             // Resource release alone must preserve that failed call's phase.
@@ -3616,6 +3793,24 @@ impl LeanWorker {
         cancellation: Option<&LeanWorkerCancellationToken>,
         timeout: Duration,
     ) -> Result<(), LeanWorkerError> {
+        let cleanup = Self::is_dispatch_cleanup(&request);
+        if self.generation_dispatch.is_some() && !cleanup {
+            self.check_request_cancelled(operation, cancellation)?;
+        }
+        let result = self.write_request_bounded_inner(request, operation, cancellation, timeout);
+        self.seal_dispatch_error(result)
+    }
+
+    fn write_request_bounded_inner(
+        &mut self,
+        request: Request,
+        operation: &'static str,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        timeout: Duration,
+    ) -> Result<(), LeanWorkerError> {
+        // Keep the authoritative check beside the actual frame write, even if
+        // another internal caller later reuses this bounded writer.
+        self.check_generation_dispatch(operation, Self::is_dispatch_cleanup(&request))?;
         let max_frame_bytes = self.config.max_frame_bytes;
         let Some(mut stdin) = self.stdin.take() else {
             return Err(self.dead_error());
@@ -3632,6 +3827,7 @@ impl LeanWorker {
                 Ok(())
             }
             Err(lean_rs_worker_protocol::protocol::ProtocolError::Io(error)) => {
+                self.seal_generation_dispatch_internal();
                 // Prevent BufWriter::drop from retrying a partial buffered write.
                 stdin.get_ref().stopped.store(true, Ordering::Release);
                 drop(stdin);
@@ -3770,6 +3966,7 @@ impl LeanWorker {
     }
 
     fn prepare_request(&mut self, import_like: bool) -> Result<(), LeanWorkerError> {
+        self.check_generation_dispatch("worker_request", false)?;
         self.ensure_running()?;
         if self.budget.accounting_unknown {
             self.restart_with_reason(LeanWorkerRestartReason::ImportAccountingUnknown)?;
@@ -3882,6 +4079,31 @@ impl LeanWorker {
         before_spawn: impl FnOnce(),
         spawn: impl FnOnce(&LeanWorkerConfig) -> Result<Self, SpawnFailure>,
     ) -> Result<(), LeanWorkerError> {
+        if self.generation_dispatch.is_some() {
+            self.seal_generation_dispatch_internal();
+            let interrupt = matches!(
+                reason,
+                LeanWorkerRestartReason::Cancelled { .. }
+                    | LeanWorkerRestartReason::RequestTimeout { .. }
+                    | LeanWorkerRestartReason::RssHardLimit { .. }
+                    | LeanWorkerRestartReason::ChildAbort { .. }
+            );
+            if interrupt {
+                // Interrupt callers return their original failure after this
+                // stop-only success; it never means a replacement is ready.
+                // Preserve cleanup failures instead of hiding unresolved work.
+                let stopped = self.shutdown_child(ShutdownIntent::KillOnly);
+                before_spawn();
+                stopped?;
+                return Ok(());
+            }
+            // Policy/explicit cycling is refused, with no spawn or unnecessary
+            // stop. The callback still owns any captured reader cleanup.
+            before_spawn();
+            return Err(LeanWorkerError::ShutdownInProgress {
+                operation: "generation_dispatch",
+            });
+        }
         let config = self.config.clone();
         let replacement_started = Instant::now();
         self.stats.replacement_attempts = self.stats.replacement_attempts.saturating_add(1);
@@ -3995,6 +4217,10 @@ impl LeanWorker {
     /// can synthesise a degraded verdict. Any non-abort error (or a respawn
     /// failure) propagates unchanged.
     fn recover_child_abort(&mut self, operation: &'static str, err: LeanWorkerError) -> Result<(), LeanWorkerError> {
+        if self.generation_dispatch.is_some() {
+            self.seal_generation_dispatch_internal();
+            return Err(err);
+        }
         if let LeanWorkerError::ChildPanicOrAbort { exit } = &err {
             self.restart_with_reason(child_abort_reason(operation, exit))
         } else {
@@ -4052,13 +4278,17 @@ impl LeanWorker {
         progress: Option<&dyn LeanWorkerProgressSink>,
         extract: impl FnOnce(Response, &'static str) -> Result<R, LeanWorkerError>,
     ) -> Result<R, LeanWorkerError> {
-        check_cancelled(operation, cancellation)?;
+        self.check_request_cancelled(operation, cancellation)?;
         let session_config = self.open_session_keys.last().cloned();
         self.prepare_host_request(import_like, cancellation, progress)?;
         self.send_request_cancellable(request.clone(), operation, cancellation)?;
         self.record_request(import_like);
         let mut response = self.read_response_with_progress(operation, progress, cancellation)?;
         if matches!(response, Response::HeaderImportRecycle) {
+            if self.generation_dispatch.is_some() {
+                self.seal_generation_dispatch_internal();
+                return Err(LeanWorkerError::ShutdownInProgress { operation });
+            }
             let config = session_config.ok_or_else(|| LeanWorkerError::Protocol {
                 message: "header recycle requested without an active session".to_owned(),
             })?;
@@ -4074,15 +4304,28 @@ impl LeanWorker {
             self.open_worker_session(&config, cancellation, progress)?;
             // Exactly one retry: the new generation admits its first necessary
             // header even when that header alone exceeds the byte budget.
-            check_cancelled(operation, cancellation)?;
+            self.check_request_cancelled(operation, cancellation)?;
             self.send_request_cancellable(request, operation, cancellation)?;
             self.record_request(import_like);
             response = self.read_response_with_progress(operation, progress, cancellation)?;
         }
-        extract(response, operation)
+        let result = extract(response, operation);
+        self.seal_dispatch_error(result)
     }
 
     fn read_response_with_events(
+        &mut self,
+        operation: &'static str,
+        progress: Option<&dyn LeanWorkerProgressSink>,
+        cancellation: Option<&LeanWorkerCancellationToken>,
+        data: Option<LeanWorkerDataSinkTarget<'_>>,
+        diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
+    ) -> Result<Response, LeanWorkerError> {
+        let result = self.read_response_with_events_inner(operation, progress, cancellation, data, diagnostics);
+        self.seal_dispatch_error(result)
+    }
+
+    fn read_response_with_events_inner(
         &mut self,
         operation: &'static str,
         progress: Option<&dyn LeanWorkerProgressSink>,
@@ -4483,6 +4726,11 @@ impl LeanWorker {
     }
 
     fn ensure_running(&mut self) -> Result<(), LeanWorkerError> {
+        let result = self.ensure_running_inner();
+        self.seal_dispatch_error(result)
+    }
+
+    fn ensure_running_inner(&mut self) -> Result<(), LeanWorkerError> {
         if self.state.rejects_new_requests() {
             return Err(LeanWorkerError::ShutdownInProgress {
                 operation: self.state.current_operation().unwrap_or("worker_request"),
@@ -4505,6 +4753,16 @@ impl LeanWorker {
         started: Instant,
         backpressure_waits: u64,
     ) -> Response {
+        if matches!(
+            &response,
+            Response::HeaderImportRecycle
+                | Response::HostArtifactEpochChanged
+                | Response::StreamExportFailed { .. }
+                | Response::StreamCallbackFailed { .. }
+                | Response::StreamRowMalformed { .. }
+        ) {
+            self.seal_generation_dispatch_internal();
+        }
         if streaming {
             if matches!(
                 response,
@@ -4520,6 +4778,7 @@ impl LeanWorker {
     }
 
     fn terminalize_request_failure(&mut self, streaming: bool, started: Instant, backpressure_waits: u64) {
+        self.seal_generation_dispatch_internal();
         if streaming {
             self.record_stream_failure(started, backpressure_waits);
         }
@@ -4589,6 +4848,8 @@ impl LeanWorker {
         }
         self.last_exit = Some(exit.clone());
         self.child = None;
+        self.native_generation_id = None;
+        self.seal_generation_dispatch_internal();
         self.stdin = None;
         self.stdout = None;
         self.finish_in_flight();
@@ -4619,6 +4880,7 @@ impl LeanWorker {
         intent: ShutdownIntent,
         cleanup: impl FnOnce(&mut StartupChild) -> Result<ExitStatus, LeanWorkerError>,
     ) -> Result<LeanWorkerShutdownReport, LeanWorkerError> {
+        self.seal_generation_dispatch_internal();
         self.host_runtime_metadata = None;
         let started = Instant::now();
         let graceful_timeout = self.config.shutdown_timeout;
@@ -5509,7 +5771,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn blocked_stdin_worker() -> super::LeanWorker {
+    pub(super) fn blocked_stdin_worker() -> super::LeanWorker {
         let mut worker = sleeping_worker();
         worker
             .shutdown_child(super::ShutdownIntent::KillOnly)
@@ -5838,7 +6100,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn sleeping_worker() -> super::LeanWorker {
+    pub(super) fn sleeping_worker() -> super::LeanWorker {
         let child = std::process::Command::new("sleep")
             .arg("60")
             .spawn()
@@ -5852,6 +6114,8 @@ mod tests {
             stderr: None,
             last_exit: None,
             request_scope: std::sync::Arc::new(()),
+            native_generation_id: None,
+            generation_dispatch: None,
             last_request: None,
             last_request_stop: None,
             last_request_exit: None,
@@ -6767,3 +7031,7 @@ mod tests {
         assert!(out.contains("bytes truncated"), "{out}");
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "supervisor/dispatch_pin_tests.rs"]
+mod dispatch_pin_tests;
