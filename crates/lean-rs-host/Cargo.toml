@@ -39,6 +39,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+sha2.workspace = true
 criterion = { workspace = true }
 # Examples under `examples/` install a `tracing_subscriber::fmt` sink so
 # `RUST_LOG=lean_rs=info cargo run --example <name>` surfaces host spans. The

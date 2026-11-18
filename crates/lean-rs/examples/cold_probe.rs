@@ -18,48 +18,21 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::print_stdout)]
 
-use std::path::PathBuf;
+#[path = "support/scalar_fixture.rs"]
+mod scalar_fixture;
+use scalar_fixture::ScalarFixture;
 use std::time::Instant;
 
 use lean_rs::LeanRuntime;
-use lean_rs::module::LeanLibrary;
-
-fn fixture_dylib_path() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = workspace
-        .join("fixtures")
-        .join("lean")
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
-}
 
 fn report(name: &str, elapsed_us: u128) {
     println!("name={name} elapsed_us={elapsed_us}");
 }
 
 fn main() {
-    let path = fixture_dylib_path();
-    assert!(
-        path.exists(),
-        "fixture dylib not found at {} — run `cd fixtures/lean && lake build`",
-        path.display(),
-    );
-
     // Stage 1: runtime init. First-call cost: `lean_initialize`,
     // `lean_io_mark_end_initialization`, OnceLock seeding.
+    let fixture = ScalarFixture::admit().expect("admit fixed profiling fixture");
     let t = Instant::now();
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
     report("runtime_init_cold", t.elapsed().as_micros());
@@ -68,7 +41,7 @@ fn main() {
     // plus the symbol-table walk that classifies function vs.
     // nullary-constant globals.
     let t = Instant::now();
-    let library = LeanLibrary::open(runtime, &path).expect("fixture dylib opens");
+    let library = fixture.open(runtime).expect("fixture dylib opens");
     report("library_open_cold", t.elapsed().as_micros());
 
     // Stage 3: module initializer. Invokes the C

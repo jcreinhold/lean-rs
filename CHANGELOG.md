@@ -9,6 +9,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
+### Removed
+
+- Remove `lean-rs-sys::string::lean_string_push` and `lean_string_data` from the raw public API on every supported Lean
+  release. This is a breaking SDK API change. Lean 4.36 replaces the push export with a header inline and
+  `lean_string_push_cold`, and removes the data export. Use Lean-authored exported operations when these capabilities
+  are needed; the SDK no longer declares either raw entry point. The required-symbol list and linkage probes cover
+  the retained curated exports without per-version missing-symbol exceptions.
+
 ## [0.9.9]
 
 ### Fixed

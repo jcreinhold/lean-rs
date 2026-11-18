@@ -183,6 +183,23 @@ impl LakeProject {
     }
 }
 
+pub(crate) fn prepared_artifacts(built: &BuiltLeanCapability) -> LeanResult<super::LeanPreparedHostArtifacts> {
+    use std::io::Read as _;
+    let fail = |error: std::io::Error| lean_rs::__host_internals::host_module_init(error.to_string());
+    let manifest_path = built.manifest_path().canonicalize().map_err(fail)?;
+    let mut json = String::new();
+    fs::File::open(&manifest_path).map_err(fail)?.take(65537).read_to_string(&mut json).map_err(fail)?;
+    let mut roots = Vec::new();
+    let mut paths = Vec::new();
+    for root in [bundled_interop_shims_root(), bundled_host_shims_root()] {
+        paths.push(project_olean_search_path(&root).canonicalize().map_err(fail)?);
+        roots.push(root.canonicalize().map_err(fail)?);
+    }
+    roots.sort();
+    roots.dedup();
+    super::LeanPreparedHostArtifacts::from_snapshot(manifest_path, json, roots, paths)
+}
+
 fn project_olean_search_path(project_root: &Path) -> PathBuf {
     project_root.join(".lake").join("build").join("lib").join("lean")
 }

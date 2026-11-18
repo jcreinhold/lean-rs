@@ -12,7 +12,9 @@
 //! filename matches the host application) can wrap [`run_worker_child_stdio`]
 //! in a one-line `main`.
 
+mod authority;
 mod child;
+pub use authority::{WorkerAuthority, WorkerManifestRead, WorkerSourceContext, install_worker_authority, run_worker_child_with_authority};
 
 /// Run the worker child process on stdin/stdout.
 ///

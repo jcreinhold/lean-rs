@@ -8,6 +8,229 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "support/fixed_fixture.rs"]
+mod fixture;
+
+#[path = "support/service_requests.rs"]
+mod service_requests;
+
+// Capture exact typed requests before taking the mutable session borrow. The policy
+// encoding uses derived Debug for closed SDK request enums (including every field).
+macro_rules! call_service {
+    ($caps:ident, $session:ident, kernel_check, $source:expr, $options:expr, $cancel:expr, $progress:expr $(,)?) => {{
+        let request: String = ($source).to_owned();
+        let options = ($options).source_options();
+        let paths =
+            service_requests::approved_paths(&$caps, &$session, "kernel_check", &format!("{request:?}"), &options);
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .kernel_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.kernel_check(&admitted, $cancel, $progress)
+    }};
+    ($caps:ident, $session:ident, elaborate, $source:expr, None, $options:expr, $cancel:expr $(,)?) => {{
+        let request: String = ($source).to_owned();
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(&$caps, &$session, "elaborate", &format!("{request:?}"), &options);
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .term_scope(env, scope, paths, request, None, options)
+        }
+        .expect("admit reviewed request");
+        $session.elaborate(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, process_module_query, $source:expr, $query:expr, $options:expr, $cancel:expr $(,)?) => {{
+        let request = lean_rs::host_bridge::HostModuleQuery {
+            source: ($source).to_owned(),
+            query: ($query).clone(),
+        };
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(
+            &$caps,
+            &$session,
+            "process_module_query",
+            &format!("{:?}", (&request.source, &request.query)),
+            &options,
+        );
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .module_query_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.process_module_query(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, process_module_query_batch, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $cancel:expr $(,)?) => {{
+        let batch = lean_rs::host_bridge::HostModuleBatch {
+            source: ($source).to_owned(),
+            selectors: ($selectors).to_vec(),
+            budgets: ($budgets).clone(),
+        };
+        let request = batch;
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(
+            &$caps,
+            &$session,
+            "process_module_query_batch",
+            &format!("{:?}", (&request.source, &request.selectors, &request.budgets)),
+            &options,
+        );
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .module_batch_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.process_module_query_batch(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, process_module_query_batch_cached, $source:expr, $selectors:expr, $budgets:expr, $options:expr, $policy:expr, $cancel:expr $(,)?) => {{
+        let batch = lean_rs::host_bridge::HostModuleBatch {
+            source: ($source).to_owned(),
+            selectors: ($selectors).to_vec(),
+            budgets: ($budgets).clone(),
+        };
+        let p = $policy;
+        let request = lean_rs::host_bridge::HostCachedModuleBatch {
+            batch,
+            policy: format!(
+                "{}\n{}\n{}\n{}\n{}",
+                p.file_identity, p.key, p.max_entries, p.ttl_millis, p.max_bytes
+            ),
+        };
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(
+            &$caps,
+            &$session,
+            "process_module_query_batch_cached",
+            &format!(
+                "{:?}",
+                (
+                    &request.batch.source,
+                    &request.batch.selectors,
+                    &request.batch.budgets,
+                    &request.policy
+                )
+            ),
+            &options,
+        );
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .cached_module_batch_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.process_module_query_batch_cached(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, verify_declaration_batch, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+        let request = ($input).clone();
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(
+            &$caps,
+            &$session,
+            "verify_declaration_batch",
+            &format!("{request:?}"),
+            &options,
+        );
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .verification_batch_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.verify_declaration_batch(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, verify_declaration, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+        let request = ($input).clone();
+        let options = ($options).source_options();
+        let paths = service_requests::approved_paths(
+            &$caps,
+            &$session,
+            "verify_declaration",
+            &format!("{request:?}"),
+            &options,
+        );
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .verification_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.verify_declaration(&admitted, $cancel)
+    }};
+    ($caps:ident, $session:ident, attempt_proof, $input:expr, $options:expr, $cancel:expr $(,)?) => {{
+        let request = ($input).clone();
+        let options = ($options).source_options();
+        let paths =
+            service_requests::approved_paths(&$caps, &$session, "attempt_proof", &format!("{request:?}"), &options);
+        let (env, scope) = $session.source_context();
+        #[allow(
+            unsafe_code,
+            reason = "exact typed request checked against the independent fixture policy"
+        )]
+        // SAFETY: the reviewed payload and options cover this operation in this
+        // admitted graph. The token binds the same environment, capability and retained images.
+        let admitted = unsafe {
+            $caps
+                .shim_capability()
+                .proof_attempt_scope(env, scope, paths, request, options)
+        }
+        .expect("admit reviewed request");
+        $session.attempt_proof(&admitted, $cancel)
+    }};
+}
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,11 +241,11 @@ use lean_rs::LeanRuntime;
 use lean_rs::error::{HostStage, LeanError};
 use lean_toolchain::LEAN_VERSION;
 
-use crate::host::meta::{
-    LeanMetaOptions, LeanMetaResponse, LeanMetaService, LeanMetaTransparency, MetaCallStatus, heartbeat_burn,
-    infer_type, is_def_eq, pp_expr, whnf,
+use lean_rs_host::host::meta::{
+    LeanMetaOptions, LeanMetaResponse, LeanMetaTransparency, MetaCallStatus, heartbeat_burn, infer_type, is_def_eq,
+    pp_expr, whnf,
 };
-use crate::{
+use lean_rs_host::{
     DeclarationInspectionFields, DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest,
     EvidenceStatus, LEAN_DIAGNOSTIC_BYTE_LIMIT_DEFAULT, LEAN_PROOF_SUMMARY_BYTE_LIMIT, LeanBracketedImportRequest,
     LeanBracketedImportResult, LeanCancellationToken, LeanDeclarationFilter, LeanElabOptions, LeanHost,
@@ -32,12 +255,7 @@ use crate::{
 // -- fixture setup -------------------------------------------------------
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
+    fixture::fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -49,6 +267,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 struct TempLakeProject {
+    name: String,
     root: PathBuf,
 }
 
@@ -65,11 +284,65 @@ impl TempLakeProject {
             format!("leanprover/lean4:v{LEAN_VERSION}\n"),
         )
         .expect("write temporary Lean toolchain pin");
-        Self { root }
+        Self {
+            name: name.to_owned(),
+            root,
+        }
     }
 
     fn path(&self) -> &Path {
         &self.root
+    }
+
+    /// Only load the independently reviewed copy of this specific project. Compare
+    /// sources, dependency descriptions and compiled modules with the fresh Lake build.
+    fn reviewed_copy(&self) -> PathBuf {
+        assert!(matches!(
+            self.name.as_str(),
+            "shims-only-good"
+                | "shims-only-broken"
+                | "transitive-oleans"
+                | "module-query-header-host"
+                | "cached-module-header-host"
+        ));
+        let approved = fixture::fixture_root().join("host-service-projects").join(&self.name);
+        fn inputs(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+            let mut selected = std::collections::BTreeMap::new();
+            let mut dirs = vec![root.to_owned()];
+            while let Some(dir) = dirs.pop() {
+                for entry in fs::read_dir(dir).expect("project directory") {
+                    let entry = entry.expect("project entry");
+                    let path = entry.path();
+                    let kind = entry.file_type().expect("project file type");
+                    assert!(!kind.is_symlink(), "project input is a symlink");
+                    if kind.is_dir() {
+                        dirs.push(path);
+                    } else if matches!(
+                        path.extension().and_then(|s| s.to_str()),
+                        Some("lean" | "olean" | "ilean" | "ir" | "toml")
+                    ) || path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|name| name.ends_with(".olean.private") || name.ends_with(".olean.server"))
+                        || matches!(
+                            path.file_name().and_then(|s| s.to_str()),
+                            Some("lake-manifest.json" | "lean-toolchain")
+                        )
+                    {
+                        selected.insert(
+                            path.strip_prefix(root).expect("relative project input").to_owned(),
+                            fs::read(path).expect("project input"),
+                        );
+                    }
+                }
+            }
+            selected
+        }
+        assert!(
+            inputs(self.path()) == inputs(&approved),
+            "fresh and reviewed project inputs differ"
+        );
+        approved
     }
 
     fn write(&self, relative: &str, content: &str) {
@@ -181,9 +454,7 @@ fn from_lake_project_missing_path_is_load_error() {
 #[test]
 fn load_capabilities_prepares_checked_host_shims() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("capability dylib loads + symbols resolve");
+    let caps = fixture::capabilities(&host).expect("capability dylib loads + symbols resolve");
     // Sanity: caps is move-constructed, no public observable state to
     // assert against. The follow-on tests prove checked shim bindings
     // actually dispatch correctly.
@@ -193,9 +464,11 @@ fn load_capabilities_prepares_checked_host_shims() {
 #[test]
 fn load_capabilities_missing_dylib_is_load_error() {
     let host = fixture_host();
-    let err = host
-        .load_capabilities("does_not_exist", "NoSuchLib")
-        .expect_err("missing dylib must fail");
+    let missing = host.project_library_path("does_not_exist", "NoSuchLib");
+    assert!(!missing.exists());
+    #[allow(unsafe_code, reason = "absent path under retained fixture custody")]
+    // SAFETY: this missing fixture image cannot be created by a cooperating writer during the held loan.
+    let err = unsafe { lean_rs::module::LeanLibrary::open(runtime(), missing) }.expect_err("missing dylib must fail");
     match err {
         LeanError::Host(failure) => {
             assert_eq!(failure.stage(), HostStage::Load);
@@ -220,10 +493,18 @@ fn load_shims_only_opens_session_against_user_oleans() {
     project.write("Good.lean", "def goodValue : Nat := 41\n");
     project.lake_build_ok("Good");
 
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
+    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
     let mut session = caps
-        .session(&["Good", "LeanRsHostShims.Meta"], None, None)
+        .session(
+            &service_requests::imports(
+                &caps,
+                &["Good", "LeanRsHostShims.Meta"],
+                LeanSessionImportProfile::default(),
+            ),
+            None,
+            None,
+        )
         .expect("session imports user and shim oleans");
 
     let declarations = session
@@ -243,14 +524,16 @@ fn load_shims_only_opens_session_against_user_oleans() {
         .expect("infer_type dispatch succeeds");
     assert_eq!(inferred.status(), MetaCallStatus::Ok);
 
-    let checked = session
-        .kernel_check(
-            "theorem good_kernel_check : 1 + 1 = 2 := rfl",
-            &LeanElabOptions::new(),
-            None,
-            None,
-        )
-        .expect("kernel_check dispatch succeeds");
+    let checked = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "theorem good_kernel_check : 1 + 1 = 2 := rfl",
+        &LeanElabOptions::new(),
+        None,
+        None,
+    )
+    .expect("kernel_check dispatch succeeds");
     assert_eq!(checked.status(), EvidenceStatus::Checked);
 }
 
@@ -270,15 +553,25 @@ fn load_shims_only_succeeds_when_user_shared_facet_does_not_build() {
         "`lake build Broken:shared` should fail for the broken fixture"
     );
 
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
-    let mut good_session = caps.session(&["Good"], None, None).expect("unrelated module imports");
+    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
+    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
+    let mut good_session = caps
+        .session(
+            &service_requests::imports(&caps, &["Good"], LeanSessionImportProfile::default()),
+            None,
+            None,
+        )
+        .expect("unrelated module imports");
     let kind = good_session
         .declaration_kind("goodValue", None)
         .expect("declaration query works in unrelated module");
     assert_eq!(kind, "definition");
 
-    let Err(broken_err) = caps.session(&["Broken"], None, None) else {
+    let Err(broken_err) = caps.session(
+        &service_requests::imports(&caps, &["Broken"], LeanSessionImportProfile::default()),
+        None,
+        None,
+    ) else {
         panic!("broken module import unexpectedly succeeded");
     };
     match broken_err {
@@ -293,10 +586,14 @@ fn import_finds_transitive_lake_package_oleans() {
     let project = TempLakeProject::new("transitive-oleans");
     write_transitive_dependency_fixture(&project);
 
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
+    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
     let mut session = caps
-        .session(&["Consumer"], None, None)
+        .session(
+            &service_requests::imports(&caps, &["Consumer"], LeanSessionImportProfile::default()),
+            None,
+            None,
+        )
         .expect("consumer imports dependency");
     let declarations = session
         .list_declarations_strings(&LeanDeclarationFilter::default(), None, None)
@@ -306,7 +603,11 @@ fn import_finds_transitive_lake_package_oleans() {
         "dependency declaration should be visible when transitive oleans are on the search path"
     );
 
-    let Err(missing_err) = caps.session(&["Dep.NonExistent"], None, None) else {
+    let Err(missing_err) = caps.session(
+        &service_requests::imports(&caps, &["Dep.NonExistent"], LeanSessionImportProfile::default()),
+        None,
+        None,
+    ) else {
         panic!("missing dependency module unexpectedly imported");
     };
     match missing_err {
@@ -324,17 +625,19 @@ fn import_finds_transitive_lake_package_oleans() {
 
 // -- session import + query ---------------------------------------------
 
-fn session_over_handles<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None, None)
-        .expect("session imports cleanly")
+fn session_over_handles<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    caps.session(
+        &service_requests::imports(caps, &["LeanRsFixture.Handles"], LeanSessionImportProfile::default()),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
 }
 
 #[test]
 fn session_import_then_query_fixture_definition() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     // `LeanRsFixture.Handles.nameAnonymous` is the first fixture export
@@ -350,9 +653,7 @@ fn session_import_then_query_fixture_definition() {
 #[test]
 fn session_declaration_kind_discriminates() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let fixture_def_kind = session
@@ -375,9 +676,7 @@ fn session_declaration_kind_discriminates() {
 #[test]
 fn session_declaration_type_round_trips_as_expr() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let type_handle = session
@@ -392,7 +691,7 @@ fn session_declaration_type_round_trips_as_expr() {
 
 #[test]
 fn session_import_profiles_pass_full_host_gates() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector, ProofStateResult,
     };
@@ -400,15 +699,15 @@ fn session_import_profiles_pass_full_host_gates() {
     const IMPORTS: &[&str] = &["LeanRsFixture.Handles", "LeanRsHostShims.Elaboration"];
     const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
 
     for profile in [
         LeanSessionImportProfile::ExportedPublic,
         LeanSessionImportProfile::Server,
     ] {
-        let Err(err) = caps.session_with_profile(IMPORTS, profile, None, None) else {
+        let Err(err) =
+            caps.session_with_profile(&service_requests::imports(&caps, IMPORTS, profile), profile, None, None)
+        else {
             panic!("{} should report the non-module fixture blocker", profile.label());
         };
         let message = format!("{err:?}");
@@ -424,7 +723,7 @@ fn session_import_profiles_pass_full_host_gates() {
         LeanSessionImportProfile::FullPrivateCompat,
     ] {
         let mut session = caps
-            .session_with_profile(IMPORTS, profile, None, None)
+            .session_with_profile(&service_requests::imports(&caps, IMPORTS, profile), profile, None, None)
             .unwrap_or_else(|err| panic!("{} session imports cleanly: {err:?}", profile.label()));
         let stats = session.import_stats().clone();
         assert_eq!(stats.import_all, profile.import_all(), "{} importAll", profile.label());
@@ -470,28 +769,37 @@ fn session_import_profiles_pass_full_host_gates() {
             other => panic!("{} expected found inspection, got {other:?}", profile.label()),
         }
 
-        let elaborated = session
-            .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new(), None)
-            .unwrap_or_else(|err| panic!("{} elaboration dispatch succeeds: {err:?}", profile.label()));
+        let elaborated = call_service!(
+            caps,
+            session,
+            elaborate,
+            "(1 + 2 : Nat)",
+            None,
+            &LeanElabOptions::new(),
+            None
+        )
+        .unwrap_or_else(|err| panic!("{} elaboration dispatch succeeds: {err:?}", profile.label()));
         assert!(
             elaborated.is_ok(),
             "{} elaboration succeeds: {elaborated:?}",
             profile.label()
         );
 
-        let outcome = session
-            .process_module_query_batch(
-                "theorem t (h : True) : True := by\n  exact h\n",
-                &[ModuleQuerySelector::ProofState {
-                    id: "state".to_owned(),
-                    line: 2,
-                    column: 4,
-                }],
-                &ModuleQueryOutputBudgets::default(),
-                &LeanElabOptions::new(),
-                None,
-            )
-            .unwrap_or_else(|err| panic!("{} proof-state dispatch succeeds: {err:?}", profile.label()));
+        let outcome = call_service!(
+            caps,
+            session,
+            process_module_query_batch,
+            "theorem t (h : True) : True := by\n  exact h\n",
+            &[ModuleQuerySelector::ProofState {
+                id: "state".to_owned(),
+                line: 2,
+                column: 4,
+            }],
+            &ModuleQueryOutputBudgets::default(),
+            &LeanElabOptions::new(),
+            None,
+        )
+        .unwrap_or_else(|err| panic!("{} proof-state dispatch succeeds: {err:?}", profile.label()));
         let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
             panic!("{} expected proof-state Ok outcome, got {outcome:?}", profile.label());
         };
@@ -515,12 +823,14 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
     const DECL: &str = "LeanRsFixture.Handles.nameAnonymous";
     const MISSING: &str = "LeanRsFixture.Handles.noSuchDeclaration";
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
 
     let result = caps
-        .bracketed_import_query(IMPORTS, LeanBracketedImportRequest::new([DECL, MISSING]), None)
+        .bracketed_import_query(
+            &service_requests::bracketed(&caps, IMPORTS),
+            LeanBracketedImportRequest::new([DECL, MISSING]),
+            None,
+        )
         .expect("bracketed import query succeeds");
 
     assert!(result.free_regions_ran, "bracketed query reports freeRegions ran");
@@ -577,11 +887,17 @@ fn bracketed_import_query_returns_serialized_declaration_metadata() {
 fn derived_cheap_inspection_skips_proof_search_indexes() {
     const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads");
     let mut session = caps
-        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .session(
+            &service_requests::imports(
+                &caps,
+                &["LeanRsFixture.SourceRanges"],
+                LeanSessionImportProfile::default(),
+            ),
+            None,
+            None,
+        )
         .expect("fixture session opens");
 
     let result = session
@@ -606,11 +922,17 @@ fn derived_cheap_inspection_skips_proof_search_indexes() {
 fn derived_proof_search_inspection_reports_explicit_work() {
     const DECL: &str = "LeanRsFixture.SourceRanges.documentedSimpTheorem";
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads");
     let mut session = caps
-        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .session(
+            &service_requests::imports(
+                &caps,
+                &["LeanRsFixture.SourceRanges"],
+                LeanSessionImportProfile::default(),
+            ),
+            None,
+            None,
+        )
         .expect("fixture session opens");
     let mut request = DeclarationInspectionRequest::new(DECL);
     request.fields.proof_search = true;
@@ -635,11 +957,17 @@ fn derived_proof_search_inspection_reports_explicit_work() {
 fn derived_statement_rendering_and_search_source_work_are_reported() {
     const DECL: &str = "LeanRsFixture.SourceRanges.knownTheorem";
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads");
     let mut session = caps
-        .session(&["LeanRsFixture.SourceRanges"], None, None)
+        .session(
+            &service_requests::imports(
+                &caps,
+                &["LeanRsFixture.SourceRanges"],
+                LeanSessionImportProfile::default(),
+            ),
+            None,
+            None,
+        )
         .expect("fixture session opens");
 
     let mut raw_request = DeclarationInspectionRequest::new(DECL);
@@ -692,12 +1020,10 @@ fn bracketed_import_query_result_surface_cannot_carry_lean_handles() {
 #[test]
 fn bracketed_import_query_reports_rejected_full_session_operations() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let result = caps
         .bracketed_import_query(
-            &["LeanRsFixture.Handles"],
+            &service_requests::bracketed(&caps, &["LeanRsFixture.Handles"]),
             LeanBracketedImportRequest::new(["LeanRsFixture.Handles.nameAnonymous"]),
             None,
         )
@@ -725,9 +1051,7 @@ fn bracketed_import_query_reports_rejected_full_session_operations() {
 #[test]
 fn session_declaration_type_returns_none_for_missing() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let absent = session
@@ -739,9 +1063,7 @@ fn session_declaration_type_returns_none_for_missing() {
 #[test]
 fn session_declaration_name_renders_dotted_form() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let rendered = session
@@ -756,9 +1078,7 @@ fn session_declaration_name_renders_dotted_form() {
 #[test]
 fn session_query_missing_declaration_is_host_error() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let err = session
@@ -781,9 +1101,7 @@ fn session_query_missing_declaration_is_host_error() {
 #[test]
 fn session_list_declarations_includes_prelude_and_fixture() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let names = session.list_declarations(None).expect("list declarations");
@@ -798,9 +1116,7 @@ fn session_list_declarations_includes_prelude_and_fixture() {
 #[test]
 fn session_name_to_string_renders_prelude_name() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let names = session.list_declarations(None).expect("list declarations");
@@ -828,9 +1144,7 @@ fn session_name_to_string_renders_prelude_name() {
 #[test]
 fn session_name_to_string_renders_names_with_numeric_components() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     // Generated names (compiler-introduced numeric components) are
@@ -860,9 +1174,7 @@ fn session_name_to_string_renders_names_with_numeric_components() {
 #[test]
 fn session_name_to_string_bulk_renders_listed_declarations() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let mut names = session.list_declarations(None).expect("list declarations");
@@ -882,9 +1194,7 @@ fn session_name_to_string_bulk_renders_listed_declarations() {
 #[test]
 fn session_list_declarations_strings_matches_filtered_count() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let filter = LeanDeclarationFilter::default();
@@ -903,22 +1213,35 @@ fn session_list_declarations_strings_matches_filtered_count() {
 
 // -- elaborate + kernel_check -------------------------------------------
 
-fn session_over_elaboration<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
-        .expect("session imports cleanly")
+fn session_over_elaboration<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    caps.session(
+        &service_requests::imports(
+            caps,
+            &["LeanRsHostShims.Elaboration"],
+            LeanSessionImportProfile::default(),
+        ),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
 }
 
 #[test]
 fn elaborate_success_returns_expr() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .elaborate("(1 + 2 : Nat)", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        elaborate,
+        "(1 + 2 : Nat)",
+        None,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let expr = outcome.expect("elaboration succeeds for a well-typed Nat term");
     // Returned LeanExpr is opaque; success path is asserted by Ok.
     drop(expr);
@@ -927,15 +1250,20 @@ fn elaborate_success_returns_expr() {
 #[test]
 fn session_expr_to_string_raw_renders_elaborated_expr() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let expr = session
-        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception")
-        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = call_service!(
+        caps,
+        session,
+        elaborate,
+        "(Nat.succ 0 : Nat)",
+        None,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception")
+    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let rendered = session.expr_to_string_raw(&expr, None).expect("raw render");
     assert!(!rendered.is_empty(), "raw projection must be non-empty");
     assert!(
@@ -947,13 +1275,10 @@ fn session_expr_to_string_raw_renders_elaborated_expr() {
 #[test]
 fn elaborate_syntax_failure_reports_diagnostic() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .elaborate("1 +", None, &LeanElabOptions::new(), None)
+    let outcome = call_service!(caps, session, elaborate, "1 +", None, &LeanElabOptions::new(), None)
         .expect("host stack reports no exception");
     let failure = outcome.expect_err("trailing operator must fail to parse");
     let first = failure
@@ -970,16 +1295,21 @@ fn elaborate_syntax_failure_reports_diagnostic() {
 #[test]
 fn elaborate_type_failure_reports_position() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // Mixing `String` with arithmetic against `Nat` triggers an
     // elaborator type error that carries a position.
-    let outcome = session
-        .elaborate("(1 + \"hi\" : Nat)", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        elaborate,
+        "(1 + \"hi\" : Nat)",
+        None,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let failure = outcome.expect_err("type-mismatched term must fail to elaborate");
     let diag = failure
         .diagnostics()
@@ -1006,14 +1336,11 @@ fn elaborate_type_failure_reports_position() {
 #[test]
 fn kernel_check_small_theorem_returns_evidence() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem lean_rs_smoke : 1 + 1 = 2 := rfl";
-    let outcome = session
-        .kernel_check(src, &LeanElabOptions::new(), None, None)
+    let outcome = call_service!(caps, session, kernel_check, src, &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -1034,14 +1361,11 @@ fn kernel_check_small_theorem_returns_evidence() {
 #[test]
 fn kernel_check_rejects_bad_proof() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem lean_rs_bad : 1 = 2 := rfl";
-    let outcome = session
-        .kernel_check(src, &LeanElabOptions::new(), None, None)
+    let outcome = call_service!(caps, session, kernel_check, src, &LeanElabOptions::new(), None, None)
         .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
@@ -1083,14 +1407,19 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
     // `Rejected` and `Unavailable`) is exercised by the fixture's own
     // tests, not by this Rust integration suite.
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .kernel_check("theorem :=", &LeanElabOptions::new(), None, None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "theorem :=",
+        &LeanElabOptions::new(),
+        None,
+        None
+    )
+    .expect("host stack reports no exception");
     assert!(
         matches!(outcome.status(), EvidenceStatus::Rejected | EvidenceStatus::Unavailable),
         "malformed source must classify as Rejected or Unavailable, got {outcome:?}"
@@ -1111,17 +1440,22 @@ fn kernel_check_classifies_unavailable_or_rejected_on_pathological_input() {
 #[test]
 fn kernel_check_unsupported_on_non_declaration() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // `#check` is a command that elaborates cleanly but adds no
     // constant to the environment, so the classifier returns
     // `Unsupported` (no new theorem/definition).
-    let outcome = session
-        .kernel_check("#check Nat", &LeanElabOptions::new(), None, None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "#check Nat",
+        &LeanElabOptions::new(),
+        None,
+        None
+    )
+    .expect("host stack reports no exception");
     assert_eq!(
         outcome.status(),
         EvidenceStatus::Unsupported,
@@ -1132,19 +1466,19 @@ fn kernel_check_unsupported_on_non_declaration() {
 #[test]
 fn check_evidence_revalidates_checked_evidence() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .kernel_check(
-            "theorem lean_rs_recheck : 1 + 1 = 2 := rfl",
-            &LeanElabOptions::new(),
-            None,
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "theorem lean_rs_recheck : 1 + 1 = 2 := rfl",
+        &LeanElabOptions::new(),
+        None,
+        None,
+    )
+    .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
         LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
@@ -1178,19 +1512,19 @@ fn check_evidence_revalidates_checked_evidence() {
 #[test]
 fn summarize_evidence_exposes_declaration_name() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .kernel_check(
-            "theorem lean_rs_summary : 1 + 1 = 2 := rfl",
-            &LeanElabOptions::new(),
-            None,
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "theorem lean_rs_summary : 1 + 1 = 2 := rfl",
+        &LeanElabOptions::new(),
+        None,
+        None,
+    )
+    .expect("host stack reports no exception");
     let evidence = match outcome {
         LeanKernelOutcome::Checked(evidence) => evidence,
         LeanKernelOutcome::Rejected(_) | LeanKernelOutcome::Unavailable(_) | LeanKernelOutcome::Unsupported(_) => {
@@ -1237,17 +1571,14 @@ fn summarize_evidence_exposes_declaration_name() {
 #[test]
 fn diagnostic_byte_limit_truncates() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     // Multiple unbound identifiers produce multiple diagnostics; a
     // single-byte budget cannot fit them all and must be reported as
     // truncated.
     let opts = LeanElabOptions::new().diagnostic_byte_limit(1);
-    let outcome = session
-        .elaborate("(foo + bar + baz : Nat)", None, &opts, None)
+    let outcome = call_service!(caps, session, elaborate, "(foo + bar + baz : Nat)", None, &opts, None)
         .expect("host stack reports no exception");
     let failure = outcome.expect_err("unbound identifiers must fail to elaborate");
     assert!(
@@ -1270,15 +1601,17 @@ fn session_reuse_amortises_import() {
     // the suite into the multi-minute range.
     const QUERIES: usize = 4;
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
 
     // (a) One session, many queries.
     let start_reuse = Instant::now();
     {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"], None, None)
+            .session(
+                &service_requests::imports(&caps, &["LeanRsFixture.Handles"], LeanSessionImportProfile::default()),
+                None,
+                None,
+            )
             .expect("session imports cleanly");
         for _ in 0..QUERIES {
             let kind = session
@@ -1293,7 +1626,11 @@ fn session_reuse_amortises_import() {
     let start_per_query = Instant::now();
     for _ in 0..QUERIES {
         let mut session = caps
-            .session(&["LeanRsFixture.Handles"], None, None)
+            .session(
+                &service_requests::imports(&caps, &["LeanRsFixture.Handles"], LeanSessionImportProfile::default()),
+                None,
+                None,
+            )
             .expect("session imports cleanly");
         let kind = session
             .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)
@@ -1316,12 +1653,24 @@ fn session_reuse_amortises_import() {
 // dylib exports the optional meta symbols, so checked binding resolution
 // finds them and `run_meta` dispatches through cached typed handles.
 
-fn session_over_meta<'lean, 'c>(caps: &'c crate::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Meta", "LeanRsHostShims.Meta"], None, None)
-        .expect("session imports cleanly")
+fn session_over_meta<'lean, 'c>(caps: &'c lean_rs_host::LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
+    caps.session(
+        &service_requests::imports(
+            caps,
+            &["LeanRsFixture.Meta", "LeanRsHostShims.Meta"],
+            LeanSessionImportProfile::default(),
+        ),
+        None,
+        None,
+    )
+    .expect("session imports cleanly")
 }
 
-fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, fixture: &str) -> lean_rs::LeanExpr<'lean> {
+fn meta_expr<'lean>(
+    caps: &lean_rs_host::LeanCapabilities<'lean, '_>,
+    session: &mut LeanSession<'lean, '_>,
+    fixture: &str,
+) -> lean_rs::LeanExpr<'lean> {
     let source = match fixture {
         "lean_rs_fixture_meta_expr_nat" => "Nat".to_owned(),
         "lean_rs_fixture_meta_expr_bool" => "Bool".to_owned(),
@@ -1329,8 +1678,7 @@ fn meta_expr<'lean>(session: &mut LeanSession<'lean, '_>, fixture: &str) -> lean
         "lean_rs_fixture_meta_expr_irreducible_nat_alias" => "LeanRsFixture.Meta.IrreducibleNatAlias".to_owned(),
         other => panic!("unknown meta fixture expression export {other}"),
     };
-    session
-        .elaborate(&source, None, &LeanElabOptions::new(), None)
+    call_service!(caps, session, elaborate, &source, None, &LeanElabOptions::new(), None)
         .expect("fixture expression elaboration reports no exception")
         .expect("fixture expression elaborates")
 }
@@ -1378,9 +1726,7 @@ fn meta_registry_exposes_five_pinned_services() {
 #[test]
 fn meta_infer_type_returns_ok_for_nat_type() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
     // The type of `Nat.zero` is `Nat`; inferring its type yields `Type`.
@@ -1412,9 +1758,7 @@ fn meta_infer_type_returns_ok_for_nat_type() {
 #[test]
 fn meta_whnf_returns_ok_for_nat_type() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
     let expr = session
@@ -1444,9 +1788,7 @@ fn meta_heartbeat_burn_yields_timeout_status() {
     // under a millisecond. No threshold asserted (per the project's
     // "no performance claim without numbers" rule).
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
     // Any Expr will do—heartbeat_burn ignores its argument.
@@ -1484,15 +1826,20 @@ fn meta_heartbeat_burn_yields_timeout_status() {
 #[test]
 fn meta_pp_expr_renders_elaborated_expr() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let expr = session
-        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception")
-        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = call_service!(
+        caps,
+        session,
+        elaborate,
+        "(Nat.succ 0 : Nat)",
+        None,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception")
+    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let outcome = session
         .run_meta(&pp_expr(), expr, &LeanMetaOptions::new(), None)
         .expect("host stack reports no exception");
@@ -1523,15 +1870,20 @@ fn meta_pp_expr_honours_heartbeat_budget() {
     // outcome must classify as `TimeoutOrHeartbeat`—never `Ok`,
     // never a panic.
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let expr = session
-        .elaborate("(Nat.succ 0 : Nat)", None, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception")
-        .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
+    let expr = call_service!(
+        caps,
+        session,
+        elaborate,
+        "(Nat.succ 0 : Nat)",
+        None,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception")
+    .expect("`(Nat.succ 0 : Nat)` elaborates against the prelude");
     let opts = LeanMetaOptions::new().heartbeat_limit(1);
     let outcome = session
         .run_meta(&pp_expr(), expr, &opts, None)
@@ -1546,13 +1898,11 @@ fn meta_pp_expr_honours_heartbeat_budget() {
 #[test]
 fn meta_is_def_eq_reducible_alias_matches_nat() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_reducible_nat_alias");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_reducible_nat_alias");
+    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1567,13 +1917,11 @@ fn meta_is_def_eq_reducible_alias_matches_nat() {
 #[test]
 fn meta_is_def_eq_distinguishes_nat_and_bool() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_bool");
+    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_bool");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1588,13 +1936,11 @@ fn meta_is_def_eq_distinguishes_nat_and_bool() {
 #[test]
 fn meta_is_def_eq_default_does_not_unfold_irreducible_alias() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1609,13 +1955,11 @@ fn meta_is_def_eq_default_does_not_unfold_irreducible_alias() {
 #[test]
 fn meta_is_def_eq_all_unfolds_irreducible_alias() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_irreducible_nat_alias");
+    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let outcome = session
         .run_meta(
             &is_def_eq(),
@@ -1630,13 +1974,11 @@ fn meta_is_def_eq_all_unfolds_irreducible_alias() {
 #[test]
 fn meta_is_def_eq_pre_cancelled_token_returns_cancelled() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let lhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
-    let rhs = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
+    let lhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    let rhs = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
     let before = session.stats();
     let token = LeanCancellationToken::new();
     token.cancel();
@@ -1663,17 +2005,15 @@ fn meta_is_def_eq_pre_cancelled_token_returns_cancelled() {
 #[test]
 fn meta_missing_optional_symbol_returns_unsupported() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_meta(&caps);
 
-    let expr = meta_expr(&mut session, "lean_rs_fixture_meta_expr_nat");
-    let missing: LeanMetaService<lean_rs::LeanExpr<'_>, lean_rs::LeanExpr<'_>> =
-        LeanMetaService::new("lean_rs_host_meta_missing_for_test", &["LeanRsHostShims.Meta"]);
+    let expr = meta_expr(&caps, &mut session, "lean_rs_fixture_meta_expr_nat");
+    // The qualification build for this case must provide a reviewed shim with
+    // the optional WHNF symbol absent; use the supported descriptor as a real caller would.
     let outcome = session
-        .run_meta(&missing, expr, &LeanMetaOptions::new(), None)
-        .expect("missing optional service is classified, not a load failure");
+        .run_meta(&whnf(), expr, &LeanMetaOptions::new(), None)
+        .expect("optional service dispatch");
     assert_eq!(
         outcome.status(),
         MetaCallStatus::Unsupported,
@@ -1685,18 +2025,23 @@ fn meta_missing_optional_symbol_returns_unsupported() {
 
 #[test]
 fn session_process_module_query_returns_diagnostics_without_info_tree_payload() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "import Lean\n\ntheorem bad : True := 0\n";
-    let outcome = session
-        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::Diagnostics,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diagnostics),
@@ -1718,28 +2063,28 @@ fn session_process_module_query_returns_diagnostics_without_info_tree_payload() 
 
 #[test]
 fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "#check Nat.add\n#print axioms Nat.add_assoc\n",
-            &[ModuleQuerySelector::Diagnostics {
-                id: "messages".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "#check Nat.add\n#print axioms Nat.add_assoc\n",
+        &[ModuleQuerySelector::Diagnostics {
+            id: "messages".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
         panic!("expected Ok command-message outcome, got {outcome:?}");
@@ -1773,28 +2118,28 @@ fn command_message_capture_returns_check_and_print_axioms_output_as_diagnostics(
 
 #[test]
 fn command_message_capture_invalid_command_returns_error_diagnostics() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "#check definitelyMissingCommandMessage\n",
-            &[ModuleQuerySelector::Diagnostics {
-                id: "messages".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("invalid command is a normal diagnostics outcome");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "#check definitelyMissingCommandMessage\n",
+        &[ModuleQuerySelector::Diagnostics {
+            id: "messages".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("invalid command is a normal diagnostics outcome");
 
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok diagnostics outcome for invalid command, got {outcome:?}");
@@ -1817,28 +2162,28 @@ fn command_message_capture_invalid_command_returns_error_diagnostics() {
 
 #[test]
 fn command_message_capture_missing_import_uses_module_query_missing_imports() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "import LeanRsFixture.DoesNotExist\n\n#check symbolThatWouldFailIfBodyRan\n",
-            &[ModuleQuerySelector::Diagnostics {
-                id: "messages".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("missing import is a normal module-query outcome");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "import LeanRsFixture.DoesNotExist\n\n#check symbolThatWouldFailIfBodyRan\n",
+        &[ModuleQuerySelector::Diagnostics {
+            id: "messages".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("missing import is a normal module-query outcome");
 
     let ModuleQueryBatchOutcome::MissingImports {
         result,
@@ -1865,31 +2210,31 @@ fn command_message_capture_missing_import_uses_module_query_missing_imports() {
 
 #[test]
 fn command_message_capture_small_budget_truncates_later_messages() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "#check Nat.add\n#check Nat.mul\n",
-            &[ModuleQuerySelector::Diagnostics {
-                id: "messages".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets {
-                per_field_bytes: 1,
-                total_bytes: 1024,
-            },
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("budgeted command-message query succeeds");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "#check Nat.add\n#check Nat.mul\n",
+        &[ModuleQuerySelector::Diagnostics {
+            id: "messages".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets {
+            per_field_bytes: 1,
+            total_bytes: 1024,
+        },
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("budgeted command-message query succeeds");
 
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok command-message outcome, got {outcome:?}");
@@ -1913,23 +2258,23 @@ fn command_message_capture_small_budget_truncates_later_messages() {
 
 #[test]
 fn session_process_module_query_type_at_returns_one_selected_term() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult, TypeAtResult};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "def x := 1\ntheorem t : x = 1 := by rfl\n";
-    let outcome = session
-        .process_module_query(
-            src,
-            &ModuleQuery::TypeAt { line: 2, column: 13 },
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::TypeAt { line: 2, column: 13 },
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result:
@@ -1964,23 +2309,23 @@ fn session_process_module_query_type_at_returns_one_selected_term() {
 
 #[test]
 fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
-    use crate::host::process::{GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{GoalAtResult, ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem t : True := by\n  trivial\n";
-    let outcome = session
-        .process_module_query(
-            src,
-            &ModuleQuery::GoalAt { line: 2, column: 4 },
-            &LeanElabOptions::new().diagnostic_byte_limit(256),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::GoalAt { line: 2, column: 4 },
+        &LeanElabOptions::new().diagnostic_byte_limit(256),
+        None,
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result:
@@ -2008,37 +2353,37 @@ fn session_process_module_query_goal_at_returns_selected_tactic_goals() {
 
 #[test]
 fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector, ProofStateResult,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "theorem t (h : True) : True := by\n  exact h\n";
     let before = session.stats();
-    let outcome = session
-        .process_module_query_batch(
-            src,
-            &[
-                ModuleQuerySelector::Diagnostics {
-                    id: "diagnostics".to_owned(),
-                },
-                ModuleQuerySelector::ProofState {
-                    id: "state".to_owned(),
-                    line: 2,
-                    column: 4,
-                },
-            ],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        src,
+        &[
+            ModuleQuerySelector::Diagnostics {
+                id: "diagnostics".to_owned(),
+            },
+            ModuleQuerySelector::ProofState {
+                id: "state".to_owned(),
+                line: 2,
+                column: 4,
+            },
+        ],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let after = session.stats();
 
     assert_eq!(after.ffi_calls, before.ffi_calls + 1);
@@ -2082,15 +2427,13 @@ fn session_process_module_query_batch_returns_proof_context_in_one_dispatch() {
 
 #[test]
 fn declaration_outline_returns_source_order_namespace_private_and_body_spans() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
         ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let source = "\
@@ -2103,17 +2446,19 @@ def withBody (n : Nat) : Nat :=
   n + 1
 end Outer
 ";
-    let outcome = session
-        .process_module_query_batch(
-            source,
-            &[ModuleQuerySelector::DeclarationOutline {
-                id: "outline".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        source,
+        &[ModuleQuerySelector::DeclarationOutline {
+            id: "outline".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryBatchOutcome::Ok { result, imports } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
@@ -2195,28 +2540,28 @@ end ScanForms
 
 /// Drive the declaration outline over `source` and return the rows.
 #[cfg(test)]
-fn outline_rows(source: &str) -> Vec<crate::host::process::DeclarationTargetInfo> {
-    use crate::host::process::{
+fn outline_rows(source: &str) -> Vec<lean_rs_host::host::process::DeclarationTargetInfo> {
+    use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
         ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
-    let outcome = session
-        .process_module_query_batch(
-            source,
-            &[ModuleQuerySelector::DeclarationOutline {
-                id: "outline".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        source,
+        &[ModuleQuerySelector::DeclarationOutline {
+            id: "outline".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
@@ -2285,15 +2630,13 @@ fn declaration_outline_covers_multi_clause_where_structure_class_and_anonymous_i
 
 #[test]
 fn declaration_target_resolves_the_new_scan_forms_by_name() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationTargetResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
         ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let selectors: Vec<ModuleQuerySelector> = [
         ("target-structure", "ScanForms.Point"),
@@ -2311,15 +2654,17 @@ fn declaration_target_resolves_the_new_scan_forms_by_name() {
         column: None,
     })
     .collect();
-    let outcome = session
-        .process_module_query_batch(
-            SCAN_FORMS_SOURCE,
-            &selectors,
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        SCAN_FORMS_SOURCE,
+        &selectors,
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-target outcome, got {outcome:?}");
     };
@@ -2335,15 +2680,13 @@ fn declaration_target_resolves_the_new_scan_forms_by_name() {
 
 #[test]
 fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
         DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let targets = [
         "ScanForms.multi",
@@ -2353,7 +2696,7 @@ fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
         "ScanForms.Default",
     ]
     .into_iter()
-    .map(|name| crate::host::process::DeclarationVerificationBatchItem {
+    .map(|name| lean_rs_host::host::process::DeclarationVerificationBatchItem {
         id: name.to_owned(),
         target: DeclarationVerificationTarget::Name { name: name.to_owned() },
     })
@@ -2365,9 +2708,15 @@ fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
         report_axioms: true,
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
@@ -2383,7 +2732,7 @@ fn verify_declaration_batch_accepts_the_new_scan_forms_by_name() {
 
 #[test]
 fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationStatus,
         DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
     };
@@ -2399,13 +2748,11 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
     // Phase 2: verifying that name reaches the declaration, exactly what the
     // kan-proofs field report could not do.
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let request = DeclarationVerificationBatchRequest {
         source: SCAN_FORMS_SOURCE.to_owned(),
-        targets: vec![crate::host::process::DeclarationVerificationBatchItem {
+        targets: vec![lean_rs_host::host::process::DeclarationVerificationBatchItem {
             id: "anon".to_owned(),
             target: DeclarationVerificationTarget::Name {
                 name: generated.clone(),
@@ -2415,9 +2762,15 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
         report_axioms: false,
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
@@ -2433,39 +2786,39 @@ fn verify_declaration_batch_resolves_anonymous_instance_under_generated_name() {
 
 #[test]
 fn surrounding_and_proof_state_work_inside_a_multi_clause_definition() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult, ModuleQueryOutputBudgets,
         ModuleQuerySelector, ProofStateResult, SurroundingDeclarationResult,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     // Line 29 is the `intro x` tactic inside the second equation clause of
     // `multiBy` (1-based): a tactic block nested in a multi-clause def.
-    let outcome = session
-        .process_module_query_batch(
-            SCAN_FORMS_SOURCE,
-            &[
-                ModuleQuerySelector::SurroundingDeclaration {
-                    id: "surrounding".to_owned(),
-                    line: 29,
-                    column: 7,
-                },
-                ModuleQuerySelector::ProofStateInDeclaration {
-                    id: "proof-state".to_owned(),
-                    declaration: "ScanForms.multiBy".to_owned(),
-                    position: crate::host::process::ProofPositionSelector::Default,
-                    locals_raw: false,
-                },
-            ],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        SCAN_FORMS_SOURCE,
+        &[
+            ModuleQuerySelector::SurroundingDeclaration {
+                id: "surrounding".to_owned(),
+                line: 29,
+                column: 7,
+            },
+            ModuleQuerySelector::ProofStateInDeclaration {
+                id: "proof-state".to_owned(),
+                declaration: "ScanForms.multiBy".to_owned(),
+                position: lean_rs_host::host::process::ProofPositionSelector::Default,
+                locals_raw: false,
+            },
+        ],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok outcome, got {outcome:?}");
     };
@@ -2503,33 +2856,33 @@ fn surrounding_and_proof_state_work_inside_a_multi_clause_definition() {
 
 #[test]
 fn declaration_outline_returns_rows_alongside_diagnostics() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
         ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "theorem ok : True := by\n  trivial\n#check missingName\n",
-            &[
-                ModuleQuerySelector::Diagnostics {
-                    id: "diagnostics".to_owned(),
-                },
-                ModuleQuerySelector::DeclarationOutline {
-                    id: "outline".to_owned(),
-                },
-            ],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "theorem ok : True := by\n  trivial\n#check missingName\n",
+        &[
+            ModuleQuerySelector::Diagnostics {
+                id: "diagnostics".to_owned(),
+            },
+            ModuleQuerySelector::DeclarationOutline {
+                id: "outline".to_owned(),
+            },
+        ],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
@@ -2544,7 +2897,7 @@ fn declaration_outline_returns_rows_alongside_diagnostics() {
                 failure
                     .diagnostics()
                     .iter()
-                    .any(|diagnostic| diagnostic.severity() == crate::LeanSeverity::Error),
+                    .any(|diagnostic| diagnostic.severity() == lean_rs_host::LeanSeverity::Error),
                 "expected diagnostic error for missingName, got {failure:?}",
             ),
             other => panic!("expected diagnostics result, got {other:?}"),
@@ -2575,31 +2928,31 @@ fn declaration_outline_returns_rows_alongside_diagnostics() {
 
 #[test]
 fn declaration_outline_truncates_by_complete_rows_under_small_budget() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationOutlineResult, ModuleQueryBatchItem, ModuleQueryBatchOutcome, ModuleQueryBatchResult,
         ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
-    let outcome = session
-        .process_module_query_batch(
-            "theorem a : True := by\n  trivial\ntheorem b : True := by\n  trivial\n",
-            &[ModuleQuerySelector::DeclarationOutline {
-                id: "outline".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets {
-                per_field_bytes: 128,
-                total_bytes: 200,
-            },
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        "theorem a : True := by\n  trivial\ntheorem b : True := by\n  trivial\n",
+        &[ModuleQuerySelector::DeclarationOutline {
+            id: "outline".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets {
+            per_field_bytes: 128,
+            total_bytes: 200,
+        },
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok declaration-outline outcome, got {outcome:?}");
     };
@@ -2621,23 +2974,23 @@ fn declaration_outline_truncates_by_complete_rows_under_small_budget() {
 
 #[test]
 fn session_process_module_query_references_returns_name_locations_only() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "def x := 1\ntheorem t : x = 1 := by rfl\n#check x\n";
-    let outcome = session
-        .process_module_query(
-            src,
-            &ModuleQuery::References { name: "x".to_string() },
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::References { name: "x".to_string() },
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("host stack reports no exception");
 
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::References(result),
@@ -2660,18 +3013,23 @@ fn session_process_module_query_references_returns_name_locations_only() {
 
 #[test]
 fn session_process_module_query_reports_missing_imports_with_result() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "import Foo.Bar.Baz\n\ndef x := 1\n";
-    let outcome = session
-        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::Diagnostics,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryOutcome::MissingImports {
         result: ModuleQueryResult::Diagnostics(_),
         imports,
@@ -2686,15 +3044,13 @@ fn session_process_module_query_reports_missing_imports_with_result() {
 
 #[test]
 fn declaration_verification_batch_preserves_order_and_uses_one_dispatch() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
         DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let source = "\
 theorem closed : True := by
@@ -2730,9 +3086,15 @@ theorem withSorry : True := by
     };
 
     let before = session.stats();
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let after = session.stats();
     assert_eq!(after.ffi_calls, before.ffi_calls + 1);
     assert_eq!(after.batch_items, before.batch_items + 3);
@@ -2765,30 +3127,30 @@ theorem withSorry : True := by
 
 #[test]
 fn private_declaration_verification_reports_real_axioms() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
         DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryBatchItem, ModuleQueryBatchOutcome,
         ModuleQueryBatchResult, ModuleQueryOutputBudgets, ModuleQuerySelector, SorryPolicy,
     };
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     // The module header shifts parser coordinates; the ordinary body-only
     // test previously hid the private-name resolution failure.
     let source = "module\npublic section\nnamespace PrivateAxioms\naxiom witness : False\nprivate theorem hidden : False := witness\nend PrivateAxioms\n";
-    let outline = session
-        .process_module_query_batch(
-            source,
-            &[ModuleQuerySelector::DeclarationOutline {
-                id: "outline".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
-        )
-        .expect("outline");
+    let outline = call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        source,
+        &[ModuleQuerySelector::DeclarationOutline {
+            id: "outline".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &LeanElabOptions::new(),
+        None,
+    )
+    .expect("outline");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outline else {
         panic!("{outline:?}")
     };
@@ -2816,9 +3178,15 @@ fn private_declaration_verification_reports_real_axioms() {
         report_axioms: true,
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("verify");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("verify");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("{outcome:?}")
     };
@@ -2831,14 +3199,12 @@ fn private_declaration_verification_reports_real_axioms() {
 
 #[test]
 fn declaration_without_kernel_constant_has_unavailable_axioms() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
         DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
     };
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let request = DeclarationVerificationBatchRequest {
         // The source declaration resolves, but Lean cannot add a theorem
@@ -2854,9 +3220,15 @@ fn declaration_without_kernel_constant_has_unavailable_axioms() {
         report_axioms: true,
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("verify");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("verify");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("{outcome:?}")
     };
@@ -2877,14 +3249,12 @@ fn declaration_without_kernel_constant_has_unavailable_axioms() {
 
 #[test]
 fn declaration_verification_batch_empty_targets_still_reports_missing_imports() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, ModuleQueryOutputBudgets, SorryPolicy,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let request = DeclarationVerificationBatchRequest {
         source: "import Foo.Bar.Baz\n\ndef x := 1\n".to_owned(),
@@ -2894,9 +3264,15 @@ fn declaration_verification_batch_empty_targets_still_reports_missing_imports() 
         budgets: ModuleQueryOutputBudgets::default(),
     };
 
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::MissingImports {
         results,
         imports,
@@ -2912,15 +3288,13 @@ fn declaration_verification_batch_empty_targets_still_reports_missing_imports() 
 
 #[test]
 fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget_rows() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
         DeclarationVerificationStatus, DeclarationVerificationTarget, ModuleQueryOutputBudgets, SorryPolicy,
     };
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let request = DeclarationVerificationBatchRequest {
         source: "theorem a : True := by trivial\ntheorem b : True := by trivial\n".to_owned(),
@@ -2942,9 +3316,15 @@ fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget
         },
     };
 
-    let outcome = session
-        .verify_declaration_batch(&request, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        verify_declaration_batch,
+        &request,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let DeclarationVerificationBatchOutcome::Ok { results, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
     };
@@ -2963,18 +3343,23 @@ fn declaration_verification_batch_total_budget_exhaustion_returns_ordered_budget
 
 #[test]
 fn session_process_module_query_surfaces_header_parse_error() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome};
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
 
     let src = "import 123\n\ntheorem t : True := by trivial\n";
-    let outcome = session
-        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::Diagnostics,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryOutcome::HeaderParseFailed { diagnostics } = outcome else {
         panic!("expected HeaderParseFailed, got {outcome:?}");
     };
@@ -2990,15 +3375,19 @@ fn session_process_module_query_surfaces_header_parse_error() {
 
 #[test]
 fn session_process_module_query_handles_module_system_header() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
 
     let project = TempLakeProject::new("module-query-header-host");
     write_module_syntax_fixture(&project);
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
+    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
     let mut session = caps
         .session(
-            &["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"],
+            &service_requests::imports(
+                &caps,
+                &["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"],
+                LeanSessionImportProfile::default(),
+            ),
             None,
             None,
         )
@@ -3014,9 +3403,16 @@ import Fixture.PrivateScope
 def moduleSyntaxFoo : Nat := imported + internalSecret
 #check privateOnly
 ";
-    let outcome = session
-        .process_module_query(src, &ModuleQuery::Diagnostics, &LeanElabOptions::new(), None)
-        .expect("host stack reports no exception");
+    let outcome = call_service!(
+        caps,
+        session,
+        process_module_query,
+        src,
+        &ModuleQuery::Diagnostics,
+        &LeanElabOptions::new(),
+        None
+    )
+    .expect("host stack reports no exception");
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diagnostics),
         imports,
@@ -3058,16 +3454,22 @@ def moduleSyntaxFoo : Nat := imported + internalSecret
 /// fresh import, including when a caller changes the header or its options.
 #[test]
 fn cached_module_headers_match_cold_queries_after_edits() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQueryBatchCachedOutcome, ModuleQueryCachePolicy, ModuleQueryOutputBudgets, ModuleQuerySelector,
     };
 
     let project = TempLakeProject::new("cached-module-header-host");
     write_module_syntax_fixture(&project);
-    let host = LeanHost::from_lake_project(runtime(), project.path()).expect("host opens temp project");
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
+    let host = LeanHost::from_lake_project(runtime(), project.reviewed_copy()).expect("host opens temp project");
+    let caps = fixture::shims_only(&host).expect("shim-only capabilities load");
     let imports = ["Fixture.Imported", "Fixture.Internal", "Fixture.PrivateScope"];
-    let mut session = caps.session(&imports, None, None).expect("session imports fixture");
+    let mut session = caps
+        .session(
+            &service_requests::imports(&caps, &imports, LeanSessionImportProfile::default()),
+            None,
+            None,
+        )
+        .expect("session imports fixture");
     let header = "module\npublic import Fixture.Imported\nimport all Fixture.Internal\nimport Fixture.PrivateScope\n";
     let base = format!("{header}\ndef foo : Nat := imported + internalSecret\n#check privateOnly\n");
     let cases = [
@@ -3115,20 +3517,47 @@ fn cached_module_headers_match_cold_queries_after_edits() {
     for (source, name, heartbeats, label) in cases {
         session.clear_module_snapshot_cache().expect("clear prior case");
         session.clear_module_header_cache().expect("clear prior header");
-        session
-            .process_module_query_batch_cached(&base, &selectors, &budgets, &baseline_opts, &policy("base"), None)
-            .expect("seed snapshot");
+        call_service!(
+            caps,
+            session,
+            process_module_query_batch_cached,
+            &base,
+            &selectors,
+            &budgets,
+            &baseline_opts,
+            &policy("base"),
+            None
+        )
+        .expect("seed snapshot");
         let opts = LeanElabOptions::new().file_label(label).heartbeat_limit(heartbeats);
-        let warm = session
-            .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
-            .expect("warm query");
+        let warm = call_service!(
+            caps,
+            session,
+            process_module_query_batch_cached,
+            &source,
+            &selectors,
+            &budgets,
+            &opts,
+            &policy(name),
+            None
+        )
+        .expect("warm query");
         session.clear_module_snapshot_cache().expect("clear warm snapshot");
         session
             .clear_module_header_cache()
             .expect("force genuinely cold header");
-        let cold = session
-            .process_module_query_batch_cached(&source, &selectors, &budgets, &opts, &policy(name), None)
-            .expect("cold query");
+        let cold = call_service!(
+            caps,
+            session,
+            process_module_query_batch_cached,
+            &source,
+            &selectors,
+            &budgets,
+            &opts,
+            &policy(name),
+            None
+        )
+        .expect("cold query");
         let (
             ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
             ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
@@ -3146,33 +3575,41 @@ fn cached_module_headers_match_cold_queries_after_edits() {
     // snapshot cache must not carry a header environment across sessions.
     let mut other = caps
         .session(
-            &["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"],
+            &service_requests::imports(
+                &caps,
+                &["Fixture.Internal", "Fixture.PrivateScope", "Fixture.Imported"],
+                LeanSessionImportProfile::default(),
+            ),
             None,
             None,
         )
         .expect("different session imports fixture");
-    let warm = other
-        .process_module_query_batch_cached(
-            &base,
-            &selectors,
-            &budgets,
-            &baseline_opts,
-            &policy("new-session"),
-            None,
-        )
-        .expect("new-session query");
+    let warm = call_service!(
+        caps,
+        other,
+        process_module_query_batch_cached,
+        &base,
+        &selectors,
+        &budgets,
+        &baseline_opts,
+        &policy("new-session"),
+        None,
+    )
+    .expect("new-session query");
     other.clear_module_snapshot_cache().expect("clear new-session snapshot");
     other.clear_module_header_cache().expect("clear new-session header");
-    let cold = other
-        .process_module_query_batch_cached(
-            &base,
-            &selectors,
-            &budgets,
-            &baseline_opts,
-            &policy("new-session"),
-            None,
-        )
-        .expect("cold new-session query");
+    let cold = call_service!(
+        caps,
+        other,
+        process_module_query_batch_cached,
+        &base,
+        &selectors,
+        &budgets,
+        &baseline_opts,
+        &policy("new-session"),
+        None,
+    )
+    .expect("cold new-session query");
     let (
         ModuleQueryBatchCachedOutcome::Ok { result: warm, .. },
         ModuleQueryBatchCachedOutcome::Ok { result: cold, .. },
@@ -3202,7 +3639,7 @@ fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
     let source = fs::read_to_string(package.join("LeanRsHostShims/InfoTree.lean")).expect("read shim source");
     project.write(
         "HeaderReuseProbe.lean",
-        &format!("{source}\n{}", include_str!("../../tests/lean/header_reuse_probe.lean")),
+        &format!("{source}\n{}", include_str!("lean/header_reuse_probe.lean")),
     );
     let compile = Command::new("lake")
         .args(["env", "lean", "-R"])
@@ -3240,7 +3677,7 @@ fn module_header_reuse_keeps_the_environment_and_rejects_changed_inputs() {
 
 #[test]
 fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         DeclarationVerificationBatchItem, DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest,
         DeclarationVerificationOutcome, DeclarationVerificationRequest, DeclarationVerificationStatus,
         DeclarationVerificationTarget, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchItem,
@@ -3250,9 +3687,7 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
     use lean_toolchain::LeanOptionValue;
 
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let source = "module\n@[expose] public section\nuniverse u\ndef before (A : Type u) := A\nend\n@[expose] public section\ndef after (A : Type u) := A\nend\n";
     let default = LeanElabOptions::new().file_label("option-regression.lean");
@@ -3308,9 +3743,16 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
         let ModuleQueryOutcome::Ok {
             result: ModuleQueryResult::Diagnostics(diags),
             ..
-        } = session
-            .process_module_query(source, &ModuleQuery::Diagnostics, options, None)
-            .expect("query")
+        } = call_service!(
+            caps,
+            session,
+            process_module_query,
+            source,
+            &ModuleQuery::Diagnostics,
+            options,
+            None
+        )
+        .expect("query")
         else {
             panic!("expected source diagnostics");
         };
@@ -3321,10 +3763,18 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
                 .any(|d| d.message().contains("unknown universe level")),
             should_error
         );
-        let ModuleQueryBatchCachedOutcome::Ok { result, .. } = session
-            .process_module_query_batch_cached(source, &selectors, &budgets, options, &policy, None)
-            .expect("cached query")
-        else {
+        let ModuleQueryBatchCachedOutcome::Ok { result, .. } = call_service!(
+            caps,
+            session,
+            process_module_query_batch_cached,
+            source,
+            &selectors,
+            &budgets,
+            options,
+            &policy,
+            None
+        )
+        .expect("cached query") else {
             panic!("expected cached diagnostics");
         };
         let ModuleQueryBatchItem::Ok { result, .. } = result.items.first().expect("one selector result") else {
@@ -3340,9 +3790,8 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
                 .any(|d| d.message().contains("unknown universe level")),
             should_error
         );
-        let DeclarationVerificationOutcome::Ok { status, .. } = session
-            .verify_declaration(&request, options, None)
-            .expect("verification")
+        let DeclarationVerificationOutcome::Ok { status, .. } =
+            call_service!(caps, session, verify_declaration, &request, options, None).expect("verification")
         else {
             panic!("expected verification")
         };
@@ -3357,9 +3806,8 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             report_axioms: true,
             budgets: budgets.clone(),
         };
-        let DeclarationVerificationBatchOutcome::Ok { results, .. } = session
-            .verify_declaration_batch(&batch, options, None)
-            .expect("batch verification")
+        let DeclarationVerificationBatchOutcome::Ok { results, .. } =
+            call_service!(caps, session, verify_declaration_batch, &batch, options, None).expect("batch verification")
         else {
             panic!("expected batch verification");
         };
@@ -3367,10 +3815,17 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
             results.first().expect("one row").status == DeclarationVerificationStatus::Accepted,
             !should_error
         );
-        let ModuleQueryBatchOutcome::Ok { result, .. } = session
-            .process_module_query_batch(source, &selectors, &budgets, options, None)
-            .expect("uncached batch")
-        else {
+        let ModuleQueryBatchOutcome::Ok { result, .. } = call_service!(
+            caps,
+            session,
+            process_module_query_batch,
+            source,
+            &selectors,
+            &budgets,
+            options,
+            None
+        )
+        .expect("uncached batch") else {
             panic!("expected batch diagnostics");
         };
         let ModuleQueryBatchItem::Ok { result, .. } = result.items.first().expect("one selector") else {
@@ -3395,9 +3850,16 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diags),
         ..
-    } = session
-        .process_module_query(&local, &ModuleQuery::Diagnostics, &strict, None)
-        .expect("local option")
+    } = call_service!(
+        caps,
+        session,
+        process_module_query,
+        &local,
+        &ModuleQuery::Diagnostics,
+        &strict,
+        None
+    )
+    .expect("local option")
     else {
         panic!("expected source diagnostics");
     };
@@ -3406,15 +3868,13 @@ fn module_options_match_direct_lean_and_invalidate_cached_elaboration() {
 
 #[test]
 fn module_options_reach_trials_and_reject_unknown_configuration() {
-    use crate::host::process::{
+    use lean_rs_host::host::process::{
         ModuleQuery, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQueryResult, ProofAttemptOutcome,
         ProofAttemptRequest, ProofAttemptStatus, ProofCandidate, ProofEditTarget, ProofPositionSelector,
     };
     use lean_toolchain::LeanOptionValue;
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_elaboration(&caps);
     let strict =
         LeanElabOptions::new().lean_options([("autoImplicit".to_owned(), LeanOptionValue::Bool(false))].into());
@@ -3430,7 +3890,9 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
         }],
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let ProofAttemptOutcome::Ok { result, .. } = session.attempt_proof(&request, &strict, None).expect("trial") else {
+    let ProofAttemptOutcome::Ok { result, .. } =
+        call_service!(caps, session, attempt_proof, &request, &strict, None).expect("trial")
+    else {
         panic!("expected trial result");
     };
     let row = result.candidates.first().expect("one candidate");
@@ -3441,16 +3903,30 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
             .iter()
             .any(|d| d.message().contains("unknown universe level"))
     );
-    let kernel = session
-        .kernel_check("def undeclaredUniverse (A : Type u) := A", &strict, None, None)
-        .expect("kernel check");
+    let kernel = call_service!(
+        caps,
+        session,
+        kernel_check,
+        "def undeclaredUniverse (A : Type u) := A",
+        &strict,
+        None,
+        None
+    )
+    .expect("kernel check");
     assert!(matches!(kernel, LeanKernelOutcome::Rejected(_)));
     let invalid = LeanElabOptions::new()
         .lean_options([("unregistered.regression.option".to_owned(), LeanOptionValue::Bool(true))].into());
     assert!(
-        session
-            .process_module_query("def x := 1", &ModuleQuery::Diagnostics, &invalid, None)
-            .is_err()
+        call_service!(
+            caps,
+            session,
+            process_module_query,
+            "def x := 1",
+            &ModuleQuery::Diagnostics,
+            &invalid,
+            None
+        )
+        .is_err()
     );
     // Weak options must not override the host's explicit heartbeat budget.
     let bounded = LeanElabOptions::new().heartbeat_limit(12345).lean_options(
@@ -3458,19 +3934,26 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
             ("weak.maxHeartbeats".to_owned(), LeanOptionValue::Nat(0)),
             ("maxSynthPendingDepth".to_owned(), LeanOptionValue::Nat(3)),
             (
-                "trace.profiler.output".to_owned(),
-                LeanOptionValue::String("option-test.json".to_owned()),
+                "tactic.simp.user.exampleString".to_owned(),
+                LeanOptionValue::String("option-value-probe".to_owned()),
             ),
         ]
         .into(),
     );
-    let source = "import Lean\nrun_cmd do\n  let opts ← Lean.MonadOptions.getOptions\n  unless opts.get `maxHeartbeats (0 : Nat) == 12345 do throwError \"wrong heartbeat limit\"\n  unless opts.get `maxSynthPendingDepth (0 : Nat) == 3 do throwError \"wrong natural option\"\n  unless opts.get `trace.profiler.output \"\" == \"option-test.json\" do throwError \"wrong string option\"\n";
+    let source = "import Lean\nrun_cmd do\n  let opts ← Lean.MonadOptions.getOptions\n  unless opts.get `maxHeartbeats (0 : Nat) == 12345 do throwError \"wrong heartbeat limit\"\n  unless opts.get `maxSynthPendingDepth (0 : Nat) == 3 do throwError \"wrong natural option\"\n  unless opts.get `tactic.simp.user.exampleString \"\" == \"option-value-probe\" do throwError \"wrong string option\"\n";
     let ModuleQueryOutcome::Ok {
         result: ModuleQueryResult::Diagnostics(diags),
         ..
-    } = session
-        .process_module_query(source, &ModuleQuery::Diagnostics, &bounded, None)
-        .expect("bounded query")
+    } = call_service!(
+        caps,
+        session,
+        process_module_query,
+        source,
+        &ModuleQuery::Diagnostics,
+        &bounded,
+        None
+    )
+    .expect("bounded query")
     else {
         panic!("expected diagnostics");
     };
@@ -3482,45 +3965,65 @@ fn module_options_reach_trials_and_reject_unknown_configuration() {
 
 #[test]
 fn header_import_accounting_survives_snapshot_eviction_and_query_paths() {
-    use crate::host::process::{ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector};
+    use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutputBudgets, ModuleQuerySelector};
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("caps");
-    let mut session = caps.session(&["Lean"], None, None).expect("session");
+    let caps = fixture::capabilities(&host).expect("caps");
+    let mut session = caps
+        .session(
+            &service_requests::imports(&caps, &["Lean"], LeanSessionImportProfile::default()),
+            None,
+            None,
+        )
+        .expect("session");
     let source = "module\nimport Lean\npublic def headerAccountingProbe : Nat := 1\n";
     let opts = LeanElabOptions::new().file_label("header-accounting.lean");
     session
         .configure_header_import_budget(0, 0)
         .expect("unlimited test budget");
     let before = session.header_import_state().expect("initial accounting");
-    session
-        .process_module_query(source, &ModuleQuery::Diagnostics, &opts, None)
-        .expect("first query");
+    call_service!(
+        caps,
+        session,
+        process_module_query,
+        source,
+        &ModuleQuery::Diagnostics,
+        &opts,
+        None
+    )
+    .expect("first query");
     let imported = session.header_import_state().expect("fresh accounting");
     assert_eq!(imported.imports, before.imports + 1);
     assert!(!imported.accounting_unknown);
     session.clear_module_snapshot_cache().expect("evict body snapshots");
-    session
-        .process_module_query_batch(
-            source,
-            &[ModuleQuerySelector::Diagnostics {
-                id: "diagnostics".to_owned(),
-            }],
-            &ModuleQueryOutputBudgets::default(),
-            &opts,
-            None,
-        )
-        .expect("other query path");
+    call_service!(
+        caps,
+        session,
+        process_module_query_batch,
+        source,
+        &[ModuleQuerySelector::Diagnostics {
+            id: "diagnostics".to_owned(),
+        }],
+        &ModuleQueryOutputBudgets::default(),
+        &opts,
+        None,
+    )
+    .expect("other query path");
     let reused = session.header_import_state().expect("warm accounting");
     assert_eq!(reused.imports, imported.imports);
     assert_eq!(reused.non_memory_mapped_bytes, imported.non_memory_mapped_bytes);
     session.clear_module_header_cache().expect("evict session header");
     let cleared = session.header_import_state().expect("retained accounting");
     assert_eq!(cleared.non_memory_mapped_bytes, imported.non_memory_mapped_bytes);
-    session
-        .process_module_query(source, &ModuleQuery::Diagnostics, &opts, None)
-        .expect("reimport");
+    call_service!(
+        caps,
+        session,
+        process_module_query,
+        source,
+        &ModuleQuery::Diagnostics,
+        &opts,
+        None
+    )
+    .expect("reimport");
     assert_eq!(
         session.header_import_state().expect("reimport accounting").imports,
         imported.imports + 1

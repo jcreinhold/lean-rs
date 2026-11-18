@@ -29,6 +29,8 @@ mod discover;
 mod fingerprint;
 mod lakefile_toml;
 mod limits;
+#[doc(hidden)]
+pub mod host_shim_abi;
 mod loader;
 pub mod manifest_validation;
 mod modules;

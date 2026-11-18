@@ -59,6 +59,7 @@ pub(crate) mod lake;
 mod bracketed;
 mod cancellation;
 mod capabilities;
+mod project_initializer;
 #[allow(
     clippy::module_inception,
     reason = "the LeanHost type is the natural name for this file"
@@ -72,7 +73,7 @@ pub use self::bracketed::{
     LeanBracketedDeclarationInfo, LeanBracketedImportRequest, LeanBracketedImportResult, LeanBracketedRejectedOperation,
 };
 pub use self::cancellation::LeanCancellationToken;
-pub use self::capabilities::LeanCapabilities;
+pub use self::capabilities::{LeanCapabilities, LeanPreparedHostArtifacts, prepare_host_artifacts};
 pub use self::declaration_search::{
     DeclarationFlags, DeclarationInspection, DeclarationInspectionBudgets, DeclarationInspectionFields,
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationNameMatch, DeclarationProofSearchFacts,
@@ -97,5 +98,4 @@ pub use self::session::{
     LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
 };
 
-#[cfg(test)]
-mod tests;
+// Native host service tests use the application boundary in tests/host_services.rs.

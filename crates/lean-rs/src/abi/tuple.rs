@@ -10,7 +10,7 @@
 use lean_rs_sys::lean_object;
 
 use crate::abi::structure::{alloc_ctor_with_objects, take_ctor_objects};
-use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, sealed};
+use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -37,28 +37,24 @@ where
     }
 }
 
-impl<A, B> sealed::SealedAbi for (A, B) {}
-
-impl<'lean, A, B> LeanAbi<'lean> for (A, B)
+// SAFETY: Prod uses an owned object slot and native codecs for its two fields.
+unsafe impl<'lean, A, B> LeanAbi<'lean> for (A, B)
 where
-    A: IntoLean<'lean> + TryFromLean<'lean>,
-    B: IntoLean<'lean> + TryFromLean<'lean>,
+    A: crate::abi::traits::LeanBoxedAbi<'lean>,
+    B: crate::abi::traits::LeanBoxedAbi<'lean>,
 {
     type CRepr = *mut lean_object;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
-        self.into_lean(runtime).into_raw()
+        <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::into_boxed(self, runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—called only by LeanExported"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned refcount returned from a Lean
         // export whose result type is a product.
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-        Self::try_from_lean(obj)
+        // SAFETY: the native result has the complete type established at binding.
+        unsafe { <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::from_boxed(obj) }
     }
 }
 
@@ -86,28 +82,24 @@ where
     }
 }
 
-impl<A, B, C> sealed::SealedAbi for (A, B, C) {}
-
-impl<'lean, A, B, C> LeanAbi<'lean> for (A, B, C)
+// SAFETY: the triple uses right-associated Prod layout with native codecs for every field.
+unsafe impl<'lean, A, B, C> LeanAbi<'lean> for (A, B, C)
 where
-    A: IntoLean<'lean> + TryFromLean<'lean>,
-    B: IntoLean<'lean> + TryFromLean<'lean>,
-    C: IntoLean<'lean> + TryFromLean<'lean>,
+    A: crate::abi::traits::LeanBoxedAbi<'lean>,
+    B: crate::abi::traits::LeanBoxedAbi<'lean>,
+    C: crate::abi::traits::LeanBoxedAbi<'lean>,
 {
     type CRepr = *mut lean_object;
 
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
-        self.into_lean(runtime).into_raw()
+        <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::into_boxed(self, runtime).into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—called only by LeanExported"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned refcount returned from a Lean
         // export whose result type is a product.
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-        Self::try_from_lean(obj)
+        // SAFETY: the native result has the complete type established at binding.
+        unsafe { <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::from_boxed(obj) }
     }
 }

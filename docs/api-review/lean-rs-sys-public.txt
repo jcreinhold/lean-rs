@@ -202,13 +202,11 @@ pub unsafe c fn lean_rs_sys::string::lean_string_append(lean_rs_sys::types::lean
 pub unsafe fn lean_rs_sys::string::lean_string_byte_size(*mut lean_rs_sys::types::lean_object) -> usize
 pub unsafe fn lean_rs_sys::string::lean_string_capacity(*mut lean_rs_sys::types::lean_object) -> usize
 pub unsafe fn lean_rs_sys::string::lean_string_cstr(lean_rs_sys::types::b_lean_obj_arg) -> *const core::ffi::primitives::c_char
-pub unsafe c fn lean_rs_sys::string::lean_string_data(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
 pub unsafe c fn lean_rs_sys::string::lean_string_eq_cold(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> bool
 pub unsafe c fn lean_rs_sys::string::lean_string_hash(lean_rs_sys::types::b_lean_obj_arg) -> u64
 pub unsafe fn lean_rs_sys::string::lean_string_len(lean_rs_sys::types::b_lean_obj_arg) -> usize
 pub unsafe c fn lean_rs_sys::string::lean_string_lt(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> bool
 pub unsafe c fn lean_rs_sys::string::lean_string_mk(lean_rs_sys::types::lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
-pub unsafe c fn lean_rs_sys::string::lean_string_push(lean_rs_sys::types::lean_obj_arg, u32) -> lean_rs_sys::types::lean_obj_res
 pub unsafe fn lean_rs_sys::string::lean_string_size(lean_rs_sys::types::b_lean_obj_arg) -> usize
 pub unsafe c fn lean_rs_sys::string::lean_string_utf8_extract(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> lean_rs_sys::types::lean_obj_res
 pub unsafe c fn lean_rs_sys::string::lean_string_utf8_get(lean_rs_sys::types::b_lean_obj_arg, lean_rs_sys::types::b_lean_obj_arg) -> u32

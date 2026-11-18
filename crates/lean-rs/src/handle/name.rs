@@ -23,7 +23,7 @@ use core::fmt;
 
 use lean_rs_sys::lean_object;
 
-use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, sealed};
+use crate::abi::traits::{IntoLean, LeanAbi, LeanBoxedAbi};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -58,20 +58,19 @@ impl fmt::Debug for LeanName<'_> {
     }
 }
 
-impl sealed::SealedAbi for LeanName<'_> {}
-
-impl<'lean> LeanAbi<'lean> for LeanName<'lean> {
+#[allow(
+    unsafe_code,
+    reason = "native conversion requires the caller-established semantic type"
+)]
+// SAFETY: the private handle stores its native semantic type; encoding transfers its reference and raw decoding requires that type.
+unsafe impl<'lean> LeanAbi<'lean> for LeanName<'lean> {
     type CRepr = *mut lean_object;
 
     fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
         self.obj.into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is an owned `lean_object*` produced by a Lean
         // export returning `Lean.Name`; per Lake's `lean_obj_res`
         // contract it carries one reference count. `runtime` witnesses
@@ -82,8 +81,17 @@ impl<'lean> LeanAbi<'lean> for LeanName<'lean> {
     }
 }
 
-impl<'lean> TryFromLean<'lean> for LeanName<'lean> {
-    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+#[allow(
+    unsafe_code,
+    reason = "native conversion requires the caller-established semantic type"
+)]
+// SAFETY: private handle construction preserves the semantic type; typed native decoding retains its owned object and lifetime.
+unsafe impl<'lean> LeanBoxedAbi<'lean> for LeanName<'lean> {
+    fn into_boxed(self, _runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        self.obj
+    }
+
+    unsafe fn from_boxed(obj: Obj<'lean>) -> LeanResult<Self> {
         Ok(Self { obj })
     }
 }
@@ -93,7 +101,7 @@ impl<'lean> IntoLean<'lean> for LeanName<'lean> {
         // The handle already wraps a fully-owned Lean object reference;
         // hand it off unchanged. Required so `Vec<LeanName<'lean>>` can
         // satisfy [`LeanAbi`] (which is bounded on
-        // `IntoLean + TryFromLean`) at the
+        // `LeanBoxedAbi`) at the
         // [`crate::LeanSession::query_declarations_bulk`] call site that
         // marshals an `Array Name`.
         self.obj

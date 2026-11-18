@@ -1,0 +1,11 @@
+error[E0200]: the trait `LeanAbi<'lean>` requires an `unsafe impl` declaration
+ --> tests/compile_fail/abi_implementation_requires_unsafe.rs:5:1
+  |
+5 | impl<'lean> LeanAbi<'lean> for NativeByte {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: the trait `LeanAbi<'lean>` enforces invariants that the compiler can't check. Review the trait documentation and make sure this implementation upholds those invariants before adding the `unsafe` keyword
+help: add `unsafe` to this trait implementation
+  |
+5 | unsafe impl<'lean> LeanAbi<'lean> for NativeByte {
+  | ++++++

@@ -1,0 +1,23 @@
+error[E0061]: this method takes 1 argument but 2 arguments were supplied
+ --> tests/compile_fail/abi_safe_import_cannot_choose_new_paths.rs:4:22
+  |
+4 |     let _ = bindings.session_import(vec!["new-path".to_owned()], vec!["NewModule".to_owned()]);
+  |                      ^^^^^^^^^^^^^^                              ---------------------------- unexpected argument #2 of type `Vec<String>`
+  |
+note: expected `&TrustedHostImports<'_, '_>`, found `Vec<String>`
+ --> tests/compile_fail/abi_safe_import_cannot_choose_new_paths.rs:4:37
+  |
+4 |     let _ = bindings.session_import(vec!["new-path".to_owned()], vec!["NewModule".to_owned()]);
+  |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: expected reference `&TrustedHostImports<'_, '_>`
+                found struct `Vec<String>`
+note: method defined here
+ --> src/host_bridge.rs
+  |
+  |     pub fn session_import(&self, scope: &TrustedHostImports<'lean, '_>) -> LeanResult<HostEnvironment<'lean>> {
+  |            ^^^^^^^^^^^^^^
+help: remove the extra argument
+  |
+4 -     let _ = bindings.session_import(vec!["new-path".to_owned()], vec!["NewModule".to_owned()]);
+4 +     let _ = bindings.session_import(/* &TrustedHostImports<'_, '_> */);
+  |

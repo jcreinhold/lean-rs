@@ -7,14 +7,14 @@
 
 use lean_rs::Obj;
 use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
-use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
+use lean_rs::abi::traits::{IntoLean, TryFromLean};
 use lean_rs::error::LeanResult;
 use serde::Deserialize;
 
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::progress::{LeanProgressSink, ProgressBridge};
-use crate::host::session::{LeanSession, with_session_import_lock};
-use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
+use lean_rs::host_bridge::HostShimBindings;
+use lean_rs::module::TrustedBracketedImports;
 
 /// Closed request for the bracketed no-extension import path.
 ///
@@ -40,22 +40,6 @@ impl LeanBracketedImportRequest {
 impl<'lean> IntoLean<'lean> for LeanBracketedImportRequest {
     fn into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> Obj<'lean> {
         alloc_ctor_with_objects(runtime, 0, [self.declaration_names.into_lean(runtime)])
-    }
-}
-
-impl sealed::SealedAbi for LeanBracketedImportRequest {}
-
-impl<'lean> LeanAbi<'lean> for LeanBracketedImportRequest {
-    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
-
-    fn into_c(self, runtime: &'lean lean_rs::LeanRuntime) -> Self::CRepr {
-        self.into_lean(runtime).into_raw()
-    }
-
-    fn from_c(_c: Self::CRepr, _runtime: &'lean lean_rs::LeanRuntime) -> LeanResult<Self> {
-        Err(conversion_error(
-            "LeanBracketedImportRequest cannot decode a Lean call result; it is an argument-only type",
-        ))
     }
 }
 
@@ -96,41 +80,23 @@ impl<'lean> TryFromLean<'lean> for LeanBracketedImportResult {
 }
 
 impl LeanBracketedImportResult {
-    pub(crate) fn query(
-        capabilities: &LeanCapabilities<'_, '_>,
-        imports: &[&str],
+    pub(crate) fn query<'lean>(
+        capabilities: &LeanCapabilities<'lean, '_>,
+        scope: &TrustedBracketedImports<'lean, '_>,
         request: LeanBracketedImportRequest,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Self> {
-        let search_paths = LeanSession::import_search_paths(capabilities)?;
-        let imports_owned: Vec<String> = imports.iter().map(|&import| import.to_owned()).collect();
-        let declaration_names = request.declaration_names;
-        with_session_import_lock(|| {
-            let shims = HostShimBindings::resolve(capabilities.shim_capability())
-                .map_err(|err| binding_error_to_lean_error(&err))?;
-            if let Some(sink) = progress {
-                let bridge = ProgressBridge::new(sink, "bracketed-import", Some(3))?;
-                let (handle, trampoline) = bridge.abi_parts();
-                let raw = shims.bracketed_import_query.call(
-                    search_paths,
-                    imports_owned,
-                    declaration_names,
-                    handle,
-                    trampoline,
-                )?;
-                Self::from_json(&bridge.decode::<String>(raw)?)
-            } else {
-                let raw = shims
-                    .bracketed_import_query
-                    .call(search_paths, imports_owned, declaration_names, 0, 0)?;
-                match Result::<String, u8>::try_from_lean(raw)? {
-                    Ok(json) => Self::from_json(&json),
-                    Err(status) => Err(lean_rs::__host_internals::host_internal(format!(
-                        "bracketed import query returned callback status {status} without a registered callback"
-                    ))),
-                }
-            }
-        })
+        let shims = HostShimBindings::resolve(capabilities.shim_capability())
+            .map_err(|error| lean_rs::__host_internals::host_module_init(error.to_string()))?;
+        let progress = progress
+            .map(|sink| ProgressBridge::new(sink, "bracketed-import", Some(3)))
+            .transpose()?;
+        let json = shims.bracketed_import_query(
+            scope,
+            request.declaration_names,
+            progress.as_ref().map(ProgressBridge::callback),
+        )?;
+        Self::from_json(&json)
     }
 
     fn from_json(raw: &str) -> LeanResult<Self> {

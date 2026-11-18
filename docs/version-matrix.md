@@ -37,9 +37,9 @@ release contract is documented in
 ## `lean-rs-sys` symbol coverage
 
 `pub const REQUIRED_SYMBOLS` in [`crates/lean-rs-abi/src/symbols.rs`](../crates/lean-rs-abi/src/symbols.rs) enumerates
-the **88** `LEAN_EXPORT`'d symbols that `lean-rs-sys`'s `extern "C"` blocks declare. `tests/linkage.rs` resolves every
+the **91** `LEAN_EXPORT`'d symbols that `lean-rs-sys`'s `extern "C"` blocks declare. `tests/linkage.rs` resolves every
 entry against `libleanshared` at link time on every version × OS cell; the parallel test in `lean-toolchain` imports the
-same set via `lean_rs_sys::REQUIRED_SYMBOLS`. All 88 symbols are present in every release in the window
+same set via `lean_rs_sys::REQUIRED_SYMBOLS`. All 91 symbols are present in every release in the window
 (`SupportedToolchain::missing_symbols` is empty for every entry).
 
 ## Rust

@@ -5,10 +5,10 @@
 # Usage: check-lean-symbols.sh <candidate-version>
 # Example: check-lean-symbols.sh 4.30.0
 #
-# Empty output = every required symbol resolves. Non-empty output =
-# a symbol disappeared upstream; add it to the entry's
-# missing_symbols list (and update consumer call sites to tolerate
-# absence), or file an upstream issue and stop.
+# Empty output and exit status 0 = every required symbol resolves.
+# Missing symbols are printed and exit status is 1. Stop and resolve the
+# ABI change before extending the supported window; see
+# docs/bump-toolchain.md. Do not add missing-symbol exceptions.
 
 set -euo pipefail
 
@@ -39,7 +39,16 @@ awk '/^pub const REQUIRED_SYMBOLS/,/^];/' \
 	"$REPO_ROOT/crates/lean-rs-abi/src/symbols.rs" |
 	grep -oE '"lean_[a-z0-9_]+"' | tr -d '"' | sort -u >"$REQUIRED"
 
+if [ ! -s "$REQUIRED" ]; then
+	echo "no required symbols were extracted from crates/lean-rs-abi/src/symbols.rs" >&2
+	exit 2
+fi
+
 nm -gU "$LIB" | awk '{print $NF}' | sed 's/^_//' | grep -E '^lean_' |
 	sort -u >"$PRESENT"
 
-comm -23 "$REQUIRED" "$PRESENT"
+MISSING=$(comm -23 "$REQUIRED" "$PRESENT")
+if [ -n "$MISSING" ]; then
+	printf '%s\n' "$MISSING"
+	exit 1
+fi

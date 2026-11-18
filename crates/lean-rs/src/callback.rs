@@ -293,7 +293,11 @@ impl<'a> LeanProgressCallback<'a> {
     where
         T: TryFromLean<'lean>,
     {
-        match Result::<T, u8>::try_from_lean(obj)? {
+        self.finish_result(Result::<T, u8>::try_from_lean(obj)?)
+    }
+
+    pub(crate) fn finish_result<T>(&self, result: Result<T, u8>) -> LeanResult<T> {
+        match result {
             Ok(value) => Ok(value),
             Err(status) => {
                 self.progress_status_to_result(status)?;
@@ -573,6 +577,46 @@ impl LeanCallbackPayload for LeanStringEvent {}
 #[cfg(test)]
 mod tests {
     use super::{LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanProgressTick, LeanStringEvent};
+
+    #[test]
+    fn stale_registration_ids_are_rejected_before_dispatch() -> crate::LeanResult<()> {
+        let tick = LeanCallbackHandle::<LeanProgressTick>::register(|_| LeanCallbackFlow::Continue)?;
+        let handle = tick.abi_parts().0;
+        drop(tick);
+        assert_eq!(
+            super::progress_trampoline(handle, super::PAYLOAD_PROGRESS_TICK, 1, 1, std::ptr::null_mut()),
+            LeanCallbackStatus::StaleHandle.as_abi()
+        );
+        let scoped = super::LeanProgressCallback::register(|_| LeanCallbackFlow::Continue)?;
+        let handle = scoped.abi_parts().0;
+        drop(scoped);
+        assert_eq!(
+            super::progress_trampoline(handle, super::PAYLOAD_PROGRESS_TICK, 1, 1, std::ptr::null_mut()),
+            LeanCallbackStatus::StaleHandle.as_abi()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mismatched_tags_are_rejected_before_payload_access() -> crate::LeanResult<()> {
+        let tick = LeanCallbackHandle::<LeanProgressTick>::register(|_| LeanCallbackFlow::Continue)?;
+        let text = LeanCallbackHandle::<LeanStringEvent>::register(|_| LeanCallbackFlow::Continue)?;
+        assert_eq!(
+            super::progress_trampoline(tick.abi_parts().0, super::PAYLOAD_STRING, 0, 0, std::ptr::null_mut()),
+            LeanCallbackStatus::WrongPayload.as_abi()
+        );
+        assert_eq!(
+            super::string_trampoline(
+                text.abi_parts().0,
+                super::PAYLOAD_PROGRESS_TICK,
+                0,
+                0,
+                std::ptr::null_mut()
+            ),
+            LeanCallbackStatus::WrongPayload.as_abi()
+        );
+        Ok(())
+    }
 
     #[test]
     fn callback_handle_is_send_sync() {

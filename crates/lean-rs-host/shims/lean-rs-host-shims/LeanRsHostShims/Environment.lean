@@ -255,6 +255,16 @@ private def initHostSearchPath (searchPaths : Array String) : IO Unit := do
   let sysroot ← Lean.findSysroot
   Lean.initSearchPath sysroot (searchPaths.toList.map System.FilePath.mk)
 
+/-- The retained identity object is allocated once per SDK import attestation. -/
+initialize sourceCacheScope : IO.Ref (String × Array String) ← IO.mkRef ("", #[])
+
+/-- Restore the complete, already resolved search path captured by the host.
+    Unlike initial import setup this does not consult changing process defaults. -/
+@[export lean_rs_host_restore_source_search_path]
+def restoreSourceSearchPath (paths : Array String) (identity : String) : IO Unit := do
+  sourceCacheScope.set (identity, paths)
+  Lean.searchPathRef.set (paths.toList.map System.FilePath.mk)
+
 private def runSessionImport (searchPaths : Array String) (importNames : Array String)
     (importAll loadExts : Bool) (level : OLeanLevel) (opts : Options) : IO Environment := do
   initHostSearchPath searchPaths

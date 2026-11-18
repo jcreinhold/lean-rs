@@ -8,9 +8,8 @@
 //! `LeanCapabilities`, `LeanSession`, plus the evidence and meta surfaces)
 //! lives in the sibling
 //! [`lean-rs-host`](https://docs.rs/lean-rs-host) crate, with its own
-//! 28+9 `lean_rs_host_*` Lean shim contract. This crate ships only the generic
-//! interop shims used by same-process callbacks; it has no theorem-prover host shim
-//! contract.
+//! bundled `lean_rs_host_*` shim sources. This crate owns the closed native host
+//! bridge and ships the generic interop shims used by same-process callbacks.
 //!
 //! ## Happy Path
 //!
@@ -19,12 +18,18 @@
 //!
 //! ```ignore
 //! let runtime = lean_rs::LeanRuntime::init()?;
-//! let capability = lean_rs::LeanCapability::from_build_manifest(
-//!     runtime,
-//!     lean_rs::LeanBuiltCapability::manifest_path(env!("MY_CAPABILITY_MANIFEST")),
-//! )?;
-//! let add = capability.exported::<(u64, u64), u64>("my_export_add")?;
-//! let sum     = add.call(3, 4)?;
+//! // SAFETY: the application trusts the actual native artifact, dependencies,
+//! // initialization, runtime compatibility, and required native code lifetime.
+//! let capability = unsafe {
+//!     lean_rs::LeanCapability::from_build_manifest(
+//!         runtime,
+//!         lean_rs::LeanBuiltCapability::manifest_path(env!("MY_CAPABILITY_MANIFEST")),
+//!     )
+//! }?;
+//! // SAFETY: the actual export is UInt64 -> UInt64 -> UInt64.
+//! let add = unsafe { capability.exported::<(u64, u64), u64>("my_export_add") }?;
+//! // SAFETY: both scalars satisfy the established native UInt64 contract.
+//! let sum = unsafe { add.call(3, 4) }?;
 //! ```
 //!
 //! [`LeanRuntime::init`] is the single doorway. It brings Lean up
@@ -53,7 +58,7 @@
 //!   before `dlopen`; [`LeanLibraryBundle`] anchors dependency dylibs;
 //!   [`LeanLibrary`] is the advanced one-dylib RAII handle; [`LeanModule`]
 //!   proves a module's initializer succeeded; [`LeanCapability::exported`]
-//!   is the safe checked lookup path; [`LeanModule::exported_unchecked`] is
+//!   checks C slots but still requires an unsafe value/layout assertion; [`LeanModule::exported_unchecked`] is
 //!   the explicit unsafe path for arbitrary exports; [`LeanExported`] is a
 //!   single generic typed function handle whose `.call` impl is macro-stamped
 //!   per arity `0..=12`.
@@ -68,10 +73,11 @@
 //! - [`runtime`]—process-wide [`LeanRuntime`] anchor,
 //!   [`LeanThreadGuard`] attach RAII, and the lifetime-bound owned /
 //!   borrowed object handles [`Obj`] / [`ObjRef`].
-//! - [`abi`]—sealed [`LeanAbi`] trait + per-Lean-type C-ABI
-//!   representation impls. The trait is the bound on
-//!   [`LeanExported`]'s argument and return types; the impls are
-//!   crate-internal (sealing prevents downstream `LeanAbi for MyType`).
+//! - [`abi`]—unsafe native conversion contracts and sealed C representations,
+//!   plus safe owned-data inspection. Semantic handles cannot be created by
+//!   decoding arbitrary objects through a safe conversion trait.
+//! - [`host_bridge`]—concrete safe operations on explicitly attested host
+//!   capabilities and immutable import scopes.
 //!
 //! ## Layering
 //!
@@ -95,6 +101,7 @@ pub mod abi;
 pub mod callback;
 pub mod error;
 pub mod handle;
+pub mod host_bridge;
 pub mod module;
 pub mod runtime;
 
@@ -165,6 +172,25 @@ pub use crate::runtime::{LeanRuntime, LeanThreadGuard};
 
 /// Version of the `lean-rs` crate, matching `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(test)]
+extern crate self as lean_rs;
+
+#[cfg(test)]
+#[path = "../examples/support/scalar_fixture.rs"]
+mod scalar_fixture;
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "failed fixture admission is a test setup failure")]
+fn fixed_test_library() -> module::LeanLibrary<'static> {
+    static FIXTURE: std::sync::OnceLock<scalar_fixture::ScalarFixture> = std::sync::OnceLock::new();
+    let fixture = FIXTURE.get_or_init(|| scalar_fixture::ScalarFixture::admit().expect("admit reviewed fixture"));
+    let library = fixture
+        .open_owned(LeanRuntime::init().expect("paired runtime"))
+        .expect("load retained fixture");
+    library.pin_for_process();
+    library
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Verify that the 10 #[repr(C)] struct layouts in lean-rs-sys/src/repr.rs
-# match a candidate Lean release. Diffs the relevant block of lean.h
-# between the existing supported release and a new candidate.
+# Compare the C declarations mirrored by lean-rs-sys/src/repr.rs between
+# an existing supported release and a candidate. This is a textual check;
+# measure size, alignment and offsets separately and review inline semantics.
 #
 # Usage: check-lean-header.sh <existing-version> <candidate-version>
 # Example: check-lean-header.sh 4.29.1 4.30.0
 #
-# Empty output = layouts unchanged, safe to add as another window entry.
-# Non-empty output = stop and revisit
-# docs/architecture/02-versioning-and-compatibility.md.
+# Empty output = the declarations are unchanged. This does not establish
+# ABI compatibility or symbol availability; follow docs/bump-toolchain.md.
+# Non-empty output = review the changes before extending the window.
 
 set -euo pipefail
 
@@ -20,8 +20,16 @@ fi
 EXISTING=$1
 CANDIDATE=$2
 TOOLCHAIN_ROOT="${ELAN_HOME:-$HOME/.elan}/toolchains"
-EXTRACT='/^typedef struct lean_object \{|^} lean_(ctor|array|sarray|string|closure|ref|thunk|task|promise|external)_object/{p=1} p{print} /^} lean_external_object/{p=0}'
+EXTRACT='/^typedef struct[^{]*\{/{p=1} p{print} /^} lean_external_object;/{found=1; exit} END{if (!p || !found) exit 1}'
 
-diff \
-	<(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$EXISTING/include/lean/lean.h") \
-	<(awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/include/lean/lean.h")
+EXISTING_DECLS=$(mktemp)
+CANDIDATE_DECLS=$(mktemp)
+trap 'rm -f "$EXISTING_DECLS" "$CANDIDATE_DECLS"' EXIT
+
+# lean_object and lean_ctor_object are anonymous typedefs in lean.h. Start
+# at the first struct definition, including named or anonymous typedefs,
+# so neither header nor constructor fields are skipped. Extract before
+# diff so an absent block fails closed.
+awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$EXISTING/include/lean/lean.h" >"$EXISTING_DECLS"
+awk "$EXTRACT" "$TOOLCHAIN_ROOT/leanprover--lean4---v$CANDIDATE/include/lean/lean.h" >"$CANDIDATE_DECLS"
+diff "$EXISTING_DECLS" "$CANDIDATE_DECLS"

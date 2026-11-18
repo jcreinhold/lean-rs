@@ -1,0 +1,131 @@
+error[E0277]: the trait bound `LeanName<'static>: TryFromLean<'_>` is not satisfied
+ --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:8:20
+  |
+8 |     safe_decoder::<LeanName<'static>>();
+  |                    ^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `LeanName<'static>`
+  |
+  = help: the following other types implement trait `TryFromLean<'lean>`:
+            ()
+            (A, B)
+            (A, B, C)
+            DeclarationVerificationTarget
+            LeanDeclarationFilter
+            ModuleSourceSpan
+            Obj<'lean>
+            Option<T>
+          and $N others
+note: required by a bound in `safe_decoder`
+ --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+  |
+5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+  |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`
+
+error[E0277]: the trait bound `LeanExpr<'static>: TryFromLean<'_>` is not satisfied
+ --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:9:20
+  |
+9 |     safe_decoder::<LeanExpr<'static>>();
+  |                    ^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `LeanExpr<'static>`
+  |
+  = help: the following other types implement trait `TryFromLean<'lean>`:
+            ()
+            (A, B)
+            (A, B, C)
+            DeclarationVerificationTarget
+            LeanDeclarationFilter
+            ModuleSourceSpan
+            Obj<'lean>
+            Option<T>
+          and $N others
+note: required by a bound in `safe_decoder`
+ --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+  |
+5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+  |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`
+
+error[E0277]: the trait bound `LeanLevel<'static>: TryFromLean<'_>` is not satisfied
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:10:20
+   |
+10 |     safe_decoder::<LeanLevel<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `LeanLevel<'static>`
+   |
+   = help: the following other types implement trait `TryFromLean<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             DeclarationVerificationTarget
+             LeanDeclarationFilter
+             ModuleSourceSpan
+             Obj<'lean>
+             Option<T>
+           and $N others
+note: required by a bound in `safe_decoder`
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+   |
+ 5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+   |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`
+
+error[E0277]: the trait bound `LeanDeclaration<'static>: TryFromLean<'_>` is not satisfied
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:11:20
+   |
+11 |     safe_decoder::<LeanDeclaration<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `LeanDeclaration<'static>`
+   |
+   = help: the following other types implement trait `TryFromLean<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             DeclarationVerificationTarget
+             LeanDeclarationFilter
+             ModuleSourceSpan
+             Obj<'lean>
+             Option<T>
+           and $N others
+note: required by a bound in `safe_decoder`
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+   |
+ 5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+   |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`
+
+error[E0277]: the trait bound `HostEnvironment<'static>: TryFromLean<'_>` is not satisfied
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:12:20
+   |
+12 |     safe_decoder::<HostEnvironment<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `HostEnvironment<'static>`
+   |
+   = help: the following other types implement trait `TryFromLean<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             DeclarationVerificationTarget
+             LeanDeclarationFilter
+             ModuleSourceSpan
+             Obj<'lean>
+             Option<T>
+           and $N others
+note: required by a bound in `safe_decoder`
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+   |
+ 5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+   |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`
+
+error[E0277]: the trait bound `HostEvidence<'static>: TryFromLean<'_>` is not satisfied
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:13:20
+   |
+13 |     safe_decoder::<HostEvidence<'static>>();
+   |                    ^^^^^^^^^^^^^^^^^^^^^ the trait `TryFromLean<'_>` is not implemented for `HostEvidence<'static>`
+   |
+   = help: the following other types implement trait `TryFromLean<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             DeclarationVerificationTarget
+             LeanDeclarationFilter
+             ModuleSourceSpan
+             Obj<'lean>
+             Option<T>
+           and $N others
+note: required by a bound in `safe_decoder`
+  --> tests/compile_fail/abi_semantic_handles_are_not_untyped_decoders.rs:5:27
+   |
+ 5 | fn safe_decoder<'lean, T: TryFromLean<'lean>>() {}
+   |                           ^^^^^^^^^^^^^^^^^^ required by this bound in `safe_decoder`

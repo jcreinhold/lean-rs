@@ -39,6 +39,11 @@ pub(crate) mod initializer;
 pub(crate) mod library;
 pub(crate) mod loaded;
 pub(crate) mod preflight;
+pub(crate) mod trusted;
+mod worker_bindings;
+pub use worker_bindings::{
+    WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding, WorkerStringBinding, WorkerUnitBinding,
+};
 
 pub use bundle::{LeanLibraryBundle, LeanLibraryDependency, LeanModuleInitializer};
 pub use capability::{
@@ -55,14 +60,17 @@ pub use preflight::{
     LeanCapabilityPreflight, LeanLoaderCheck, LeanLoaderDiagnosticCode, LeanLoaderReport, LeanLoaderSeverity,
     LeanRuntimePreflight,
 };
+pub use trusted::{
+    AuthorizedWorkerSnapshot, HostImportIdentity, HostImportOptions, LoadedHostArtifacts, TrustedBracketedImports,
+    TrustedHostCapability, TrustedHostImports, TrustedWorkerCapability, WorkerExportContract,
+};
 
 // `LeanAbi` lives in `crate::abi::traits` but appears in the public
 // signature of [`LeanModule::exported_unchecked`] (as a per-arg bound) and in the
 // docstrings for [`LeanExported`]/[`LeanIo`]. Re-export it at the
 // `module` boundary so rustdoc resolves intra-crate links and so a
 // downstream crate that wants to inspect the bound has a single import
-// path. The trait remains sealed; the re-export only widens the doc
-// surface, not the impl surface.
+// path. Native conversion implementations require an explicit unsafe contract.
 pub use crate::abi::traits::{LeanAbi, LeanCReprAbi};
 
 #[cfg(test)]

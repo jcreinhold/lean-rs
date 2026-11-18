@@ -61,7 +61,18 @@ impl CapabilityManifest {
                 "rebuild the Lean capability through CargoLeanCapability and ensure the manifest file is packaged",
             )
         })?;
-        let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|err| {
+        Self::from_bytes(path, &bytes)
+    }
+
+    /// Parse one already captured manifest snapshot without rereading its path.
+    ///
+    /// The path is diagnostic context. Callers that coordinate artifact writers
+    /// can retain the exact metadata validated before opening any library.
+    ///
+    /// # Errors
+    /// Returns the first JSON/schema-shape validation failure.
+    pub fn from_bytes(path: &Path, bytes: &[u8]) -> Result<Self, LeanLoaderCheck> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|err| {
             LeanLoaderCheck::error(
                 LeanLoaderDiagnosticCode::MalformedManifest,
                 path.display().to_string(),

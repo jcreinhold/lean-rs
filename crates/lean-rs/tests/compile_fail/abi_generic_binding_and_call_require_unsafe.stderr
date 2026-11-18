@@ -1,0 +1,15 @@
+error[E0133]: call to unsafe function `LeanCapability::<'lean>::exported` is unsafe and requires unsafe block
+ --> tests/compile_fail/abi_generic_binding_and_call_require_unsafe.rs:4:13
+  |
+4 |     let _ = capability.exported::<(String,), String>("native_string");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `LeanExported::<'lean, 'lib, (A1,), R>::call` is unsafe and requires unsafe block
+ --> tests/compile_fail/abi_generic_binding_and_call_require_unsafe.rs:8:13
+  |
+8 |     let _ = handle.call(String::new());
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior

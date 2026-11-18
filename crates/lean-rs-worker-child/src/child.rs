@@ -1,3 +1,4 @@
+use crate::authority::{WorkerSourceContext, worker_authority};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use lean_rs::error::host_internal;
-use lean_rs::module::{LeanBuiltCapability, LeanCapability, LeanCheckedExportError, LeanExported, LeanIo};
+use lean_rs::module::{
+    TrustedWorkerCapability, WorkerBinaryBinding, WorkerBindingFailure, WorkerStreamBinding, WorkerStringBinding,
+    WorkerUnitBinding,
+};
 use lean_rs::{
     LeanCallbackFlow, LeanCallbackHandle, LeanCallbackStatus, LeanError, LeanResult, LeanRuntime, LeanStringEvent,
 };
@@ -806,8 +810,15 @@ fn serve_stdio() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn load_worker_manifest(runtime: &'static LeanRuntime, path: &Path) -> LeanResult<TrustedWorkerCapability<'static>> {
+    let authority = worker_authority()?;
+    authority.manifest_read(path)?.read_for(path, |path, bytes| {
+        load_worker_snapshot(runtime, path, bytes, |p, b| authority.worker(runtime, p, b))
+    })
+}
+
 fn load_fixture_capability(runtime: &'static LeanRuntime, manifest_path: &Path) -> LeanResult<()> {
-    let _capability = LeanCapability::from_build_manifest(runtime, LeanBuiltCapability::manifest_path(manifest_path))?;
+    let _capability = load_worker_manifest(runtime, manifest_path)?;
     Ok(())
 }
 
@@ -817,11 +828,8 @@ fn call_fixture_mul(
     lhs: u64,
     rhs: u64,
 ) -> Result<u64, WorkerCallError> {
-    let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
-        runtime,
-        LeanBuiltCapability::manifest_path(manifest_path),
-    )?));
-    let mut bindings = WorkerCapabilityBindings::new(capability);
+    let capability = load_worker_manifest(runtime, manifest_path)?;
+    let mut bindings = WorkerCapabilityBindings::new(&capability);
     bindings
         .fixture_mul("lean_rs_fixture_u64_mul")?
         .call(lhs, rhs)
@@ -829,11 +837,8 @@ fn call_fixture_mul(
 }
 
 fn trigger_lean_panic(runtime: &'static LeanRuntime, manifest_path: &Path) -> Result<(), WorkerCallError> {
-    let capability = Box::leak(Box::new(LeanCapability::from_build_manifest(
-        runtime,
-        LeanBuiltCapability::manifest_path(manifest_path),
-    )?));
-    let mut bindings = WorkerCapabilityBindings::new(capability);
+    let capability = load_worker_manifest(runtime, manifest_path)?;
+    let mut bindings = WorkerCapabilityBindings::new(&capability);
     bindings
         .fixture_panic("lean_rs_fixture_panic_unit")?
         .call(0)
@@ -893,7 +898,7 @@ struct HostAnchor {
     #[allow(dead_code, reason = "leaked host anchors the capability and session lifetimes")]
     host: &'static LeanHost<'static>,
     capabilities: &'static LeanCapabilities<'static, 'static>,
-    worker_capability: Option<&'static LeanCapability<'static>>,
+    worker_capability: Option<&'static TrustedWorkerCapability<'static>>,
 }
 
 impl HostAnchor {
@@ -903,24 +908,25 @@ impl HostAnchor {
 }
 
 struct HostSessionState {
+    capability: &'static lean_rs::module::TrustedHostCapability<'static>,
     /// Which open produced this session. Compared for equality to decide
     /// reuse, and folded into the module-query cache key so an answer is never
     /// served to a different environment.
     key: HostSessionKey,
-    worker_bindings: Option<WorkerCapabilityBindings>,
+    worker_bindings: Option<WorkerCapabilityBindings<'static>>,
     session: LeanSession<'static, 'static>,
 }
 
-struct WorkerCapabilityBindings {
-    capability: &'static LeanCapability<'static>,
-    string_io: HashMap<String, LeanExported<'static, 'static, (String,), LeanIo<String>>>,
-    streams: HashMap<String, LeanExported<'static, 'static, (String, usize, usize), LeanIo<u8>>>,
-    fixture_mul: HashMap<String, LeanExported<'static, 'static, (u64, u64), u64>>,
-    fixture_panic: HashMap<String, LeanExported<'static, 'static, (u8,), ()>>,
+struct WorkerCapabilityBindings<'cap> {
+    capability: &'cap TrustedWorkerCapability<'static>,
+    string_io: HashMap<String, WorkerStringBinding<'static, 'cap>>,
+    streams: HashMap<String, WorkerStreamBinding<'static, 'cap>>,
+    fixture_mul: HashMap<String, WorkerBinaryBinding<'static, 'cap>>,
+    fixture_panic: HashMap<String, WorkerUnitBinding<'static, 'cap>>,
 }
 
-impl WorkerCapabilityBindings {
-    fn new(capability: &'static LeanCapability<'static>) -> Self {
+impl<'cap> WorkerCapabilityBindings<'cap> {
+    fn new(capability: &'cap TrustedWorkerCapability<'static>) -> Self {
         Self {
             capability,
             string_io: HashMap::new(),
@@ -934,11 +940,11 @@ impl WorkerCapabilityBindings {
         &mut self,
         operation: WorkerExportOperation,
         export: &str,
-    ) -> Result<&LeanExported<'static, 'static, (String,), LeanIo<String>>, WorkerCallError> {
+    ) -> Result<&WorkerStringBinding<'static, 'cap>, WorkerCallError> {
         if !self.string_io.contains_key(export) {
             let binding = self
                 .capability
-                .exported::<(String,), LeanIo<String>>(export)
+                .bind_string_io(export)
                 .map_err(|source| WorkerBindingError::checked(operation, export, source))?;
             self.string_io.insert(export.to_owned(), binding);
         }
@@ -951,17 +957,11 @@ impl WorkerCapabilityBindings {
         })
     }
 
-    fn stream(
-        &mut self,
-        export: &str,
-    ) -> Result<&LeanExported<'static, 'static, (String, usize, usize), LeanIo<u8>>, WorkerCallError> {
+    fn stream(&mut self, export: &str) -> Result<&WorkerStreamBinding<'static, 'cap>, WorkerCallError> {
         if !self.streams.contains_key(export) {
-            let binding = self
-                .capability
-                .exported::<(String, usize, usize), LeanIo<u8>>(export)
-                .map_err(|source| {
-                    WorkerBindingError::checked(WorkerExportOperation::StreamingCommand, export, source)
-                })?;
+            let binding = self.capability.bind_stream(export).map_err(|source| {
+                WorkerBindingError::checked(WorkerExportOperation::StreamingCommand, export, source)
+            })?;
             self.streams.insert(export.to_owned(), binding);
         }
         self.streams.get(export).ok_or_else(|| {
@@ -973,14 +973,11 @@ impl WorkerCapabilityBindings {
         })
     }
 
-    fn fixture_mul(
-        &mut self,
-        export: &str,
-    ) -> Result<&LeanExported<'static, 'static, (u64, u64), u64>, WorkerCallError> {
+    fn fixture_mul(&mut self, export: &str) -> Result<&WorkerBinaryBinding<'static, 'cap>, WorkerCallError> {
         if !self.fixture_mul.contains_key(export) {
             let binding = self
                 .capability
-                .exported::<(u64, u64), u64>(export)
+                .bind_binary(export)
                 .map_err(|source| WorkerBindingError::checked(WorkerExportOperation::FixtureMul, export, source))?;
             self.fixture_mul.insert(export.to_owned(), binding);
         }
@@ -993,11 +990,11 @@ impl WorkerCapabilityBindings {
         })
     }
 
-    fn fixture_panic(&mut self, export: &str) -> Result<&LeanExported<'static, 'static, (u8,), ()>, WorkerCallError> {
+    fn fixture_panic(&mut self, export: &str) -> Result<&WorkerUnitBinding<'static, 'cap>, WorkerCallError> {
         if !self.fixture_panic.contains_key(export) {
             let binding = self
                 .capability
-                .exported::<(u8,), ()>(export)
+                .bind_unit(export)
                 .map_err(|source| WorkerBindingError::checked(WorkerExportOperation::FixturePanic, export, source))?;
             self.fixture_panic.insert(export.to_owned(), binding);
         }
@@ -1020,12 +1017,12 @@ struct WorkerBindingError {
 
 #[derive(Debug)]
 enum WorkerBindingErrorSource {
-    Checked(LeanCheckedExportError),
+    Checked(WorkerBindingFailure),
     Internal(String),
 }
 
 impl WorkerBindingError {
-    fn checked(operation: WorkerExportOperation, export: &str, source: LeanCheckedExportError) -> WorkerCallError {
+    fn checked(operation: WorkerExportOperation, export: &str, source: WorkerBindingFailure) -> WorkerCallError {
         WorkerCallError::Binding(Self {
             operation,
             export: export.to_owned(),
@@ -1276,36 +1273,49 @@ fn evict_stale_host_sessions(host_session: &mut Option<HostSessionState>, parked
     }
 }
 
+fn load_worker_snapshot(
+    runtime: &'static LeanRuntime,
+    path: &Path,
+    bytes: &[u8],
+    authorize: impl FnOnce(&Path, &[u8]) -> LeanResult<lean_rs::module::AuthorizedWorkerSnapshot<'static>>,
+) -> LeanResult<TrustedWorkerCapability<'static>> {
+    authorize(path, bytes)?.load_for(runtime, path, bytes)
+}
+
 impl HostAnchor {
-    fn build(runtime: &'static LeanRuntime, project_root: &str, mode: &HostSessionMode) -> LeanResult<&'static Self> {
+    #[allow(
+        clippy::wildcard_enum_match_arm,
+        reason = "all future guarded mode variants must refuse before loading"
+    )]
+    fn build(
+        runtime: &'static LeanRuntime,
+        project_root: &str,
+        mode: &HostSessionMode,
+    ) -> LeanResult<&'static Self> {
         let host = Box::leak(Box::new(LeanHost::from_lake_project(runtime, Path::new(project_root))?));
-        let (capabilities, worker_capability) = match mode {
+        let authority = worker_authority()?;
+        let manifest = match mode {
+            HostSessionMode::Capability { manifest_path, .. } => manifest_path.as_deref(),
+            HostSessionMode::ShimsOnly => None,
+            _ => return Err(host_internal("unsupported host session loading mode")),
+        };
+        let worker_capability = manifest.map(|path| load_worker_manifest(runtime, Path::new(path))).transpose()?;
+        let prepared = lean_rs_host::host::prepare_host_artifacts()?;
+        let prepared = &prepared;
+        let shim = authority.host(runtime, prepared)?;
+        let capabilities = match mode {
             HostSessionMode::Capability {
                 package,
                 lib_name,
-                manifest_path,
+                manifest_path: None,
             } => {
-                let worker_capability = match manifest_path {
-                    Some(path) => Some(&*Box::leak(Box::new(LeanCapability::from_build_manifest(
-                        runtime,
-                        LeanBuiltCapability::manifest_path(path),
-                    )?))),
-                    None => None,
-                };
-                let capabilities = if worker_capability.is_some() {
-                    Box::leak(Box::new(host.load_shims_only()?))
-                } else {
-                    Box::leak(Box::new(host.load_capabilities(package, lib_name)?))
-                };
-                (capabilities, worker_capability)
+                let library = authority.project(runtime, &host.project_library_path(package, lib_name), &lean_rs::module::LeanModuleInitializer::new(package, lib_name))?;
+                LeanCapabilities::from_prepared_capability(host, prepared, shim, library, package, lib_name)?
             }
-            HostSessionMode::ShimsOnly => (Box::leak(Box::new(host.load_shims_only()?)), None),
-            _ => {
-                return Err(host_internal(
-                    "worker child received an unsupported host session loading mode".to_owned(),
-                ));
-            }
+            _ => LeanCapabilities::from_prepared(host, prepared, shim)?,
         };
+        let capabilities = &*Box::leak(Box::new(capabilities));
+        let worker_capability = worker_capability.map(|image| &*Box::leak(Box::new(image)));
         Ok(Box::leak(Box::new(Self {
             project_root: project_root.to_owned(),
             mode: mode.clone(),
@@ -1318,14 +1328,20 @@ impl HostAnchor {
 
 impl HostSessionState {
     fn open(anchor: &'static HostAnchor, key: HostSessionKey) -> LeanResult<Self> {
-        let import_refs: Vec<&str> = key.imports.iter().map(String::as_str).collect();
-        let session = anchor.capabilities.session_with_profile(
-            &import_refs,
-            host_import_profile(key.import_profile)?,
-            None,
-            None,
-        )?;
+        let cap = anchor.capabilities.shim_capability();
+        let profile = host_import_profile(key.import_profile)?;
+        let options = lean_rs_host::LeanImportProfileMode::FullSession(profile)
+            .native_options(&lean_rs_host::LeanImportProfilerOptions::default());
+        let paths = anchor.capabilities.import_search_paths();
+        let scope = worker_authority()?.imports(cap, paths.clone(), key.imports.clone(), options)?;
+        if !scope.matches_request(&paths, &key.imports) {
+            return Err(host_internal(
+                "worker authority returned different import names or ordered search paths",
+            ));
+        }
+        let session = anchor.capabilities.session_with_profile(&scope, profile, None, None)?;
         Ok(Self {
+            capability: cap,
             worker_bindings: anchor.worker_capability.map(WorkerCapabilityBindings::new),
             session,
             key,
@@ -1336,7 +1352,7 @@ impl HostSessionState {
         &mut self,
         operation: WorkerExportOperation,
         export: &str,
-    ) -> Result<&mut WorkerCapabilityBindings, WorkerCallError> {
+    ) -> Result<&mut WorkerCapabilityBindings<'static>, WorkerCallError> {
         self.worker_bindings.as_mut().ok_or_else(|| {
             WorkerCallError::Binding(WorkerBindingError::internal(
                 operation,
@@ -1346,9 +1362,27 @@ impl HostSessionState {
         })
     }
 
+    fn source_context(&self) -> WorkerSourceContext<'_, 'static> {
+        let (environment, imports) = self.session.source_context();
+        WorkerSourceContext {
+            capability: self.capability,
+            environment,
+            imports,
+        }
+    }
+
+    fn elaborate_term(
+        &mut self,
+        source: &str,
+        options: &lean_rs_host::LeanElabOptions,
+    ) -> LeanResult<Result<lean_rs::LeanExpr<'static>, lean_rs_host::LeanElabFailure>> {
+        let request = worker_authority()?.term(self.source_context(), source.to_owned(), options.source_options())?;
+        self.session.elaborate(&request, None)
+    }
+
     fn elaborate(&mut self, source: &str, options: &LeanWorkerElabOptions) -> LeanResult<LeanWorkerElabResult> {
         let options = elab_options_to_host(options);
-        let outcome = self.session.elaborate(source, None, &options, None)?;
+        let outcome = self.elaborate_term(source, &options)?;
         Ok(match outcome {
             Ok(_expr) => LeanWorkerElabResult {
                 success: true,
@@ -1370,7 +1404,8 @@ impl HostSessionState {
             emit_progress(writer, "kernel_check", 0, Some(1));
         }
         let options = elab_options_to_host(options);
-        let outcome = self.session.kernel_check(source, &options, None, None)?;
+        let req = worker_authority()?.kernel(self.source_context(), source.to_owned(), options.source_options())?;
+        let outcome = self.session.kernel_check(&req, None, None)?;
         if progress {
             emit_progress(writer, "kernel_check", 1, Some(1));
         }
@@ -1550,13 +1585,12 @@ impl HostSessionState {
         })
         .map_err(StreamRunError::Host)?;
 
-        let (handle, trampoline) = callback.abi_parts();
         let status = self
             .worker_bindings_for(WorkerExportOperation::StreamingCommand, export)
             .map_err(StreamRunError::from_worker_call)?
             .stream(export)
             .map_err(StreamRunError::from_worker_call)?
-            .call(request_json, handle, trampoline)
+            .call(request_json, &callback)
             .map_err(StreamRunError::Host)?;
 
         if let Some(error) = row_error.lock().ok().and_then(|mut guard| guard.take()) {
@@ -1623,7 +1657,7 @@ impl HostSessionState {
         options: &LeanWorkerElabOptions,
     ) -> LeanResult<LeanWorkerMetaResult<LeanWorkerRendered>> {
         let elab_options = elab_options_to_host(options);
-        let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
+        let elab_outcome = self.elaborate_term(source, &elab_options)?;
         let expr = match elab_outcome {
             Ok(expr) => expr,
             Err(failure) => return Ok(meta_failure_from_elab(&failure)),
@@ -1639,7 +1673,7 @@ impl HostSessionState {
         options: &LeanWorkerElabOptions,
     ) -> LeanResult<LeanWorkerMetaResult<LeanWorkerRendered>> {
         let elab_options = elab_options_to_host(options);
-        let elab_outcome = self.session.elaborate(source, None, &elab_options, None)?;
+        let elab_outcome = self.elaborate_term(source, &elab_options)?;
         let expr = match elab_outcome {
             Ok(expr) => expr,
             Err(failure) => return Ok(meta_failure_from_elab(&failure)),
@@ -1657,12 +1691,12 @@ impl HostSessionState {
         options: &LeanWorkerElabOptions,
     ) -> LeanResult<LeanWorkerMetaResult<bool>> {
         let elab_options = elab_options_to_host(options);
-        let lhs_outcome = self.session.elaborate(lhs, None, &elab_options, None)?;
+        let lhs_outcome = self.elaborate_term(lhs, &elab_options)?;
         let lhs_expr = match lhs_outcome {
             Ok(expr) => expr,
             Err(failure) => return Ok(meta_failure_from_elab(&failure)),
         };
-        let rhs_outcome = self.session.elaborate(rhs, None, &elab_options, None)?;
+        let rhs_outcome = self.elaborate_term(rhs, &elab_options)?;
         let rhs_expr = match rhs_outcome {
             Ok(expr) => expr,
             Err(failure) => return Ok(meta_failure_from_elab(&failure)),
@@ -1764,7 +1798,8 @@ impl HostSessionState {
         }
         let request = proof_attempt_request_host(request)?;
         let options = elab_options_to_host(options);
-        let result = self.session.attempt_proof(&request, &options, None)?;
+        let request = worker_authority()?.proof(self.source_context(), request, options.source_options())?;
+        let result = self.session.attempt_proof(&request, None)?;
         if progress {
             emit_progress(writer, "attempt_proof", 1, Some(1));
         }
@@ -1783,7 +1818,8 @@ impl HostSessionState {
         }
         let request = declaration_verification_request_host(request)?;
         let options = elab_options_to_host(options);
-        let result = self.session.verify_declaration(&request, &options, None)?;
+        let request = worker_authority()?.verify(self.source_context(), request, options.source_options())?;
+        let result = self.session.verify_declaration(&request, None)?;
         if progress {
             emit_progress(writer, "verify_declaration", 1, Some(1));
         }
@@ -1804,7 +1840,8 @@ impl HostSessionState {
         }
         let request = declaration_verification_batch_request_host(request)?;
         let options = elab_options_to_host(options);
-        let result = self.session.verify_declaration_batch(&request, &options, None)?;
+        let request = worker_authority()?.verify_batch(self.source_context(), request, options.source_options())?;
+        let result = self.session.verify_declaration_batch(&request, None)?;
         if progress {
             emit_progress(writer, "verify_declaration_batch", 1, Some(1));
         }
@@ -1901,29 +1938,33 @@ impl HostSessionState {
     ) -> LeanResult<LeanWorkerModuleQueryOutcome> {
         let options = elab_options_to_host(options);
         let query = module_query_host(query)?;
-        Ok(
-            match self.session.process_module_query(source, &query, &options, None)? {
-                ModuleQueryOutcome::Ok { result, imports } => LeanWorkerModuleQueryOutcome::Ok {
-                    result: module_query_result_wire(result),
-                    imports,
-                },
-                ModuleQueryOutcome::MissingImports {
-                    result,
-                    imports,
-                    missing,
-                } => LeanWorkerModuleQueryOutcome::MissingImports {
-                    result: module_query_result_wire(result),
-                    imports,
-                    missing,
-                },
-                ModuleQueryOutcome::HeaderParseFailed { diagnostics } => {
-                    LeanWorkerModuleQueryOutcome::HeaderParseFailed {
-                        diagnostics: elab_failure_wire(&diagnostics),
-                    }
-                }
-                ModuleQueryOutcome::Unsupported => LeanWorkerModuleQueryOutcome::Unsupported,
+        let request = worker_authority()?.query(
+            self.source_context(),
+            lean_rs::host_bridge::HostModuleQuery {
+                source: source.into(),
+                query,
             },
-        )
+            options.source_options(),
+        )?;
+        Ok(match self.session.process_module_query(&request, None)? {
+            ModuleQueryOutcome::Ok { result, imports } => LeanWorkerModuleQueryOutcome::Ok {
+                result: module_query_result_wire(result),
+                imports,
+            },
+            ModuleQueryOutcome::MissingImports {
+                result,
+                imports,
+                missing,
+            } => LeanWorkerModuleQueryOutcome::MissingImports {
+                result: module_query_result_wire(result),
+                imports,
+                missing,
+            },
+            ModuleQueryOutcome::HeaderParseFailed { diagnostics } => LeanWorkerModuleQueryOutcome::HeaderParseFailed {
+                diagnostics: elab_failure_wire(&diagnostics),
+            },
+            ModuleQueryOutcome::Unsupported => LeanWorkerModuleQueryOutcome::Unsupported,
+        })
     }
 
     fn process_module_query_batch(
@@ -1942,51 +1983,62 @@ impl HostSessionState {
             .collect::<LeanResult<Vec<_>>>()?;
         let budgets = module_query_budgets_host(budgets);
         self.clear_module_snapshot_cache_for_rss_guard()?;
-        let cached = self
-            .session
-            .process_module_query_batch_cached(source, &selectors, &budgets, &options, &policy, None)?;
+        let batch = lean_rs::host_bridge::HostModuleBatch {
+            source: source.into(),
+            selectors,
+            budgets,
+        };
+        let policy = format!(
+            "{}\n{}\n{}\n{}\n{}",
+            policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
+        );
+        let cached = worker_authority()?.cached(
+            self.source_context(),
+            lean_rs::host_bridge::HostCachedModuleBatch {
+                batch: batch.clone(),
+                policy,
+            },
+            options.source_options(),
+        )?;
+        let cached = self.session.process_module_query_batch_cached(&cached, None)?;
         if !matches!(cached, ModuleQueryBatchCachedOutcome::Unsupported) {
             return Ok(module_query_batch_cached_outcome_wire(cached));
         }
-        Ok(
-            match self
-                .session
-                .process_module_query_batch(source, &selectors, &budgets, &options, None)?
-            {
-                ModuleQueryBatchOutcome::Ok { result, imports } => {
-                    let result = module_query_batch_envelope_wire(result);
-                    let output_bytes = approx_json_bytes(&result);
-                    LeanWorkerModuleQueryBatchOutcome::Ok {
-                        result,
-                        imports,
-                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
-                    }
+        let request = worker_authority()?.batch(self.source_context(), batch, options.source_options())?;
+        Ok(match self.session.process_module_query_batch(&request, None)? {
+            ModuleQueryBatchOutcome::Ok { result, imports } => {
+                let result = module_query_batch_envelope_wire(result);
+                let output_bytes = approx_json_bytes(&result);
+                LeanWorkerModuleQueryBatchOutcome::Ok {
+                    result,
+                    imports,
+                    facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
                 }
-                ModuleQueryBatchOutcome::MissingImports {
+            }
+            ModuleQueryBatchOutcome::MissingImports {
+                result,
+                imports,
+                missing,
+            } => {
+                let result = module_query_batch_envelope_wire(result);
+                let output_bytes = approx_json_bytes(&result);
+                LeanWorkerModuleQueryBatchOutcome::MissingImports {
                     result,
                     imports,
                     missing,
-                } => {
-                    let result = module_query_batch_envelope_wire(result);
-                    let output_bytes = approx_json_bytes(&result);
-                    LeanWorkerModuleQueryBatchOutcome::MissingImports {
-                        result,
-                        imports,
-                        missing,
-                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
-                    }
+                    facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
                 }
-                ModuleQueryBatchOutcome::HeaderParseFailed { diagnostics } => {
-                    let diagnostics = elab_failure_wire(&diagnostics);
-                    let output_bytes = approx_json_bytes(&diagnostics);
-                    LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed {
-                        diagnostics,
-                        facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
-                    }
+            }
+            ModuleQueryBatchOutcome::HeaderParseFailed { diagnostics } => {
+                let diagnostics = elab_failure_wire(&diagnostics);
+                let output_bytes = approx_json_bytes(&diagnostics);
+                LeanWorkerModuleQueryBatchOutcome::HeaderParseFailed {
+                    diagnostics,
+                    facts: LeanWorkerModuleQueryCacheFacts::uncached(output_bytes),
                 }
-                ModuleQueryBatchOutcome::Unsupported => LeanWorkerModuleQueryBatchOutcome::Unsupported,
-            },
-        )
+            }
+            ModuleQueryBatchOutcome::Unsupported => LeanWorkerModuleQueryBatchOutcome::Unsupported,
+        })
     }
 
     fn clear_module_snapshot_cache(&mut self) -> LeanResult<LeanWorkerModuleSnapshotCacheClearResult> {
@@ -3510,6 +3562,30 @@ mod tests {
         LeanWorkerDeclarationVerificationFacts, LeanWorkerDeclarationVerificationResult,
         LeanWorkerDeclarationVerificationStatus, LeanWorkerElabOptions, LeanWorkerSessionImportProfile,
     };
+
+    #[test]
+    fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() {
+        let prepared = lean_rs_host::host::prepare_host_artifacts().expect("packaged fixture");
+        let runtime = lean_rs::LeanRuntime::init().expect("runtime");
+        let path = prepared.manifest_path();
+        let admitted = prepared.manifest_json().as_bytes();
+        let mut other = admitted.to_vec();
+        other.push(b'\n');
+        let result = super::load_worker_snapshot(runtime, path, admitted, |requested_path, bytes| {
+            assert_eq!(requested_path, path);
+            assert_eq!(bytes, admitted);
+            #[allow(
+                unsafe_code,
+                reason = "qualification owns the packaged fixture and approves no export calls"
+            )]
+            // SAFETY: other is valid JSON for the same exclusively held bundled fixture.
+            // The production bootstrap must refuse its distinct bytes before loading it.
+            Ok(unsafe {
+                lean_rs::module::AuthorizedWorkerSnapshot::attest(runtime, path.to_owned(), other, vec![], ())
+            })
+        });
+        assert!(matches!(result, Err(error) if error.to_string().contains("different manifest snapshot")));
+    }
 
     fn session_key() -> HostSessionKey {
         HostSessionKey {

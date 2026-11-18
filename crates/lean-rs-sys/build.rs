@@ -39,6 +39,7 @@ fn main() {
         );
     }
 
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
     if env::var_os("DOCS_RS").is_some() {
         emit_docs_rs_metadata();
         return;
@@ -66,6 +67,17 @@ fn main() {
                 window_summary(),
             )
         });
+
+    let include = prefix.join("include");
+    for header in ["config.h", "version.h", "mimalloc.h"] {
+        println!("cargo:rerun-if-changed={}", include.join("lean").join(header).display());
+    }
+    println!("cargo:rerun-if-changed=allocator_config.c");
+    cc::Build::new()
+        .include(include)
+        .file("allocator_config.c")
+        .cargo_metadata(false)
+        .compile("allocator_config");
 
     let discovered_version = read_lean_version(&prefix);
     let resolved_version = pick_resolved_version(entry, &discovered_version);

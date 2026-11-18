@@ -8,12 +8,12 @@
 #![allow(clippy::expect_used, clippy::panic)]
 #![allow(unsafe_code)]
 
-use std::path::PathBuf;
+#[path = "../examples/support/callback_fixture.rs"]
+mod callback_fixture;
 use std::slice;
 use std::sync::Mutex;
 
-use lean_rs::LeanRuntime;
-use lean_rs::module::{LeanIo, LeanLibrary, LeanLibraryBundle, LeanLibraryDependency};
+use lean_rs::module::{LeanIo, LeanLibrary};
 use lean_rs_sys::lean_object;
 use lean_rs_sys::object::{lean_is_scalar, lean_is_string};
 use lean_rs_sys::string::{lean_string_cstr, lean_string_size};
@@ -119,69 +119,6 @@ fn decode_string_payload(payload: *mut lean_object) -> Option<String> {
     String::from_utf8(bytes.to_vec()).ok()
 }
 
-fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root")
-        .to_path_buf();
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = package_dir
-        .iter()
-        .fold(workspace, |path, part| path.join(part))
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("{new_name}.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("{old_name}.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
-}
-
-fn interop_dylib_path() -> PathBuf {
-    dylib_path(
-        &["crates", "lean-rs", "shims", "lean-rs-interop-shims"],
-        "liblean__rs__interop__shims_LeanRsInterop",
-        "libLeanRsInterop",
-    )
-}
-
-fn consumer_dylib_path() -> PathBuf {
-    dylib_path(
-        &["fixtures", "interop-shims"],
-        "liblean__rs__interop__consumer_LeanRsInteropConsumer",
-        "libLeanRsInteropConsumer",
-    )
-}
-
-fn consumer_bundle() -> LeanLibraryBundle<'static> {
-    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-    let interop_path = interop_dylib_path();
-    assert!(
-        interop_path.exists(),
-        "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
-        interop_path.display(),
-    );
-    let path = consumer_dylib_path();
-    assert!(
-        path.exists(),
-        "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
-        path.display(),
-    );
-    LeanLibraryBundle::open(
-        runtime,
-        &path,
-        [LeanLibraryDependency::path(interop_path)
-            .export_symbols_for_dependents()
-            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
-    )
-    .expect("interop consumer bundle opens cleanly")
-}
-
 fn string_callback_loop<'lean, 'lib>(
     library: &'lib LeanLibrary<'lean>,
 ) -> lean_rs::LeanExported<'lean, 'lib, (usize, usize, Vec<String>), LeanIo<u8>> {
@@ -197,29 +134,20 @@ fn string_callback_loop<'lean, 'lib>(
     .expect("string callback loop export resolves")
 }
 
-fn tick_callback_loop<'lean, 'lib>(
-    library: &'lib LeanLibrary<'lean>,
-) -> lean_rs::LeanExported<'lean, 'lib, (usize, usize, u64), LeanIo<u8>> {
-    let module = library
-        .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
-        .expect("consumer root module initializes");
-    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    unsafe { module.exported_unchecked::<(usize, usize, u64), LeanIo<u8>>("lean_rs_interop_consumer_callback_loop") }
-        .expect("tick callback loop export resolves")
-}
-
 #[test]
 fn lean_loop_invokes_string_trampoline_in_order() {
-    let bundle = consumer_bundle();
+    let bundle = callback_fixture::bundle().expect("admitted callback fixture pair");
     let callback_loop = string_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(None);
-    let status = callback_loop
-        .call(
+    // SAFETY: The probe lives through this synchronous call and the trampoline implements the fixture callback ABI.
+    let status = unsafe {
+        callback_loop.call(
             std::ptr::from_ref(&probe).addr(),
             test_string_callback_trampoline as *const () as usize,
             vec!["alpha".to_owned(), "βeta".to_owned(), "with\0nul".to_owned()],
         )
-        .expect("string callback loop returns");
+    }
+    .expect("string callback loop returns");
 
     assert_eq!(status, OK);
     assert_eq!(
@@ -230,33 +158,26 @@ fn lean_loop_invokes_string_trampoline_in_order() {
 
 #[test]
 fn wrong_payload_returns_status_without_panic() {
-    let bundle = consumer_bundle();
-    let callback_loop = tick_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(None);
-    let status = callback_loop
-        .call(
-            std::ptr::from_ref(&probe).addr(),
-            test_string_callback_trampoline as *const () as usize,
-            1,
-        )
-        .expect("tick loop returns wrong-payload status");
-
+    let status = test_string_callback_trampoline(std::ptr::from_ref(&probe).addr(), 0, 0, 1, std::ptr::null_mut());
     assert_eq!(status, WRONG_PAYLOAD);
     assert!(probe.events().is_empty());
 }
 
 #[test]
 fn rust_string_callback_panic_is_caught_before_returning_to_lean() {
-    let bundle = consumer_bundle();
+    let bundle = callback_fixture::bundle().expect("admitted callback fixture pair");
     let callback_loop = string_callback_loop(bundle.library());
     let probe = StringCallbackProbe::new(Some("panic"));
-    let status = callback_loop
-        .call(
+    // SAFETY: The probe lives through this synchronous call and the trampoline implements the fixture callback ABI.
+    let status = unsafe {
+        callback_loop.call(
             std::ptr::from_ref(&probe).addr(),
             test_string_callback_trampoline as *const () as usize,
             vec!["before".to_owned(), "panic".to_owned(), "after".to_owned()],
         )
-        .expect("string callback loop returns after caught callback panic");
+    }
+    .expect("string callback loop returns after caught callback panic");
 
     assert_eq!(status, PANIC);
     assert_eq!(probe.events(), vec!["before".to_owned()]);

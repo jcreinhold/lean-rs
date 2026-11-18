@@ -72,9 +72,14 @@ impl LeanRuntimePreflight {
             Err(check) => return LeanLoaderReport::new(Some(manifest_path), vec![check]),
         };
 
+        Self::check_manifest(&manifest_path, &manifest)
+    }
+
+    /// Inspect precisely the parsed metadata that will be consumed by loading.
+    pub(crate) fn check_manifest(manifest_path: &std::path::Path, manifest: &CapabilityManifest) -> LeanLoaderReport {
         let mut checks = Vec::new();
-        lean_toolchain::manifest_validation::check_fingerprint(&manifest, &mut checks);
-        lean_toolchain::manifest_validation::check_staleness(&manifest_path, &manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_fingerprint(manifest, &mut checks);
+        lean_toolchain::manifest_validation::check_staleness(manifest_path, manifest, &mut checks);
 
         let mut dependency_exports = HashSet::new();
         for dependency in &manifest.dependencies {
@@ -88,13 +93,13 @@ impl LeanRuntimePreflight {
 
         match inspect_artifact(&manifest.primary_dylib, ArtifactRole::Primary) {
             Ok(info) => {
-                check_initializer(&manifest, &info, &mut checks);
-                check_imported_symbols(&manifest, &info, &dependency_exports, &mut checks);
+                check_initializer(manifest, &info, &mut checks);
+                check_imported_symbols(manifest, &info, &dependency_exports, &mut checks);
             }
             Err(check) => checks.push(check),
         }
 
-        LeanLoaderReport::new(Some(manifest_path), checks)
+        LeanLoaderReport::new(Some(manifest_path.to_path_buf()), checks)
     }
 }
 
@@ -290,7 +295,7 @@ mod tests {
         ArtifactInfo, CapabilityManifest, LeanLoaderDiagnosticCode, LeanRuntimePreflight, check_imported_symbols,
         inspect_artifact,
     };
-    use crate::{LeanBuiltCapability, LeanCapability, LeanRuntime};
+    use crate::LeanBuiltCapability;
     use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -483,13 +488,9 @@ mod tests {
         let dir = temp_dir("open_failure_preflight_code");
         let missing = dir.join("missing-capability.dylib");
         let manifest = write_manifest(&dir, &missing, "", "");
-        let runtime = LeanRuntime::init().expect("runtime init");
-
-        let Err(err) = LeanCapability::from_build_manifest(runtime, LeanBuiltCapability::manifest_path(manifest))
-        else {
-            panic!("missing primary should fail before open");
-        };
-
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        assert!(!report.is_ok());
+        let err = super::report_into_error(report);
         assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
         assert!(
             err.to_string()

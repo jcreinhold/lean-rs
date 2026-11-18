@@ -110,6 +110,18 @@ impl LeanElabOptions {
         self
     }
 
+    /// Capture the exact option values used by the native source bridge.
+    #[must_use]
+    pub fn source_options(&self) -> lean_rs::host_bridge::HostSourceOptions {
+        lean_rs::host_bridge::HostSourceOptions {
+            namespace: self.namespace_context_str().to_owned(),
+            file: self.file_label_str().to_owned(),
+            heartbeats: self.heartbeats(),
+            diagnostic_bytes: self.diagnostic_byte_limit_usize(),
+            options_json: self.lean_options_json(),
+        }
+    }
+
     pub(crate) fn lean_options_json(&self) -> String {
         lean_toolchain::lean_options_json(&self.lean_options)
     }

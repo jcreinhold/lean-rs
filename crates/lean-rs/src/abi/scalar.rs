@@ -25,12 +25,10 @@
 // at the module scope.
 #![allow(unsafe_code)]
 
-use lean_rs_sys::ctor::{
-    lean_box_float, lean_box_uint64, lean_box_usize, lean_unbox_float, lean_unbox_uint64, lean_unbox_usize,
-};
+use lean_rs_sys::ctor::{lean_box_float, lean_box_uint64, lean_box_usize};
 use lean_rs_sys::object::{lean_box, lean_is_scalar, lean_obj_tag, lean_unbox};
 
-use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
+use crate::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error};
 use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -42,10 +40,6 @@ use crate::runtime::obj::Obj;
 /// stays uniform and grep-stable.
 fn wrong_kind(expected: &str, found_tag: u32) -> LeanError {
     conversion_error(format!("expected Lean {expected}, found object with tag {found_tag}"))
-}
-
-fn wrong_kind_scalar(expected: &str) -> LeanError {
-    conversion_error(format!("expected Lean {expected}, found scalar-tagged object"))
 }
 
 fn out_of_range(expected: &str) -> LeanError {
@@ -69,24 +63,12 @@ fn require_scalar(obj: &Obj<'_>, expected: &str) -> LeanResult<()> {
     }
 }
 
-/// Require that `obj` is a ctor-boxed value; build a wrong-kind error
-/// otherwise. Used by the polymorphic-boxed wide scalars (`u64`, `usize`,
-/// `f64`).
-#[inline]
-fn require_ctor(obj: &Obj<'_>, expected: &str) -> LeanResult<()> {
-    let ptr = obj.as_raw_borrowed();
-    // SAFETY: pure pointer-bit math.
-    if unsafe { lean_is_scalar(ptr) } {
-        return Err(wrong_kind_scalar(expected));
-    }
-    // SAFETY: non-scalar branch; tag read on the owned object.
-    if unsafe { lean_rs_sys::object::lean_is_ctor(ptr) } {
-        Ok(())
-    } else {
-        // SAFETY: same branch.
-        let found_tag = unsafe { lean_obj_tag(ptr) };
-        Err(wrong_kind(expected, found_tag))
-    }
+/// Check the constructor and initialized payload bounds before reading a wide
+/// scalar. A constructor tag alone does not establish any scalar storage.
+fn boxed_word(obj: &Obj<'_>, expected: &str) -> LeanResult<u64> {
+    crate::abi::structure::view(obj)
+        .ctor_shape(0, 0, expected)?
+        .uint64(0, expected)
 }
 
 // -- () -------------------------------------------------------------------
@@ -199,11 +181,7 @@ impl<'lean> IntoLean<'lean> for u64 {
 
 impl<'lean> TryFromLean<'lean> for u64 {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        // Polymorphic `UInt64` is always ctor-boxed, never scalar-tagged.
-        require_ctor(&obj, "u64")?;
-        // SAFETY: kind check above gives us a ctor with the expected
-        // single-`u64` payload at offset 0.
-        Ok(unsafe { lean_unbox_uint64(obj.as_raw_borrowed()) })
+        boxed_word(&obj, "u64")
     }
 }
 
@@ -216,9 +194,7 @@ impl<'lean> IntoLean<'lean> for usize {
 
 impl<'lean> TryFromLean<'lean> for usize {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        require_ctor(&obj, "usize")?;
-        // SAFETY: see `u64`'s impl.
-        Ok(unsafe { lean_unbox_usize(obj.as_raw_borrowed()) })
+        Self::try_from(boxed_word(&obj, "usize")?).map_err(|_| out_of_range("usize"))
     }
 }
 
@@ -232,10 +208,7 @@ impl<'lean> IntoLean<'lean> for i64 {
 
 impl<'lean> TryFromLean<'lean> for i64 {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        require_ctor(&obj, "i64")?;
-        // SAFETY: kind check above; same single-`u64` ctor as `UInt64`,
-        // reinterpreted as `i64` for the caller.
-        let bits = unsafe { lean_unbox_uint64(obj.as_raw_borrowed()) };
+        let bits = boxed_word(&obj, "i64")?;
         #[allow(clippy::cast_possible_wrap, reason = "Int64 reuses UInt64's bit pattern")]
         Ok(bits as Self)
     }
@@ -251,9 +224,7 @@ impl<'lean> IntoLean<'lean> for isize {
 
 impl<'lean> TryFromLean<'lean> for isize {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        require_ctor(&obj, "isize")?;
-        // SAFETY: kind check above; same single-`usize` ctor as `USize`.
-        let bits = unsafe { lean_unbox_usize(obj.as_raw_borrowed()) };
+        let bits = usize::try_from(boxed_word(&obj, "isize")?).map_err(|_| out_of_range("isize"))?;
         #[allow(clippy::cast_possible_wrap, reason = "ISize reuses USize's bit pattern")]
         Ok(bits as Self)
     }
@@ -294,10 +265,7 @@ impl<'lean> IntoLean<'lean> for f64 {
 
 impl<'lean> TryFromLean<'lean> for f64 {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        require_ctor(&obj, "f64")?;
-        // SAFETY: kind check above; the ctor's first scalar payload is the
-        // installed `f64` from `lean_box_float`.
-        Ok(unsafe { lean_unbox_float(obj.as_raw_borrowed()) })
+        boxed_word(&obj, "f64").map(Self::from_bits)
     }
 }
 
@@ -321,31 +289,27 @@ impl<'lean> TryFromLean<'lean> for f64 {
 // `fixtures/lean/.lake/build/ir/LeanRsFixture/Scalars.c`
 // (`lean_rs_fixture_unit_id(lean_object*)`).
 
-impl sealed::SealedAbi for () {}
-impl<'lean> LeanAbi<'lean> for () {
+// SAFETY: Unit uses the scalar sentinel; its decoder consumes the owned boxed result.
+unsafe impl<'lean> LeanAbi<'lean> for () {
     type CRepr = *mut lean_rs_sys::lean_object;
     fn into_c(self, _runtime: &'lean LeanRuntime) -> Self::CRepr {
         // SAFETY: `lean_box(0)` is the scalar sentinel; no refcount.
         unsafe { lean_box(0) }
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: take ownership for Drop; consumes the returned object.
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };
         <()>::try_from_lean(obj)
     }
 }
 
-impl sealed::SealedAbi for bool {}
-impl<'lean> LeanAbi<'lean> for bool {
+// SAFETY: Bool uses u8 values 0/1; decoding rejects other bytes and owns no references.
+unsafe impl<'lean> LeanAbi<'lean> for bool {
     type CRepr = u8;
     fn into_c(self, _runtime: &'lean LeanRuntime) -> u8 {
         u8::from(self)
     }
-    fn from_c(c: u8, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: u8, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         match c {
             0 => Ok(false),
             1 => Ok(true),
@@ -359,11 +323,12 @@ impl<'lean> LeanAbi<'lean> for bool {
 macro_rules! impl_scalar_abi_passthrough {
     ($($ty:ty),* $(,)?) => {
         $(
-            impl sealed::SealedAbi for $ty {}
-            impl<'lean> LeanAbi<'lean> for $ty {
+
+            // SAFETY: this Rust scalar is the exact C slot type; identity conversion owns no references.
+            unsafe impl<'lean> LeanAbi<'lean> for $ty {
                 type CRepr = $ty;
                 fn into_c(self, _runtime: &'lean LeanRuntime) -> $ty { self }
-                fn from_c(c: $ty, _runtime: &'lean LeanRuntime) -> LeanResult<$ty> { Ok(c) }
+                unsafe fn from_c(c: $ty, _runtime: &'lean LeanRuntime) -> LeanResult<$ty> { Ok(c) }
             }
         )*
     };
@@ -378,13 +343,14 @@ impl_scalar_abi_passthrough!(i8, i16, i32, i64, isize);
 
 // Char is a UInt32 at the Lake C ABI. The encode/decode pair uses the
 // `u32::CRepr` shape but validates the Unicode invariant on decode.
-impl sealed::SealedAbi for char {}
-impl<'lean> LeanAbi<'lean> for char {
+
+// SAFETY: Char uses a u32 slot and validates the Unicode scalar invariant on decode.
+unsafe impl<'lean> LeanAbi<'lean> for char {
     type CRepr = u32;
     fn into_c(self, _runtime: &'lean LeanRuntime) -> u32 {
         u32::from(self)
     }
-    fn from_c(c: u32, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: u32, _runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         Self::from_u32(c).ok_or_else(|| conversion_error(format!("Lean char {c:#x} is not a Unicode scalar value")))
     }
 }

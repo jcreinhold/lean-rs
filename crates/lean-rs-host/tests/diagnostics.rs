@@ -14,34 +14,19 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
+#[path = "support/fixed_fixture.rs"]
+mod fixture;
 use std::path::PathBuf;
 
 use lean_rs::module::LeanLibrary;
 use lean_rs::{DiagnosticCapture, LeanDiagnosticCode, LeanRuntime};
 use lean_rs_host::meta::{MetaCallStatus, infer_type};
-use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanSession};
+use lean_rs_host::{LeanCapabilities, LeanHost, LeanSession};
 
 // -- fixture setup -------------------------------------------------------
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
-}
-
-fn fixture_dylib_path() -> PathBuf {
-    let dylib_ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = fixture_lake_root().join(".lake").join("build").join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_ext}"));
-    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_ext}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
+    fixture::fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -52,18 +37,17 @@ fn fixture_host() -> LeanHost<'static> {
     LeanHost::from_lake_project(runtime(), fixture_lake_root()).expect("host opens cleanly")
 }
 
-fn fixture_caps<'lean, 'h>(host: &'h LeanHost<'lean>) -> LeanCapabilities<'lean, 'h> {
-    host.load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps")
+fn fixture_caps<'h>(host: &'h LeanHost<'static>) -> LeanCapabilities<'static, 'h> {
+    fixture::capabilities(host).expect("load caps")
 }
 
 fn session_over_elaboration<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
+    caps.session(&fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
         .expect("session imports cleanly")
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None, None)
+    caps.session(&fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly")
 }
 
@@ -83,9 +67,12 @@ fn module_init_code_on_missing_dylib() {
     // dispatch in `LakeProject::capability_dylib` produces a name that
     // doesn't exist on disk, so `libloading::Library::new` fails—that
     // is the `ModuleInit` family.
-    let err = host
-        .load_capabilities("lean_rs_fixture", "DefinitelyMissingLib")
-        .expect_err("missing capability dylib must fail");
+    use std::path::Path;
+    let missing = host.project_library_path("lean_rs_fixture", "DefinitelyMissingLib");
+    assert!(!missing.exists());
+    #[allow(unsafe_code, reason = "fixed missing image under retained fixture custody")]
+    // SAFETY: this fixed path is absent in the qualified fixture root, held against writers.
+    let err = unsafe { LeanLibrary::open(runtime(), Path::new(&missing)) }.expect_err("missing library");
     assert_eq!(err.code(), LeanDiagnosticCode::ModuleInit, "got {err:?}");
 }
 
@@ -96,7 +83,7 @@ fn linking_code_on_invalid_lake_identifier() {
     // a space fails the `[A-Za-z_][A-Za-z0-9_]*` alphabet check in
     // `InitializerName::from_lake_names`, surfacing as a `Linking`
     // failure.
-    let library = LeanLibrary::open(runtime(), fixture_dylib_path()).expect("fixture dylib opens");
+    let library = fixture::project_library();
     let err = library
         .initialize_module("lean_rs_fixture", "Bad Module")
         .expect_err("invalid Lake module name must fail");
@@ -105,7 +92,7 @@ fn linking_code_on_invalid_lake_identifier() {
 
 #[test]
 fn linking_code_on_missing_initializer_symbol() {
-    let library = LeanLibrary::open(runtime(), fixture_dylib_path()).expect("fixture dylib opens");
+    let library = fixture::project_library();
     // The fixture has no module called `DefinitelyNotAModule`; the
     // mangled initializer symbol it asks for is absent, so
     // `lookup_initializer` raises `Linking` ("missing initializer
@@ -132,9 +119,9 @@ fn elaboration_code_on_parse_error() {
     let host = fixture_host();
     let caps = fixture_caps(&host);
     let mut session = session_over_elaboration(&caps);
-    let opts = LeanElabOptions::new();
+
     let outcome = session
-        .elaborate("(1 +", None, &opts, None)
+        .elaborate(&fixture::term(&caps, &session, "(1 +"), None)
         .expect("host stack reports no exception while elaborating a malformed term");
     let failure = outcome.expect_err("malformed term must elaborate to a failure");
     assert_eq!(failure.code(), LeanDiagnosticCode::Elaboration);
@@ -170,7 +157,15 @@ fn unsupported_code_on_absent_meta_service() {
     // path—the response is `Ok` here, but `code()` on `Ok` is
     // `None`, which is part of the contract surface this test pins.
     let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None, None)
+        .session(
+            &fixture::imports_for(
+                &caps,
+                &["LeanRsFixture.Handles", "LeanRsHostShims.Meta"],
+                lean_rs_host::LeanSessionImportProfile::Private,
+            ),
+            None,
+            None,
+        )
         .expect("session imports cleanly");
     let expr = session
         .declaration_type("Nat.zero", None)

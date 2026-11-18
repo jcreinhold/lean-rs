@@ -63,6 +63,7 @@ fn all_required_symbols_resolve_at_link_time() {
             "lean_object_data_byte_size",
         ),
         // arrays
+        (lean_rs_sys::array::lean_mk_array as *const (), "lean_mk_array"),
         (lean_rs_sys::array::lean_array_mk as *const (), "lean_array_mk"),
         (lean_rs_sys::array::lean_array_push as *const (), "lean_array_push"),
         (
@@ -95,13 +96,11 @@ fn all_required_symbols_resolve_at_link_time() {
             lean_rs_sys::string::lean_mk_ascii_string_unchecked as *const (),
             "lean_mk_ascii_string_unchecked",
         ),
-        (lean_rs_sys::string::lean_string_push as *const (), "lean_string_push"),
         (
             lean_rs_sys::string::lean_string_append as *const (),
             "lean_string_append",
         ),
         (lean_rs_sys::string::lean_string_mk as *const (), "lean_string_mk"),
-        (lean_rs_sys::string::lean_string_data as *const (), "lean_string_data"),
         (
             lean_rs_sys::string::lean_string_utf8_get as *const (),
             "lean_string_utf8_get",
@@ -135,6 +134,10 @@ fn all_required_symbols_resolve_at_link_time() {
         ),
         // Nat bignum
         (
+            lean_rs_sys::nat_int::lean_nat_big_div_exact as *const (),
+            "lean_nat_big_div_exact",
+        ),
+        (
             lean_rs_sys::nat_int::lean_nat_big_succ as *const (),
             "lean_nat_big_succ",
         ),
@@ -151,6 +154,18 @@ fn all_required_symbols_resolve_at_link_time() {
             "lean_nat_overflow_mul",
         ),
         // Int bignum
+        (
+            lean_rs_sys::nat_int::lean_int_big_div_exact as *const (),
+            "lean_int_big_div_exact",
+        ),
+        (
+            lean_rs_sys::nat_int::lean_int_big_ediv as *const (),
+            "lean_int_big_ediv",
+        ),
+        (
+            lean_rs_sys::nat_int::lean_int_big_emod as *const (),
+            "lean_int_big_emod",
+        ),
         (lean_rs_sys::nat_int::lean_int_big_neg as *const (), "lean_int_big_neg"),
         (lean_rs_sys::nat_int::lean_int_big_add as *const (), "lean_int_big_add"),
         (lean_rs_sys::nat_int::lean_int_big_sub as *const (), "lean_int_big_sub"),

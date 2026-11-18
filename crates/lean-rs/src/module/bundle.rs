@@ -40,17 +40,30 @@ impl<'lean> LeanLibraryBundle<'lean> {
     ///
     /// Returns [`crate::LeanError`] if any dependency or primary dylib cannot
     /// be opened, or if any requested dependency initializer fails.
-    pub fn open(
+    /// # Safety
+    ///
+    /// The primary artifact and every transitive dependency must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Declared dependency metadata is not a trust assertion.
+    #[allow(
+        unsafe_code,
+        reason = "forward caller-established native artifact trust to every load"
+    )]
+    pub unsafe fn open(
         runtime: &'lean LeanRuntime,
         primary_path: impl AsRef<Path>,
         dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
     ) -> LeanResult<Self> {
         let mut opened_dependencies = Vec::new();
         for dependency in dependencies {
-            let library = if dependency.exports_symbols_for_dependents() {
-                LeanLibrary::open_globally(runtime, dependency.path_ref())?
-            } else {
-                LeanLibrary::open(runtime, dependency.path_ref())?
+            // SAFETY: the caller's trust assertion covers every actual loaded
+            // dependency and its requested visibility and initializer contract.
+            let library = unsafe {
+                if dependency.exports_symbols_for_dependents() {
+                    LeanLibrary::open_globally(runtime, dependency.path_ref())?
+                } else {
+                    LeanLibrary::open(runtime, dependency.path_ref())?
+                }
             };
             if let Some(initializer) = dependency.into_module_initializer() {
                 let _module = library.initialize_module(initializer.package_name(), initializer.module_name())?;
@@ -58,7 +71,8 @@ impl<'lean> LeanLibraryBundle<'lean> {
             opened_dependencies.push(library);
         }
 
-        let primary = LeanLibrary::open(runtime, primary_path)?;
+        // SAFETY: the caller established the primary artifact's native contract.
+        let primary = unsafe { LeanLibrary::open(runtime, primary_path) }?;
         Ok(Self {
             primary,
             dependencies: opened_dependencies,
@@ -93,6 +107,13 @@ impl<'lean> LeanLibraryBundle<'lean> {
     #[must_use]
     pub fn dependency_count(&self) -> usize {
         self.dependencies.len()
+    }
+
+    pub(crate) fn pin_for_process(&self) {
+        self.primary.pin_for_process();
+        for dependency in &self.dependencies {
+            dependency.pin_for_process();
+        }
     }
 }
 
