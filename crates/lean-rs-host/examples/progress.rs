@@ -1,15 +1,9 @@
-//! Observe structured progress and cooperative cancellation on a host-session call.
-//!
-//! Run with: `cargo run -p lean-rs-host --example progress`.
-//! See `crates/lean-rs-host/examples/README.md` for expected output.
+//! Observe progress and cancellation in a session importing LeanRsFixture.Handles.
 
-#![allow(clippy::expect_used, clippy::panic, clippy::print_stdout)]
+#![allow(clippy::print_stdout, clippy::panic)]
 
-use std::path::PathBuf;
-use std::process::ExitCode;
-
-use lean_rs::{LeanDiagnosticCode, LeanResult, LeanRuntime};
-use lean_rs_host::{LeanCancellationToken, LeanHost, LeanProgressEvent, LeanProgressSink};
+use lean_rs::{LeanDiagnosticCode, LeanResult};
+use lean_rs_host::{LeanCancellationToken, LeanProgressEvent, LeanProgressSink, LeanSession};
 
 struct PrintProgress;
 
@@ -44,25 +38,14 @@ impl LeanProgressSink for CancelOnFirst<'_> {
     }
 }
 
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => {
-            println!("ok");
-            ExitCode::SUCCESS
-        }
-        Err(err) => {
-            eprintln!("[{}] {err}", err.code());
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn run() -> LeanResult<()> {
-    let runtime = LeanRuntime::init()?;
-    let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
-    let mut session = caps.session(&["LeanRsFixture.Handles"], None, None)?;
-
+/// Observe progress and cancellation in a session importing LeanRsFixture.Handles.
+///
+/// # Errors
+/// Returns session dispatch errors to the application.
+///
+/// # Panics
+/// Panics if the pre-cancelled query unexpectedly succeeds.
+pub fn report_and_cancel(session: &mut LeanSession<'_, '_>) -> LeanResult<()> {
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",
         "LeanRsFixture.Handles.nameMkStr",
@@ -84,12 +67,4 @@ fn run() -> LeanResult<()> {
     }
 
     Ok(())
-}
-
-fn lake_project_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.parent().and_then(std::path::Path::parent).map_or_else(
-        || PathBuf::from("fixtures/lean"),
-        |workspace| workspace.join("fixtures").join("lean"),
-    )
 }

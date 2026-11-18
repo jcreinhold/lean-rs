@@ -64,3 +64,27 @@ workspace = true
 # which cargo-shear cannot see statically.
 [package.metadata.cargo-shear]
 ignored-paths = ["tests/compile_fail/*.rs"]
+
+[[example]]
+name = "theorem_query"
+crate-type = ["rlib"]
+
+[[example]]
+name = "progress"
+crate-type = ["rlib"]
+
+[[example]]
+name = "proof_check"
+crate-type = ["rlib"]
+
+[[example]]
+name = "meta_query"
+crate-type = ["rlib"]
+
+[[example]]
+name = "process_module_query"
+crate-type = ["rlib"]
+
+[[example]]
+name = "import_residue_probe"
+crate-type = ["rlib"]

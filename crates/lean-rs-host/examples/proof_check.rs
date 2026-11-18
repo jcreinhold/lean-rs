@@ -1,62 +1,23 @@
-//! Submit a small theorem to Lean's elaborator + kernel, re-validate
-//! the resulting evidence, and project a bounded summary.
-//!
-//! `LeanSession::kernel_check` is the host-stack entry point that
-//! takes a source string, parses + elaborates + kernel-checks it, and
-//! returns a typed `LeanKernelOutcome`. On `Checked`, the carried
-//! `LeanEvidence` handle lets us re-validate (`check_evidence`) or
-//! project a display-only `ProofSummary` (`summarize_evidence`).
-//!
-//! Run with: `cargo run -p lean-rs --example proof_check`.
-//! See `crates/lean-rs/examples/README.md` for expected output.
+//! Check the application-attested theorem in its originating session, then revalidate and summarize its evidence.
 
-#![allow(clippy::print_stdout)]
+#![allow(clippy::print_stdout, clippy::panic)]
 
-use std::path::PathBuf;
-use std::process::ExitCode;
+use lean_rs::LeanResult;
+use lean_rs::host_bridge::TrustedHostKernelRequest;
+use lean_rs_host::{EvidenceStatus, LeanKernelOutcome, LeanSession};
 
-use lean_rs::{LeanResult, LeanRuntime};
-use lean_rs_host::{EvidenceStatus, LeanElabOptions, LeanHost, LeanKernelOutcome};
-
-fn main() -> ExitCode {
-    install_tracing();
-    match run() {
-        Ok(()) => {
-            println!("ok");
-            ExitCode::SUCCESS
-        }
-        Err(err) => {
-            eprintln!("[{}] {err}", err.code());
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn install_tracing() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
-    let _result = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
-        .try_init();
-}
-
-fn run() -> LeanResult<()> {
-    let runtime = LeanRuntime::init()?;
-    let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
-
-    // `LeanRsHostShims.Elaboration` brings in the Lean shim that
-    // `kernel_check` dispatches through; the Lean prelude is
-    // imported transitively, so `1 + 1 = 2 := rfl` elaborates.
-    let mut session = caps.session(&["LeanRsHostShims.Elaboration"], None, None)?;
-
-    let source = "theorem demo_proof_check : 1 + 1 = 2 := rfl";
-    let options = LeanElabOptions::new();
-
-    println!("kernel_check source: {source}");
-    let outcome = session.kernel_check(source, &options, None, None)?;
-
+/// Check the application-attested theorem in its originating session, then revalidate and summarize its evidence.
+///
+/// # Errors
+/// Returns session dispatch errors to the application.
+///
+/// # Panics
+/// Panics if checked evidence fails revalidation.
+pub fn check<'lean>(
+    session: &mut LeanSession<'lean, '_>,
+    request: &TrustedHostKernelRequest<'lean, '_>,
+) -> LeanResult<()> {
+    let outcome = session.kernel_check(request, None, None)?;
     // The outcome is a four-tag enum. Only `Checked` carries a
     // `LeanEvidence` handle for re-validation; the other three carry
     // structured diagnostics.
@@ -95,12 +56,4 @@ fn run() -> LeanResult<()> {
     );
 
     Ok(())
-}
-
-fn lake_project_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.parent().and_then(std::path::Path::parent).map_or_else(
-        || PathBuf::from("fixtures/lean"),
-        |workspace| workspace.join("fixtures").join("lean"),
-    )
 }

@@ -21,55 +21,24 @@
 //! A large ratio between the two says the RSS-denominated figures elsewhere in this
 //! repo are inflated.
 //!
-//! ```sh
-//! LEAN_RS_IMPORT_PROBE_ROOT=/path/to/lake/project \
-//! LEAN_RS_IMPORT_PROBE_PROFILES=/path/to/profiles.txt \
-//!     cargo run --release -p lean-rs-host --example import_residue_probe
-//! ```
-//!
-//! `profiles.txt` holds one profile per line; imports within a line are separated by
-//! whitespace or commas. Blank lines and `#` comments are skipped. Each line is
-//! imported once, in order, into one process — which is the point: the question is
-//! what the *n*-th import adds, not what the first one costs.
+//! The embedding application admits each profile against its retained project artifacts
+//! before calling `measure`. Use `parse_profiles` to read profile descriptions.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
-use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::Command;
 
-use lean_rs::LeanRuntime;
-use lean_rs_host::{LeanHost, LeanImportStats};
+use lean_rs::module::TrustedHostImports;
+use lean_rs_host::{LeanCapabilities, LeanImportStats};
 
-fn main() -> ExitCode {
-    let Some(root) = std::env::var_os("LEAN_RS_IMPORT_PROBE_ROOT").map(PathBuf::from) else {
-        eprintln!("set LEAN_RS_IMPORT_PROBE_ROOT to a Lake project root");
-        return ExitCode::FAILURE;
-    };
-    let Some(profiles_path) = std::env::var_os("LEAN_RS_IMPORT_PROBE_PROFILES").map(PathBuf::from) else {
-        eprintln!("set LEAN_RS_IMPORT_PROBE_PROFILES to a file holding one import profile per line");
-        return ExitCode::FAILURE;
-    };
-    let profiles = match std::fs::read_to_string(&profiles_path) {
-        Ok(text) => parse_profiles(&text),
-        Err(err) => {
-            eprintln!("cannot read {}: {err}", profiles_path.display());
-            return ExitCode::FAILURE;
-        }
-    };
-    if profiles.is_empty() {
-        eprintln!("{} contained no profiles", profiles_path.display());
-        return ExitCode::FAILURE;
-    }
-
-    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-    let host = LeanHost::from_lake_project(runtime, &root).expect("host opens the project");
-    // Shims-only: the probe must not depend on the project exposing a `:shared`
-    // facet, and a capability dylib would add its own initializers to the picture.
-    let caps = host.load_shims_only().expect("shim-only capabilities load");
-
+pub fn measure<'lean, 'c>(
+    caps: &'c LeanCapabilities<'lean, '_>,
+    profiles: &[TrustedHostImports<'lean, 'c>],
+    drop_each: bool,
+) {
     println!(
-        "probe_start root={} profiles={} rss_kib={} footprint_kib={}",
-        root.display(),
+        "probe_start roots={:?} profiles={} rss_kib={} footprint_kib={}",
+        caps.artifact_roots(),
         profiles.len(),
         rss_kib(),
         phys_footprint_kib().map_or_else(|| "unavailable".to_owned(), |kib| kib.to_string()),
@@ -81,14 +50,12 @@ fn main() -> ExitCode {
     // `LEAN_RS_IMPORT_PROBE_DROP=1` measures the same workload holding nothing.
     // The difference between the two final footprints is the marginal cost of one
     // held environment, which is what pool capacity trades against a re-import.
-    let drop_each = std::env::var_os("LEAN_RS_IMPORT_PROBE_DROP").is_some();
     let mut held = Vec::with_capacity(profiles.len());
     let mut previous_rss = rss_kib();
     let mut previous_footprint = phys_footprint_kib();
 
     for (index, profile) in profiles.iter().enumerate() {
-        let borrowed: Vec<&str> = profile.iter().map(String::as_str).collect();
-        let session = match caps.session(&borrowed, None, None) {
+        let session = match caps.session(profile, None, None) {
             Ok(session) => session,
             Err(err) => {
                 println!("import index={index} status=failed error={err}");
@@ -120,7 +87,6 @@ fn main() -> ExitCode {
         rss_kib(),
         phys_footprint_kib().map_or_else(|| "unavailable".to_owned(), |kib| kib.to_string()),
     );
-    ExitCode::SUCCESS
 }
 
 fn report(
@@ -156,7 +122,7 @@ fn report(
     );
 }
 
-fn parse_profiles(text: &str) -> Vec<Vec<String>> {
+pub fn parse_profiles(text: &str) -> Vec<Vec<String>> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))

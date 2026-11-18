@@ -20,28 +20,20 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
-use std::path::PathBuf;
+#[path = "../tests/support/fixed_fixture.rs"]
+mod fixed_fixture;
 use std::time::Instant;
 
 use lean_rs::LeanRuntime;
 use lean_rs_host::meta::{LeanMetaOptions, LeanMetaResponse, whnf};
-use lean_rs_host::{LeanElabOptions, LeanHost, LeanKernelOutcome};
-
-fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
-}
+use lean_rs_host::{LeanHost, LeanKernelOutcome, LeanSessionImportProfile};
 
 fn report(name: &str, elapsed_us: u128) {
     println!("name={name} elapsed_us={elapsed_us}");
 }
 
 fn main() {
-    let lake_root = fixture_lake_root();
+    let lake_root = fixed_fixture::fixture_root();
     assert!(
         lake_root.join(".lake").join("build").exists(),
         "fixture build not found at {} — run `cd fixtures/lean && lake build`",
@@ -64,9 +56,7 @@ fn main() {
     // session-fixed symbols. Per-call dispatch cost in later stages
     // comes from cached addresses set here.
     let t = Instant::now();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("capabilities load");
+    let caps = fixed_fixture::capabilities(&host).expect("capabilities load");
     report("load_caps", t.elapsed().as_micros());
 
     // Stage 3: build a `LeanSession` over the imported environment.
@@ -74,41 +64,34 @@ fn main() {
     // kernel_check / run_meta calls below the prelude + fixture
     // declarations the bulk query exercises.
     let t = Instant::now();
-    let mut session = caps
-        .session(&["LeanRsFixture.Handles", "LeanRsHostShims.Meta"], None, None)
-        .expect("session imports");
+    let scope = fixed_fixture::imports_for(
+        &caps,
+        &["LeanRsFixture.Handles", "LeanRsHostShims.Meta"],
+        LeanSessionImportProfile::Private,
+    );
+    let mut session = caps.session(&scope, None, None).expect("session imports");
     report("session_import", t.elapsed().as_micros());
-
-    let elab_opts = LeanElabOptions::new();
 
     // Stage 4 & 5: two `elaborate` calls. The repeat exists to surface
     // warm-vs-second-call drift inside one session.
+    let request = fixed_fixture::term(&caps, &session, "(1 + 2 : Nat)");
     let t = Instant::now();
-    let outcome = session
-        .elaborate("(1 + 2 : Nat)", None, &elab_opts, None)
-        .expect("host stack");
+    let outcome = session.elaborate(&request, None).expect("host stack");
     drop(outcome.expect("(1 + 2 : Nat) elaborates"));
     report("elaborate_1", t.elapsed().as_micros());
 
+    let request = fixed_fixture::term(&caps, &session, "(1 * 7 : Nat)");
     let t = Instant::now();
-    let outcome = session
-        .elaborate("(1 * 7 : Nat)", None, &elab_opts, None)
-        .expect("host stack");
+    let outcome = session.elaborate(&request, None).expect("host stack");
     drop(outcome.expect("(1 * 7 : Nat) elaborates"));
     report("elaborate_2", t.elapsed().as_micros());
 
     // Stage 6: one `kernel_check`. The declaration name must be unique
     // within this session—repeated invocations of this binary each get
     // a fresh process and a fresh environment.
+    let request = fixed_fixture::curated_theorem(&caps, &session);
     let t = Instant::now();
-    let outcome = session
-        .kernel_check(
-            "theorem lean_rs_session_workflow_rfl : 1 + 1 = 2 := rfl",
-            &elab_opts,
-            None,
-            None,
-        )
-        .expect("host stack");
+    let outcome = session.kernel_check(&request, None, None).expect("host stack");
     match outcome {
         LeanKernelOutcome::Checked(evidence) => drop(evidence),
         LeanKernelOutcome::Unavailable(failure)

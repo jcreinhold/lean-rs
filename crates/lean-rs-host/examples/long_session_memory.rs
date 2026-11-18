@@ -13,6 +13,8 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::print_stdout)]
 
+#[path = "../tests/support/fixed_fixture.rs"]
+mod fixture;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 use std::thread;
@@ -203,7 +205,7 @@ fn run(config: &Config) -> LeanResult<()> {
     snapshot("after_runtime_init");
 
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root())?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
+    let caps = fixture::capabilities(&host)?;
     snapshot("after_host_capabilities");
 
     match config.mode {
@@ -358,9 +360,10 @@ fn run_fresh_import_drop_loop(
     caps: &LeanCapabilities<'static, '_>,
     config: &Config,
 ) -> LeanResult<PoolStats> {
+    let imports = scope(caps, &IMPORTS, lean_rs::module::HostImportOptions::default());
     let pool = SessionPool::with_memory_policy(runtime, 0, memory_policy(config));
     for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &IMPORTS, None, None)?;
+        let session = pool.acquire(caps, &imports, None, None)?;
         report_import_stats(
             "fresh_import_drop",
             iteration,
@@ -378,11 +381,12 @@ fn run_bounded_pool_loop(
     caps: &LeanCapabilities<'static, '_>,
     config: &Config,
 ) -> LeanResult<PoolStats> {
+    let imports = scope(caps, &IMPORTS, lean_rs::module::HostImportOptions::default());
     let pool = SessionPool::with_memory_policy(runtime, config.pool_capacity, memory_policy(config));
     if config.pool_capacity > 0 {
         let mut warm = Vec::with_capacity(config.pool_capacity);
         for iteration in 1..=config.pool_capacity {
-            let session = pool.acquire(caps, &IMPORTS, None, None)?;
+            let session = pool.acquire(caps, &imports, None, None)?;
             report_import_stats(
                 "bounded_pool_warm",
                 iteration,
@@ -396,7 +400,7 @@ fn run_bounded_pool_loop(
     snapshot("after_bounded_pool_warm");
 
     for iteration in 1..=config.imports {
-        let session = pool.acquire(caps, &IMPORTS, None, None)?;
+        let session = pool.acquire(caps, &imports, None, None)?;
         drop(session);
         maybe_checkpoint("bounded_pool", iteration, config.checkpoint_every);
     }
@@ -414,7 +418,12 @@ fn run_steady_state_loop(
         config.pool_capacity,
         memory_policy(config).max_fresh_imports(1),
     );
-    let mut session = pool.acquire(caps, &MIXED_IMPORTS, None, None)?;
+    let mut session = pool.acquire(
+        caps,
+        &scope(caps, &MIXED_IMPORTS, lean_rs::module::HostImportOptions::default()),
+        None,
+        None,
+    )?;
     report_import_stats(
         "steady_state_warm",
         1,
@@ -431,11 +440,11 @@ fn run_steady_state_loop(
     println!("bulk_calls={}", config.bulk);
     snapshot("after_bulk_introspection");
 
-    let opts = LeanElabOptions::new();
     let mut ok = 0usize;
     let mut err = 0usize;
     for (iteration, term) in (1..=config.elab).zip(ELAB_TERMS.iter().cycle()) {
-        match session.elaborate(term, None, &opts, None)? {
+        let request = fixed_term(caps, &session, term, &MIXED_IMPORTS);
+        match session.elaborate(&request, None)? {
             Ok(expr) => {
                 ok = ok.saturating_add(1);
                 drop(expr);
@@ -472,11 +481,12 @@ fn run_import_matrix(
         for iteration in 1..=config.imports {
             enforce_matrix_rss_cap(config)?;
             let profiler_options = import_profiler_options(mode, iteration);
-            match caps.profiling_session(&IMPORTS, mode, &profiler_options) {
+            let scope = scope(caps, &IMPORTS, mode.native_options(&profiler_options));
+            match caps.profiling_session(&scope, mode, &profiler_options) {
                 Ok(mut session) => {
                     report_import_stats("import_matrix", iteration, mode.label(), session.import_stats());
                     if !mode.load_exts() {
-                        report_no_ext_capability_gap(mode, &mut session);
+                        report_no_ext_capability_gap(caps, mode, &mut session);
                     }
                     drop(session);
                 }
@@ -526,7 +536,12 @@ fn run_pooled_distinct_arm(
     // pool, so holding it across the acquire would make every hit a miss and
     // silently turn the pooled arm into another capacity-0 arm.
     let mut held = None;
-    let rotation = DISTINCT_IMPORT_SETS.iter().take(distinct).cycle();
+    let scopes = DISTINCT_IMPORT_SETS
+        .iter()
+        .take(distinct)
+        .map(|names| scope(caps, names, lean_rs::module::HostImportOptions::default()))
+        .collect::<Vec<_>>();
+    let rotation = scopes.iter().cycle();
     for (iteration, imports) in (1..=acquisitions).zip(rotation) {
         drop(held.take());
         let session = pool.acquire(caps, imports, None, None)?;
@@ -622,12 +637,27 @@ fn field(line: &str, key: &str) -> Option<u64> {
 }
 
 fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
+    let roots = fixture::approved_graph(
+        caps,
+        &IMPORTS,
+        &lean_rs::module::HostImportOptions::default(),
+        "memory-probe-bracketed-lightweight",
+    );
+    #[allow(
+        unsafe_code,
+        reason = "separate protected approval for bracketed import and region release"
+    )]
+    // SAFETY: this approval covers the fixed lightweight import with no escaping Lean values.
+    let imports = unsafe {
+        caps.shim_capability()
+            .bracketed_import_scope(roots, IMPORTS.iter().map(|s| (*s).into()).collect())
+    };
     for iteration in 1..=config.imports {
         enforce_matrix_rss_cap(config)?;
         snapshot(&format!("bracketed_before_dispatch_{iteration}"));
         let sink = BracketedCheckpointSink { iteration };
         let result =
-            caps.bracketed_import_query(&IMPORTS, LeanBracketedImportRequest::new(BRACKETED_DECLS), Some(&sink))?;
+            caps.bracketed_import_query(&imports, LeanBracketedImportRequest::new(BRACKETED_DECLS), Some(&sink))?;
         report_bracketed_import_stats(
             "bracketed_lightweight",
             iteration,
@@ -643,7 +673,15 @@ fn run_bracketed_lightweight(caps: &LeanCapabilities<'static, '_>, config: &Conf
 
 fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) -> LeanResult<()> {
     enforce_matrix_rss_cap(config)?;
-    let mut session = caps.session(&["LeanRsFixture.SourceRanges"], None, None)?;
+    let mut session = caps.session(
+        &scope(
+            caps,
+            &["LeanRsFixture.SourceRanges"],
+            lean_rs::module::HostImportOptions::default(),
+        ),
+        None,
+        None,
+    )?;
     report_import_stats(
         "derived_indexes",
         1,
@@ -697,17 +735,29 @@ fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) ->
 
     let options = LeanElabOptions::new();
     let source = "theorem derivedProbe (h : True) : True := by\n  exact h\n";
-    let _module_query = session.process_module_query_batch(
-        source,
-        &[ModuleQuerySelector::ProofState {
-            id: "state".to_owned(),
+    fixture::approved_graph(
+        caps,
+        &["LeanRsFixture.SourceRanges"],
+        &lean_rs::module::HostImportOptions::default(),
+        "memory-probe-derived-fixed-requests",
+    );
+    let batch = lean_rs::host_bridge::HostModuleBatch {
+        source: source.into(),
+        selectors: vec![ModuleQuerySelector::ProofState {
+            id: "state".into(),
             line: 2,
             column: 4,
         }],
-        &ModuleQueryOutputBudgets::default(),
-        &options,
-        None,
-    )?;
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    let (env, imports) = session.source_context();
+    #[allow(unsafe_code, reason = "protected fixture approval for the fixed derived-index probe")]
+    // SAFETY: the approved theorem, projection, location and budgets are fixed above in this retained environment.
+    let query = unsafe {
+        caps.shim_capability()
+            .module_batch_scope(env, imports, fixture::resolution(), batch, options.source_options())
+    }?;
+    let _module_query = session.process_module_query_batch(&query, None)?;
     report_derived_work(
         "module_query_proof_state",
         1,
@@ -730,7 +780,19 @@ fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) ->
         }],
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let _attempt = session.attempt_proof(&proof_request, &options, None)?;
+    let (env, imports) = session.source_context();
+    #[allow(unsafe_code, reason = "protected fixture approval for the fixed derived-index probe")]
+    // SAFETY: the literal theorem, target, settings and budgets above belong to this approved workload.
+    let request = unsafe {
+        caps.shim_capability().proof_attempt_scope(
+            env,
+            imports,
+            fixture::resolution(),
+            proof_request,
+            options.source_options(),
+        )
+    }?;
+    let _result = session.attempt_proof(&request, None)?;
     report_derived_work(
         "proof_attempt",
         1,
@@ -750,7 +812,19 @@ fn run_derived_indexes(caps: &LeanCapabilities<'static, '_>, config: &Config) ->
         report_axioms: false,
         budgets: ModuleQueryOutputBudgets::default(),
     };
-    let _verification = session.verify_declaration(&verification_request, &options, None)?;
+    let (env, imports) = session.source_context();
+    #[allow(unsafe_code, reason = "protected fixture approval for the fixed derived-index probe")]
+    // SAFETY: the literal theorem, target, settings and budgets above belong to this approved workload.
+    let request = unsafe {
+        caps.shim_capability().verification_scope(
+            env,
+            imports,
+            fixture::resolution(),
+            verification_request,
+            options.source_options(),
+        )
+    }?;
+    let _result = session.verify_declaration(&request, None)?;
     report_derived_work(
         "verify_declaration",
         1,
@@ -851,9 +925,12 @@ fn report_import_profile_gap(mode: LeanImportProfileMode, iteration: usize, err:
     );
 }
 
-fn report_no_ext_capability_gap(mode: LeanImportProfileMode, session: &mut lean_rs_host::LeanSession<'_, '_>) {
-    let opts = LeanElabOptions::new();
-    match session.elaborate(ELAB_TERMS[0], None, &opts, None) {
+fn report_no_ext_capability_gap(
+    caps: &LeanCapabilities<'static, '_>,
+    mode: LeanImportProfileMode,
+    session: &mut lean_rs_host::LeanSession<'static, '_>,
+) {
+    match session.elaborate(&fixed_term(caps, session, ELAB_TERMS[0], &IMPORTS), None) {
         Ok(Ok(expr)) => {
             drop(expr);
             println!(
@@ -879,11 +956,56 @@ fn report_no_ext_capability_gap(mode: LeanImportProfileMode, session: &mut lean_
 }
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.parent().and_then(std::path::Path::parent).map_or_else(
-        || PathBuf::from("fixtures/lean"),
-        |workspace| workspace.join("fixtures").join("lean"),
-    )
+    fixture::fixture_root()
+}
+
+fn scope<'c>(
+    caps: &'c LeanCapabilities<'static, '_>,
+    names: &[&str],
+    options: lean_rs::module::HostImportOptions,
+) -> lean_rs::module::TrustedHostImports<'static, 'c> {
+    let roots = fixture::approved_graph(caps, names, &options, "memory-probe-import");
+    #[allow(
+        unsafe_code,
+        reason = "protected graph policy checks exact roots, modules, options and profiler destination"
+    )]
+    // SAFETY: the authenticated graph row covers these exact imports, including extension loading,
+    // under the fixture reader loans and the process launcher's retained toolchain closure.
+    unsafe {
+        caps.shim_capability()
+            .import_scope_with_options(roots, names.iter().map(|s| (*s).into()).collect(), options)
+    }
+}
+
+fn fixed_term<'c>(
+    caps: &'c LeanCapabilities<'static, '_>,
+    session: &lean_rs_host::LeanSession<'static, '_>,
+    term: &str,
+    names: &[&str],
+) -> lean_rs::host_bridge::TrustedHostTerm<'static, 'c> {
+    assert!(ELAB_TERMS.contains(&term));
+    let (env, imports) = session.source_context();
+    let paths = fixture::approved_graph(
+        caps,
+        names,
+        imports.options(),
+        "memory-probe-four-terms-default-options",
+    );
+    assert!(imports.matches_request(&paths, &names.iter().map(|s| (*s).into()).collect::<Vec<_>>()));
+    #[allow(unsafe_code, reason = "four literal expressions in the explicitly approved workload")]
+    // SAFETY: this policy row covers the four fixed terms, no expected type and default options
+    // for this exact admitted environment, including the matrix's no-extension case.
+    unsafe {
+        caps.shim_capability().term_scope(
+            env,
+            imports,
+            fixture::resolution(),
+            term.into(),
+            None,
+            LeanElabOptions::new().source_options(),
+        )
+    }
+    .expect("admit fixed term")
 }
 
 fn maybe_checkpoint(stage: &str, iteration: usize, checkpoint_every: usize) {

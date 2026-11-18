@@ -1,72 +1,25 @@
-//! Process a Lean source file with one bounded module query.
-//!
-//! Run with:
-//!
-//! ```text
-//! cargo run -p lean-rs-host --example process_module_query -- <path> diagnostics
-//! cargo run -p lean-rs-host --example process_module_query -- <path> type-at <line> <column>
-//! cargo run -p lean-rs-host --example process_module_query -- <path> goal-at <line> <column>
-//! cargo run -p lean-rs-host --example process_module_query -- <path> references <name>
-//! ```
+//! Process an application-attested Lean module query and print its bounded result.
 
 #![allow(clippy::print_stdout)]
 
-use std::path::PathBuf;
-use std::process::ExitCode;
-
-use lean_rs::{LeanError, LeanRuntime};
+use lean_rs::LeanResult;
+use lean_rs::host_bridge::{HostModuleQuery, TrustedModuleSource};
+use lean_rs_host::LeanSession;
 use lean_rs_host::host::process::{ModuleQuery, ModuleQueryOutcome, ModuleQueryResult};
-use lean_rs_host::{LeanElabOptions, LeanHost};
 
-fn main() -> ExitCode {
-    match run() {
-        Ok(code) => code,
-        Err(err) => {
-            eprintln!("[{}] {err}", err.code());
-            ExitCode::FAILURE
-        }
-    }
+/// # Errors
+/// Returns the session dispatch error if the admitted query fails.
+pub fn run<'lean>(
+    session: &mut LeanSession<'lean, '_>,
+    request: &TrustedModuleSource<'lean, '_, HostModuleQuery>,
+) -> LeanResult<()> {
+    print_outcome(session.process_module_query(request, None)?);
+    Ok(())
 }
 
-fn run() -> Result<ExitCode, LeanError> {
-    let mut args = std::env::args().skip(1);
-    let Some(path_arg) = args.next() else {
-        usage();
-        return Ok(ExitCode::from(2));
-    };
-    let Some(query_arg) = args.next() else {
-        usage();
-        return Ok(ExitCode::from(2));
-    };
-    let path = PathBuf::from(path_arg);
-    let source = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("failed to read {}: {err}", path.display());
-            return Ok(ExitCode::from(2));
-        }
-    };
-    let query = match parse_query(&query_arg, args) {
-        Ok(query) => query,
-        Err(err) => {
-            eprintln!("{err}");
-            usage();
-            return Ok(ExitCode::from(2));
-        }
-    };
-
-    let runtime = LeanRuntime::init()?;
-    let host = LeanHost::from_lake_project(runtime, lake_project_root())?;
-    let caps = host.load_capabilities("lean_rs_fixture", "LeanRsFixture")?;
-    let mut session = caps.session(&["LeanRsHostShims.Elaboration"], None, None)?;
-    let options = LeanElabOptions::new().file_label(&path.display().to_string());
-
-    let outcome = session.process_module_query(&source, &query, &options, None)?;
-    print_outcome(outcome);
-    Ok(ExitCode::SUCCESS)
-}
-
-fn parse_query<I>(kind: &str, mut args: I) -> Result<ModuleQuery, String>
+/// # Errors
+/// Returns a diagnostic for an unknown selector or a missing or invalid argument.
+pub fn parse_query<I>(kind: &str, mut args: I) -> Result<ModuleQuery, String>
 where
     I: Iterator<Item = String>,
 {
@@ -143,16 +96,4 @@ fn print_result(result: ModuleQueryResult) {
             );
         }
     }
-}
-
-fn usage() {
-    eprintln!("usage: process_module_query <path> <diagnostics|type-at|goal-at|references> [args]");
-}
-
-fn lake_project_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.parent().and_then(std::path::Path::parent).map_or_else(
-        || PathBuf::from("fixtures/lean"),
-        |workspace| workspace.join("fixtures").join("lean"),
-    )
 }

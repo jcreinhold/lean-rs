@@ -42,11 +42,12 @@ cargo nextest run -p lean-rs-host --test progress
 cargo nextest run -p lean-rs-worker-child --test streaming_runner --test typed_command
 cargo run -p lean-rs --example interop_callback
 cargo run -p lean-rs --example string_streaming
-cargo run -p lean-rs-host --example progress
+cargo build -p lean-rs-host --example progress
 cargo run -p lean-rs-worker-child --example worker_capability_runner
 ```
 
-The examples need their artifact-writer prerequisites; see the [interop](recipes/downstream-interop.md) and
+The progress example accepts an application-admitted session. Its build checks the example API; the host progress test above exercises runtime callbacks.
+The executable examples need their artifact-writer prerequisites; see the [interop](recipes/downstream-interop.md) and
 [worker](recipes/worker-capability-runner.md) recipes. For performance-sensitive changes, compare saved baselines on the
 same toolchain and machine:
 

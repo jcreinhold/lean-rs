@@ -10,7 +10,8 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
 
-use std::path::PathBuf;
+#[path = "../tests/support/fixed_fixture.rs"]
+mod fixed_fixture;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
@@ -24,18 +25,9 @@ use lean_rs_host::{LeanCapabilities, LeanElabOptions, LeanHost, LeanProgressEven
 
 // -- fixture bring-up ---------------------------------------------------
 
-fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
-}
-
 fn fixture_host() -> LeanHost<'static> {
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
-    LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("Lake project opens")
+    LeanHost::from_lake_project(runtime, fixed_fixture::fixture_root()).expect("Lake project opens")
 }
 
 // -- query_declarations_bulk --------------------------------------------
@@ -68,7 +60,7 @@ const HANDLES_NAMES: [&str; 16] = [
 
 fn bench_query_declarations_bulk(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::query_declarations_bulk");
@@ -108,7 +100,7 @@ impl LeanProgressSink for CountingSink {
 
 fn bench_query_declarations_bulk_progress(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
     let sink = CountingSink::default();
     let names = &HANDLES_NAMES[..16];
@@ -145,10 +137,10 @@ fn introspection_names_5k() -> Vec<&'static str> {
 fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_type_bulk_vs_loop");
@@ -181,10 +173,10 @@ fn bench_declaration_type_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_kind_bulk_vs_loop");
@@ -217,10 +209,10 @@ fn bench_declaration_kind_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let names = introspection_names_5k();
     let mut bulk_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
     let mut loop_session = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("Handles imports cleanly");
 
     let mut group = c.benchmark_group("host::session::declaration_name_bulk_vs_loop");
@@ -262,14 +254,14 @@ fn bench_declaration_name_bulk_vs_loop(c: &mut Criterion, caps: &LeanCapabilitie
 
 fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
         .expect("Elaboration imports cleanly");
-    let opts = LeanElabOptions::new();
+    let term = fixed_fixture::term(caps, &session, "(1 + 1 : Nat)");
 
     c.bench_function("host::session::elaborate_small", |b| {
         b.iter(|| {
             let outcome = session
-                .elaborate(black_box("(1 + 1 : Nat)"), None, &opts, None)
+                .elaborate(black_box(&term), None)
                 .expect("host stack reports no exception");
             let expr = outcome.expect("elaboration succeeds");
             black_box(expr);
@@ -288,7 +280,7 @@ fn bench_elaborate(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.Meta"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsHostShims.Meta"), None, None)
         .expect("Meta imports cleanly");
     let expr = session
         .declaration_type("Nat.zero", None)
@@ -316,7 +308,7 @@ fn bench_run_meta_whnf(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
 
 fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabilities<'_, '_>) {
     let mut session = caps
-        .session(&["LeanRsHostShims.InfoTree"], None, None)
+        .session(&fixed_fixture::imports(caps, "LeanRsHostShims.InfoTree"), None, None)
         .expect("InfoTree imports cleanly");
     let source = "def benchValue : Nat := 1\n#check benchValue\n";
     let selectors = vec![
@@ -339,17 +331,37 @@ fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabili
         max_bytes: 1_048_576,
     };
 
+    let (env, imports) = session.source_context();
+    let batch = lean_rs::host_bridge::HostModuleBatch {
+        source: source.into(),
+        selectors,
+        budgets,
+    };
+    let cached = lean_rs::host_bridge::HostCachedModuleBatch {
+        batch,
+        policy: format!(
+            "{}\n{}\n{}\n{}\n{}",
+            policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
+        ),
+    };
+    #[allow(unsafe_code, reason = "fixed benchmark case under qualified fixture custody")]
+    // SAFETY: the request above contains one fixed declaration, two fixed projections
+    // and bounded cache policy in this exact InfoTree environment with default options.
+    let request = unsafe {
+        caps.shim_capability().cached_module_batch_scope(
+            env,
+            imports,
+            fixed_fixture::resolution(),
+            cached,
+            options.source_options(),
+        )
+    }
+    .expect("attest fixed benchmark");
+
     c.bench_function("host::process::module_query_batch_cached_decode", |b| {
         b.iter(|| {
             let outcome = session
-                .process_module_query_batch_cached(
-                    black_box(source),
-                    black_box(&selectors),
-                    black_box(&budgets),
-                    black_box(&options),
-                    black_box(&policy),
-                    None,
-                )
+                .process_module_query_batch_cached(black_box(&request), None)
                 .expect("cached module query");
             black_box(outcome);
         });
@@ -367,7 +379,7 @@ fn bench_module_query_batch_cached_decode(c: &mut Criterion, caps: &LeanCapabili
 
 fn bench_session_pool_reuse_hit(c: &mut Criterion, runtime: &'static LeanRuntime, caps: &LeanCapabilities<'_, '_>) {
     let pool = SessionPool::with_capacity(runtime, 1);
-    let imports = ["LeanRsFixture.Handles"];
+    let imports = fixed_fixture::imports(caps, "LeanRsFixture.Handles");
 
     // Warm the pool: one acquire + drop seeds the free list with a
     // ready-to-reuse environment.
@@ -389,9 +401,7 @@ fn bench_session_pool_reuse_hit(c: &mut Criterion, runtime: &'static LeanRuntime
 fn criterion_benchmarks(c: &mut Criterion) {
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("capabilities load");
+    let caps = fixed_fixture::capabilities(&host).expect("capabilities load");
 
     bench_query_declarations_bulk(c, &caps);
     bench_query_declarations_bulk_progress(c, &caps);
