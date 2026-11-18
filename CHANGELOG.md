@@ -24,7 +24,12 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - Advance worker protocol to 13 for host metadata and artifact-read lifecycle messages. Install matching parent and
   child builds together. Lean 4.36.0 joins the supported toolchain window.
 - The new managed native-reader completion check requires the macOS atomic process-group census. Other platforms
-  currently fail closed for that mode; Linux qualification remains open before a public release.
+  fail closed for that mode. Linux supports ordinary SDK operations. Managed-reader completion can report
+  unsupported after payload execution on Linux, so callers cannot infer that the payload never ran.
+
+- Six host examples now build as libraries: `theorem_query`, `proof_check`, `meta_query`, `progress`,
+  `process_module_query`, and `import_residue_probe`. Applications supply the admitted session, request, or
+  ordered import profiles. See the [migration instructions](crates/lean-rs-host/examples/README.md).
 
 ### lean-toolchain
 
