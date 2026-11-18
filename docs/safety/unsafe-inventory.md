@@ -205,14 +205,13 @@ constructor shape, and owned/borrowed conventions.
 | `option.rs` | Lean's nullary scalar `none` or constructor `some` with the expected field. | Tag and field shape determine which payload may be read. |
 | `except.rs` | Owned result from the corresponding typed Lean export. | Wrapping transfers one reference count into `Obj`; decoding follows the error/success constructor contract. |
 | `structure.rs`, `tuple.rs` | Expected constructor tag, object arity, and scalar tail. | `ObjView`/`CtorView` check shape and scalar bounds; `take_ctor_objects` acquires child references before the parent is dropped. |
-| `traits.rs`, `handle/{name,level,expr,declaration}.rs` | `from_c` receives a value of the declared representation with owned-result convention. | Wrapping a boxed result transfers exactly one reference; semantic handles retain the runtime lifetime. |
+| `traits.rs` | The caller of `LeanAbi::from_c` supplies a valid value of the implementation's Lean type. | The unsafe `Obj` implementation transfers one owned reference into a handle tied to the runtime lifetime. |
 
-`LeanAbi`'s hidden sibling extension is an implementation convention, not Rust-enforced sealing: its supertrait module
-is public. In addition, the hidden `LeanAbi::from_c` conversion hook is a public **safe** method. The `Obj`
-implementation accepts a raw pointer and calls `Obj::from_owned_raw` without establishing validity or ownership itself.
-Direct external calls can therefore violate the wrapping preconditions through a safe signature. This remains an
-unresolved API soundness gap; checked export dispatch's controlled call path does not close that public entry point.
-Review representation and dispatch changes against the actual visibility and caller obligations.
+`LeanCReprAbi` restricts C representations through a private sealing trait. Downstream code can implement `LeanAbi`
+for a new Rust type with an `unsafe impl` and a supported C representation. Review each implementation for its actual
+layout, ownership and scalar refinements. In particular, `Obj::from_c` delegates to `Obj::from_owned_raw`; the caller
+establishes pointer validity and ownership before that call. The compile-fail cases `abi_c_representation_is_sealed`,
+`abi_implementation_requires_unsafe` and `abi_raw_decode_requires_unsafe` exercise these distinct boundaries.
 
 ### Module—`crates/lean-rs/src/module/`
 

@@ -15,16 +15,16 @@ fields, and `LeanObjectRepr` and the other layout mirrors remain `pub(crate)`. R
 directly and accept its unsafe preconditions. The safe `lean-rs` surface never re-exports raw symbols or requires
 callers to inspect object headers, manage reference counts, or cast symbol addresses.
 
-Safe export lookup requires trusted signature metadata, such as a build manifest for a known capability contract.
-`LeanModule::exported_unchecked::<Args, R>(name)` is unsafe: a symbol name and caller-selected Rust types do not prove
-that the compiled C ABI matches. Manifest and loader checks are described in
-[`loading.md`](loading.md).
+Generic export binding and invocation are unsafe. `LeanCapability::exported` checks the requested signature against the
+manifest, but the caller must establish that the actual loaded symbol implements that contract. Safe typed operations
+rely on that responsibility being discharged when their capability is established. See [loading](loading.md).
 
-The current public hidden `LeanAbi` conversion hooks do not fully enforce the intended boundary: `Obj`'s safe `from_c`
-implementation accepts a raw C representation without a caller-side unsafe requirement. The sibling-crate marker
-convention also does not restrict implementations through Rust visibility. These are unresolved implementation gaps, not
-exceptions to the required contract above. The [unsafe inventory](../safety/unsafe-inventory.md) records the source
-locations and required follow-up; documentation cleanup does not repair that source boundary.
+`LeanAbi` is a public unsafe trait. Implementers must justify the Lean type, representation and ownership conventions
+in both conversion directions. Its associated C representation implements the sealed `LeanCReprAbi` trait. Calling
+`LeanAbi::from_c` is unsafe even for `Obj`: the caller must supply an initialized value of the correct representation.
+A boxed result must belong to the runtime and transfer one owned reference on an attached thread. Sealing the C
+representation alone cannot establish pointer validity, boxed layout or scalar refinements. See the
+[unsafe inventory](../safety/unsafe-inventory.md) for the conversion boundary.
 
 ## Object ownership and lifetime
 
