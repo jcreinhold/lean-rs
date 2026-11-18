@@ -863,7 +863,8 @@ fn metadata_mismatch_is_reported_by_bootstrap_check() {
     let first = report.first_error().expect("metadata mismatch is reported");
     assert_eq!(
         first.code(),
-        LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch
+        LeanWorkerBootstrapDiagnosticCode::CapabilityMetadataMismatch,
+        "{first:?}"
     );
 }
 
