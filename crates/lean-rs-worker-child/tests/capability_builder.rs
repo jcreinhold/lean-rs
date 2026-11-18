@@ -44,29 +44,24 @@ fn shipped_template_manifest() -> PathBuf {
 }
 
 fn shipped_template_target_dir() -> PathBuf {
-    static TARGET_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    TARGET_DIR
-        .get_or_init(|| {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock is after Unix epoch")
-                .as_nanos();
-            std::env::temp_dir().join(format!(
-                "lean-rs-shipped-template-target-{}-{nonce}",
-                std::process::id(),
-            ))
-        })
-        .clone()
+    // Cargo serializes builds in this package-owned target across nextest processes.
+    // Each process still asks Cargo to validate the selected sources and outputs.
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("shipped-template")
 }
 
-fn build_shipped_template() -> &'static Path {
+struct ShippedBuild {
+    manifest: PathBuf,
+    worker: PathBuf,
+}
+
+fn build_shipped_template() -> &'static ShippedBuild {
     // Memoize: see the matching note in `loader_regressions::build_template`.
     // Each invocation of `cargo build` spawns its own rustc swarm; with
     // nextest's parallel test threads and many tests calling this
     // helper, the unbounded fan-out can exhaust developer-machine RAM.
     // Cap the inner cargo's jobs and run the build at most once per
     // test process.
-    static ONCE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    static ONCE: std::sync::OnceLock<ShippedBuild> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
             .args(["build", "--jobs", "1", "--manifest-path"])
@@ -83,9 +78,12 @@ fn build_shipped_template() -> &'static Path {
         );
         // Cargo owns the output layout; its JSON messages identify the build
         // directories across toolchains without guessing paths under target/.
-        String::from_utf8_lossy(&output.stdout)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let messages = stdout
             .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok());
+        let manifest = messages
+            .clone()
             .filter(|message| {
                 message.get("reason").and_then(serde_json::Value::as_str) == Some("build-script-executed")
             })
@@ -95,27 +93,32 @@ fn build_shipped_template() -> &'static Path {
                         .then(|| pair.get(1)?.as_str().map(PathBuf::from))?
                 })
             })
-            .expect("shipped build script emitted its selected capability manifest")
+            .expect("shipped build script emitted its selected capability manifest");
+        let worker = messages
+            .filter(|message| {
+                message.get("reason").and_then(serde_json::Value::as_str) == Some("compiler-artifact")
+                    && message.pointer("/target/name").and_then(serde_json::Value::as_str)
+                        == Some("shipped-lean-crate-worker")
+            })
+            .find_map(|message| message.get("executable")?.as_str().map(PathBuf::from))
+            .expect("Cargo reported the shipped worker executable");
+        ShippedBuild { manifest, worker }
     })
 }
 
 fn shipped_manifest_path() -> PathBuf {
-    build_shipped_template().to_owned()
-}
-
-fn env_exe_name(name: &str) -> String {
-    let mut name = name.to_owned();
-    if !std::env::consts::EXE_SUFFIX.is_empty() {
-        name.push_str(std::env::consts::EXE_SUFFIX);
-    }
-    name
+    build_shipped_template().manifest.clone()
 }
 
 fn shipped_worker_binary() -> PathBuf {
-    build_shipped_template();
-    shipped_template_target_dir()
-        .join("debug")
-        .join(env_exe_name("shipped-lean-crate-worker"))
+    build_shipped_template().worker.clone()
+}
+
+fn shipped_builder() -> LeanWorkerCapabilityBuilder {
+    let capability = LeanBuiltCapability::manifest_path(shipped_manifest_path());
+    LeanWorkerCapabilityBuilder::from_built_capability(&capability, ["ShipLeanDemo"])
+        .expect("shipped manifest selects the package-owned project")
+        .worker_child(LeanWorkerChild::path(shipped_worker_binary()))
 }
 
 fn builder() -> LeanWorkerCapabilityBuilder {
@@ -309,17 +312,7 @@ fn built_capability_builder_infers_lake_root_from_dylib_path() {
 
 #[test]
 fn app_owned_worker_child_locator_accepts_explicit_binary() {
-    let child = LeanWorkerChild::path(worker_binary());
-    let mut capability = LeanWorkerCapabilityBuilder::new(
-        interop_root(),
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        ["LeanRsInteropConsumer.Callback"],
-    )
-    .worker_child(child)
-    .open()
-    .expect("explicit app-owned worker child opens");
-
+    let mut capability = shipped_builder().open().expect("explicit app-owned worker child opens");
     capability.open_session(None, None).expect("session opens");
 }
 
@@ -765,16 +758,7 @@ fn bootstrap_report_distinguishes_missing_child_without_spawning() {
 
 #[test]
 fn manifest_backed_builder_uses_manifest_capability_identity() {
-    // The manifest, primary dylib, and worker binary are all produced by
-    // the template's `cargo build`; without this the test relied on a
-    // sibling having built the template earlier under nextest's scheduler.
-    build_shipped_template();
-
-    let spec = LeanBuiltCapability::manifest_path(shipped_manifest_path());
-    let report = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["ShipLeanDemo"])
-        .expect("manifest-backed descriptor creates worker builder")
-        .worker_child(LeanWorkerChild::path(shipped_worker_binary()))
-        .check();
+    let report = shipped_builder().check();
 
     assert!(
         report.is_ok(),
@@ -1080,7 +1064,7 @@ fn capability_builder_session_import_profile_reaches_child_import() {
 
 #[test]
 fn restart_policy_override_is_applied_during_builder_startup() {
-    let capability = builder()
+    let capability = shipped_builder()
         .restart_policy(LeanWorkerRestartPolicy::default().max_requests(1))
         .open()
         .expect("builder opens capability with restart policy");
