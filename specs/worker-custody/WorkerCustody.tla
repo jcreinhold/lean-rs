@@ -11,6 +11,8 @@ PublishBeforeAdopt == "publish_before_adopt"
 AckBeforeDurable == "ack_before_durable"
 LoseAdoption == "lose_adoption"
 CollectPreparingOnParentDeath == "collect_preparing_on_parent_death"
+DropPreparingAfterPossibleSpawn == "drop_preparing_after_possible_spawn"
+DirectExitReturnsTrackerCapacity == "direct_exit_returns_tracker_capacity"
 
 Phases == {"idle", "reserved", "running", "stopping", "closed"}
 Observations == {"unknown", "present", "absent"}
@@ -222,6 +224,50 @@ MutantCollectPreparing ==
   /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent,
                  guardianPresent, guardianStarted, identitiesAuthenticated,
                  leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, writerAdmitted>>
+
+\* The accept-error Drop path retires Preparing after authenticated HELLO,
+\* although the actual payload and guardian still exist. This configuration
+\* projects capacityReserved to the durable registry reservation.
+MutantDropPreparingAfterPossibleSpawn ==
+  /\ Mode = DropPreparingAfterPossibleSpawn
+  /\ phase = "running"
+  /\ supervisorAlive
+  /\ identitiesAuthenticated
+  /\ ~runningDurable
+  /\ ~leaseAdopted
+  /\ groupPresent
+  /\ guardianPresent
+  /\ capacityReserved
+  /\ phase' = "closed"
+  /\ capacityReserved' = FALSE
+  /\ capacityReturns' = capacityReturns + 1
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable,
+                 supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, writerAdmitted>>
+
+\* A direct-child wait without an attached lease returns the tracker slot
+\* while guardian custody remains open. The payload is already absent here,
+\* so this is distinct from the registry/payload counterexample above.
+MutantDirectExitReturnsTrackerCapacity ==
+  /\ Mode = DirectExitReturnsTrackerCapacity
+  /\ phase \in {"running", "stopping"}
+  /\ supervisorAlive
+  /\ identitiesAuthenticated
+  /\ ~leaseAdopted
+  /\ ~rootPresent
+  /\ ~groupPresent
+  /\ guardianPresent
+  /\ capacityReserved
+  /\ phase' = "closed"
+  /\ capacityReserved' = FALSE
+  /\ capacityReturns' = capacityReturns + 1
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable,
+                 supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
                  groupObservation, guardianObservation, writerAdmitted>>
 
 AcquireReads ==
@@ -467,7 +513,8 @@ Next == Reserve \/ SpawnFails \/ Spawn \/ GuardianReady \/
         AuthenticateIdentities \/ PublishBootstrapIdentity \/ AdoptLease \/ PublishRunning \/
         AcknowledgeStartup \/ MutantPublishBeforeAdopt \/
         MutantAckBeforeDurable \/ MutantLoseAdoption \/
-        MutantCollectPreparing \/ AcquireReads \/ DropWorkerAlias \/
+        MutantCollectPreparing \/ MutantDropPreparingAfterPossibleSpawn \/
+        MutantDirectExitReturnsTrackerCapacity \/ AcquireReads \/ DropWorkerAlias \/
         RequestStop \/ SupervisorCrash \/ RootExits \/ GroupExits \/
         GuardianDetectsOwnerLoss \/ GuardianLoss \/ ObserveGuardianAbsent \/
         DiscoverGuardianLoss \/ RecoverClosedScope \/ CleanupGroup \/ PublishBootstrapClosure \/ GuardianExitsAfterGroup \/

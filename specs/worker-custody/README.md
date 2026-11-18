@@ -213,3 +213,31 @@ instance of this custody contract. Multiple commands within one companion are
 host/worker-protocol semantics and stay outside this model. The host must keep a
 companion's capacity reserved when its command outcome is known but cleanup is
 not; the SDK reports those facts separately.
+
+## Startup-error negative controls
+
+Two focused controls preserve the distinct failures observed by the one-use
+`before-running` experiment on runtime `5ff75ec` (SDK model revision `21cd9f5`):
+
+- `DropPreparingAfterPossibleSpawn.cfg` reaches authenticated HELLO before
+  Running or lease adoption, then models erroneous Preparing retirement after
+  an accept error. `NoEarlyCapacityReturn` fails while payload and guardian are
+  present. The concrete cut was `owner.write` returning `AlreadyExists`, followed
+  by `ParentLifetime::drop` retiring and deleting the original Preparing record.
+- `DirectExitReturnsTrackerCapacity.cfg` reaches authenticated HELLO without
+  adoption, then payload absence with a live guardian. It models the unattached
+  direct-child wait returning the tracker reservation.
+  `GuardianPresentImpliesCapacity` fails even though the payload is absent.
+
+In the first control `capacityReserved` projects the durable registry reservation;
+in the second it projects the same in-memory tracker's custody reservation. These
+are separate configurations, not a model of two coupled counters. In particular,
+the tracker observation must not be inferred from registry admission, and the
+registry's guardian-only occupancy policy is not the payload-present failure.
+The good protocol is unchanged. Neither negative control simulates filesystem
+error delivery, kernel wait semantics, or proves their Rust implementation.
+
+Run these controls with the same Java/TLC command above, substituting their
+`.cfg` names. Each must fail its named invariant with a reachable trace; a failed
+control is not successful runtime qualification. Preserve the failed experiment
+and its clean final census separately from these abstract traces.
