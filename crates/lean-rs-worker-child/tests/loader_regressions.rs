@@ -199,15 +199,19 @@ fn consumer_dylib_path() -> PathBuf {
 
 fn open_consumer_capability() -> LeanCapability<'static> {
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation succeeds");
-    LeanCapability::open_with_dependencies(
-        runtime,
-        consumer_dylib_path(),
-        "lean_rs_interop_consumer",
-        "LeanRsInteropConsumer",
-        [LeanLibraryDependency::path(interop_dylib_path())
-            .export_symbols_for_dependents()
-            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
-    )
+    // SAFETY: this test owns the Lake-built consumer and interop images from the selected
+    // toolchain. Their named initializers and dependency order match the fixture sources.
+    unsafe {
+        LeanCapability::open_with_dependencies(
+            runtime,
+            consumer_dylib_path(),
+            "lean_rs_interop_consumer",
+            "LeanRsInteropConsumer",
+            [LeanLibraryDependency::path(interop_dylib_path())
+                .export_symbols_for_dependents()
+                .initializer("lean_rs_interop_shims", "LeanRsInterop")],
+        )
+    }
     .expect("consumer capability opens through public bundle loader")
 }
 
@@ -233,9 +237,10 @@ fn public_capability_bundle_keeps_transitive_dependency_after_opener_returns() {
     .expect("callback registration succeeds");
 
     let (handle, trampoline) = callback.abi_parts();
-    let status = callback_loop
-        .call(handle, trampoline, 2)
-        .expect("callback loop runs after opener returned");
+    // SAFETY: the fixture accepts the live registered callback and its matching trampoline;
+    // both remain valid for the synchronous call and the fixture returns IO UInt8.
+    let status =
+        unsafe { callback_loop.call(handle, trampoline, 2) }.expect("callback loop runs after opener returned");
 
     assert_eq!(LeanCallbackStatus::from_abi(status), Some(LeanCallbackStatus::Ok));
     assert_eq!(

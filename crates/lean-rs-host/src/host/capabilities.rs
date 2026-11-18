@@ -40,12 +40,12 @@ use std::path::{Path, PathBuf};
 use lean_rs::error::LeanResult;
 use lean_rs::module::{LeanLibrary, LoadedHostArtifacts, TrustedHostCapability, TrustedHostImports};
 
+use super::project_initializer::initializer_matches;
 use crate::host::bracketed::{LeanBracketedImportRequest, LeanBracketedImportResult};
 use crate::host::cancellation::LeanCancellationToken;
 use crate::host::host::LeanHost;
 use crate::host::progress::LeanProgressSink;
 use crate::host::session::{LeanImportProfileMode, LeanImportProfilerOptions, LeanSession, LeanSessionImportProfile};
-use super::project_initializer::initializer_matches;
 use crate::host::shim_bindings::host_shim_export_signatures;
 
 const HOST_CARGO_TEST_IMPORT_OVERRIDE: &str = "LEAN_RS_ALLOW_CARGO_TEST_HOST_IMPORTS";
@@ -132,7 +132,9 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         if !library.opened_for(host.runtime(), &host.project_library_path(package, lib_name))
             || !initializer_matches(&approved, package, lib_name)
         {
-            return Err(lean_rs::__host_internals::host_module_init("project loader returned a different image or initializer"));
+            return Err(lean_rs::__host_internals::host_module_init(
+                "project loader returned a different image or initializer",
+            ));
         }
         library.initialize_module(approved.package_name(), approved.module_name())?;
         capabilities._user_library = Some(library);

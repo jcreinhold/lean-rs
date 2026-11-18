@@ -1547,7 +1547,11 @@ impl HostAnchor {
                 lib_name,
                 manifest_path: None,
             } => {
-                let library = authority.project(runtime, &host.project_library_path(package, lib_name), &lean_rs::module::LeanModuleInitializer::new(package, lib_name))?;
+                let library = authority.project(
+                    runtime,
+                    &host.project_library_path(package, lib_name),
+                    &lean_rs::module::LeanModuleInitializer::new(package, lib_name),
+                )?;
                 LeanCapabilities::from_prepared_capability(host, prepared, shim, library, package, lib_name)?
             }
             _ => LeanCapabilities::from_prepared(host, prepared, shim)?,

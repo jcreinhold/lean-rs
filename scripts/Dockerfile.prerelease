@@ -33,7 +33,7 @@
 # child process instead of returning synchronously).
 FROM ubuntu:24.04
 
-ARG LEAN_VERSION=4.35.0
+ARG LEAN_VERSION=4.36.0
 ARG RUST_CHANNEL=stable
 
 # Reproducibility:

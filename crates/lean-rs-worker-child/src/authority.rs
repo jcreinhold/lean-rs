@@ -76,8 +76,12 @@ pub trait WorkerAuthority: Send + Sync {
     ) -> LeanResult<LoadedHostArtifacts<'static>>;
     /// Admit a project library, including its module initializers.
     /// Return the independently approved initializer with the actual loaded library.
-    fn project(&self, runtime: &'static LeanRuntime, path: &Path, requested: &lean_rs::module::LeanModuleInitializer)
-        -> LeanResult<(LeanLibrary<'static>, lean_rs::module::LeanModuleInitializer)>;
+    fn project(
+        &self,
+        runtime: &'static LeanRuntime,
+        path: &Path,
+        requested: &lean_rs::module::LeanModuleInitializer,
+    ) -> LeanResult<(LeanLibrary<'static>, lean_rs::module::LeanModuleInitializer)>;
     /// Acquire custody for the single deployment-approved manifest before bootstrap reads any bytes.
     fn manifest_read(&self, requested: &Path) -> LeanResult<WorkerManifestRead>;
     /// Verify the actual images and hold custody for the exact requested manifest and symbol contracts.

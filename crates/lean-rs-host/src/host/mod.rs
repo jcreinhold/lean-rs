@@ -59,13 +59,13 @@ pub(crate) mod lake;
 mod bracketed;
 mod cancellation;
 mod capabilities;
-mod project_initializer;
 #[allow(
     clippy::module_inception,
     reason = "the LeanHost type is the natural name for this file"
 )]
 mod host;
 mod progress;
+mod project_initializer;
 mod session;
 mod shim_bindings;
 

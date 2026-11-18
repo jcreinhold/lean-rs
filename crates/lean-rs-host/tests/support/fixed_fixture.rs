@@ -13,7 +13,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
-
 };
 
 #[derive(Deserialize)]
@@ -53,7 +52,6 @@ fn hex_digest(bytes: &[u8]) -> String {
 struct Admission {
     record: Record,
     approved_rows: Vec<serde_json::Value>,
-
 }
 fn digest(path: &Path) -> String {
     hex_digest(&fs::read(path).expect("read controlled fixture input"))
@@ -175,11 +173,7 @@ fn admission() -> &'static Admission {
             }
         }
         assert!(inventory.is_empty());
-        Admission {
-            record,
-            approved_rows,
-
-        }
+        Admission { record, approved_rows }
     })
 }
 pub(super) fn fixture_root() -> PathBuf {
@@ -244,7 +238,17 @@ fn open<'h>(host: &'h LeanHost<'static>, load_project: bool) -> lean_rs::LeanRes
         project.to_str()
     );
     let library = project_library();
-    LeanCapabilities::from_prepared_capability(host, &prepared, shim, (library, lean_rs::module::LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture")), "lean_rs_fixture", "LeanRsFixture")
+    LeanCapabilities::from_prepared_capability(
+        host,
+        &prepared,
+        shim,
+        (
+            library,
+            lean_rs::module::LeanModuleInitializer::new("lean_rs_fixture", "LeanRsFixture"),
+        ),
+        "lean_rs_fixture",
+        "LeanRsFixture",
+    )
 }
 #[allow(
     dead_code,
