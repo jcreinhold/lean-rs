@@ -53,6 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // needs static ABI metadata and Lake only; it must not link the Lean runtime.
     let metadata = std::process::Command::new(std::env::var_os("CARGO").ok_or("missing Cargo")?)
         .args(["metadata", "--locked", "--offline", "--format-version", "1"])
+        .arg("--filter-platform")
+        .arg(std::env::var("TARGET")?)
         .output()?;
     if !metadata.status.success() {
         return Err(String::from_utf8_lossy(&metadata.stderr).into_owned().into());
