@@ -1468,7 +1468,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// The Lean shim owns header parsing, module-system header handling,
     /// info-tree traversal, cursor selection, reference collection, and
     /// bounded expression/goal rendering. The Rust side chooses a
-    /// [`ModuleQuery`] and receives the matching
+    /// [`ModuleQuery`](crate::ModuleQuery) and receives the matching
     /// [`ModuleQueryOutcome`]; whole-file raw expression/type dumps never
     /// cross this boundary.
     ///
