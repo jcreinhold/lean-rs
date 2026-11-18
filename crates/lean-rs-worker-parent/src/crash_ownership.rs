@@ -14,6 +14,7 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt as _, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 pub(crate) const SOCKET_ENV: &str = "LEAN_RS_WORKER_PARENT_SOCKET";
 pub(crate) const NONCE_ENV: &str = "LEAN_RS_WORKER_PARENT_NONCE";
@@ -58,6 +59,27 @@ fn read_startup_hello(stream: &mut UnixStream, deadline: Instant) -> io::Result<
         }
     }
 }
+fn write_before_deadline(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) -> io::Result<()> {
+    stream.set_nonblocking(true)?;
+    let result = (|| {
+        while !bytes.is_empty() {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "startup ACK deadline elapsed"));
+            }
+            match stream.write(bytes) {
+                Ok(0) => return Err(io::Error::new(io::ErrorKind::WriteZero, "startup ACK closed")),
+                Ok(n) => bytes = &bytes[n..],
+                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
+                    std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())))
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    })();
+    let restored = stream.set_nonblocking(false);
+    result.and(restored)
+}
 fn running() -> String {
     "running".to_owned()
 }
@@ -90,7 +112,63 @@ pub struct LeanWorkerNativeScope(ParentLifetime);
 
 /// Exact admitted group and its parent-to-guardian cleanup capability.
 #[derive(Debug)]
-pub struct LeanWorkerNativeScopeLease(ParentLifetimeLease);
+pub struct LeanWorkerNativeScopeLease(crate::process::OwnedChild);
+
+/// Startup failure with its original error and any outstanding cleanup owner.
+#[derive(Debug)]
+pub enum LeanWorkerNativeSpawnError {
+    /// No target was created. A failed durable dispatch write may still fence
+    /// the registry reservation; this is not proof that registry cleanup succeeded.
+    BeforeSpawn(io::Error),
+    /// A child was created. Retain host resources until `custody_closed` is true.
+    AfterSpawn {
+        source: io::Error,
+        pending: LeanWorkerNativePendingCleanup,
+    },
+}
+
+impl std::fmt::Display for LeanWorkerNativeSpawnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BeforeSpawn(source) => write!(f, "native startup before spawn: {source}"),
+            Self::AfterSpawn { source, .. } => write!(f, "native startup after spawn: {source}"),
+        }
+    }
+}
+impl std::error::Error for LeanWorkerNativeSpawnError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::BeforeSpawn(source) | Self::AfterSpawn { source, .. } => source,
+        })
+    }
+}
+
+/// Retained local process/tracker ownership after failed startup.
+/// Dropping this value delegates cleanup, but does not certify closure. Unknown
+/// authenticated identity remains fenced; direct exit alone is not closure.
+#[derive(Debug)]
+pub struct LeanWorkerNativePendingCleanup {
+    child: crate::process::OwnedChild,
+    custody: BootstrapCustody,
+}
+impl LeanWorkerNativePendingCleanup {
+    fn new(mut child: crate::process::OwnedChild, custody: BootstrapCustody) -> Self {
+        let _stop = child.kill(); // Preserve the original startup error.
+        Self { child, custody }
+    }
+    /// Observe exact group and guardian closure independently of wait status.
+    /// # Errors
+    /// A failed OS observation is not closure.
+    pub fn custody_closed(&self) -> io::Result<bool> {
+        self.custody.closed()
+    }
+    /// Poll owned cleanup. ECHILD remains an error, even if custody is closed.
+    /// # Errors
+    /// Preserves wait errors without inventing an exit receipt.
+    pub fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+        self.child.try_wait()
+    }
+}
 
 impl LeanWorkerNativeScope {
     /// Reserve the existing registry and optional shared capacity slot.
@@ -117,23 +195,68 @@ impl LeanWorkerNativeScope {
         self.0.configure(command);
     }
 
-    /// Authenticate the actual bootstrap child and persist its owner record.
-    /// Native payload startup remains forbidden until `acknowledge` succeeds.
-    ///
+    /// Spawn and adopt the controlled bootstrap under one retained cleanup owner.
+    /// HELLO waiting is synchronous and bounded by `timeout`, not promptly
+    /// cancellable mid-wait. After return, the caller must check cancellation
+    /// and its deadline before ACK. Host keepalive ownership remains the caller's.
     /// # Errors
-    /// Refuses changed process birth, wrong session or guardian and late startup.
-    pub fn accept(self, child_pid: u32, timeout: Duration) -> io::Result<LeanWorkerNativeScopeLease> {
-        self.0.accept(child_pid, timeout).map(LeanWorkerNativeScopeLease)
+    /// Distinguishes no target from a created child with retained cleanup.
+    pub fn spawn(
+        mut self,
+        command: &mut Command,
+        timeout: Duration,
+    ) -> Result<LeanWorkerNativeScopeLease, LeanWorkerNativeSpawnError> {
+        let started = Instant::now();
+        self.0.configure(command);
+        let tracker = crate::process::LeanWorkerProcessTracker::new();
+        let custody = self.0.custody.clone();
+        let mut child = tracker
+            .spawn_guarded(command, &mut self.0)
+            .map_err(LeanWorkerNativeSpawnError::BeforeSpawn)?;
+        let lease = match self.0.accept(child.id(), timeout.saturating_sub(started.elapsed())) {
+            Ok(lease) => lease,
+            Err(source) => {
+                return Err(LeanWorkerNativeSpawnError::AfterSpawn {
+                    source,
+                    pending: LeanWorkerNativePendingCleanup::new(child, custody),
+                });
+            }
+        };
+        if let Err(source) = child.attach_lifetime(lease) {
+            return Err(LeanWorkerNativeSpawnError::AfterSpawn {
+                source,
+                pending: LeanWorkerNativePendingCleanup::new(child, custody),
+            });
+        }
+        Ok(LeanWorkerNativeScopeLease(child))
     }
 }
 
 impl LeanWorkerNativeScopeLease {
+    /// Take one pipe once; the lease retains process and cleanup ownership.
+    pub fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.0.stdin.take()
+    }
+    /// Take one output pipe once without exposing the child wait/signal handle.
+    pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.0.stdout.take()
+    }
+    /// Take one diagnostic pipe once without exposing process ownership.
+    pub fn take_stderr(&mut self) -> Option<std::process::ChildStderr> {
+        self.0.stderr.take()
+    }
+    /// Request owned cleanup through the exact child/group and guardian channel.
+    /// # Errors
+    /// Failed stop retains custody for later polling.
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.0.kill()
+    }
     /// Return this generation's existing private inputs without creating them.
     /// # Errors
     /// Refuses missing, aliased or invalid owned directories.
     pub fn input_directory(&self) -> io::Result<PathBuf> {
         native_guardian::generation_inputs(
-            self.0
+            self.lifetime()?
                 .record
                 .parent()
                 .ok_or_else(|| io::Error::other("owner directory missing"))?,
@@ -151,7 +274,7 @@ impl LeanWorkerNativeScopeLease {
             ));
         }
         native_guardian::cleanup_generation_inputs(
-            self.0
+            self.lifetime()?
                 .record
                 .parent()
                 .ok_or_else(|| io::Error::other("owner directory missing"))?,
@@ -163,7 +286,7 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Returns a broken or timed-out private guardian channel.
     pub fn acknowledge(&mut self) -> io::Result<()> {
-        self.0.acknowledge()
+        self.0.acknowledge_lifetime()
     }
 
     /// Request cleanup from the sole guardian, without signalling a stored PID.
@@ -171,7 +294,7 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Returns a failed shutdown of the private lifetime channel.
     pub fn request_stop(&self) -> io::Result<()> {
-        self.0.request_stop()
+        self.lifetime()?.request_stop()
     }
 
     /// Observe closure of the exact inherited payload group.
@@ -179,7 +302,7 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Failed kernel observation remains an error, never a closure assertion.
     pub fn group_absent(&self) -> io::Result<bool> {
-        self.0.group_absent()
+        self.lifetime()?.group_absent()
     }
 
     /// Observe the exact guardian identity authenticated at admission.
@@ -187,7 +310,7 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Failed process observations are not a guardian-death assertion.
     pub fn guardian_alive(&self) -> io::Result<bool> {
-        self.0.guardian_alive()
+        self.lifetime()?.guardian_alive()
     }
 
     /// Observe group closure and release of the guardian's read descriptors.
@@ -195,12 +318,56 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Failed kernel observations never establish custody release.
     pub fn custody_closed(&self) -> io::Result<bool> {
-        self.0.custody_closed()
+        self.lifetime()?.custody_closed()
     }
 
     /// Kernel identity authenticated for this actual bootstrap child.
-    pub fn owner(&self) -> &LeanWorkerOwnedProcess {
-        &self.0.owner
+    pub fn owner(&self) -> io::Result<&LeanWorkerOwnedProcess> {
+        Ok(&self.lifetime()?.owner)
+    }
+    fn lifetime(&self) -> io::Result<&ParentLifetimeLease> {
+        self.0
+            .lifetime
+            .as_ref()
+            .ok_or_else(|| io::Error::other("native custody lease missing"))
+    }
+    /// Poll the actual owned group and guardian; never infer exit from a numeric PID.
+    /// # Errors
+    /// Returns wait or custody observation errors without releasing capacity.
+    pub fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+        self.0.try_wait()
+    }
+}
+
+/// Shared from before spawn through every cleanup path. Unknown is not absent.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BootstrapCustody(Arc<Mutex<Option<AuthenticatedBootstrap>>>);
+#[derive(Debug)]
+struct AuthenticatedBootstrap {
+    stream: UnixStream,
+    owner: LeanWorkerOwnedProcess,
+    guardian: Option<LeanWorkerOwnedProcess>,
+}
+impl BootstrapCustody {
+    pub(crate) fn closed(&self) -> io::Result<bool> {
+        let state = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(state) = state.as_ref() else {
+            return Ok(false);
+        };
+        Ok(
+            !lean_toolchain::process_group::group_present(state.owner.process_group)?
+                && state.guardian.as_ref().map_or(Ok(true), |g| g.is_live().map(|v| !v))?,
+        )
+    }
+    pub(crate) fn request_stop(&self) {
+        if let Some(state) = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            let _stop = state.stream.shutdown(std::net::Shutdown::Both);
+        }
     }
 }
 
@@ -212,6 +379,8 @@ pub(crate) struct ParentLifetime {
     nonce: String,
     guarded: bool,
     capacity_slot: Option<native_guardian::NativeCapacitySlot>,
+    pub(crate) custody: BootstrapCustody,
+    dispatched: bool,
 }
 #[derive(Debug)]
 pub(crate) struct ParentLifetimeLease {
@@ -221,6 +390,9 @@ pub(crate) struct ParentLifetimeLease {
     pub(crate) record: PathBuf,
     nonce: String,
     guarded: bool,
+    generation: LeanWorkerOwnedGeneration,
+    deadline: Instant,
+    running_published: bool,
 }
 impl ParentLifetime {
     pub(crate) fn prepare(root: &Path) -> io::Result<Self> {
@@ -284,6 +456,8 @@ impl ParentLifetime {
                 nonce,
                 guarded,
                 capacity_slot: slot.cloned(),
+                custody: BootstrapCustody::default(),
+                dispatched: false,
             })
         })();
         if initialized.is_err() && guarded {
@@ -293,6 +467,20 @@ impl ParentLifetime {
             let _socket_directory = fs::remove_dir(socket_directory);
         }
         initialized
+    }
+    pub(crate) fn dispatch(&mut self) -> io::Result<()> {
+        // Set first: a rename/fsync error may still have committed dispatching.
+        self.dispatched = true;
+        if self.guarded {
+            native_guardian::dispatch_owner_record(&self.directory.join("owner.json"), &self.nonce)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn no_spawn(&self) -> io::Result<()> {
+        if self.guarded {
+            native_guardian::retire_unspawned_owner_record(&self.directory.join("owner.json"), &self.nonce)?;
+        }
+        Ok(())
     }
     pub(crate) fn configure(&self, command: &mut Command) {
         command
@@ -304,7 +492,9 @@ impl ParentLifetime {
             command.env(native_guardian::OWNERS_DIRECTORY_ENV, root);
         }
     }
-    pub(crate) fn accept(self, child_pid: u32, timeout: Duration) -> io::Result<ParentLifetimeLease> {
+    pub(crate) fn accept(mut self, child_pid: u32, timeout: Duration) -> io::Result<ParentLifetimeLease> {
+        // Legacy test callers configure/spawn separately. Never retire their possible spawn.
+        self.dispatched = true;
         let deadline = Instant::now()
             .checked_add(timeout)
             .filter(|_| !timeout.is_zero())
@@ -361,6 +551,21 @@ impl ParentLifetime {
                 Ok(guard)
             })
             .transpose()?;
+        // Install authenticated cleanup evidence before any fallible publication.
+        *self.custody.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(AuthenticatedBootstrap {
+            stream,
+            owner: owner.clone(),
+            guardian: guardian.clone(),
+        });
+        let stream = self
+            .custody
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .ok_or_else(|| io::Error::other("authenticated bootstrap missing"))?
+            .stream
+            .try_clone()?;
         let generation = LeanWorkerOwnedGeneration {
             version: if self.guarded { 2 } else { 1 },
             scope: if self.guarded {
@@ -373,18 +578,31 @@ impl ParentLifetime {
             parent: LeanWorkerOwnedProcess::capture(std::process::id())?
                 .ok_or_else(|| io::Error::other("parent process identity unavailable"))?,
             process: owner.clone(),
-            phase: running(),
+            phase: if self.guarded {
+                "bootstrap".to_owned()
+            } else {
+                running()
+            },
             guardian,
             protected_domains: Vec::new(),
             capacity_slot: self.capacity_slot.clone(),
         };
         let record = self.directory.join("owner.json");
-        let temporary = self.directory.join("owner.write");
-        let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary)?;
-        file.write_all(&serde_json::to_vec(&generation).map_err(io::Error::other)?)?;
-        file.sync_all()?;
-        fs::rename(temporary, &record)?;
-        File::open(&self.directory)?.sync_all()?;
+        if self.guarded {
+            native_guardian::publish_startup_owner(
+                &record,
+                &serde_json::to_value(&generation).map_err(io::Error::other)?,
+                "dispatching",
+                deadline.saturating_duration_since(Instant::now()),
+            )?;
+        } else {
+            let temporary = self.directory.join("owner.write");
+            let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary)?;
+            file.write_all(&serde_json::to_vec(&generation).map_err(io::Error::other)?)?;
+            file.sync_all()?;
+            fs::rename(temporary, &record)?;
+            File::open(&self.directory)?.sync_all()?;
+        }
         stream.set_read_timeout(None)?;
         stream.set_write_timeout(Some(deadline.saturating_duration_since(Instant::now())))?;
         fs::remove_file(self.socket_directory.join("parent.sock"))?;
@@ -392,29 +610,57 @@ impl ParentLifetime {
         Ok(ParentLifetimeLease {
             stream,
             owner,
-            guardian: generation.guardian,
+            guardian: generation.guardian.clone(),
             record,
             nonce: self.nonce.clone(),
             guarded: self.guarded,
+            generation,
+            deadline,
+            running_published: false,
         })
     }
 }
 impl ParentLifetimeLease {
+    pub(crate) fn publish_running(&mut self) -> io::Result<()> {
+        if Instant::now() >= self.deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "startup deadline elapsed"));
+        }
+        self.generation.phase = running();
+        if self.guarded {
+            native_guardian::publish_startup_owner(
+                &self.record,
+                &serde_json::to_value(&self.generation).map_err(io::Error::other)?,
+                "bootstrap",
+                self.deadline.saturating_duration_since(Instant::now()),
+            )?;
+        }
+        self.stream
+            .set_write_timeout(Some(self.deadline.saturating_duration_since(Instant::now())))?;
+        self.running_published = true;
+        Ok(())
+    }
+
     /// Correlation with the actual guarded admission, not authority to signal.
     pub(crate) fn guarded_generation_id(&self) -> Option<&str> {
         self.guarded.then_some(self.nonce.as_str())
     }
 
     pub(crate) fn acknowledge(&mut self) -> io::Result<()> {
+        if !self.running_published {
+            return Err(io::Error::other("startup ACK requires adopted durable Running"));
+        }
+        if Instant::now() >= self.deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "startup ACK deadline elapsed"));
+        }
         if self.guarded {
             let mut bytes = serde_json::to_vec(
                 &serde_json::json!({"state":"durable-owner-ready","nonce":self.nonce,"record":self.record}),
             )
             .map_err(io::Error::other)?;
             bytes.push(b'\n');
-            self.stream.write_all(&bytes)
+            write_before_deadline(&mut self.stream, &bytes, self.deadline)
         } else {
-            self.stream.write_all(b"durable-owner-ready\n")
+            write_before_deadline(&mut self.stream, b"durable-owner-ready\n", self.deadline)
         }
     }
     pub(crate) fn request_stop(&self) -> io::Result<()> {
@@ -474,7 +720,7 @@ impl Drop for ParentLifetime {
     fn drop(&mut self) {
         let _socket = fs::remove_file(self.socket_directory.join("parent.sock"));
         let _socket_directory = fs::remove_dir(&self.socket_directory);
-        if self.guarded {
+        if self.guarded && !self.dispatched {
             let record = self.directory.join("owner.json");
             if fs::symlink_metadata(&record)
                 .ok()
@@ -528,6 +774,83 @@ impl Drop for ParentLifetimeLease {
 #[allow(clippy::unwrap_used, reason = "isolated OS identity tests assert their own process")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_bootstrap_publication_preserves_dispatching() {
+        let root = std::env::temp_dir().join(format!("lean-publication-failure-{}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let mut lifetime = ParentLifetime::prepare_guarded(&root, Duration::from_secs(1)).unwrap();
+        lifetime.dispatch().unwrap();
+        let record = lifetime.directory.join("owner.json");
+        let original = std::fs::read(&record).unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        // Synthetic serialized identities only: no process is launched or signalled.
+        let mut worker = LeanWorkerOwnedProcess::capture(std::process::id()).unwrap().unwrap();
+        worker.pid = 1234;
+        worker.session = 1234;
+        worker.process_group = 1234;
+        let mut guardian = worker.clone();
+        guardian.pid = 1235;
+        guardian.process_group = 1235;
+        value["phase"] = serde_json::json!("bootstrap");
+        value["process"] = serde_json::to_value(worker).unwrap();
+        value["guardian"] = serde_json::to_value(guardian).unwrap();
+        std::fs::write(lifetime.directory.join("owner.write"), b"collision").unwrap();
+        let error =
+            native_guardian::publish_startup_owner(&record, &value, "dispatching", Duration::from_secs(1)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&record).unwrap(), original);
+        drop(lifetime);
+        assert!(record.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn backpressured_ack_obeys_original_deadline() {
+        let (mut sender, _receiver) = UnixStream::pair().unwrap();
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(25);
+        let error = write_before_deadline(&mut sender, &vec![0; 4 * 1024 * 1024], deadline).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            write_before_deadline(&mut sender, b"ACK", deadline).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+    }
+
+    #[test]
+    fn dispatched_preparing_drop_keeps_exact_reservation() {
+        let root = std::env::temp_dir().join(format!("lean-dispatch-drop-{}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let mut lifetime = ParentLifetime::prepare_guarded(&root, Duration::from_secs(1)).unwrap();
+        let record = lifetime.directory.join("owner.json");
+        lifetime.dispatch().unwrap();
+        let custody = lifetime.custody.clone();
+        drop(lifetime);
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        assert_eq!(value["phase"], "dispatching");
+        assert!(!custody.closed().unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_spawn_error_retires_only_dispatching() {
+        let root = std::env::temp_dir().join(format!("lean-no-spawn-{}", std::process::id()));
+        std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let mut lifetime = ParentLifetime::prepare_guarded(&root, Duration::from_secs(1)).unwrap();
+        assert!(lifetime.no_spawn().is_err());
+        lifetime.dispatch().unwrap();
+        lifetime.no_spawn().unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(lifetime.directory.join("owner.json")).unwrap()).unwrap();
+        assert_eq!(value["phase"], "preparing_closed");
+        drop(lifetime);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn exact_birth_capture_never_accepts_a_forged_incarnation() {

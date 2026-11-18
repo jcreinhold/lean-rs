@@ -113,12 +113,23 @@ fn guardian_failed(lifetime: Option<&crate::crash_ownership::ParentLifetimeLease
     lifetime.is_some_and(|lifetime| lifetime.uses_guardian() && !matches!(lifetime.guardian_alive(), Ok(true)))
 }
 
+#[cfg(unix)]
+fn custody_closed(
+    lifetime: Option<&crate::crash_ownership::ParentLifetimeLease>,
+    bootstrap: Option<&crate::crash_ownership::BootstrapCustody>,
+) -> bool {
+    bootstrap.is_none_or(|b| matches!(b.closed(), Ok(true)))
+        && lifetime.is_none_or(|l| matches!(l.retirement_closed(), Ok(true)))
+}
+
 #[derive(Debug)]
 struct PendingChild {
     child: OwnedProcess,
     exit: LeanWorkerExitObservation,
     #[cfg(unix)]
     lifetime: Option<crate::crash_ownership::ParentLifetimeLease>,
+    #[cfg(unix)]
+    bootstrap: Option<crate::crash_ownership::BootstrapCustody>,
 }
 
 impl LeanWorkerProcessTracker {
@@ -139,6 +150,27 @@ impl LeanWorkerProcessTracker {
 
     pub(crate) fn spawn(&self, command: &mut std::process::Command) -> io::Result<OwnedChild> {
         self.launch(Self::start_reaper, || command.spawn())
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn spawn_guarded(
+        &self,
+        command: &mut std::process::Command,
+        lifetime: &mut crate::crash_ownership::ParentLifetime,
+    ) -> io::Result<OwnedChild> {
+        let custody = lifetime.custody.clone();
+        let mut child = self.launch(Self::start_reaper, || {
+            lifetime.dispatch()?;
+            match command.spawn() {
+                Ok(child) => Ok(child),
+                Err(error) => {
+                    let _retired = lifetime.no_spawn();
+                    Err(error)
+                }
+            }
+        })?;
+        child.bootstrap = Some(custody);
+        Ok(child)
     }
 
     fn launch(
@@ -171,12 +203,18 @@ impl LeanWorkerProcessTracker {
             exit: LeanWorkerExitObservation::default(),
             #[cfg(unix)]
             lifetime: None,
+            #[cfg(unix)]
+            bootstrap: None,
         })
     }
 
     fn reap_pending(&self) {
         let mut pending = self.0.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         pending.retain_mut(|owned| {
+            #[cfg(unix)]
+            if let Some(b) = &owned.bootstrap {
+                b.request_stop();
+            }
             #[cfg(unix)]
             if guardian_failed(owned.lifetime.as_ref()) {
                 if let Some(lifetime) = &owned.lifetime {
@@ -191,11 +229,7 @@ impl LeanWorkerProcessTracker {
                         let _stop = lifetime.request_stop();
                     }
                     #[cfg(unix)]
-                    if owned
-                        .lifetime
-                        .as_ref()
-                        .is_some_and(|lifetime| !matches!(lifetime.retirement_closed(), Ok(true)))
-                    {
+                    if !custody_closed(owned.lifetime.as_ref(), owned.bootstrap.as_ref()) {
                         return true;
                     }
                     owned.exit.confirm(status);
@@ -230,10 +264,8 @@ impl LeanWorkerProcessTracker {
                     }
                     #[cfg(unix)]
                     if error.raw_os_error() == Some(libc::ECHILD)
-                        && owned
-                            .lifetime
-                            .as_ref()
-                            .is_some_and(|lifetime| matches!(lifetime.retirement_closed(), Ok(true)))
+                        && (owned.bootstrap.is_some() || owned.lifetime.is_some())
+                        && custody_closed(owned.lifetime.as_ref(), owned.bootstrap.as_ref())
                     {
                         // No wait status exists: release physical capacity only.
                         // Serialized identities never authorize a recovery signal.
@@ -326,7 +358,9 @@ pub(crate) struct OwnedChild {
     direct_exit_observed: bool,
     exit: LeanWorkerExitObservation,
     #[cfg(unix)]
-    lifetime: Option<crate::crash_ownership::ParentLifetimeLease>,
+    pub(crate) lifetime: Option<crate::crash_ownership::ParentLifetimeLease>,
+    #[cfg(unix)]
+    bootstrap: Option<crate::crash_ownership::BootstrapCustody>,
 }
 
 impl OwnedChild {
@@ -355,6 +389,10 @@ impl OwnedChild {
             });
         }
         self.lifetime = Some(lifetime);
+        self.lifetime
+            .as_mut()
+            .ok_or_else(|| io::Error::other("lifetime missing"))?
+            .publish_running()?;
         Ok(())
     }
 
@@ -396,6 +434,10 @@ impl OwnedChild {
 
     pub(crate) fn kill(&mut self) -> io::Result<()> {
         self.cleanup_requested = true;
+        #[cfg(unix)]
+        if let Some(b) = &self.bootstrap {
+            b.request_stop();
+        }
         #[cfg(unix)]
         if let Some(lifetime) = &mut self.lifetime {
             let requested = lifetime.request_stop();
@@ -443,10 +485,8 @@ impl OwnedChild {
                 #[cfg(unix)]
                 if error.raw_os_error() == Some(libc::ECHILD)
                     && !self.confirmed
-                    && self
-                        .lifetime
-                        .as_ref()
-                        .is_some_and(|lifetime| matches!(lifetime.retirement_closed(), Ok(true)))
+                    && (self.bootstrap.is_some() || self.lifetime.is_some())
+                    && custody_closed(self.lifetime.as_ref(), self.bootstrap.as_ref())
                 {
                     self.confirmed = true;
                     self.exit.confirm_scope_closed_without_status();
@@ -470,16 +510,16 @@ impl OwnedChild {
         if result.is_some() && !self.confirmed {
             self.direct_exit_observed = true;
             #[cfg(unix)]
+            if let Some(b) = &self.bootstrap {
+                b.request_stop();
+            }
+            #[cfg(unix)]
             if let Some(lifetime) = &self.lifetime {
                 let _stop = lifetime.request_stop();
             }
             #[cfg(unix)]
-            if self
-                .lifetime
-                .as_ref()
-                .is_some_and(|lifetime| !matches!(lifetime.retirement_closed(), Ok(true)))
-            {
-                return Ok(None); // The owned service still has inherited-group descendants.
+            if !custody_closed(self.lifetime.as_ref(), self.bootstrap.as_ref()) {
+                return Ok(None);
             }
             if let Some(status) = result {
                 self.exit.confirm(status);
@@ -515,6 +555,8 @@ impl Drop for OwnedChild {
                     exit: self.exit.clone(),
                     #[cfg(unix)]
                     lifetime: self.lifetime.take(),
+                    #[cfg(unix)]
+                    bootstrap: self.bootstrap.take(),
                 });
             self.tracker.wake();
         }
@@ -526,6 +568,17 @@ impl Drop for OwnedChild {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[cfg(unix)]
+    #[test]
+    fn all_release_paths_share_unknown_bootstrap_fence() {
+        let bootstrap = crate::crash_ownership::BootstrapCustody::default();
+        assert!(!custody_closed(None, Some(&bootstrap)));
+        let deferred = bootstrap.clone();
+        drop(bootstrap);
+        assert!(!custody_closed(None, Some(&deferred)));
+        assert!(custody_closed(None, None)); // Only genuinely unguarded direct children.
+    }
 
     impl LeanWorkerProcessTracker {
         pub(crate) fn own(&self, child: Child) -> OwnedChild {

@@ -501,24 +501,35 @@ also has a 128-record backstop, 32 artifact domains per generation and 256 KiB p
 scans use the original remaining startup budget; filesystem syscalls themselves cannot be preempted by this userspace
 deadline.
 
-Preparing means no runtime, artifact load or request body was admitted. If its exact parent dies, that reservation may
-be collected; a child paused before its startup ACK can still physically exist. The actor bound consequently covers
-admitted native generations, not a hard operating-system PID quota over arbitrary paused bootstrap children. A missing
-committed record with only known bounded protocol temporary files can be collected under the same admission mutex: spawn
-was not permitted before initial Preparing publication committed, or collection had already proved group absence.
-Writers perform that reconciliation too, so interrupted initial publication cannot block the preparation that precedes
-the next reservation. Unknown files and malformed committed records are not collected.
+Preparing means spawn has not been authorized. Before the spawn syscall, the exact owner durably
+publishes `dispatching` and installs pending cleanup responsibility in the tracker. Only a true spawn error can
+explicitly retire that dispatch. Parent death never collects `dispatching`: the interval between possible spawn
+and authenticated durable identity is unknown and remains fenced. After HELLO the owner retains the authenticated
+stream and birth identities before any fallible write, publishes `bootstrap`, adopts the private group, publishes
+Running and finally ACKs. Pre-Running bootstrap capacity requires both group and guardian absence; Running retains
+the separate payload-only registry occupancy policy described above. Tracker custody always requires both absences.
+The guardian captures its worker and own birth identities before HELLO. After pre-Running group drain it publishes
+`bootstrap_closed`, serialized with parent publication under the admission lock. Registry collection additionally
+requires that exact guardian to be absent. Its bounded dedicated staging file is not evidence; interrupted partial
+staging can be retried by the same guardian. Failed observation or durable publication retains custody.
+A missing committed record with only known protocol temporary files can be collected under the admission mutex;
+spawn is forbidden before durable dispatch publication. Unknown files and malformed records remain fenced.
+
+The external native-scope API now owns spawn and adoption (`LeanWorkerNativeScope::spawn`) rather than accepting
+an already-spawned numeric PID. Downstream native-reader callers of the old `accept` API must migrate before release;
+the current host pin and its tests do not establish conformance to this new boundary. The lease exposes one-time
+`take_stdin`, `take_stdout`, and `take_stderr` plus owned `kill`, `try_wait`, `acknowledge`, and passive custody
+observations; it never returns the raw Child or permits a second adoption.
 
 Preparation source files live only in the literal private `inputs` child of that same generation directory. Public
 scope creation exposes it before body admission; an admitted lease returns the existing directory and permits cleanup
 only after custody closes. Registry collection removes inputs before owner metadata. Cleanup uses descriptor-relative
 no-follow operations, unlinks symlinks themselves, and is bounded by 4096 entries, depth 32 and a two-second userspace
 budget. Unknown generation children, excessive depth and special files preserve the parseable owner record and fail
-closed. Partial count-budget deletion can resume on the next admission. A cancelled exact Preparing reservation first
-publishes `preparing_closed` in the same record: Running publication always precedes startup ACK, so no native body
-could have been admitted. This permits cleanup retry and utility-capacity recovery while the original caller remains
+closed. Partial count-budget deletion can resume on the next admission. A cancelled exact undispatched Preparing reservation first
+publishes `preparing_closed` in the same record. Dispatching requires an explicit no-spawn syscall outcome to retire. This permits cleanup retry and utility-capacity recovery while the original caller remains
 alive, without retiring a Running or uncertain payload. Already collected generations make post-closure cleanup a
-no-op. The existing pre-ACK physical-child caveat still applies; no additional cleanup process or journal is created.
+no-op. No additional cleanup process or journal is created.
 
 If another waiter has revoked the actual parent's wait authority (`ECHILD`), confirmed whole-group absence may release
 resource capacity without supplying any exit-status receipt. Other wait errors retain the actual child for retry.
@@ -534,3 +545,15 @@ per-user local-data default is used. The validated writer contract and every coo
 binding. Protected native spawn refuses a lifetime directory different from the caller's resolved writer registry. An
 upstream embedder choosing a custom lifetime directory must likewise configure every cooperating managed writer to check
 that namespace. Registries in unrelated directories cannot discover each other's ownership automatically.
+
+Public native startup returns `LeanWorkerNativeSpawnError`: `BeforeSpawn`
+proves no target was created (not successful registry retirement), while
+`AfterSpawn` preserves the original error and an owned
+`LeanWorkerNativePendingCleanup`. Callers retain host keepalive resources beside
+that owner until its exact `custody_closed` observation succeeds. Its `try_wait`
+remains separate: ECHILD does not become an exit receipt. Dropping pending
+cleanup transfers local cleanup to the tracker, never certifies closure.
+HELLO wait is synchronous and bounded by the supplied startup timeout; prompt
+mid-wait cancellation is not supported. Callers must check cancellation and their
+deadline after return and before ACK. Host keepalive migration and stage-fixture
+rendezvous migration remain separate integration gates.

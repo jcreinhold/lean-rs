@@ -154,7 +154,7 @@ fn checked_identity(value: &Value) -> io::Result<NativeProcessIdentity> {
     }
     Ok(identity)
 }
-fn validate_owner_header(value: &Value) -> io::Result<()> {
+pub(super) fn validate_owner_header(value: &Value) -> io::Result<()> {
     let version = field(value, "version")
         .as_u64()
         .ok_or_else(|| invalid("native owner version missing"))?;
@@ -174,7 +174,7 @@ fn validate_owner_header(value: &Value) -> io::Result<()> {
             .validate()?;
     }
     let phase = field(value, "phase");
-    if phase == "preparing" || phase == "preparing_closed" {
+    if phase == "preparing" || phase == "preparing_closed" || phase == "dispatching" {
         if version != 2
             || !field(value, "process").is_null()
             || !field(value, "guardian").is_null()
@@ -186,8 +186,11 @@ fn validate_owner_header(value: &Value) -> io::Result<()> {
         }
         return Ok(());
     }
-    if phase != "running" && !(version == 1 && phase.is_null()) {
+    if phase != "running" && phase != "bootstrap" && phase != "bootstrap_closed" && !(version == 1 && phase.is_null()) {
         return Err(invalid("unknown native owner phase"));
+    }
+    if matches!(phase.as_str(), Some("bootstrap" | "bootstrap_closed")) && version != 2 {
+        return Err(invalid("bootstrap requires guarded owner"));
     }
     let process = checked_identity(field(value, "process"))?;
     if process.pid <= 1 || process.pid != process.session || process.pid != process.process_group {
@@ -229,8 +232,15 @@ pub(super) fn payload_closed(value: &Value) -> io::Result<bool> {
     if field(value, "phase") == "preparing" {
         return checked_identity(field(value, "parent"))?.is_live().map(|live| !live);
     }
+    if field(value, "phase") == "bootstrap_closed" {
+        return checked_identity(field(value, "guardian"))?.is_live().map(|v| !v);
+    }
+    if matches!(field(value, "phase").as_str(), Some("dispatching" | "bootstrap")) {
+        return Ok(false); // Pre-Running custody requires a durable guardian closure receipt.
+    }
     let process = checked_identity(field(value, "process"))?;
-    crate::process_group::group_present(process.process_group).map(|present| !present)
+    let absent = !crate::process_group::group_present(process.process_group)?;
+    Ok(absent)
 }
 // Record retention includes the descriptor custodian, independently of compute
 // occupancy. A closed payload may leave a live guardian holding artifact loans.
@@ -238,15 +248,20 @@ fn record_can_be_removed(value: &Value) -> io::Result<bool> {
     if !payload_closed(value)? {
         return Ok(false);
     }
-    if field(value, "version") == 2 && field(value, "phase") == "running" {
+    if field(value, "version") == 2
+        && matches!(
+            field(value, "phase").as_str(),
+            Some("running" | "bootstrap" | "bootstrap_closed")
+        )
+    {
         return checked_identity(field(value, "guardian"))?.is_live().map(|live| !live);
     }
     Ok(true)
 }
 /// Retire only this caller's exact undispatched Preparing reservation.
 ///
-/// Running publication always precedes the native startup ACK. A retired
-/// Preparing record therefore cannot have admitted native body work; keeping
+/// Dispatch publication precedes every possible spawn. A retired
+/// Preparing record therefore cannot have spawned a child; keeping
 /// it parseable permits bounded input cleanup retries while this caller lives.
 /// # Errors
 /// Refuses another owner, a running generation or failed durable publication.
@@ -269,6 +284,84 @@ pub fn retire_preparing_owner_record(record: &Path, nonce: &str) -> io::Result<(
         .as_object_mut()
         .ok_or_else(|| invalid("native owner object missing"))?
         .insert("phase".to_owned(), json!("preparing_closed"));
+    persist_owner(record, &value)
+}
+
+/// Serialize a parent startup publication against admission and guardian closure.
+/// # Errors
+/// Refuses a changed generation/parent/state or any uncertain durable write.
+#[doc(hidden)]
+pub fn publish_startup_owner(record: &Path, value: &Value, expected: &str, timeout: Duration) -> io::Result<()> {
+    let _lock = lock_publication(record, timeout)?;
+    let current = read_owner(record)?;
+    validate_owner_header(&current)?;
+    validate_owner_header(value)?;
+    let parent = NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("parent absent"))?;
+    if !matches!(
+        (expected, field(value, "phase").as_str()),
+        ("dispatching", Some("bootstrap")) | ("bootstrap", Some("running"))
+    ) {
+        return Err(invalid("invalid startup phase transition"));
+    }
+    if field(&current, "phase") != expected
+        || field(&current, "generation_id") != field(value, "generation_id")
+        || checked_identity(field(&current, "parent"))? != parent
+        || field(&current, "parent") != field(value, "parent")
+    {
+        return Err(invalid("startup publication no longer owns this phase"));
+    }
+    super::persist_owner_at(record, value, "write")
+}
+pub(super) fn lock_publication(record: &Path, timeout: Duration) -> io::Result<File> {
+    let root = record
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| invalid("owner registry missing"))?;
+    validate_registry(root)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join(".admission.lock"))?;
+    let until = deadline(timeout)?;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                thread::sleep(Duration::from_millis(5))
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Err(expired()),
+            Err(std::fs::TryLockError::Error(e)) => return Err(e),
+        }
+    }
+}
+
+/// Mark possible dispatch durably before invoking the spawn syscall.
+/// # Errors
+/// Refuses non-preparing state, another owner, or uncertain publication.
+pub fn dispatch_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
+    transition_preparing(record, nonce, "preparing", "dispatching")
+}
+/// Retire dispatch only after the actual spawn syscall returned no child.
+/// # Errors
+/// Refuses a changed owner/state or failed durable publication.
+pub fn retire_unspawned_owner_record(record: &Path, nonce: &str) -> io::Result<()> {
+    transition_preparing(record, nonce, "dispatching", "preparing_closed")
+}
+fn transition_preparing(record: &Path, nonce: &str, from: &str, to: &str) -> io::Result<()> {
+    let mut value = read_owner(record)?;
+    validate_owner_header(&value)?;
+    let parent =
+        NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("native parent identity absent"))?;
+    if field(&value, "generation_id") != nonce
+        || checked_identity(field(&value, "parent"))? != parent
+        || field(&value, "phase") != from
+    {
+        return Err(invalid("native dispatch transition differs from exact owner/state"));
+    }
+    value
+        .as_object_mut()
+        .ok_or_else(|| invalid("native owner object missing"))?
+        .insert("phase".to_owned(), json!(to));
     persist_owner(record, &value)
 }
 
@@ -446,9 +539,10 @@ pub fn reserve_owner_record(root: &Path, nonce: &str, timeout: Duration) -> io::
 /// Live groups keep their actor slot after server death. A successful passive
 /// whole-group absence observation releases capacity, never a proof outcome.
 /// A still-live guardian retains its recovery record without occupying that slot.
-/// Preparing records certify no body dispatch and may be collected after their
-/// exact parent dies. A child paused before its startup ACK may still exist, but
-/// cannot load runtime/artifacts or execute a request before promotion to Running.
+/// Preparing records certify no possible spawn and may be collected after their
+/// exact parent dies. Dispatching records remain fenced without durable identity.
+/// Bootstrap records require group and guardian closure; Running preserves the
+/// separate payload-only compute occupancy policy.
 /// # Errors
 /// Returns bounded backpressure, invalid ownership, or durable-write errors.
 pub fn reserve_owner_record_with_slot(
@@ -515,7 +609,7 @@ pub fn reserve_owner_record_with_slot(
         if record_can_be_removed(&value)? {
             // Keep the committed record parseable through partial asset cleanup.
             super::cleanup_generation_inputs(&entry.path())?;
-            for name in ["owner.write", "owner.guardian-write"] {
+            for name in ["owner.write", "owner.guardian-write", "owner.closure-write"] {
                 match fs::remove_file(entry.path().join(name)) {
                     Ok(()) => {}
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}

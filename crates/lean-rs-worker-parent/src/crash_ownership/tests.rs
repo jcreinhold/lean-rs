@@ -436,6 +436,47 @@ with (root/'native-heartbeat').open('ab',buffering=0) as output:
 
 #[test]
 fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
+    guarded_release_path(false, false, false);
+}
+
+#[test]
+fn guarded_release_deferred_drop() {
+    guarded_release_path(true, false, false);
+}
+
+#[test]
+fn guarded_release_echild_sync() {
+    guarded_release_path(false, true, false);
+}
+
+#[test]
+fn guarded_release_echild_deferred() {
+    guarded_release_path(true, true, false);
+}
+
+#[test]
+fn native_pending_cleanup_retains_exact_closure() {
+    guarded_release_path(false, false, true);
+}
+
+#[test]
+fn native_spawn_error_before_target_preserves_source() {
+    let root = directory().canonicalize().unwrap();
+    let scope = LeanWorkerNativeScope::prepare(&root.join("owners"), Duration::from_secs(2), None).unwrap();
+    let error = scope
+        .spawn(
+            &mut Command::new(root.join("absent-executable")),
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+    match error {
+        LeanWorkerNativeSpawnError::BeforeSpawn(source) => assert_eq!(source.kind(), io::ErrorKind::NotFound),
+        other => panic!("unexpected outcome: {other}"),
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn guarded_release_path(defer: bool, steal_wait: bool, pending: bool) {
     use std::os::unix::fs::PermissionsExt as _;
     let root = directory().canonicalize().unwrap();
     let executable = std::env::current_exe()
@@ -444,7 +485,7 @@ fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
         .replace('\'', "'\\''");
     fs::write(root.join("guardian.sh"),format!("#!/bin/sh\nexec '{executable}' --exact crash_ownership::lifecycle_tests::native_guardian_fixture_entry --nocapture\n")).unwrap();
     fs::set_permissions(root.join("guardian.sh"), fs::Permissions::from_mode(0o700)).unwrap();
-    let lifetime = ParentLifetime::prepare_guarded(&root.join("owners"), Duration::from_secs(2)).unwrap();
+    let mut lifetime = ParentLifetime::prepare_guarded(&root.join("owners"), Duration::from_secs(2)).unwrap();
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
         .args([
@@ -456,7 +497,8 @@ fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
         .env("LEAN_NATIVE_GUARDIAN_FIXTURE", "1");
     lifetime.configure(&mut command);
     let tracker = process::LeanWorkerProcessTracker::new();
-    let mut worker = tracker.own(command.spawn().unwrap());
+    let mut worker = tracker.spawn_guarded(&mut command, &mut lifetime).unwrap();
+    let lifetime_custody = lifetime.custody.clone();
     let actual_pid = worker.id();
     let lease = lifetime.accept(actual_pid, Duration::from_secs(3)).unwrap();
     let owner: LeanWorkerOwnedGeneration = serde_json::from_slice(&fs::read(&lease.record).unwrap()).unwrap();
@@ -474,11 +516,57 @@ fn external_guardian_ack_is_attached_to_the_actual_worker_before_body() {
         fs::read_to_string(root.join("native-body")).unwrap(),
         actual_pid.to_string()
     );
+    let observation = worker.exit_observation();
+    assert_eq!(tracker.active_processes(), 1);
+    assert!(!lifetime_custody.closed().unwrap());
     worker.kill().unwrap();
-    wait_for(|| worker.try_wait().unwrap().is_some());
-    assert_eq!(tracker.active_processes(), 0);
+    if steal_wait {
+        let mut status = 0;
+        // SAFETY: this test owns this exact direct child; steal only its wait
+        // receipt, never signal an identity read from disk.
+        assert_eq!(
+            unsafe { libc::waitpid(actual_pid as i32, &raw mut status, 0) },
+            actual_pid as i32
+        );
+    }
+    if pending {
+        let error = LeanWorkerNativeSpawnError::AfterSpawn {
+            source: io::Error::new(io::ErrorKind::TimedOut, "injected startup error"),
+            pending: LeanWorkerNativePendingCleanup::new(worker, lifetime_custody.clone()),
+        };
+        let LeanWorkerNativeSpawnError::AfterSpawn { source, mut pending } = error else {
+            unreachable!()
+        };
+        assert_eq!(source.kind(), io::ErrorKind::TimedOut);
+        wait_for(|| pending.try_wait().unwrap().is_some());
+        assert!(pending.custody_closed().unwrap());
+        assert_eq!(tracker.active_processes(), 0);
+        drop(pending);
+    } else if defer {
+        drop(worker);
+        wait_for(|| tracker.active_processes() == 0);
+    } else {
+        wait_for(|| {
+            let result = worker.try_wait();
+            if steal_wait {
+                assert!(result.is_err());
+            } else {
+                result.unwrap();
+            }
+            tracker.active_processes() == 0
+        });
+        // Repeated observation and Drop must not return the same slot twice.
+        let _repeat = worker.try_wait();
+        assert_eq!(tracker.active_processes(), 0);
+        drop(worker);
+    }
+    assert!(lifetime_custody.closed().unwrap());
+    assert_eq!(observation.scope_closed_without_status(), steal_wait);
+    assert_eq!(observation.confirmed_exit().is_some(), !steal_wait);
     assert!(!lean_toolchain::process_group::group_present(actual_pid).unwrap());
-    drop(worker);
+    assert!(!guardian.is_live().unwrap());
+    std::thread::sleep(Duration::from_millis(30));
+    assert_eq!(tracker.active_processes(), 0);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -555,7 +643,7 @@ fn guardian_failure_parent_recovery(defer: bool) {
         .replace('\'', "'\\''");
     fs::write(root.join("guardian.sh"), format!("#!/bin/sh\nexec '{executable}' --exact crash_ownership::lifecycle_tests::native_guardian_fixture_entry --nocapture\n")).unwrap();
     fs::set_permissions(root.join("guardian.sh"), fs::Permissions::from_mode(0o700)).unwrap();
-    let lifetime = ParentLifetime::prepare_guarded(&root.join("owners"), Duration::from_secs(2)).unwrap();
+    let mut lifetime = ParentLifetime::prepare_guarded(&root.join("owners"), Duration::from_secs(2)).unwrap();
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
         .args([
@@ -568,7 +656,7 @@ fn guardian_failure_parent_recovery(defer: bool) {
         .env("LEAN_NATIVE_GUARDIAN_FAILURE_ROOT", &root);
     lifetime.configure(&mut command);
     let tracker = process::LeanWorkerProcessTracker::new();
-    let mut worker = tracker.own(command.spawn().unwrap());
+    let mut worker = tracker.spawn_guarded(&mut command, &mut lifetime).unwrap();
     let lease = lifetime.accept(worker.id(), Duration::from_secs(3)).unwrap();
     let record: LeanWorkerOwnedGeneration = serde_json::from_slice(&fs::read(&lease.record).unwrap()).unwrap();
     let guardian = record.guardian.unwrap();

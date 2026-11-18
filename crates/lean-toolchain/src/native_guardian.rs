@@ -54,8 +54,9 @@ mod inputs;
 pub use inputs::{cleanup_generation_inputs, create_generation_inputs, generation_inputs};
 mod ownership;
 pub use ownership::{
-    NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, registry_directory, reserve_owner_record,
-    reserve_owner_record_with_slot, retire_preparing_owner_record,
+    NativeCapacitySlot, NativeOwnerObservation, NativeProcessIdentity, dispatch_owner_record, publish_startup_owner,
+    registry_directory, reserve_owner_record, reserve_owner_record_with_slot, retire_preparing_owner_record,
+    retire_unspawned_owner_record,
 };
 
 /// One actual shared lock and epoch protected by a native generation.
@@ -409,11 +410,14 @@ fn validate_owner_record_path(record: &Path, value: Value) -> io::Result<Value> 
     Ok(value)
 }
 fn persist_owner(record: &Path, value: &Value) -> io::Result<()> {
+    persist_owner_at(record, value, "guardian-write")
+}
+fn persist_owner_at(record: &Path, value: &Value, suffix: &str) -> io::Result<()> {
     let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
     if bytes.len() > MAX_OWNER_BYTES {
         return Err(invalid("native owner union exceeds limit"));
     }
-    let temporary = record.with_extension("guardian-write");
+    let temporary = record.with_extension(suffix);
     let mut file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -428,6 +432,35 @@ fn persist_owner(record: &Path, value: &Value) -> io::Result<()> {
     )?
     .sync_all()
 }
+// Called under the admission lock by this exact live guardian only. Staging is
+// never closure evidence; only the fsynced owner.json publication is authoritative.
+fn persist_closure_owner(record: &Path, value: &Value) -> io::Result<()> {
+    let temporary = record.with_extension("closure-write");
+    match fs::symlink_metadata(&temporary) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > MAX_OWNER_BYTES as u64 {
+                return Err(invalid("closure staging identity differs"));
+            }
+            let bytes = fs::read(&temporary)?;
+            if bytes.len() > MAX_OWNER_BYTES {
+                return Err(invalid("closure staging exceeds bound"));
+            }
+            match serde_json::from_slice::<Value>(&bytes) {
+                Ok(staged) if staged == *value => {
+                    File::open(&temporary)?.sync_all()?;
+                    fs::rename(&temporary, record)?;
+                    return File::open(record.parent().ok_or_else(|| invalid("owner directory missing"))?)?.sync_all();
+                }
+                Ok(_) => return Err(invalid("closure staging belongs to another receipt")),
+                Err(_) => fs::remove_file(&temporary)?, // This exact guardian's partial staging only.
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    persist_owner_at(record, value, "closure-write")
+}
+
 fn validate_domain(domain: &NativeReadDomain, file: &File) -> io::Result<()> {
     if domain.epoch.is_empty()
         || domain.epoch.len() > 4096
@@ -461,9 +494,79 @@ struct Guardian {
     next_sequence: u64,
     loans: Vec<(NativeReadDomain, File)>,
     incoming: Incoming,
+    bootstrap_identity: Option<(NativeProcessIdentity, NativeProcessIdentity)>,
 }
 impl Guardian {
+    fn prepare_bootstrap_record(&mut self) -> io::Result<()> {
+        let root = std::env::var_os(OWNERS_DIRECTORY_ENV)
+            .map(PathBuf::from)
+            .ok_or_else(|| invalid("native owners registry missing"))?;
+        ownership::validate_registry(&root)?;
+        let record = root.join(format!("worker-{}", self.nonce)).join("owner.json");
+        let value = read_owner(&record)?;
+        ownership::validate_owner_header(&value)?;
+        if field(&value, "generation_id") != self.nonce.as_str() {
+            return Err(invalid("bootstrap generation differs"));
+        }
+        let worker = NativeProcessIdentity::capture(self.worker)?.ok_or_else(|| invalid("bootstrap worker absent"))?;
+        let guardian = NativeProcessIdentity::capture(std::process::id())?.ok_or_else(|| invalid("guardian absent"))?;
+        if worker.pid != worker.session
+            || worker.pid != worker.process_group
+            || guardian.session != worker.pid
+            || guardian.process_group != guardian.pid
+        {
+            return Err(invalid("bootstrap identity scope differs"));
+        }
+        self.record = Some(record);
+        self.bootstrap_identity = Some((worker, guardian));
+        Ok(())
+    }
+    fn publish_bootstrap_closed(&self) -> io::Result<()> {
+        let record = self
+            .record
+            .as_ref()
+            .ok_or_else(|| invalid("bootstrap record unknown"))?;
+        let (worker, guardian) = self
+            .bootstrap_identity
+            .as_ref()
+            .ok_or_else(|| invalid("bootstrap identity unknown"))?;
+        let _lock = ownership::lock_publication(record, Duration::from_secs(2))?;
+        let mut value = read_owner(record)?;
+        ownership::validate_owner_header(&value)?;
+        if field(&value, "generation_id") != self.nonce.as_str() {
+            return Err(invalid("bootstrap closure generation differs"));
+        }
+        if field(&value, "phase") == "running" {
+            return Ok(());
+        }
+        if field(&value, "phase") == "bootstrap_closed" {
+            if field(&value, "process") != &serde_json::to_value(worker).map_err(io::Error::other)?
+                || field(&value, "guardian") != &serde_json::to_value(guardian).map_err(io::Error::other)?
+            {
+                return Err(invalid("durable bootstrap closure identity differs"));
+            }
+            return File::open(record.parent().ok_or_else(|| invalid("owner directory missing"))?)?.sync_all();
+        }
+        if !matches!(field(&value, "phase").as_str(), Some("dispatching" | "bootstrap")) {
+            return Err(invalid("bootstrap closure phase differs"));
+        }
+        if crate::process_group::group_present(self.worker)? || !guardian.is_live()? {
+            return Err(invalid("bootstrap closure not observed"));
+        }
+        let object = value.as_object_mut().ok_or_else(|| invalid("owner object missing"))?;
+        object.insert(
+            "process".to_owned(),
+            serde_json::to_value(worker).map_err(io::Error::other)?,
+        );
+        object.insert(
+            "guardian".to_owned(),
+            serde_json::to_value(guardian).map_err(io::Error::other)?,
+        );
+        object.insert("phase".to_owned(), json!("bootstrap_closed"));
+        persist_closure_owner(record, &value)
+    }
     fn run(&mut self, socket: &Path, timeout: Duration) -> io::Result<()> {
+        self.prepare_bootstrap_record()?;
         let until = deadline(timeout)?;
         let mut parent = UnixStream::connect(socket)?;
         parent.set_nonblocking(true)?;
@@ -482,6 +585,9 @@ impl Guardian {
                 .as_str()
                 .ok_or_else(|| invalid("native owner path missing"))?,
         );
+        if self.record.as_ref() != Some(&record) {
+            return Err(invalid("ACK changed bootstrap owner path"));
+        }
         let value = read_owner(&record)?;
         if field(&value, "version") != 2
             || field(&value, "generation_id") != self.nonce.as_str()
@@ -598,7 +704,9 @@ impl Guardian {
                 Ok(false) => {
                     #[cfg(all(test, target_os = "macos"))]
                     tests::pause_after_payload_closed(self);
-                    return;
+                    if self.publish_bootstrap_closed().is_ok() {
+                        return;
+                    }
                 }
                 Ok(true) => {
                     let _requested = native::kill_payload(self.worker);
@@ -608,6 +716,33 @@ impl Guardian {
             // No failed kill/observation releases loans or erases ownership.
             thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+#[cfg(test)]
+mod closure_publication_tests {
+    use super::*;
+    #[test]
+    fn interrupted_closure_staging_is_not_evidence_and_can_retry() -> io::Result<()> {
+        let root = std::env::temp_dir().join(format!("lean-closure-retry-{}", std::process::id()));
+        fs::create_dir(&root)?;
+        let record = root.join("owner.json");
+        let value = json!({"phase":"bootstrap_closed","generation_id":"test"});
+        fs::write(&record, b"dispatching")?;
+        fs::write(record.with_extension("closure-write"), b"{partial")?;
+        assert_eq!(fs::read(&record)?, b"dispatching");
+        persist_closure_owner(&record, &value)?;
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&record)?).map_err(io::Error::other)?,
+            value
+        );
+        fs::write(
+            record.with_extension("closure-write"),
+            serde_json::to_vec(&value).map_err(io::Error::other)?,
+        )?;
+        persist_closure_owner(&record, &value)?;
+        assert!(!record.with_extension("closure-write").exists());
+        fs::remove_dir_all(root)
     }
 }
 
@@ -642,6 +777,7 @@ pub fn run_guardian_cli() -> io::Result<()> {
         next_sequence: 0,
         loans: Vec::new(),
         incoming: Incoming::default(),
+        bootstrap_identity: None,
     };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if !valid_nonce(&guardian.nonce) {
@@ -708,6 +844,9 @@ pub fn protected_native_reads_stopped(registry: &Path, lock_path: &Path, identit
         // guardian may still retain SH and a recovery record; callers hold EX.
         if ownership::payload_closed(&value)? || field(&value, "phase") == "preparing" {
             continue;
+        }
+        if field(&value, "phase") == "dispatching" {
+            return Ok(false);
         }
         let process = field(&value, "process");
         let group =

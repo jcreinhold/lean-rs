@@ -1993,7 +1993,7 @@ impl LeanWorker {
             command.env(lean_toolchain::native_guardian::EXECUTABLE_ENV, executable);
         }
         #[cfg(unix)]
-        let lifetime = config
+        let mut lifetime = config
             .lifetime_directory
             .as_deref()
             .map(|directory| {
@@ -2018,7 +2018,14 @@ impl LeanWorker {
             lifetime.configure(&mut command);
         }
 
-        let mut child = StartupChild(Some(config.process_tracker.spawn(&mut command).map_err(|source| {
+        #[cfg(unix)]
+        let spawned = match lifetime.as_mut() {
+            Some(lifetime) => config.process_tracker.spawn_guarded(&mut command, lifetime),
+            None => config.process_tracker.spawn(&mut command),
+        };
+        #[cfg(not(unix))]
+        let spawned = config.process_tracker.spawn(&mut command);
+        let mut child = StartupChild(Some(spawned.map_err(|source| {
             SpawnFailure::no_child(LeanWorkerError::Spawn {
                 executable: config.executable.clone(),
                 source,

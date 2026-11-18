@@ -132,10 +132,10 @@ pub fn cleanup_generation_inputs(directory: &Path) -> io::Result<()> {
         count = count
             .checked_add(1)
             .ok_or_else(|| super::invalid("generation child count overflow"))?;
-        if count > 4
+        if count > 5
             || !matches!(
                 name,
-                b"owner.json" | b"owner.write" | b"owner.guardian-write" | b"inputs"
+                b"owner.json" | b"owner.write" | b"owner.guardian-write" | b"owner.closure-write" | b"inputs"
             )
         {
             return Err(super::invalid("unexpected child beside generation inputs"));

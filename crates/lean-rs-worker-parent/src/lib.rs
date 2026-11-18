@@ -33,8 +33,8 @@ pub use capability::{
 };
 #[cfg(unix)]
 pub use crash_ownership::{
-    LeanWorkerNativeScope, LeanWorkerNativeScopeLease, LeanWorkerOwnedGeneration, LeanWorkerOwnedProcess,
-    LeanWorkerOwnerObservation,
+    LeanWorkerNativePendingCleanup, LeanWorkerNativeScope, LeanWorkerNativeScopeLease, LeanWorkerNativeSpawnError,
+    LeanWorkerOwnedGeneration, LeanWorkerOwnedProcess, LeanWorkerOwnerObservation,
 };
 pub use planning::{
     LeanWorkerBatchFingerprint, LeanWorkerImportPlanConfig, LeanWorkerImportPlanError, LeanWorkerImportPlanner,
