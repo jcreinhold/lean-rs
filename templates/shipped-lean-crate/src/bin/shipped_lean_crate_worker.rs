@@ -27,7 +27,7 @@ const BYTES: &[u8] = include_bytes!(env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANI
 impl WorkerAuthority for Demo {
     fn manifest_read(&self, path: &Path) -> LeanResult<WorkerManifestRead> {
         if path != Path::new(MANIFEST) {
-            return Err(denied());
+            return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: manifest selection"));
         }
         let readers = deployment::hold(std::slice::from_ref(&self.0.project)).map_err(ioerr)?;
         Ok(WorkerManifestRead::new(self.0.project.clone(), path.into(), readers))
@@ -48,7 +48,7 @@ impl WorkerAuthority for Demo {
             || std::fs::read(image).map_err(ioerr)?
                 != include_bytes!(env!("LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_DYLIB")).as_slice()
         {
-            return Err(denied());
+            return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: worker image or manifest"));
         }
         // SAFETY: the captured manifest and image equal this package's build-selected bytes.
         // A retained reader excludes cooperating builds. The deployed matching Lean runtime
@@ -71,13 +71,15 @@ impl WorkerAuthority for Demo {
         let mut roots = self.0.shim_roots.clone();
         roots.push(self.0.project.clone());
         let readers = deployment::hold(&roots).map_err(ioerr)?;
-        if p.manifest_path() != self.0.shim_manifest
-            || p.artifact_roots() != self.0.shim_roots
-            || p.shim_search_paths() != self.0.shim_paths
-            || std::fs::read(p.manifest_path()).map_err(ioerr)? != p.manifest_json().as_bytes()
-            || self.0.inventory().map_err(ioerr)? != self.0.files
-        {
-            return Err(denied());
+        if p.manifest_path() != self.0.shim_manifest {
+            return Err(lean_rs::error::host_internal(format!("prepared shim manifest path differs: {} versus {}", p.manifest_path().display(), self.0.shim_manifest.display())));
+        }
+        if p.artifact_roots() != self.0.shim_roots || p.shim_search_paths() != self.0.shim_paths {
+            return Err(lean_rs::error::host_internal("prepared shim roots differ"));
+        }
+        if std::fs::read(p.manifest_path()).map_err(ioerr)? != p.manifest_json().as_bytes()
+            || self.0.inventory().map_err(ioerr)? != self.0.files {
+            return Err(lean_rs::error::host_internal("prepared shim or deployment bytes differ"));
         }
         // SAFETY: the bundled host and interop images and manifest match the SDK build
         // recorded by this application. The readers retain their checked resolution.
@@ -111,7 +113,7 @@ impl WorkerAuthority for Demo {
                 .as_ref()
                 != Some(&self.0.sysroot)
         {
-            return Err(denied());
+            return Err(lean_rs::error::host_internal("outside the build-selected ShipLeanDemo deployment: import graph or runtime"));
         }
         // SAFETY: host() retains the read union and checks the packaged module bytes,
         // canonical search order and absence of Init shadows. ShipLeanDemo imports only

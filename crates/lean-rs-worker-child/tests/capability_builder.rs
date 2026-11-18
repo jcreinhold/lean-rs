@@ -59,14 +59,14 @@ fn shipped_template_target_dir() -> PathBuf {
         .clone()
 }
 
-fn build_shipped_template() -> &'static [PathBuf] {
+fn build_shipped_template() -> &'static Path {
     // Memoize: see the matching note in `loader_regressions::build_template`.
     // Each invocation of `cargo build` spawns its own rustc swarm; with
     // nextest's parallel test threads and many tests calling this
     // helper, the unbounded fan-out can exhaust developer-machine RAM.
     // Cap the inner cargo's jobs and run the build at most once per
     // test process.
-    static ONCE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    static ONCE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
             .args(["build", "--jobs", "1", "--manifest-path"])
@@ -89,40 +89,18 @@ fn build_shipped_template() -> &'static [PathBuf] {
             .filter(|message| {
                 message.get("reason").and_then(serde_json::Value::as_str) == Some("build-script-executed")
             })
-            .filter_map(|message| {
-                message
-                    .get("out_dir")
-                    .and_then(serde_json::Value::as_str)
-                    .map(PathBuf::from)
+            .find_map(|message| {
+                message["env"].as_array()?.iter().find_map(|pair| {
+                    (pair[0].as_str()? == "LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST")
+                        .then(|| pair[1].as_str().map(PathBuf::from))?
+                })
             })
-            .collect()
+            .expect("shipped build script emitted its selected capability manifest")
     })
 }
 
 fn shipped_manifest_path() -> PathBuf {
-    let mut candidates = build_shipped_template()
-        .iter()
-        .flat_map(|directory| {
-            std::fs::read_dir(directory)
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|candidate| candidate.path())
-        })
-        .filter(|path| {
-            path.file_name()
-                .and_then(std::ffi::OsStr::to_str)
-                .is_some_and(|name| name.starts_with("ShipLeanDemo") && name.ends_with(".lean-rs-capability.json"))
-        })
-        .filter(|path| {
-            let bytes = std::fs::read(path).expect("read emitted capability manifest");
-            let json: serde_json::Value = serde_json::from_slice(&bytes).expect("capability manifest is JSON");
-            json.get("schema_version").and_then(serde_json::Value::as_u64)
-                == Some(u64::from(lean_toolchain::CAPABILITY_MANIFEST_SCHEMA_VERSION))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort();
-    candidates.pop().expect("template build emitted a capability manifest")
+    build_shipped_template().to_owned()
 }
 
 fn env_exe_name(name: &str) -> String {
@@ -895,12 +873,18 @@ fn handshake_failure_is_a_bootstrap_diagnostic() {
     if !shell.is_file() {
         return;
     }
-    let report = builder()
+    let spec = LeanBuiltCapability::manifest_path(shipped_manifest_path());
+    let report = LeanWorkerCapabilityBuilder::from_built_capability(&spec, ["ShipLeanDemo"])
+        .expect("actual shipped manifest passes preflight")
         .worker_child(LeanWorkerChild::path(shell))
         .startup_timeout(Duration::from_millis(50))
         .check();
     let first = report.first_error().expect("non-worker child fails bootstrap");
-    assert_eq!(first.code(), LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed);
+    assert_eq!(
+        first.code(),
+        LeanWorkerBootstrapDiagnosticCode::WorkerHandshakeFailed,
+        "{first:?}"
+    );
 }
 
 #[test]

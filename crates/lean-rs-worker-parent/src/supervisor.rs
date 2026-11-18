@@ -1925,6 +1925,9 @@ impl LeanWorker {
     fn spawn_tracked(config: &LeanWorkerConfig) -> Result<Self, SpawnFailure> {
         let spawn_started = Instant::now();
         let mut command = Command::new(&config.executable);
+        // This child is a runtime process. A parent running inside Cargo may inherit
+        // a build-script OUT_DIR that is outside the worker’s artifact custody.
+        command.env_remove("OUT_DIR");
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
