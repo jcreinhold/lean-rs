@@ -2018,12 +2018,12 @@ impl LeanWorker {
             lifetime.configure(&mut command);
         }
 
-        let mut child = StartupChild(Some(config.process_tracker.own(command.spawn().map_err(|source| {
+        let mut child = StartupChild(Some(config.process_tracker.spawn(&mut command).map_err(|source| {
             SpawnFailure::no_child(LeanWorkerError::Spawn {
                 executable: config.executable.clone(),
                 source,
             })
-        })?)));
+        })?));
         let initialized = (|| {
             #[cfg(unix)]
             let native_generation_id = if let Some(lifetime) = lifetime {
@@ -6044,6 +6044,20 @@ mod tests {
         assert!(child.try_wait().expect("poll holder").is_none());
         child.kill().expect("kill holder");
         child.wait().expect("reap holder");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn consuming_shutdown_error_still_reaps_owned_child() {
+        let worker = sleeping_worker();
+        let observation = worker.child.as_ref().expect("owned child").exit_observation();
+        assert!(observation.confirmed_exit().is_none());
+        worker.shutdown().expect_err("fixture has no protocol stdin");
+        let start = std::time::Instant::now();
+        while observation.confirmed_exit().is_none() {
+            assert!(start.elapsed() < Duration::from_secs(3));
+            std::thread::yield_now();
+        }
     }
 
     #[cfg(unix)]

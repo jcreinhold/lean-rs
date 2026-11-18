@@ -195,13 +195,7 @@ impl LeanWorkerNativeScopeLease {
     /// # Errors
     /// Failed kernel observations never establish custody release.
     pub fn custody_closed(&self) -> io::Result<bool> {
-        if !self.0.group_absent()? {
-            return Ok(false);
-        }
-        match &self.0.guardian {
-            Some(guardian) => guardian.is_live().map(|live| !live),
-            None => Ok(false),
-        }
+        self.0.custody_closed()
     }
 
     /// Kernel identity authenticated for this actual bootstrap child.
@@ -437,6 +431,23 @@ impl ParentLifetimeLease {
     }
     pub(crate) fn group_absent(&self) -> io::Result<bool> {
         lean_toolchain::process_group::group_present(self.owner.process_group).map(|present| !present)
+    }
+    pub(crate) fn retirement_closed(&self) -> io::Result<bool> {
+        if self.uses_guardian() {
+            self.custody_closed()
+        } else {
+            self.group_absent()
+        }
+    }
+
+    fn custody_closed(&self) -> io::Result<bool> {
+        if !self.group_absent()? {
+            return Ok(false);
+        }
+        match &self.guardian {
+            Some(guardian) => guardian.is_live().map(|live| !live),
+            None => Ok(false),
+        }
     }
     pub(crate) fn remove_if_absent(&self) -> io::Result<()> {
         if !self.group_absent()? {

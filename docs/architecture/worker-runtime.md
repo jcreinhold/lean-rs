@@ -405,15 +405,15 @@ cleanup confirms its owned scope is closed.
 
 `LeanWorkerProcessTracker` counts child processes across startup and replacement. Pass one shared tracker to every
 worker builder covered by a capacity slot. After the actor stops and cannot spawn again, release its slot only when
-`active_processes()` returns zero. The count decreases after `try_wait` confirms exit and any attached inherited group
-has closed, not merely when the owner drops, a request expires, or a PID disappears. If `ECHILD` revokes wait authority,
-an attached lifetime's confirmed whole-group absence can instead release capacity without an exit-status receipt.
+`active_processes()` returns zero. The tracker reserves one count before spawn after establishing a cleanup thread. A failed spawn returns
+the reservation. After spawn, retirement requires direct exit and closure of the attached scope. Guarded retirement
+also requires closure of the authenticated guardian. An attached lifetime can establish resource closure after
+`ECHILD` without supplying an exit status.
 
 `try_shutdown(&mut self)` allows cleanup retries without consuming the owner. Dropping an owner moves any unconfirmed
-child into the tracker's cleanup registry. At most one cleanup thread per tracker retries every 100 ms, then stops when
-the registry is empty. A poll also retries cleanup and thread creation if needed. Keep the tracker until its count
-reaches zero, especially if cleanup-thread creation fails. Dropping the last tracker after a thread-start failure can
-discard pending handles; automatic cleanup is not guaranteed in that case. Cleanup sends a kill only after `try_wait`
+child into the tracker's cleanup registry. The reaper remains available while launches or children are outstanding,
+wakes on transfer and retries unresolved handles every 100 ms. If the thread cannot start, launch fails before spawn.
+Cleanup sends a kill only after `try_wait`
 reports the owned child still running; a wait error never authorizes a signal to a reused PID. Other wait errors keep
 the actual child and count for retry. `ECHILD` without an attached whole-group absence witness can still keep capacity
 unavailable indefinitely. A normally stopped child, or a closed attached group after `ECHILD`, recovers automatically;

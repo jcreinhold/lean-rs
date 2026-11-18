@@ -1,7 +1,7 @@
 //! Process ownership and confirmed-exit accounting, including failed startup.
 use std::io;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, ExitStatus};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,8 +12,7 @@ use std::time::Duration;
 /// may release resource capacity without manufacturing an exit-status receipt.
 /// After its owner stops, an embedder may release capacity when this reaches zero. A zero
 /// count while the owner is still running does not prevent a later spawn.
-/// Keep and poll this tracker until zero if cleanup-thread creation fails;
-/// dropping the last tracker in that case can discard pending process handles.
+/// Cleanup ownership is established before spawn and survives loss of the last client.
 #[derive(Clone, Debug, Default)]
 pub struct LeanWorkerProcessTracker(Arc<Processes>);
 
@@ -21,7 +20,7 @@ pub struct LeanWorkerProcessTracker(Arc<Processes>);
 struct Processes {
     active: AtomicUsize,
     pending: Mutex<Vec<PendingChild>>,
-    reaper_running: AtomicBool,
+    reaper: Mutex<Option<std::thread::Thread>>,
 }
 
 /// Shared exit evidence for one owned direct child, never a process signal handle.
@@ -129,20 +128,37 @@ impl LeanWorkerProcessTracker {
         Self::default()
     }
 
-    /// Number of children whose owned resource scope has not closed.
+    /// Number of reserved launches and children whose owned resource scope has not closed.
     ///
-    /// Also retries cleanup left by dropped owners, including after a failed
-    /// attempt to start the cleanup thread. This never infers death from a PID.
+    /// Also polls cleanup left by dropped owners. This never infers death from a PID.
     #[must_use]
     pub fn active_processes(&self) -> usize {
         self.reap_pending();
-        self.start_reaper();
         self.0.active.load(Ordering::Acquire)
     }
 
-    pub(crate) fn own(&self, mut child: Child) -> OwnedChild {
-        self.0.active.fetch_add(1, Ordering::AcqRel);
-        OwnedChild {
+    pub(crate) fn spawn(&self, command: &mut std::process::Command) -> io::Result<OwnedChild> {
+        self.launch(Self::start_reaper, || command.spawn())
+    }
+
+    fn launch(
+        &self,
+        start: impl FnOnce(Self) -> io::Result<std::thread::Thread>,
+        spawn: impl FnOnce() -> io::Result<Child>,
+    ) -> io::Result<OwnedChild> {
+        {
+            let mut reaper = self.0.reaper.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if reaper.is_none() {
+                *reaper = Some(start(self.clone())?);
+            }
+            self.0.active.fetch_add(1, Ordering::AcqRel);
+            // Publish the reservation before allowing the reaper to decide to exit.
+            drop(reaper);
+        }
+        let mut reservation = LaunchReservation(Some(self));
+        let mut child = spawn()?;
+        reservation.0 = None;
+        Ok(OwnedChild {
             pid: child.id(),
             stdin: child.stdin.take(),
             stdout: child.stdout.take(),
@@ -155,7 +171,7 @@ impl LeanWorkerProcessTracker {
             exit: LeanWorkerExitObservation::default(),
             #[cfg(unix)]
             lifetime: None,
-        }
+        })
     }
 
     fn reap_pending(&self) {
@@ -178,7 +194,7 @@ impl LeanWorkerProcessTracker {
                     if owned
                         .lifetime
                         .as_ref()
-                        .is_some_and(|lifetime| !matches!(lifetime.group_absent(), Ok(true)))
+                        .is_some_and(|lifetime| !matches!(lifetime.retirement_closed(), Ok(true)))
                     {
                         return true;
                     }
@@ -187,7 +203,7 @@ impl LeanWorkerProcessTracker {
                     if let Some(lifetime) = &owned.lifetime {
                         let _removed = lifetime.remove_if_absent();
                     }
-                    self.0.active.fetch_sub(1, Ordering::AcqRel);
+                    self.release();
                     false
                 }
                 Ok(None) => {
@@ -208,15 +224,21 @@ impl LeanWorkerProcessTracker {
                 Err(error) => {
                     #[cfg(unix)]
                     if error.raw_os_error() == Some(libc::ECHILD)
+                        && let Some(lifetime) = &owned.lifetime
+                    {
+                        let _stop = lifetime.request_stop();
+                    }
+                    #[cfg(unix)]
+                    if error.raw_os_error() == Some(libc::ECHILD)
                         && owned
                             .lifetime
                             .as_ref()
-                            .is_some_and(|lifetime| matches!(lifetime.group_absent(), Ok(true)))
+                            .is_some_and(|lifetime| matches!(lifetime.retirement_closed(), Ok(true)))
                     {
                         // No wait status exists: release physical capacity only.
                         // Serialized identities never authorize a recovery signal.
                         owned.exit.confirm_scope_closed_without_status();
-                        self.0.active.fetch_sub(1, Ordering::AcqRel);
+                        self.release();
                         return false;
                     }
                     #[cfg(not(unix))]
@@ -227,42 +249,66 @@ impl LeanWorkerProcessTracker {
         });
     }
 
-    fn start_reaper(&self) {
-        if self
+    fn wake(&self) {
+        if let Some(thread) = self
             .0
-            .pending
+            .reaper
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_empty()
-            || self.0.reaper_running.swap(true, Ordering::AcqRel)
+            .as_ref()
         {
-            return;
+            thread.unpark();
         }
-        let tracker = self.clone();
-        let result = std::thread::Builder::new()
+    }
+
+    fn release(&self) {
+        if self.0.active.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.wake();
+        }
+    }
+
+    fn start_reaper(tracker: Self) -> io::Result<std::thread::Thread> {
+        let handle = std::thread::Builder::new()
             .name("lean-worker-reaper".into())
             .spawn(move || {
                 loop {
                     tracker.reap_pending();
-                    let pending = tracker
+                    {
+                        let mut reaper = tracker
+                            .0
+                            .reaper
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if tracker.0.active.load(Ordering::Acquire) == 0 {
+                            *reaper = None;
+                            drop(reaper);
+                            return;
+                        }
+                        drop(reaper);
+                    }
+                    if tracker
                         .0
                         .pending
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if pending.is_empty() {
-                        // Clear while holding the registry lock, so a concurrent
-                        // retirement either sees this thread or starts the next one.
-                        tracker.0.reaper_running.store(false, Ordering::Release);
-                        break;
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .is_empty()
+                    {
+                        std::thread::park();
+                    } else {
+                        std::thread::park_timeout(Duration::from_millis(100));
                     }
-                    drop(pending);
-                    std::thread::sleep(Duration::from_millis(100));
                 }
-            });
-        if result.is_err() {
-            // The tracker still owns every pending Child. Its next poll or
-            // retirement retries; no capacity is released on this error.
-            self.0.reaper_running.store(false, Ordering::Release);
+            })?;
+        Ok(handle.thread().clone())
+    }
+}
+
+struct LaunchReservation<'a>(Option<&'a LeanWorkerProcessTracker>);
+
+impl Drop for LaunchReservation<'_> {
+    fn drop(&mut self) {
+        if let Some(tracker) = self.0 {
+            tracker.release();
         }
     }
 }
@@ -390,15 +436,21 @@ impl OwnedChild {
             Err(error) => {
                 #[cfg(unix)]
                 if error.raw_os_error() == Some(libc::ECHILD)
+                    && let Some(lifetime) = &self.lifetime
+                {
+                    let _stop = lifetime.request_stop();
+                }
+                #[cfg(unix)]
+                if error.raw_os_error() == Some(libc::ECHILD)
                     && !self.confirmed
                     && self
                         .lifetime
                         .as_ref()
-                        .is_some_and(|lifetime| matches!(lifetime.group_absent(), Ok(true)))
+                        .is_some_and(|lifetime| matches!(lifetime.retirement_closed(), Ok(true)))
                 {
                     self.confirmed = true;
                     self.exit.confirm_scope_closed_without_status();
-                    self.tracker.0.active.fetch_sub(1, Ordering::AcqRel);
+                    self.tracker.release();
                 }
                 // A capacity witness is not an exit-status witness. Preserve the
                 // actual wait failure and leave the request observation unknown.
@@ -425,7 +477,7 @@ impl OwnedChild {
             if self
                 .lifetime
                 .as_ref()
-                .is_some_and(|lifetime| !matches!(lifetime.group_absent(), Ok(true)))
+                .is_some_and(|lifetime| !matches!(lifetime.retirement_closed(), Ok(true)))
             {
                 return Ok(None); // The owned service still has inherited-group descendants.
             }
@@ -433,7 +485,7 @@ impl OwnedChild {
                 self.exit.confirm(status);
             }
             self.confirmed = true;
-            self.tracker.0.active.fetch_sub(1, Ordering::AcqRel);
+            self.tracker.release();
             #[cfg(unix)]
             if let Some(lifetime) = &self.lifetime {
                 let _removed = lifetime.remove_if_absent();
@@ -464,7 +516,7 @@ impl Drop for OwnedChild {
                     #[cfg(unix)]
                     lifetime: self.lifetime.take(),
                 });
-            self.tracker.start_reaper();
+            self.tracker.wake();
         }
     }
 }
@@ -475,11 +527,97 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    impl LeanWorkerProcessTracker {
+        pub(crate) fn own(&self, child: Child) -> OwnedChild {
+            self.launch(Self::start_reaper, || Ok(child))
+                .expect("test cleanup thread starts")
+        }
+    }
+
     fn sleeper() -> Child {
         std::process::Command::new("sleep")
             .arg("60")
             .spawn()
             .expect("spawn test child")
+    }
+
+    #[test]
+    fn reaper_start_failure_prevents_launch_and_releases_no_unowned_capacity() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let calls = std::cell::Cell::new(0);
+        let result = tracker.launch(
+            |_| Err(io::Error::other("thread unavailable")),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(sleeper())
+            },
+        );
+        assert_eq!(
+            result.expect_err("must reject before launch").to_string(),
+            "thread unavailable"
+        );
+        assert_eq!(calls.get(), 0);
+        assert_eq!(tracker.active_processes(), 0);
+        assert!(tracker.0.reaper.lock().expect("lock").is_none());
+    }
+
+    #[test]
+    fn failed_launch_holds_reservation_until_spawn_returns() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let failed = tracker.launch(LeanWorkerProcessTracker::start_reaper, || {
+            assert_eq!(tracker.active_processes(), 1);
+            Err(io::Error::other("spawn failed"))
+        });
+        assert_eq!(failed.expect_err("launch failed").to_string(), "spawn failed");
+        assert_eq!(tracker.active_processes(), 0);
+    }
+
+    #[test]
+    fn reservation_survives_concurrent_retirement_of_previous_child() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let first = tracker
+            .spawn(std::process::Command::new("sleep").arg("60"))
+            .expect("launch");
+        let first_exit = first.exit_observation();
+        let second = tracker
+            .launch(LeanWorkerProcessTracker::start_reaper, || {
+                assert_eq!(tracker.active_processes(), 2);
+                drop(first);
+                let start = Instant::now();
+                while first_exit.confirmed_exit().is_none() || tracker.0.active.load(Ordering::Acquire) != 1 {
+                    assert!(start.elapsed() < Duration::from_secs(3));
+                    std::thread::yield_now();
+                }
+                // No child handle is enqueued here: the outstanding launch must keep this thread alive.
+                assert!(tracker.0.reaper.lock().expect("lock").is_some());
+                Ok(sleeper())
+            })
+            .expect("second launch");
+        let second_exit = second.exit_observation();
+        drop(second);
+        drop(tracker);
+        let start = Instant::now();
+        while second_exit.confirmed_exit().is_none() {
+            assert!(start.elapsed() < Duration::from_secs(3));
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn final_client_loss_reaps_without_external_tracker_poll() {
+        let tracker = LeanWorkerProcessTracker::new();
+        let owned = tracker
+            .spawn(std::process::Command::new("sleep").arg("60"))
+            .expect("launch");
+        let evidence = owned.exit_observation();
+        assert_eq!(tracker.active_processes(), 1);
+        drop(tracker);
+        drop(owned);
+        let start = Instant::now();
+        while evidence.confirmed_exit().is_none() {
+            assert!(start.elapsed() < Duration::from_secs(3));
+            std::thread::yield_now();
+        }
     }
 
     #[test]
