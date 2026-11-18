@@ -218,7 +218,9 @@ fn native_guardian_fixture_entry() {
             }
         });
     }
-    lean_toolchain::native_guardian::run_guardian_cli().unwrap();
+    startup_faults::fixture_watchdog("guardian");
+    let result = lean_toolchain::native_guardian::run_guardian_cli();
+    startup_faults::pause_drained_guardian(result).unwrap();
 }
 
 #[test]
@@ -226,10 +228,12 @@ fn native_worker_fixture_entry() {
     let Some(root) = std::env::var_os("LEAN_NATIVE_WORKER_FIXTURE") else {
         return;
     };
+    startup_faults::fixture_watchdog("worker");
     // SAFETY: this isolated fixture is the actual worker before any body work.
     assert!(unsafe { libc::setsid() } > 0);
     let socket = std::env::var_os(SOCKET_ENV).unwrap();
     let nonce = std::env::var(NONCE_ENV).unwrap();
+    startup_faults::collide_bootstrap_publication();
     let mut guardian = lean_toolchain::native_guardian::GuardianHandle::spawn(
         &Path::new(&root).join("guardian.sh"),
         Path::new(&socket),
@@ -305,3 +309,6 @@ mod guardian_failure;
 mod input_custody;
 #[path = "tests/lifeline.rs"]
 mod lifeline;
+
+#[path = "tests/startup_faults.rs"]
+pub(super) mod startup_faults;

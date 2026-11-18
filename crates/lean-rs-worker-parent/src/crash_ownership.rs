@@ -66,9 +66,17 @@ fn write_before_deadline(stream: &mut UnixStream, mut bytes: &[u8], deadline: In
             if Instant::now() >= deadline {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "startup ACK deadline elapsed"));
             }
-            match stream.write(bytes) {
+            #[cfg(test)]
+            let offered = lifecycle_tests::startup_faults::write_limit(bytes.len());
+            #[cfg(not(test))]
+            let offered = bytes.len();
+            match stream.write(&bytes[..offered]) {
                 Ok(0) => return Err(io::Error::new(io::ErrorKind::WriteZero, "startup ACK closed")),
-                Ok(n) => bytes = &bytes[n..],
+                Ok(n) => {
+                    #[cfg(test)]
+                    lifecycle_tests::startup_faults::after_write(n);
+                    bytes = &bytes[n..];
+                }
                 Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {
                     std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())))
                 }

@@ -364,6 +364,11 @@ pub(crate) struct OwnedChild {
 }
 
 impl OwnedChild {
+    #[cfg(test)]
+    pub(crate) fn test_active_processes(&self) -> usize {
+        self.tracker.active_processes()
+    }
+
     #[cfg(unix)]
     pub(crate) fn attach_lifetime(&mut self, lifetime: crate::crash_ownership::ParentLifetimeLease) -> io::Result<()> {
         if lifetime.uses_guardian() {
