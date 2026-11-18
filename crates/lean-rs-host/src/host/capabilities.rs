@@ -62,7 +62,7 @@ pub struct LeanCapabilities<'lean, 'h> {
     /// User's capability dylib—the one named in `load_capabilities`, absent
     /// for `load_shims_only`. Kept alive so initialized user modules remain
     /// loaded while sessions import and query their environments.
-    _user_library: Option<LeanLibrary<'lean>>,
+    user_library: Option<LeanLibrary<'lean>>,
     /// Manifest-backed bundled host shim capability. Session construction
     /// resolves typed bindings from this checked surface.
     shim_capability: LoadedHostArtifacts<'lean>,
@@ -105,7 +105,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
         artifact_roots.dedup();
         Ok(Self {
             host,
-            _user_library: None,
+            user_library: None,
             shim_capability,
             shim_search_paths: prepared.shim_search_paths.clone(),
             artifact_roots,
@@ -137,7 +137,7 @@ impl<'lean, 'h> LeanCapabilities<'lean, 'h> {
             ));
         }
         library.initialize_module(approved.package_name(), approved.module_name())?;
-        capabilities._user_library = Some(library);
+        capabilities.user_library = Some(library);
         Ok(capabilities)
     }
 

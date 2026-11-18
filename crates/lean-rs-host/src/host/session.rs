@@ -1403,7 +1403,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         if !self.shims.supports_declaration_inspection() {
             return Ok(DeclarationInspectionResult::Unsupported);
-        };
+        }
         let source_roots = if request.fields.source {
             self.capabilities
                 .host()

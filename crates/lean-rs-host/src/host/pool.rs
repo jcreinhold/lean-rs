@@ -468,7 +468,7 @@ impl<'lean> SessionPool<'lean> {
             "lean_rs.host.pool.acquire",
             profile = import_profile.label(),
             imports_len = scope.imports().len(),
-            imports_first = scope.imports().first().map(String::as_str).unwrap_or("<empty>"),
+            imports_first = scope.imports().first().map_or("<empty>", String::as_str),
         )
         .entered();
         check_cancellation(cancellation)?;
