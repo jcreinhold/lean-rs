@@ -268,6 +268,9 @@ members = [
             "CARGO_TERM_COLOR": os.environ.get("CARGO_TERM_COLOR", "always"),
         }
 
+        if "CARGO_BUILD_JOBS" in os.environ:
+            env["CARGO_BUILD_JOBS"] = os.environ["CARGO_BUILD_JOBS"]
+
         for crate in CRATES:
             subprocess.run(
                 [
