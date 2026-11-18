@@ -376,7 +376,9 @@ The table maps the control and cleanup contracts above to their implementation o
 
 This document states the SDK worker and pool contract. Its named Rust conformance tests exercise selected
 implementation behaviors; they do not establish trace refinement, shutdown liveness, or the full native guardian
-contract. No maintained mechanized proof of those SDK guarantees is provided here.
+contract. The small [worker-custody model](../../specs/worker-custody/README.md) checks the reservation, guardian-loss,
+lock-alias, physical-closure and capacity-return design over one bounded generation. It states its OS and trust
+assumptions and includes deliberate counterexamples. It does not prove the Rust implementation or those assumptions.
 
 The separate [native-execution TLA+ models](https://github.com/jcreinhold/lean-host-mcp/tree/main/specs/native-execution)
 describe bounded abstract protocols in `lean-host-mcp`. Their documented assumptions and checked cases have their own
