@@ -239,13 +239,16 @@ fn rss_policy_restarts_or_records_unavailable_sample() {
 
 fn kill_and_observe_exit(worker: &mut LeanWorker) {
     worker.__kill_for_test().expect("worker kill succeeds");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let started = Instant::now();
     loop {
         if let LeanWorkerStatus::Exited(exit) = worker.status().expect("observe killed worker") {
             assert!(!exit.success, "killed worker exited successfully");
             return;
         }
-        assert!(Instant::now() < deadline, "worker exit remained unconfirmed");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "worker exit remained unconfirmed"
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }

@@ -90,9 +90,9 @@ fn build_shipped_template() -> &'static Path {
                 message.get("reason").and_then(serde_json::Value::as_str) == Some("build-script-executed")
             })
             .find_map(|message| {
-                message["env"].as_array()?.iter().find_map(|pair| {
-                    (pair[0].as_str()? == "LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST")
-                        .then(|| pair[1].as_str().map(PathBuf::from))?
+                message.get("env")?.as_array()?.iter().find_map(|pair| {
+                    (pair.get(0)?.as_str()? == "LEAN_RS_CAPABILITY_SHIP_LEAN_DEMO_MANIFEST")
+                        .then(|| pair.get(1)?.as_str().map(PathBuf::from))?
                 })
             })
             .expect("shipped build script emitted its selected capability manifest")
