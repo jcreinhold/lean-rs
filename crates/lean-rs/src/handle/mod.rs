@@ -13,7 +13,7 @@
 //! ## How to use a handle
 //!
 //! Reach into Lean through [`crate::module::LeanModule::exported_unchecked`]; the
-//! handle types already implement the (sealed) [`crate::module::LeanAbi`]
+//! handle types already implement the unsafe [`crate::module::LeanAbi`]
 //! trait so they can appear as argument or return types in the typed
 //! dispatch:
 //!

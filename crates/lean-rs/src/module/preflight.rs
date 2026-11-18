@@ -295,7 +295,7 @@ mod tests {
         ArtifactInfo, CapabilityManifest, LeanLoaderDiagnosticCode, LeanRuntimePreflight, check_imported_symbols,
         inspect_artifact,
     };
-    use crate::{LeanBuiltCapability, LeanCapability, LeanRuntime};
+    use crate::LeanBuiltCapability;
     use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -488,13 +488,9 @@ mod tests {
         let dir = temp_dir("open_failure_preflight_code");
         let missing = dir.join("missing-capability.dylib");
         let manifest = write_manifest(&dir, &missing, "", "");
-        let runtime = LeanRuntime::init().expect("runtime init");
-
-        let Err(err) = LeanCapability::from_build_manifest(runtime, LeanBuiltCapability::manifest_path(manifest))
-        else {
-            panic!("missing primary should fail before open");
-        };
-
+        let report = LeanRuntimePreflight::new(LeanBuiltCapability::manifest_path(manifest)).check();
+        assert!(!report.is_ok());
+        let err = super::report_into_error(report);
         assert_eq!(err.code(), crate::LeanDiagnosticCode::ModuleInit);
         assert!(
             err.to_string()

@@ -312,11 +312,17 @@ impl SessionAdmission {
         Ok(())
     }
 }
-fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
+pub(crate) fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?
-        .take((MAX_DESCRIPTOR_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let file = File::options()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("capability metadata requires a regular file"));
+    }
+    file.take((MAX_DESCRIPTOR_BYTES + 1) as u64).read_to_end(&mut bytes)?;
     if bytes.len() > MAX_DESCRIPTOR_BYTES {
         return Err(invalid("capability metadata exceeds 64 KiB"));
     }
@@ -339,6 +345,47 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NONCE: AtomicU64 = AtomicU64::new(0);
+    #[test]
+    fn refused_manifest_reads_never_reach_the_native_loader() {
+        use crate::WorkerManifestRead;
+        let fixture = Fixture::new();
+        let path = fixture.host.join("manifest.fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("create FIFO");
+        assert!(status.success());
+        let custody = WorkerManifestRead::new(fixture.host.clone(), path.clone(), ());
+        let mut calls = 0;
+        let mut initialize = |_: &Path, _: &[u8]| {
+            calls += 1;
+            Ok(())
+        };
+        let outside = fixture.project.join("missing.json");
+        assert!(custody.read_for(&outside, &mut initialize).is_err());
+        let error = custody
+            .read_for(&path, &mut initialize)
+            .expect_err("FIFO must be rejected without a writer");
+        assert!(error.to_string().contains("regular file"));
+        assert_eq!(calls, 0);
+        let regular = fixture.host.join("manifest.json");
+        fs::write(&regular, b"{}").expect("write regular file");
+        let other_root = WorkerManifestRead::new(fixture.project.clone(), regular.clone(), ());
+        assert!(
+            other_root
+                .read_for::<()>(&regular, |_, _| panic!("outside approved root"))
+                .is_err()
+        );
+        WorkerManifestRead::new(fixture.host.clone(), regular.clone(), ())
+            .read_for(&regular, |_, bytes| {
+                assert_eq!(bytes, b"{}");
+                calls += 1;
+                Ok(())
+            })
+            .expect("regular file admitted");
+        assert_eq!(calls, 1);
+    }
+
     struct Fixture {
         directory: PathBuf,
         host: PathBuf,

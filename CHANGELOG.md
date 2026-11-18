@@ -20,7 +20,7 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - Report actual loaded host-runtime compatibility metadata separately from preparation descriptors. Refuse incompatible
   or missing required capabilities before target dispatch, and do not replay arbitrary Lean IO after a child failure.
 - Advance worker protocol to 13 for host metadata and artifact-read lifecycle messages. Install matching parent and
-  child builds together. The supported Lean toolchain window is unchanged.
+  child builds together. Lean 4.36 support is described below.
 - The new managed native-reader completion check requires the macOS atomic process-group census. Other platforms
   currently fail closed for that mode; Linux qualification remains open before a public release.
 
@@ -33,6 +33,14 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - Restrict abandoned materialization cleanup to the entry protected by its lock.
 - Resolve bounded flattened Lake dependency domains once for readers and writers; acquire a sorted project-lock union
   and reject missing or unsupported dependency metadata before command launch.
+
+### Removed
+
+- Remove `lean-rs-sys::string::lean_string_push` and `lean_string_data` from the raw public API on every supported Lean
+  release. This is a breaking SDK API change. Lean 4.36 replaces the push export with a header inline and
+  `lean_string_push_cold`, and removes the data export. Use Lean-authored exported operations when these capabilities
+  are needed; the SDK no longer declares either raw entry point. The required-symbol list and linkage probes cover
+  the retained curated exports without per-version missing-symbol exceptions.
 
 ## [0.9.9]
 

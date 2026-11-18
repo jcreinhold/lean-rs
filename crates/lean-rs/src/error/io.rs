@@ -197,8 +197,6 @@ mod tests {
 
     #![allow(unsafe_code, clippy::expect_used, clippy::panic)]
 
-    use std::path::PathBuf;
-
     use super::decode_io;
     use crate::LeanRuntime;
     use crate::abi::nat;
@@ -206,34 +204,8 @@ mod tests {
     use crate::module::LeanLibrary;
     use crate::runtime::obj::Obj;
 
-    fn fixture_dylib_path() -> PathBuf {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace = manifest_dir
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("crates/<name>/ lives two directories beneath the workspace root");
-        let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-        let lib_dir = workspace
-            .join("fixtures")
-            .join("lean")
-            .join(".lake")
-            .join("build")
-            .join("lib");
-        let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
-        let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
-        if old_style.is_file() && !new_style.is_file() {
-            old_style
-        } else {
-            new_style
-        }
-    }
-
-    /// Open the fixture library and initialize its root module so the
-    /// per-test `decode_io` calls can resolve `Effects` exports.
-    fn open_fixture(runtime: &LeanRuntime) -> LeanLibrary<'_> {
-        let path = fixture_dylib_path();
-        assert!(path.exists(), "fixture dylib not found at {}", path.display());
-        let library = LeanLibrary::open(runtime, &path).expect("fixture dylib opens cleanly");
+    fn open_fixture() -> LeanLibrary<'static> {
+        let library = crate::fixed_test_library();
         // Initializing the root cascades into `Effects` (where the IO
         // fixtures live); drop the typed handle—these tests reach the
         // raw entry points via the library directly.
@@ -245,19 +217,21 @@ mod tests {
         library
     }
 
-    /// Resolve the raw entry point for a fixture function and call it
-    /// with the IO world token, returning the owned result `Obj`.
+    /// Read the raw IO result for the two fixture exports exercised below.
     fn call_io_raw<'lean>(library: &LeanLibrary<'lean>, runtime: &'lean LeanRuntime, symbol: &str) -> Obj<'lean> {
-        let addr = library.resolve_function_symbol(symbol).expect("symbol resolves");
-        type FnPtr = unsafe extern "C" fn(*mut lean_rs_sys::lean_object) -> *mut lean_rs_sys::lean_object;
-        // SAFETY: every fixture IO export has Lake-emitted signature
-        // `fn(world: *mut lean_object) -> *mut lean_object`.
+        assert!(matches!(
+            symbol,
+            "lean_rs_fixture_io_success_nat" | "lean_rs_fixture_io_throw"
+        ));
+        let addr = library
+            .resolve_function_symbol(symbol)
+            .expect("fixture function resolves");
+        type FnPtr = unsafe extern "C" fn() -> *mut lean_rs_sys::lean_object;
+        // SAFETY: the paired fixture declares these two exports as nullary IO actions.
+        // Their generated C definitions take zero arguments and return an owned IO result.
         let f: FnPtr = unsafe { core::mem::transmute::<*mut core::ffi::c_void, FnPtr>(addr) };
-        // SAFETY: `lean_box(0)` is the conventional scalar world token.
-        let world = unsafe { lean_rs_sys::object::lean_box(0) };
-        // SAFETY: the function takes ownership of `world` (a scalar—no
-        // refcount transfer) and returns an owned IO result pointer.
-        let raw = unsafe { f(world) };
+        // SAFETY: the retained fixture and runtime are live on this initialized test thread.
+        let raw = unsafe { f() };
         // SAFETY: `raw` is the owned IO result returned by Lake's IO export.
         unsafe { Obj::from_owned_raw(runtime, raw) }
     }
@@ -265,7 +239,7 @@ mod tests {
     #[test]
     fn decode_io_ok_returns_value() {
         let runtime = LeanRuntime::init().expect("runtime init");
-        let library = open_fixture(runtime);
+        let library = open_fixture();
         let result = call_io_raw(&library, runtime, "lean_rs_fixture_io_success_nat");
         let value_obj = decode_io(runtime, result).expect("ioSuccessNat decodes");
         // `pure 7 : IO Nat` returns a Lean `Nat`, decoded by the Nat
@@ -278,7 +252,7 @@ mod tests {
     #[test]
     fn decode_io_error_returns_lean_exception() {
         let runtime = LeanRuntime::init().expect("runtime init");
-        let library = open_fixture(runtime);
+        let library = open_fixture();
         let result = call_io_raw(&library, runtime, "lean_rs_fixture_io_throw");
         match decode_io(runtime, result) {
             Err(LeanError::LeanException(exc)) => {

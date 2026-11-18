@@ -7,8 +7,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
-use lean_rs::abi::traits::TryFromLean;
-use lean_rs::{LeanCallbackFlow, LeanProgressCallback, LeanResult, Obj};
+use lean_rs::{LeanCallbackFlow, LeanProgressCallback, LeanResult};
 
 /// One structured progress observation from a `LeanSession` operation.
 ///
@@ -64,15 +63,8 @@ impl<'a> ProgressBridge<'a> {
         Ok(Self { callback })
     }
 
-    pub(crate) fn abi_parts(&self) -> (usize, usize) {
-        self.callback.abi_parts()
-    }
-
-    pub(crate) fn decode<'lean, T>(&self, obj: Obj<'lean>) -> LeanResult<T>
-    where
-        T: TryFromLean<'lean>,
-    {
-        self.callback.decode_result(obj)
+    pub(crate) fn callback(&self) -> &LeanProgressCallback<'_> {
+        &self.callback
     }
 }
 

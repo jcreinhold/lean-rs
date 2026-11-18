@@ -15,7 +15,7 @@
 //! ## Capability-agnostic storage
 //!
 //! Entries store the bare imported environment as
-//! `Obj<'lean>` (a refcounted handle to the Lean
+//! `HostEnvironment<'lean>` (a refcounted handle to the Lean
 //! `Environment` value), not a full [`crate::LeanSession`]. The session
 //! borrows from the capability via `'c`; storing one in the pool would
 //! tie the pool's lifetime to a single capability borrow. Storing the
@@ -28,7 +28,7 @@
 //!
 //! [`SessionPool::with_capacity`] sets a hard upper bound on the
 //! free-list size. On release, if the pool is at capacity, the
-//! environment is dropped immediately (its `Obj<'lean>`
+//! environment is dropped immediately (its `HostEnvironment<'lean>`
 //! `Drop` runs `lean_dec` and the underlying allocation is freed). The
 //! free list is FIFO on `take` and LRU on `push`, so the most
 //! recently-released environment is the next to be reused—hot OS
@@ -63,7 +63,7 @@
 //! ## Threading
 //!
 //! [`SessionPool`] is `!Send + !Sync` (inherited from the contained
-//! `Obj<'lean>` and the `RefCell` that wraps the free list). The pool
+//! `HostEnvironment<'lean>` and the `RefCell` that wraps the free list). The pool
 //! is a per-thread reuse helper; cross-thread pooling is explicitly
 //! out of scope. Per-pool stats are `Cell<PoolStats>`—
 //! single-threaded but uniform with the per-session
@@ -76,10 +76,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use lean_rs::LeanRuntime;
-use lean_rs::Obj;
 use lean_rs::ResourceExhaustedFacts;
 use lean_rs::error::LeanError;
 use lean_rs::error::LeanResult;
+use lean_rs::host_bridge::HostEnvironment;
+use lean_rs::module::{HostImportIdentity, TrustedHostImports};
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
@@ -130,7 +131,7 @@ pub struct PoolStats {
     pub key_hits: u64,
     /// Number of acquire calls that could not reuse a session key.
     pub key_misses: u64,
-    /// Number of distinct session keys observed by this pool.
+    /// Distinct project/import/profile requests observed, saturating at 256.
     pub distinct_keys_seen: u64,
     /// Number of fresh imports avoided by key hits.
     pub fresh_imports_avoided: u64,
@@ -271,11 +272,16 @@ impl SessionPoolConfig {
 /// imported with.
 ///
 /// Order matters because `Lean.importModules` is order-sensitive—a
-/// later import can shadow an earlier one. Equality is structural and
-/// canonical (the same capability root, profile, and `&[&str]` always
-/// produces the same key).
+/// later import can shadow an earlier one. Reuse also requires the same
+/// attestation identity, even for structurally identical requests.
 #[derive(Clone, Eq, PartialEq)]
 struct SessionPoolKey {
+    scope: HostImportIdentity,
+    request: PoolRequestKey,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct PoolRequestKey {
     project_root: PathBuf,
     imports: Vec<String>,
     import_profile: LeanSessionImportProfile,
@@ -284,13 +290,16 @@ struct SessionPoolKey {
 impl SessionPoolKey {
     fn from_capabilities(
         caps: &LeanCapabilities<'_, '_>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'_, '_>,
         import_profile: LeanSessionImportProfile,
     ) -> Self {
         Self {
-            project_root: caps.host().project().root().to_path_buf(),
-            imports: imports.iter().map(|&s| s.to_owned()).collect(),
-            import_profile,
+            scope: scope.identity(),
+            request: PoolRequestKey {
+                project_root: caps.host().project().root().to_path_buf(),
+                imports: scope.imports().to_vec(),
+                import_profile,
+            },
         }
     }
 }
@@ -299,12 +308,24 @@ impl SessionPoolKey {
 
 struct PooledEntry<'lean> {
     key: SessionPoolKey,
-    environment: Obj<'lean>,
+    environment: HostEnvironment<'lean>,
     import_stats: LeanImportStats,
     /// The process-global extension-registration stamp as it stood when this
     /// environment was imported. Reuse is safe only while it still matches the
     /// live stamp — see [`crate::LeanSession::extension_registry_epoch`].
     extension_registry_epoch: u64,
+}
+
+// Diagnostic history is independent of authority. The free list retains exact
+// scope identities, while statistics keep only a bounded number of request shapes.
+const MAX_DIAGNOSTIC_KEYS: usize = 256;
+
+fn record_request_key(history: &mut Vec<PoolRequestKey>, request: &PoolRequestKey) -> bool {
+    if history.len() >= MAX_DIAGNOSTIC_KEYS || history.contains(request) {
+        return false;
+    }
+    history.push(request.clone());
+    true
 }
 
 // -- PoolInner: RefCell-protected free list ------------------------------
@@ -317,7 +338,7 @@ struct PoolInner<'lean> {
     /// amortising imports across O(10s) of sessions, not for managing
     /// thousands.
     free: Vec<PooledEntry<'lean>>,
-    seen_keys: Vec<SessionPoolKey>,
+    seen_keys: Vec<PoolRequestKey>,
 }
 
 impl<'lean> PoolInner<'lean> {
@@ -340,7 +361,7 @@ impl<'lean> PoolInner<'lean> {
 /// roots and profiles still partition the reusable environments.
 ///
 /// Neither [`Send`] nor [`Sync`] (inherited from the contained
-/// `Obj<'lean>` values).
+/// `HostEnvironment<'lean>` values).
 pub struct SessionPool<'lean> {
     runtime: &'lean LeanRuntime,
     capacity: usize,
@@ -418,17 +439,11 @@ impl<'lean> SessionPool<'lean> {
     pub fn acquire<'p, 'c>(
         &'p self,
         caps: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'lean, 'c>,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<PooledSession<'lean, 'p, 'c>> {
-        self.acquire_with_profile(
-            caps,
-            imports,
-            LeanSessionImportProfile::default(),
-            cancellation,
-            progress,
-        )
+        self.acquire_with_profile(caps, scope, LeanSessionImportProfile::default(), cancellation, progress)
     }
 
     /// Acquire a session targeting `imports` with an explicit import profile.
@@ -443,7 +458,7 @@ impl<'lean> SessionPool<'lean> {
     pub fn acquire_with_profile<'p, 'c>(
         &'p self,
         caps: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'lean, 'c>,
         import_profile: LeanSessionImportProfile,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
@@ -452,8 +467,8 @@ impl<'lean> SessionPool<'lean> {
             target: "lean_rs",
             "lean_rs.host.pool.acquire",
             profile = import_profile.label(),
-            imports_len = imports.len(),
-            imports_first = imports.first().copied().unwrap_or("<empty>"),
+            imports_len = scope.imports().len(),
+            imports_first = scope.imports().first().map(String::as_str).unwrap_or("<empty>"),
         )
         .entered();
         check_cancellation(cancellation)?;
@@ -461,7 +476,16 @@ impl<'lean> SessionPool<'lean> {
             core::ptr::eq(self.runtime, caps.host().runtime()),
             "pool runtime and capability runtime must agree; the shared 'lean parameter normally enforces this",
         );
-        let key = SessionPoolKey::from_capabilities(caps, imports, import_profile);
+        scope.check_capability(caps.shim_capability())?;
+        if scope.options()
+            != &crate::LeanImportProfileMode::FullSession(import_profile)
+                .native_options(&crate::LeanImportProfilerOptions::default())
+        {
+            return Err(lean_rs::__host_internals::host_module_init(
+                "pool import profile differs from attested scope",
+            ));
+        }
+        let key = SessionPoolKey::from_capabilities(caps, scope, import_profile);
         self.remember_seen_key(&key);
         let matched = {
             let mut inner = self.inner.borrow_mut();
@@ -481,6 +505,7 @@ impl<'lean> SessionPool<'lean> {
                 let entry_epoch = entry.extension_registry_epoch;
                 let session = LeanSession::from_environment_with_import_stats(
                     caps,
+                    scope,
                     entry.environment,
                     entry.import_stats,
                     entry_epoch,
@@ -507,8 +532,8 @@ impl<'lean> SessionPool<'lean> {
         let (session, hit) = match reused {
             Some(session) => (session, true),
             None => {
-                self.enforce_before_fresh_import(imports)?;
-                let session = caps.session_with_profile(imports, import_profile, cancellation, progress)?;
+                self.enforce_before_fresh_import(scope.imports().len())?;
+                let session = caps.session_with_profile(scope, import_profile, cancellation, progress)?;
                 self.remember_import_stats(session.import_stats().clone());
                 self.bump_imported();
                 (session, false)
@@ -576,7 +601,7 @@ impl<'lean> SessionPool<'lean> {
     /// Drop every cached environment currently retained by the pool.
     ///
     /// Returns the number of free-list entries removed. Each removed
-    /// entry drops its owned `Obj<'lean>` environment, which releases
+    /// entry drops its owned `HostEnvironment<'lean>` environment, which releases
     /// one Lean refcount via `lean_dec`.
     ///
     /// Checked-out [`PooledSession`] values are not affected: they own
@@ -625,8 +650,7 @@ impl<'lean> SessionPool<'lean> {
 
     fn remember_seen_key(&self, key: &SessionPoolKey) {
         let mut inner = self.inner.borrow_mut();
-        if inner.seen_keys.iter().all(|seen| seen != key) {
-            inner.seen_keys.push(key.clone());
+        if record_request_key(&mut inner.seen_keys, &key.request) {
             let mut s = self.stats.get();
             s.distinct_keys_seen = u64::try_from(inner.seen_keys.len()).unwrap_or(u64::MAX);
             self.stats.set(s);
@@ -755,7 +779,7 @@ impl<'lean> SessionPool<'lean> {
         )
     }
 
-    fn enforce_before_fresh_import(&self, imports: &[&str]) -> LeanResult<()> {
+    fn enforce_before_fresh_import(&self, import_count: usize) -> LeanResult<()> {
         let stats = self.stats.get();
         if let Some(limit) = self.memory_policy.max_fresh_imports
             && stats.imports_performed >= limit
@@ -766,14 +790,14 @@ impl<'lean> SessionPool<'lean> {
                 format!(
                 "same-process SessionPool refused fresh import #{} for {} import(s): max_fresh_imports={limit}; {}; reuse a pooled environment or cycle the worker process",
                 stats.imports_performed.saturating_add(1),
-                imports.len(),
+                import_count,
                 self.latest_import_stats_diagnostic(),
                 ),
                 None,
                 None,
                 Some(stats.imports_performed),
                 Some(limit),
-                imports.len() as u64,
+                import_count as u64,
             ));
         }
 
@@ -786,14 +810,14 @@ impl<'lean> SessionPool<'lean> {
                         "same_process_rss_ceiling",
                         format!(
                         "same-process SessionPool refused fresh import for {} import(s): current RSS {current_kib} KiB reached max_rss_kib={limit_kib}; {}; cycle the worker process to reset Lean process-global import state",
-                        imports.len(),
+                        import_count,
                         self.latest_import_stats_diagnostic(),
                         ),
                         Some(current_kib),
                         Some(limit_kib),
                         Some(stats.imports_performed),
                         None,
-                        imports.len() as u64,
+                        import_count as u64,
                     ));
                 }
                 Some(_) => self.bump_rss_sample(false),
@@ -804,14 +828,14 @@ impl<'lean> SessionPool<'lean> {
                         "same_process_rss_sample_unavailable",
                         format!(
                         "same-process SessionPool refused fresh import for {} import(s): current RSS sample unavailable while max_rss_kib={limit_kib} is configured; {}",
-                        imports.len(),
+                        import_count,
                         self.latest_import_stats_diagnostic(),
                         ),
                         None,
                         Some(limit_kib),
                         Some(stats.imports_performed),
                         None,
-                        imports.len() as u64,
+                        import_count as u64,
                     ));
                 }
             }
@@ -823,7 +847,7 @@ impl<'lean> SessionPool<'lean> {
     fn release(
         &self,
         key: SessionPoolKey,
-        env: Obj<'lean>,
+        env: HostEnvironment<'lean>,
         import_stats: LeanImportStats,
         extension_registry_epoch: u64,
     ) {
@@ -970,5 +994,31 @@ impl Drop for PooledSession<'_, '_, '_> {
 impl core::fmt::Debug for PooledSession<'_, '_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("PooledSession").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_history_tests {
+    use super::{MAX_DIAGNOSTIC_KEYS, PoolRequestKey, record_request_key};
+    use crate::LeanSessionImportProfile;
+    use std::path::PathBuf;
+
+    #[test]
+    fn repeated_requests_share_one_diagnostic_entry_and_unique_requests_are_bounded() {
+        let mut history = Vec::new();
+        let mut request = PoolRequestKey {
+            project_root: PathBuf::from("/project"),
+            imports: vec!["Init".into()],
+            import_profile: LeanSessionImportProfile::Private,
+        };
+        for _ in 0..4096 {
+            record_request_key(&mut history, &request);
+        }
+        assert_eq!(history.len(), 1);
+        for index in 0..4096 {
+            request.imports = vec![index.to_string()];
+            record_request_key(&mut history, &request);
+        }
+        assert_eq!(history.len(), MAX_DIAGNOSTIC_KEYS);
     }
 }

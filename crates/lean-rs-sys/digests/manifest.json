@@ -82,6 +82,12 @@
         "4.35.0"
       ],
       "header_digest": "eb951e1171d39b828e7ad60aed0b90759598b678bfe58cf85c65a1559c021bf9"
+    },
+    {
+      "versions": [
+        "4.36.0"
+      ],
+      "header_digest": "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4"
     }
   ]
 }

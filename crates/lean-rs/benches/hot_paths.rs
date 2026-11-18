@@ -16,7 +16,9 @@
     clippy::unwrap_used
 )]
 
-use std::path::PathBuf;
+#[path = "../examples/support/scalar_fixture.rs"]
+mod scalar_fixture;
+use scalar_fixture::ScalarFixture;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
@@ -32,37 +34,10 @@ use lean_rs::module::{LeanExported, LeanLibrary, LeanModule};
 // `LeanModule` live in this `static`-equivalent scope via lazy locals
 // owned by `criterion_benchmarks`.
 
-fn fixture_dylib_path() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = workspace
-        .join("fixtures")
-        .join("lean")
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
-}
-
-fn open_fixture() -> LeanLibrary<'static> {
+fn open_fixture() -> &'static LeanLibrary<'static> {
+    let fixture = ScalarFixture::admit().expect("admit fixed profiling fixture");
     let runtime = LeanRuntime::init().expect("Lean runtime initialises");
-    let path = fixture_dylib_path();
-    assert!(
-        path.exists(),
-        "fixture dylib not found at {} — run `cd fixtures/lean && lake build`",
-        path.display(),
-    );
-    LeanLibrary::open(runtime, &path).expect("fixture dylib opens")
+    fixture.open(runtime).expect("fixture dylib opens")
 }
 
 // -- scalar dispatch -----------------------------------------------------
@@ -84,7 +59,8 @@ fn bench_scalar_dispatch(c: &mut Criterion, module: &LeanModule<'_, '_>) {
 
     c.bench_function("module::scalar_dispatch_u32_add", |b| {
         b.iter(|| {
-            let result = add.call(black_box(7_u32), black_box(35_u32)).expect("call");
+            // SAFETY: the reviewed scalar fixture takes and returns unboxed UInt32 on the initialized runtime thread.
+            let result = unsafe { add.call(black_box(7_u32), black_box(35_u32)) }.expect("call");
             black_box(result);
         });
     });
@@ -117,7 +93,8 @@ fn bench_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) {
             b.iter_batched(
                 || source.clone(),
                 |owned| {
-                    let echoed = identity.call(black_box(owned)).expect("call");
+                    // SAFETY: the fixed fixture identity consumes the typed benchmark input and returns the same Lean type.
+                    let echoed = unsafe { identity.call(black_box(owned)) }.expect("call");
                     black_box(echoed);
                 },
                 criterion::BatchSize::SmallInput,
@@ -158,7 +135,8 @@ fn bench_array_string_roundtrip(c: &mut Criterion, module: &LeanModule<'_, '_>) 
             b.iter_batched(
                 || source.clone(),
                 |owned| {
-                    let echoed = identity.call(black_box(owned)).expect("call");
+                    // SAFETY: the fixed fixture identity consumes the typed benchmark input and returns the same Lean type.
+                    let echoed = unsafe { identity.call(black_box(owned)) }.expect("call");
                     black_box(echoed);
                 },
                 criterion::BatchSize::SmallInput,

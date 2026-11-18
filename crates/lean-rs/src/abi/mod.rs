@@ -1,17 +1,13 @@
 //! Typed first-order ABI conversions for `lean-rs`.
 //!
-//! The public surface is the sealed [`LeanAbi`](traits::LeanAbi) trait
-//! (re-exported at the crate root) plus the unboxing/boxing impls for
-//! every Lean type that crosses [`crate::module::LeanExported`]'s typed
-//! dispatch. Sealing prevents downstream crates from implementing
-//! `LeanAbi` for foreign types—wrong impls would produce undefined
-//! behaviour at the FFI boundary.
+//! [`LeanAbi`](traits::LeanAbi) and [`LeanBoxedAbi`](traits::LeanBoxedAbi)
+//! require unsafe implementations for native conversions. Actual C slot types
+//! are sealed; native calls still require an explicit value/layout contract.
 //!
-//! The submodules ([`nat`], [`structure`], [`traits`]) expose the
-//! helpers the sibling `lean-rs-host` crate needs to decode and
-//! construct host-defined Lean structures; their items are reachable
-//! via `lean_rs::__host_internals` and are not part of `lean-rs`'s
-//! public semver promise.
+//! [`traits::IntoLean`], [`traits::TryFromLean`], [`nat`], and [`structure`]
+//! provide safe owned-data construction and checked inspection. They do not
+//! establish native signatures or permit arbitrary objects to become semantic
+//! handles. The concrete safe host boundary lives in [`crate::host_bridge`].
 
 // Items here are infrastructure for the typed `LeanExported` family
 // and the `module` / `host` modules. A subset is exercised only by
@@ -27,6 +23,7 @@ pub(crate) mod bytearray;
 pub(crate) mod except;
 pub(crate) mod int;
 pub mod nat;
+mod native;
 pub(crate) mod option;
 pub(crate) mod scalar;
 pub(crate) mod string;

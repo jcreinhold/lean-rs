@@ -336,14 +336,17 @@ impl<'lean, 'a> CtorView<'lean, 'a> {
 ///
 /// # Panics
 ///
-/// Panics only via `lean_alloc_ctor`'s `strict_*` arithmetic overflow
-/// guard—unreachable for the constructor shapes Lean emits
-/// (`LEAN_MAX_CTOR_FIELDS` = 256).
+/// Panics before allocation if `tag` is a reserved non-constructor heap tag.
+/// Sizing arithmetic also panics on overflow; the compile-time arity bound
+/// excludes overflow for supported constructor layouts.
 pub fn alloc_ctor_with_objects<'lean, const N: usize>(
     runtime: &'lean LeanRuntime,
     tag: u8,
     objects: [Obj<'lean>; N],
 ) -> Obj<'lean> {
+    // Reserved heap tags select incompatible layouts in Lean's destructor.
+    // Reject them before allocating or transferring any object references.
+    validate_ctor_tag(tag);
     // SAFETY: `lean_alloc_ctor` returns a fresh ctor with refcount 1 and
     // `N` uninitialised object slots; we write each `Obj::into_raw` into
     // its slot before the object escapes, satisfying the
@@ -360,6 +363,13 @@ pub fn alloc_ctor_with_objects<'lean, const N: usize>(
         }
         Obj::from_owned_raw(runtime, raw)
     }
+}
+
+fn validate_ctor_tag(tag: u8) {
+    assert!(
+        tag <= lean_rs_sys::consts::LEAN_MAX_CTOR_TAG,
+        "constructor tag exceeds Lean's constructor tag range"
+    );
 }
 
 /// Validate that `obj` is a constructor with `expected_tag` and exactly
@@ -454,6 +464,19 @@ fn ctor_scalar_tail_size(ptr: *mut lean_rs_sys::lean_object) -> usize {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
+
+    #[test]
+    #[should_panic(expected = "constructor tag exceeds Lean's constructor tag range")]
+    fn reserved_constructor_tag_is_rejected_without_allocating() {
+        super::validate_ctor_tag(u8::MAX);
+    }
+
+    #[test]
+    fn supported_constructor_tags_pass_validation_without_allocating() {
+        for tag in 0..=lean_rs_sys::consts::LEAN_MAX_CTOR_TAG {
+            super::validate_ctor_tag(tag);
+        }
+    }
 
     use core::ffi::c_char;
 

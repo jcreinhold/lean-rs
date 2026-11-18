@@ -59,6 +59,7 @@ pub(crate) mod lake;
 mod bracketed;
 mod cancellation;
 mod capabilities;
+mod project_initializer;
 #[allow(
     clippy::module_inception,
     reason = "the LeanHost type is the natural name for this file"
@@ -99,5 +100,4 @@ pub use self::session::{
     LeanImportProfilerOptions, LeanImportStats, LeanSession, LeanSessionImportProfile, LeanSourceRange, SessionStats,
 };
 
-#[cfg(test)]
-mod tests;
+// Native host service tests use the application boundary in tests/host_services.rs.

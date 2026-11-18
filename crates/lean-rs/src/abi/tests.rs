@@ -25,66 +25,19 @@
     clippy::wildcard_enum_match_arm
 )]
 
-use std::path::PathBuf;
+use crate::fixed_test_library as fixture_library;
 
 use crate::abi::except::Except;
 use crate::abi::structure::{alloc_ctor_with_objects, ctor_tag, take_ctor_objects};
 use crate::abi::traits::{IntoLean, TryFromLean};
 use crate::abi::{bytearray, int, nat, string};
 use crate::error::{HostStage, LeanError, LeanExceptionKind};
-use crate::module::{LeanIo, LeanLibrary};
+use crate::module::LeanIo;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
-// -- fixture setup -------------------------------------------------------
-//
-// `LeanLibrary` is `!Sync` (it borrows `&'lean LeanRuntime` and
-// `LeanRuntime` is `!Sync`), so it cannot live in a `static OnceLock`.
-// Each test opens its own [`LeanLibrary`] against the shared runtime
-// singleton; symbol-table walking + dlopen are both backed by the OS page
-// cache for the second-and-later open of the same file, so the overhead
-// across the test suite is negligible.
-
-fn fixture_dylib_path() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = workspace
-        .join("fixtures")
-        .join("lean")
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("liblean__rs__fixture_LeanRsFixture.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("libLeanRsFixture.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
-}
-
-/// `LeanRuntime` reference for tests that need to build Lean values
-/// directly (e.g. via `string::from_str`).
 fn runtime() -> &'static LeanRuntime {
     LeanRuntime::init().expect("Lean runtime initialisation must succeed")
-}
-
-/// Open the fixture library against the shared runtime singleton. Each
-/// test that needs the typed handle then calls `library.initialize_module(...)`
-/// inline; `LeanModule<'lean, 'lib>` borrows from `library`, so the two
-/// bindings live together at the start of every test.
-fn fixture_library() -> LeanLibrary<'static> {
-    let path = fixture_dylib_path();
-    assert!(
-        path.exists(),
-        "fixture dylib not found at {} — run `cd fixtures/lean && lake build`",
-        path.display(),
-    );
-    LeanLibrary::open(runtime(), &path).expect("fixture dylib opens cleanly")
 }
 
 // -- scalar (unboxed) round trips ----------------------------------------
@@ -97,50 +50,86 @@ fn unboxed_scalar_identity_round_trips() {
         .expect("init");
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity") }
-            .expect("lookup")
-            .call(0)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity")
+                    .expect("lookup")
+                    .call(0)
+            }
+        )
+        .expect("call"),
         0,
     );
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity") }
-            .expect("lookup")
-            .call(u8::MAX)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(u8,), u8>("lean_rs_fixture_u8_identity")
+                    .expect("lookup")
+                    .call(u8::MAX)
+            }
+        )
+        .expect("call"),
         u8::MAX,
     );
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(u16,), u16>("lean_rs_fixture_u16_identity") }
-            .expect("lookup")
-            .call(u16::MAX)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(u16,), u16>("lean_rs_fixture_u16_identity")
+                    .expect("lookup")
+                    .call(u16::MAX)
+            }
+        )
+        .expect("call"),
         u16::MAX,
     );
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(u32,), u32>("lean_rs_fixture_u32_identity") }
-            .expect("lookup")
-            .call(u32::MAX)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(u32,), u32>("lean_rs_fixture_u32_identity")
+                    .expect("lookup")
+                    .call(u32::MAX)
+            }
+        )
+        .expect("call"),
         u32::MAX,
     );
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(u64,), u64>("lean_rs_fixture_u64_identity") }
-            .expect("lookup")
-            .call(u64::MAX)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(u64,), u64>("lean_rs_fixture_u64_identity")
+                    .expect("lookup")
+                    .call(u64::MAX)
+            }
+        )
+        .expect("call"),
         u64::MAX,
     );
     assert_eq!(
         // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-        unsafe { module.exported_unchecked::<(usize,), usize>("lean_rs_fixture_usize_identity") }
-            .expect("lookup")
-            .call(usize::MAX)
-            .expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe {
+                module
+                    .exported_unchecked::<(usize,), usize>("lean_rs_fixture_usize_identity")
+                    .expect("lookup")
+                    .call(usize::MAX)
+            }
+        )
+        .expect("call"),
         usize::MAX,
     );
 }
@@ -153,10 +142,24 @@ fn unboxed_scalar_multi_argument_calls() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let add = unsafe { module.exported_unchecked::<(u32, u32), u32>("lean_rs_fixture_u32_add") }.expect("lookup");
-    assert_eq!(add.call(7, 35).expect("call"), 42);
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { add.call(7, 35) }
+        )
+        .expect("call"),
+        42
+    );
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let mul = unsafe { module.exported_unchecked::<(u64, u64), u64>("lean_rs_fixture_u64_mul") }.expect("lookup");
-    assert_eq!(mul.call(u64::from(u32::MAX), 2).expect("call"), u64::from(u32::MAX) * 2);
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { mul.call(u64::from(u32::MAX), 2) }
+        )
+        .expect("call"),
+        u64::from(u32::MAX) * 2
+    );
 }
 
 #[test]
@@ -168,16 +171,48 @@ fn float_identity_round_trip_includes_nan() {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let identity =
         unsafe { module.exported_unchecked::<(f64,), f64>("lean_rs_fixture_float_identity") }.expect("lookup");
-    assert_eq!(identity.call(0.0).expect("call"), 0.0);
-    assert_eq!(identity.call(-1.5).expect("call"), -1.5);
     assert_eq!(
-        identity.call(core::f64::consts::PI).expect("call"),
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { identity.call(0.0) }
+        )
+        .expect("call"),
+        0.0
+    );
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { identity.call(-1.5) }
+        )
+        .expect("call"),
+        -1.5
+    );
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { identity.call(core::f64::consts::PI) }
+        )
+        .expect("call"),
         core::f64::consts::PI,
     );
-    assert!(identity.call(f64::NAN).expect("call").is_nan());
+    assert!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { identity.call(f64::NAN) }
+        )
+        .expect("call")
+        .is_nan()
+    );
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let add = unsafe { module.exported_unchecked::<(f64, f64), f64>("lean_rs_fixture_float_add") }.expect("lookup");
-    assert_eq!(add.call(0.1, 0.2).expect("call"), 0.1 + 0.2);
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { add.call(0.1, 0.2) }
+        )
+        .expect("call"),
+        0.1 + 0.2
+    );
 }
 
 #[test]
@@ -190,7 +225,14 @@ fn char_identity_round_trip_preserves_non_ascii() {
     let identity =
         unsafe { module.exported_unchecked::<(char,), char>("lean_rs_fixture_char_identity") }.expect("lookup");
     for c in ['a', '🦀', '\0', char::MAX] {
-        assert_eq!(identity.call(c).expect("call"), c);
+        assert_eq!(
+            (
+                // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+                unsafe { identity.call(c) }
+            )
+            .expect("call"),
+            c
+        );
     }
 }
 
@@ -204,8 +246,20 @@ fn bool_round_trip_via_fixture() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let bool_not = unsafe { module.exported_unchecked::<(bool,), bool>("lean_rs_fixture_bool_not") }.expect("lookup");
-    assert!(bool_not.call(false).expect("call"));
-    assert!(!bool_not.call(true).expect("call"));
+    assert!(
+        (
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { bool_not.call(false) }
+        )
+        .expect("call")
+    );
+    assert!(
+        !(
+            // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+            unsafe { bool_not.call(true) }
+        )
+        .expect("call")
+    );
 }
 
 #[test]
@@ -216,7 +270,11 @@ fn unit_round_trip_via_fixture() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let unit_id = unsafe { module.exported_unchecked::<((),), ()>("lean_rs_fixture_unit_id") }.expect("lookup");
-    unit_id.call(()).expect("Unit round-trips");
+    (
+        // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+        unsafe { unit_id.call(()) }
+    )
+    .expect("Unit round-trips");
 }
 
 // -- Nat / Int (scalar fast path + bignum diagnostic) --------------------
@@ -241,7 +299,11 @@ fn nat_identity_round_trips_small_values() {
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity") }.expect("lookup");
     for &n in &[0_u64, 1, 42, 1_000, u64::from(u32::MAX)] {
         let input = nat::from_u64(runtime, n);
-        let echoed = identity.call(input).expect("call");
+        let echoed = (
+            // SAFETY: the retained fixture receives the declared object representation built in this test.
+            unsafe { identity.call(input) }
+        )
+        .expect("call");
         assert_eq!(nat::try_to_u64(echoed).expect("scalar Nat decodes"), n);
     }
 }
@@ -255,7 +317,11 @@ fn nat_succ_of_zero_round_trips_through_u64() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let succ = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ") }.expect("lookup");
-    let echoed = succ.call(nat::from_u64(runtime, 0)).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { succ.call(nat::from_u64(runtime, 0)) }
+    )
+    .expect("call");
     assert_eq!(nat::try_to_u64(echoed).expect("scalar Nat decodes"), 1);
 }
 
@@ -269,7 +335,11 @@ fn nat_succ_of_max_small_returns_bignum_that_does_not_fit_u64() {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let succ = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_succ") }.expect("lookup");
     let input = nat::from_usize(runtime, lean_rs_sys::nat_int::LEAN_MAX_SMALL_NAT);
-    let echoed = succ.call(input).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { succ.call(input) }
+    )
+    .expect("call");
     match nat::try_to_u64(echoed) {
         Err(LeanError::Host(host)) => {
             assert_eq!(host.stage(), HostStage::Conversion);
@@ -295,7 +365,11 @@ fn int_identity_round_trips_signed_values() {
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity") }.expect("lookup");
     for &n in &[0_i64, 1, -1, 42, -42, i64::from(i32::MAX), i64::from(i32::MIN)] {
         let input = int::from_i64(runtime, n);
-        let echoed = identity.call(input).expect("call");
+        let echoed = (
+            // SAFETY: the retained fixture receives the declared object representation built in this test.
+            unsafe { identity.call(input) }
+        )
+        .expect("call");
         assert_eq!(int::try_to_i64(echoed).expect("scalar Int decodes"), n);
     }
 }
@@ -311,14 +385,22 @@ fn isize_and_usize_helpers_round_trip_through_int_and_nat_fixtures() {
     let nat_identity =
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_nat_identity") }.expect("lookup");
     let n: usize = 12345;
-    let echoed = nat_identity.call(nat::from_usize(runtime, n)).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { nat_identity.call(nat::from_usize(runtime, n)) }
+    )
+    .expect("call");
     assert_eq!(nat::try_to_usize(echoed).expect("scalar Nat decodes"), n);
 
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let int_identity =
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_identity") }.expect("lookup");
     for &v in &[0_isize, 1, -1, 42, -42] {
-        let echoed = int_identity.call(int::from_isize(runtime, v)).expect("call");
+        let echoed = (
+            // SAFETY: the retained fixture receives the declared object representation built in this test.
+            unsafe { int_identity.call(int::from_isize(runtime, v)) }
+        )
+        .expect("call");
         assert_eq!(int::try_to_isize(echoed).expect("scalar Int decodes"), v);
     }
 }
@@ -333,7 +415,11 @@ fn int_neg_round_trips_through_fixture() {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let neg = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_int_neg") }.expect("lookup");
     for &n in &[0_i64, 1, -1, 42, -42, i64::from(i32::MAX)] {
-        let echoed = neg.call(int::from_i64(runtime, n)).expect("call");
+        let echoed = (
+            // SAFETY: the retained fixture receives the declared object representation built in this test.
+            unsafe { neg.call(int::from_i64(runtime, n)) }
+        )
+        .expect("call");
         let decoded = int::try_to_i64(echoed).expect("scalar Int decodes");
         assert_eq!(decoded, n.wrapping_neg());
     }
@@ -349,7 +435,14 @@ fn string_identity_helper(s: &str) {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let identity =
         unsafe { module.exported_unchecked::<(String,), String>("lean_rs_fixture_string_identity") }.expect("lookup");
-    assert_eq!(identity.call(s.to_owned()).expect("call"), s);
+    assert_eq!(
+        (
+            // SAFETY: the retained fixture receives the declared object representation built in this test.
+            unsafe { identity.call(s.to_owned()) }
+        )
+        .expect("call"),
+        s
+    );
 }
 
 /// `LeanAbi for &str` round-trips through the same fixture as the
@@ -366,7 +459,14 @@ fn borrowed_str_arg_round_trips_through_string_identity() {
     let identity =
         unsafe { module.exported_unchecked::<(&str,), String>("lean_rs_fixture_string_identity") }.expect("lookup");
     for &s in &["", "hello, world", "héllo 🦀", "a\0b\0c"] {
-        assert_eq!(identity.call(s).expect("call"), s);
+        assert_eq!(
+            (
+                // SAFETY: the retained fixture receives the declared object representation built in this test.
+                unsafe { identity.call(s) }
+            )
+            .expect("call"),
+            s
+        );
     }
 }
 
@@ -406,7 +506,11 @@ fn string_length_returns_utf8_codepoint_count_as_nat() {
     let length =
         unsafe { module.exported_unchecked::<(String,), Obj<'_>>("lean_rs_fixture_string_length") }.expect("lookup");
     let s = "héllo 🦀";
-    let len_obj = length.call(s.to_owned()).expect("call");
+    let len_obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { length.call(s.to_owned()) }
+    )
+    .expect("call");
     let len = nat::try_to_u64(len_obj).expect("string length fits scalar");
     assert_eq!(len, s.chars().count() as u64);
 }
@@ -426,7 +530,11 @@ fn bytearray_identity_helper(bytes: &[u8]) {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let identity = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_identity") }
         .expect("lookup");
-    let echoed = identity.call(bytearray::from_bytes(runtime, bytes)).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { identity.call(bytearray::from_bytes(runtime, bytes)) }
+    )
+    .expect("call");
     let view = echoed.borrow();
     let borrowed = bytearray::borrow_bytes(&view).expect("ByteArray view");
     assert_eq!(borrowed, bytes);
@@ -472,7 +580,11 @@ fn bytearray_size_returns_byte_count_as_nat() {
     let size_fn =
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_bytearray_size") }.expect("lookup");
     let bytes: &[u8] = b"hello\0world";
-    let size_obj = size_fn.call(bytearray::from_bytes(runtime, bytes)).expect("call");
+    let size_obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { size_fn.call(bytearray::from_bytes(runtime, bytes)) }
+    )
+    .expect("call");
     let size = nat::try_to_u64(size_obj).expect("byte-count fits scalar");
     assert_eq!(size, bytes.len() as u64);
 }
@@ -605,7 +717,11 @@ fn array_string_round_trip(xs: Vec<String>) {
         unsafe { module.exported_unchecked::<(Vec<String>,), Vec<String>>("lean_rs_fixture_array_string_identity") }
             .expect("lookup");
     let expected = xs.clone();
-    let decoded = identity.call(xs).expect("call");
+    let decoded = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { identity.call(xs) }
+    )
+    .expect("call");
     assert_eq!(decoded, expected);
 }
 
@@ -639,9 +755,11 @@ fn array_string_push_round_trips_added_element() {
     let push =
         unsafe { module.exported_unchecked::<(Vec<String>, String), Vec<String>>("lean_rs_fixture_array_string_push") }
             .expect("lookup");
-    let decoded = push
-        .call(vec!["one".to_owned(), "two".to_owned()], "three".to_owned())
-        .expect("call");
+    let decoded = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { push.call(vec!["one".to_owned(), "two".to_owned()], "three".to_owned()) }
+    )
+    .expect("call");
     assert_eq!(decoded, vec!["one".to_owned(), "two".to_owned(), "three".to_owned()]);
 }
 
@@ -674,11 +792,17 @@ fn option_nat_identity_round_trips_none() {
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let identity = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_identity") }
         .expect("lookup");
-    let input_obj = alloc_ctor_with_objects::<0>(runtime, 0, []);
-    let echoed = identity.call(input_obj).expect("call");
-    let tag = ctor_tag(&echoed).expect("Option ctor");
-    assert_eq!(tag, 0, "expected None");
-    let [] = take_ctor_objects::<0>(echoed, 0, "Option::none").expect("none decodes");
+    let input_obj = Option::<u64>::None.into_lean(runtime);
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { identity.call(input_obj) }
+    )
+    .expect("call");
+    assert!(
+        Option::<Obj<'_>>::try_from_lean(echoed)
+            .expect("Option decodes")
+            .is_none()
+    );
 }
 
 #[test]
@@ -693,7 +817,11 @@ fn option_nat_identity_round_trips_some() {
         .expect("lookup");
     let n: u64 = 42;
     let input_obj = alloc_ctor_with_objects(runtime, 1, [nat::from_u64(runtime, n)]);
-    let echoed = identity.call(input_obj).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { identity.call(input_obj) }
+    )
+    .expect("call");
     let tag = ctor_tag(&echoed).expect("Option ctor");
     assert_eq!(tag, 1, "expected Some");
     let [field] = take_ctor_objects::<1>(echoed, 1, "Option::some").expect("some decodes");
@@ -711,7 +839,11 @@ fn option_nat_some_constructed_lean_side() {
     let some_fn =
         unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_option_nat_some") }.expect("lookup");
     let n: u64 = 7;
-    let some_obj = some_fn.call(nat::from_u64(runtime, n)).expect("call");
+    let some_obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { some_fn.call(nat::from_u64(runtime, n)) }
+    )
+    .expect("call");
     let tag = ctor_tag(&some_obj).expect("Option ctor");
     assert_eq!(tag, 1);
     let [inner] = take_ctor_objects::<1>(some_obj, 1, "Option::some").expect("some decodes");
@@ -743,7 +875,7 @@ fn option_nested_round_trips() {
 fn option_returns_wrong_tag_for_bogus_ctor() {
     let runtime = runtime();
     let bogus = alloc_ctor_with_objects::<0>(runtime, 5, []);
-    match Option::<u64>::try_from_lean(bogus) {
+    match Option::<Obj<'_>>::try_from_lean(bogus) {
         Err(LeanError::Host(host)) => {
             assert_eq!(host.stage(), HostStage::Conversion);
             assert!(host.message().contains("Option"), "unexpected: {:?}", host.message());
@@ -765,7 +897,11 @@ fn except_string_nat_ok_round_trips_via_fixture() {
     let ok_fn = unsafe { module.exported_unchecked::<(Obj<'_>,), Obj<'_>>("lean_rs_fixture_except_string_nat_ok") }
         .expect("lookup");
     let n: u64 = 99;
-    let obj = ok_fn.call(nat::from_u64(runtime, n)).expect("call");
+    let obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { ok_fn.call(nat::from_u64(runtime, n)) }
+    )
+    .expect("call");
     let tag = ctor_tag(&obj).expect("Except ctor");
     assert_eq!(tag, 1, "expected ok");
     let [field] = take_ctor_objects::<1>(obj, 1, "Except::ok").expect("ok decodes");
@@ -782,7 +918,11 @@ fn except_string_nat_err_round_trips_via_fixture() {
     let err_fn = unsafe { module.exported_unchecked::<(String,), Obj<'_>>("lean_rs_fixture_except_string_nat_err") }
         .expect("lookup");
     let s = "boom".to_owned();
-    let obj = err_fn.call(s.clone()).expect("call");
+    let obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { err_fn.call(s.clone()) }
+    )
+    .expect("call");
     let tag = ctor_tag(&obj).expect("Except ctor");
     assert_eq!(tag, 0, "expected error");
     let [field] = take_ctor_objects::<1>(obj, 0, "Except::error").expect("error decodes");
@@ -838,7 +978,11 @@ fn pair_make_round_trips_via_fixture() {
         .expect("lookup");
     let n: u64 = 1234;
     let s = "pair-field".to_owned();
-    let pair = pair_fn.call(nat::from_u64(runtime, n), s.clone()).expect("call");
+    let pair = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { pair_fn.call(nat::from_u64(runtime, n), s.clone()) }
+    )
+    .expect("call");
     let [first, second] = take_ctor_objects::<2>(pair, 0, "Pair").expect("Pair decodes");
     assert_eq!(nat::try_to_u64(first).expect("first decodes"), n);
     assert_eq!(String::try_from_lean(second).expect("second decodes"), s);
@@ -858,7 +1002,11 @@ fn bundle_make_round_trips_via_fixture() {
             .expect("lookup");
     let name = "release".to_owned();
     let items: Vec<String> = vec!["x86_64".to_owned(), "aarch64".to_owned()];
-    let bundle = bundle_fn.call(name.clone(), items.clone()).expect("call");
+    let bundle = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { bundle_fn.call(name.clone(), items.clone()) }
+    )
+    .expect("call");
     let [name_field, items_field] = take_ctor_objects::<2>(bundle, 0, "Bundle").expect("Bundle decodes");
     assert_eq!(String::try_from_lean(name_field).expect("name decodes"), name);
     assert_eq!(Vec::<String>::try_from_lean(items_field).expect("items decode"), items);
@@ -881,7 +1029,11 @@ fn bundle_identity_round_trips_through_lean() {
         0,
         [string::from_str(runtime, &name), items.clone().into_lean(runtime)],
     );
-    let echoed = identity.call(bundle).expect("call");
+    let echoed = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { identity.call(bundle) }
+    )
+    .expect("call");
     let [name_field, items_field] = take_ctor_objects::<2>(echoed, 0, "Bundle").expect("Bundle decodes");
     assert_eq!(String::try_from_lean(name_field).expect("name decodes"), name);
     assert_eq!(Vec::<String>::try_from_lean(items_field).expect("items decode"), items);
@@ -924,7 +1076,11 @@ fn io_success_unit_decodes_via_lean_io_marker() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let f = unsafe { module.exported_unchecked::<(), LeanIo<()>>("lean_rs_fixture_io_success_unit") }.expect("lookup");
-    f.call().expect("io_success_unit");
+    (
+        // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+        unsafe { f.call() }
+    )
+    .expect("io_success_unit");
 }
 
 #[test]
@@ -938,7 +1094,11 @@ fn io_success_nat_decodes_payload() {
         unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_success_nat") }.expect("lookup");
     // `IO Nat` returns a scalar-tagged Nat payload, decoded via the
     // `nat::*` helpers (not the polymorphic-UInt64 `TryFromLean` impl).
-    let nat_obj = f.call().expect("io_success_nat");
+    let nat_obj = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { f.call() }
+    )
+    .expect("io_success_nat");
     let value = nat::try_to_u64(nat_obj).expect("Nat decodes");
     assert_eq!(value, 7);
 }
@@ -953,7 +1113,11 @@ fn io_failure_decodes_inner_except() {
     // the failure. We get the inner `Obj<'_>` then walk the ctor.
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let f = unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_failure") }.expect("lookup");
-    let inner = f.call().expect("io_failure outer IO succeeds");
+    let inner = (
+        // SAFETY: the retained fixture receives the declared argument representation on its initialized runtime thread.
+        unsafe { f.call() }
+    )
+    .expect("io_failure outer IO succeeds");
     let tag = ctor_tag(&inner).expect("Except ctor");
     assert_eq!(tag, 0, "expected inner error");
     let [field] = take_ctor_objects::<1>(inner, 0, "Except::error").expect("error decodes");
@@ -969,7 +1133,8 @@ fn io_throw_surfaces_lean_exception_with_user_error_kind() {
         .expect("init");
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
     let f = unsafe { module.exported_unchecked::<(), LeanIo<Obj<'_>>>("lean_rs_fixture_io_throw") }.expect("lookup");
-    match f.call() {
+    // SAFETY: the retained fixture exports a nullary IO action on this initialized thread.
+    match unsafe { f.call() } {
         Err(LeanError::LeanException(exc)) => {
             assert_eq!(exc.kind(), LeanExceptionKind::UserError);
             assert!(
@@ -994,72 +1159,26 @@ fn option_nat_none_resolves_as_global_and_decodes_via_arity_zero() {
     // persistent `lean_object*` global (`lean_box(0)`, scalar-tagged for
     // Option.none). The typed handle reads the global's stored value,
     // lean_inc's it (no-op on a scalar), and decodes through
-    // `Option::<u64>::try_from_lean` which handles both none and some.
+    // `Option::<Obj<'_>>::try_from_lean` which handles both none and some.
     // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    let none_handle = unsafe { module.exported_unchecked::<(), Option<u64>>("lean_rs_fixture_option_nat_none") }
+    let none_handle = unsafe { module.exported_unchecked::<(), Option<Obj<'_>>>("lean_rs_fixture_option_nat_none") }
         .expect("arity-0 lookup against the global succeeds");
-    let decoded = none_handle.call().expect("call returns the persistent none value");
-    assert_eq!(decoded, None, "Option::none decodes to Rust None");
+    let decoded = (
+        // SAFETY: the retained fixture receives the declared object representation built in this test.
+        unsafe { none_handle.call() }
+    )
+    .expect("call returns the persistent none value");
+    assert!(decoded.is_none(), "Option::none decodes to Rust None");
 }
 
-#[test]
-fn arity_one_lookup_against_global_rejects_with_link_diagnostic() {
-    let library = fixture_library();
-    let module = library
-        .initialize_module("lean_rs_fixture", "LeanRsFixture")
-        .expect("init");
-    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    let err = unsafe { module.exported_unchecked::<(u64,), u64>("lean_rs_fixture_option_nat_none") }
-        .expect_err("arity 1 against a global must fail at lookup");
-    match err {
-        LeanError::Host(failure) => {
-            assert_eq!(failure.stage(), HostStage::Link);
-            let message = failure.message();
-            assert!(
-                message.contains("lean_rs_fixture_option_nat_none"),
-                "diagnostic must name the symbol, got: {message:?}",
-            );
-            assert!(
-                message.contains("nullary-constant global"),
-                "diagnostic must name the kind mismatch, got: {message:?}",
-            );
-        }
-        LeanError::LeanException(exc) => panic!("expected Host(Link), got LeanException {exc:?}"),
-        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
-    }
-}
-
-#[test]
-fn lean_io_against_global_rejects_at_lookup() {
-    let library = fixture_library();
-    let module = library
-        .initialize_module("lean_rs_fixture", "LeanRsFixture")
-        .expect("init");
-    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    let err = unsafe { module.exported_unchecked::<(), LeanIo<u64>>("lean_rs_fixture_option_nat_none") }
-        .expect_err("LeanIo against a global must fail at lookup");
-    match err {
-        LeanError::Host(failure) => {
-            assert_eq!(failure.stage(), HostStage::Link);
-            assert!(
-                failure.message().contains("LeanIo"),
-                "diagnostic must mention LeanIo: {:?}",
-                failure.message(),
-            );
-        }
-        LeanError::LeanException(exc) => panic!("expected Host(Link), got LeanException {exc:?}"),
-        LeanError::Cancelled(cancelled) => panic!("unexpected cancellation: {cancelled:?}"),
-    }
-}
+// Invalid global signatures are exercised without native lookup in
+// module::exported::tests::global_signature_arguments_and_io_results_are_rejected.
 
 #[test]
 fn unknown_symbol_lookup_surfaces_host_link_diagnostic() {
     let library = fixture_library();
-    let module = library
-        .initialize_module("lean_rs_fixture", "LeanRsFixture")
-        .expect("init");
-    // SAFETY: the fixture/export signature is pinned by the Lean source for this call.
-    let err = unsafe { module.exported_unchecked::<(), u64>("lean_rs_fixture_does_not_exist") }
+    let err = library
+        .resolve_function_symbol("lean_rs_fixture_does_not_exist")
         .expect_err("unknown symbol must surface at lookup");
     match err {
         LeanError::Host(failure) => {

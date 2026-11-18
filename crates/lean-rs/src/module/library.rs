@@ -60,7 +60,8 @@ use crate::runtime::LeanRuntime;
 /// `LeanRuntime: Sync`). A negative-bound compile-time assertion in
 /// the test module fails if either auto-trait is ever implemented.
 pub struct LeanLibrary<'lean> {
-    library: libloading::Library,
+    library: std::sync::Arc<libloading::Library>,
+    loader_identity: usize,
     path: PathBuf,
     runtime: &'lean LeanRuntime,
     /// Names of data-section exports (Lean nullary-constant globals),
@@ -72,6 +73,20 @@ pub struct LeanLibrary<'lean> {
     ///
     /// [`open`]: Self::open
     globals: HashSet<String>,
+}
+
+/// Obtain the native handle identity while preserving the original loader reference.
+#[allow(unsafe_code, reason = "round-trip the same owned platform handle without closing it")]
+fn identify_library(library: libloading::Library) -> (libloading::Library, usize) {
+    #[cfg(unix)]
+    use libloading::os::unix::Library;
+    #[cfg(windows)]
+    use libloading::os::windows::Library;
+    let raw = Library::from(library).into_raw();
+    // SAFETY: into_raw transfers one live loader reference. Reconstitute that same
+    // reference exactly once; its numeric identity is never converted back to a pointer.
+    let library = unsafe { Library::from_raw(raw) };
+    (library.into(), raw as usize)
 }
 
 impl<'lean> LeanLibrary<'lean> {
@@ -102,7 +117,15 @@ impl<'lean> LeanLibrary<'lean> {
     ///   dependency, architecture mismatch, …).
     ///
     /// The diagnostic embeds the path and the underlying error message.
-    pub fn open(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
+    /// # Safety
+    ///
+    /// The actual library and all dependencies must be trusted native code for
+    /// this Lean runtime. Their loader constructors, module initializers, global
+    /// registrations, and unload behavior must be safe. All initializer symbols
+    /// must follow Lean's initializer ABI. Keep required code/data loaded while
+    /// any native value or process-global registration can refer to it. A path,
+    /// file-format check, or build manifest does not establish these facts.
+    pub unsafe fn open(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
         let path = path.as_ref();
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -111,17 +134,15 @@ impl<'lean> LeanLibrary<'lean> {
         )
         .entered();
         let globals = classify_globals(path)?;
-        // SAFETY: `Library::new` runs the platform dynamic loader. Lake
-        // does not emit constructor-style initializers for Lean
-        // libraries (the per-module `initialize_*` functions are
-        // explicit, not C constructors), so the load is side-effect-free
-        // from Rust's perspective; the resulting handle releases the
-        // library on drop.
+        // SAFETY: the caller established native loader, initializer, runtime,
+        // dependency, and unload safety for the actual artifact being opened.
         let library = unsafe { libloading::Library::new(path) }.map_err(|err| {
             LeanError::module_init(format!("failed to open Lean library '{}': {err}", path.display()))
         })?;
+        let (library, loader_identity) = identify_library(library);
         Ok(Self {
-            library,
+            loader_identity,
+            library: std::sync::Arc::new(library),
             path: path.to_path_buf(),
             runtime,
             globals,
@@ -145,7 +166,12 @@ impl<'lean> LeanLibrary<'lean> {
     /// # Errors
     ///
     /// Same as [`LeanLibrary::open`].
-    pub fn open_globally(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
+    /// # Safety
+    ///
+    /// All requirements of [`Self::open`] apply. The library's globally exposed
+    /// symbols must also be compatible with every native consumer that can bind
+    /// them; global visibility is not a signature or artifact check.
+    pub unsafe fn open_globally(runtime: &'lean LeanRuntime, path: impl AsRef<Path>) -> LeanResult<Self> {
         let path = path.as_ref();
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -155,8 +181,10 @@ impl<'lean> LeanLibrary<'lean> {
         .entered();
         let globals = classify_globals(path)?;
         let library = open_with_global_visibility(path)?;
+        let (library, loader_identity) = identify_library(library);
         Ok(Self {
-            library,
+            loader_identity,
+            library: std::sync::Arc::new(library),
             path: path.to_path_buf(),
             runtime,
             globals,
@@ -195,6 +223,13 @@ impl<'lean> LeanLibrary<'lean> {
         Ok(LeanModule::new(self, name))
     }
 
+    /// Check the original loader arguments without reopening the image.
+    /// The application remains responsible for protecting path resolution and image bytes.
+    #[must_use]
+    pub fn opened_for(&self, runtime: &LeanRuntime, path: &Path) -> bool {
+        std::ptr::eq(self.runtime, runtime) && self.path.as_os_str() == path.as_os_str()
+    }
+
     /// Names of data-section exports for this library, normalised to the
     /// form [`libloading::Library::get`] resolves with.
     pub(crate) fn globals(&self) -> &HashSet<String> {
@@ -204,6 +239,21 @@ impl<'lean> LeanLibrary<'lean> {
     /// The runtime borrow this library was opened with.
     pub(crate) fn runtime(&self) -> &'lean LeanRuntime {
         self.runtime
+    }
+
+    /// Initialized Lean code can escape through process-global registrations
+    /// and runtime-bound values. Trusted safe facades retain the native image
+    /// until process exit, independently of the Rust token's own lifetime.
+    pub(crate) fn pin_for_process(&self) {
+        // A retained native loader reference keeps its handle unique until process exit.
+        // Reopening the same image can create new Rust Library wrappers around that handle.
+        static PINNED: std::sync::Mutex<Option<std::collections::HashMap<usize, std::sync::Arc<libloading::Library>>>> =
+            std::sync::Mutex::new(None);
+        let mut pinned = PINNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        pinned
+            .get_or_insert_with(Default::default)
+            .entry(self.loader_identity)
+            .or_insert_with(|| std::sync::Arc::clone(&self.library));
     }
 
     /// On-disk path the library was opened from. Used only for
@@ -411,4 +461,24 @@ fn is_data_section(kind: SectionKind) -> bool {
             | SectionKind::Tls
             | SectionKind::UninitializedTls
     )
+}
+
+#[cfg(test)]
+#[test]
+#[allow(
+    unsafe_code,
+    clippy::expect_used,
+    reason = "reopen the exact pinned test image under held fixture custody"
+)]
+fn reopening_pinned_image_does_not_retain_additional_wrappers() {
+    let first = crate::fixed_test_library();
+    first.pin_for_process();
+    for _ in 0..8 {
+        // SAFETY: this is the same approved path under the retained fixture reader,
+        // on the same initialized runtime with a permanent reference to its image.
+        let reopened = unsafe { LeanLibrary::open(first.runtime, first.path()) }.expect("reopen held fixture");
+        assert_eq!(reopened.loader_identity, first.loader_identity);
+        reopened.pin_for_process();
+        assert_eq!(std::sync::Arc::strong_count(&reopened.library), 1);
+    }
 }

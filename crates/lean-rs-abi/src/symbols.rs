@@ -19,6 +19,7 @@ pub const REQUIRED_SYMBOLS: &[&str] = &[
     "lean_object_byte_size",
     "lean_object_data_byte_size",
     // arrays
+    "lean_mk_array",
     "lean_array_mk",
     "lean_array_push",
     "lean_array_to_list",
@@ -30,10 +31,8 @@ pub const REQUIRED_SYMBOLS: &[&str] = &[
     "lean_mk_string_from_bytes",
     "lean_mk_string_from_bytes_unchecked",
     "lean_mk_ascii_string_unchecked",
-    "lean_string_push",
     "lean_string_append",
     "lean_string_mk",
-    "lean_string_data",
     "lean_string_utf8_get",
     "lean_string_utf8_next",
     "lean_string_utf8_prev",
@@ -45,6 +44,7 @@ pub const REQUIRED_SYMBOLS: &[&str] = &[
     "lean_utf8_strlen",
     "lean_utf8_n_strlen",
     // Nat bignum dispatch
+    "lean_nat_big_div_exact",
     "lean_nat_big_succ",
     "lean_nat_big_add",
     "lean_nat_big_sub",
@@ -56,6 +56,9 @@ pub const REQUIRED_SYMBOLS: &[&str] = &[
     "lean_nat_big_lt",
     "lean_nat_overflow_mul",
     // Int bignum dispatch
+    "lean_int_big_div_exact",
+    "lean_int_big_ediv",
+    "lean_int_big_emod",
     "lean_int_big_neg",
     "lean_int_big_add",
     "lean_int_big_sub",

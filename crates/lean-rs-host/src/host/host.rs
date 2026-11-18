@@ -16,9 +16,9 @@ use std::path::Path;
 
 use lean_rs::LeanRuntime;
 use lean_rs::error::LeanResult;
-use lean_rs::module::LeanLibrary;
+use lean_rs::module::{LeanLibrary, LeanModuleInitializer, LoadedHostArtifacts};
 
-use crate::host::capabilities::LeanCapabilities;
+use crate::host::capabilities::{LeanCapabilities, LeanPreparedHostArtifacts, prepare_host_artifacts};
 use crate::host::lake::LakeProject;
 
 /// Entry point for hosting Lean capabilities from a Lake project.
@@ -70,10 +70,18 @@ impl<'lean> LeanHost<'lean> {
     /// to open. Missing or signature-mismatched mandatory host shims fail when
     /// constructing a session; optional host shims degrade to `Unsupported` at
     /// the corresponding call site.
-    pub fn load_capabilities<'h>(&'h self, package: &str, lib_name: &str) -> LeanResult<LeanCapabilities<'lean, 'h>> {
-        let dylib_path = self.project.capability_dylib(package, lib_name);
-        let library = LeanLibrary::open(self.runtime, &dylib_path)?;
-        LeanCapabilities::new(self, library, package, lib_name)
+    pub fn load_capabilities<'h>(
+        &'h self,
+        package: &str,
+        lib_name: &str,
+        load_shim: impl FnOnce(&LeanPreparedHostArtifacts) -> LeanResult<LoadedHostArtifacts<'lean>>,
+        load_project: impl FnOnce(&Path, &LeanModuleInitializer) -> LeanResult<(LeanLibrary<'lean>, LeanModuleInitializer)>,
+    ) -> LeanResult<LeanCapabilities<'lean, 'h>> {
+        let prepared = prepare_host_artifacts()?;
+        let shim = load_shim(&prepared)?;
+        let initializer = LeanModuleInitializer::new(package, lib_name);
+        let library = load_project(&self.project.capability_dylib(package, lib_name), &initializer)?;
+        LeanCapabilities::from_prepared_capability(self, &prepared, shim, library, package, lib_name)
     }
 
     /// Load the bundled host-shim and interop dylibs without opening a user
@@ -91,8 +99,19 @@ impl<'lean> LeanHost<'lean> {
     /// if the bundled shim or interop dylibs cannot be built or located.
     /// Returns [`lean_rs::HostStage::Link`] if any mandatory shim symbol is
     /// missing.
-    pub fn load_shims_only<'h>(&'h self) -> LeanResult<LeanCapabilities<'lean, 'h>> {
-        LeanCapabilities::new_shims_only(self)
+    pub fn load_shims_only<'h>(
+        &'h self,
+        load_shim: impl FnOnce(&LeanPreparedHostArtifacts) -> LeanResult<LoadedHostArtifacts<'lean>>,
+    ) -> LeanResult<LeanCapabilities<'lean, 'h>> {
+        let prepared = prepare_host_artifacts()?;
+        let shim = load_shim(&prepared)?;
+        LeanCapabilities::from_prepared(self, &prepared, shim)
+    }
+
+    /// Resolve the project library location to submit to an application loader.
+    #[must_use]
+    pub fn project_library_path(&self, package: &str, lib_name: &str) -> std::path::PathBuf {
+        self.project.capability_dylib(package, lib_name)
     }
 
     /// The runtime borrow this host was constructed with.

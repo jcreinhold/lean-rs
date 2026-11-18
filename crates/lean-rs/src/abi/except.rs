@@ -126,49 +126,45 @@ where
 
 #[allow(unsafe_code, reason = "LeanAbi::from_c wraps an owned `lean_obj_res` pointer")]
 mod lean_abi_impls {
-    use super::{Except, IntoLean, LeanResult, LeanRuntime, Obj, TryFromLean};
+    use super::{Except, LeanResult, LeanRuntime, Obj};
 
-    impl<E, T> crate::abi::traits::sealed::SealedAbi for Except<E, T> {}
-    impl<'lean, E, T> crate::abi::traits::LeanAbi<'lean> for Except<E, T>
+    // SAFETY: Except uses an owned object slot and native codecs for both branch payloads.
+    unsafe impl<'lean, E, T> crate::abi::traits::LeanAbi<'lean> for Except<E, T>
     where
-        E: IntoLean<'lean> + TryFromLean<'lean>,
-        T: IntoLean<'lean> + TryFromLean<'lean>,
+        E: crate::abi::traits::LeanBoxedAbi<'lean>,
+        T: crate::abi::traits::LeanBoxedAbi<'lean>,
     {
         type CRepr = *mut lean_rs_sys::lean_object;
         fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
-            self.into_lean(runtime).into_raw()
+            <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::into_boxed(self, runtime).into_raw()
         }
-        #[allow(
-            clippy::not_unsafe_ptr_arg_deref,
-            reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-        )]
-        fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+
+        unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
             // SAFETY: `c` is a `lean_obj_res` owning one refcount per
             // Lake's contract.
             let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-            Self::try_from_lean(obj)
+            // SAFETY: the native result has the complete type established at binding.
+            unsafe { <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::from_boxed(obj) }
         }
     }
 
-    impl<T, E> crate::abi::traits::sealed::SealedAbi for Result<T, E> {}
-    impl<'lean, T, E> crate::abi::traits::LeanAbi<'lean> for Result<T, E>
+    // SAFETY: Result shares Except layout and ownership; both branch types require native codecs.
+    unsafe impl<'lean, T, E> crate::abi::traits::LeanAbi<'lean> for Result<T, E>
     where
-        T: IntoLean<'lean> + TryFromLean<'lean>,
-        E: IntoLean<'lean> + TryFromLean<'lean>,
+        T: crate::abi::traits::LeanBoxedAbi<'lean>,
+        E: crate::abi::traits::LeanBoxedAbi<'lean>,
     {
         type CRepr = *mut lean_rs_sys::lean_object;
         fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
-            self.into_lean(runtime).into_raw()
+            <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::into_boxed(self, runtime).into_raw()
         }
-        #[allow(
-            clippy::not_unsafe_ptr_arg_deref,
-            reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-        )]
-        fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+
+        unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
             // SAFETY: `c` is a `lean_obj_res` owning one refcount per
             // Lake's contract.
             let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-            Self::try_from_lean(obj)
+            // SAFETY: the native result has the complete type established at binding.
+            unsafe { <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::from_boxed(obj) }
         }
     }
 }

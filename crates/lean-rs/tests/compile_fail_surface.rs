@@ -6,6 +6,10 @@
 //!    `Args`/`R`, so calling it requires an `unsafe` block.
 //! 2. `LeanIo<T>` is an opaque type-level marker whose single field is private,
 //!    so downstream code cannot construct a value.
+//! 3. Native loading, raw decoding, generic calls, and artifact/contract trust
+//!    require unsafe assertions. C representations are sealed; safe owned-data
+//!    conversions cannot manufacture semantic handles or authorize native
+//!    container elements. Imports require an immutable attested scope.
 //!
 //! Each negative case is a standalone `.rs` file with a matching `.stderr`
 //! snapshot. The snapshots capture `rustc` diagnostics, whose exact wording
@@ -32,4 +36,6 @@ fn surface_invariants_are_enforced_by_the_type_system() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/exported_unchecked_requires_unsafe.rs");
     t.compile_fail("tests/compile_fail/lean_io_not_constructible.rs");
+    t.compile_fail("tests/compile_fail/abi_*.rs");
+    t.pass("tests/compile_pass/abi_native_container_contracts.rs");
 }

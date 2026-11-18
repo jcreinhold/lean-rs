@@ -17,10 +17,8 @@ unsafe extern "C" {
     pub fn lean_mk_string_from_bytes_unchecked(s: *const c_char, sz: usize) -> lean_obj_res;
     pub fn lean_mk_ascii_string_unchecked(s: *const c_char) -> lean_obj_res;
 
-    pub fn lean_string_push(s: lean_obj_arg, c: u32) -> lean_obj_res;
     pub fn lean_string_append(s1: lean_obj_arg, s2: b_lean_obj_arg) -> lean_obj_res;
     pub fn lean_string_mk(cs: lean_obj_arg) -> lean_obj_res;
-    pub fn lean_string_data(s: lean_obj_arg) -> lean_obj_res;
 
     pub fn lean_string_utf8_get(s: b_lean_obj_arg, i: b_lean_obj_arg) -> u32;
     pub fn lean_string_utf8_next(s: b_lean_obj_arg, i: b_lean_obj_arg) -> lean_obj_res;

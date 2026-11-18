@@ -13,6 +13,9 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
+#[path = "support/fixed_fixture.rs"]
+mod fixture;
+
 use std::path::PathBuf;
 use std::sync::Barrier;
 use std::thread;
@@ -21,12 +24,7 @@ use lean_rs::{LeanRuntime, LeanThreadGuard};
 use lean_rs_host::{LeanHost, SessionPool};
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
+    fixture::fixture_root()
 }
 
 #[test]
@@ -80,14 +78,12 @@ fn independent_worker_sessions_run_in_parallel() {
             let runtime = LeanRuntime::init().expect("worker init must succeed");
             let _guard = LeanThreadGuard::attach(runtime);
             let host = LeanHost::from_lake_project(runtime, lake_root).expect("worker host opens");
-            let caps = host
-                .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-                .expect("worker loads capabilities");
+            let caps = fixture::capabilities(&host).expect("worker loads capabilities");
             // Stagger session imports past a barrier so several threads
             // do Lean work simultaneously.
             barrier.wait();
             let mut session = caps
-                .session(&["LeanRsFixture.Handles"], None, None)
+                .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
                 .expect("worker imports its own session");
 
             let decl = session
@@ -130,14 +126,13 @@ fn per_worker_session_pool_under_concurrency() {
             let runtime = LeanRuntime::init().expect("worker init must succeed");
             let _guard = LeanThreadGuard::attach(runtime);
             let host = LeanHost::from_lake_project(runtime, lake_root).expect("host opens");
-            let caps = host
-                .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-                .expect("loads capabilities");
+            let caps = fixture::capabilities(&host).expect("loads capabilities");
             let pool = SessionPool::with_capacity(runtime, 2);
             barrier.wait();
+            let imports = fixture::imports(&caps, "LeanRsFixture.Handles");
             for _ in 0..CHECKOUTS_PER_WORKER {
                 let mut session = pool
-                    .acquire(&caps, &["LeanRsFixture.Handles"], None, None)
+                    .acquire(&caps, &imports, None, None)
                     .expect("pool acquire returns a session");
                 let kind = session
                     .declaration_kind("LeanRsFixture.Handles.nameAnonymous", None)

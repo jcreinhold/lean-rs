@@ -134,14 +134,18 @@ pub unsafe fn lean_alloc_ctor(tag: u8, num_objs: u8, scalar_sz: usize) -> lean_o
         clippy::cast_possible_truncation,
         reason = "LEAN_MAX_SMALL_OBJECT_SIZE is below u16::MAX"
     )]
-    let aligned_sz = aligned_sz as u16;
-    // SAFETY: `lean_alloc_object` returns a non-null pointer to `sz` bytes of
+    let header_sz = aligned_sz as u16;
+    // SAFETY: `lean_alloc_object` returns a non-null pointer to `aligned_sz` bytes of
     // uninitialised Lean-managed memory; we immediately install the
     // single-threaded header so any subsequent access through Lean's
     // predicates sees a well-formed object.
     unsafe {
-        let o = lean_alloc_object(sz);
-        set_st_header(o, tag, num_objs, aligned_sz);
+        let o = lean_alloc_object(aligned_sz);
+        // Native constructor size queries include rounding bytes. Initialize
+        // those bytes so checked scalar-tail readers cannot observe padding
+        // that was never written. Declared fields remain the caller's duty.
+        core::ptr::write_bytes(o.cast::<u8>().add(sz), 0, aligned_sz.strict_sub(sz));
+        set_st_header(o, tag, num_objs, header_sz);
         o
     }
 }
@@ -496,6 +500,35 @@ mod tests {
                 lean_io_mark_end_initialization();
             }
         });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "executes libleanshared; Miri cannot interpret the Lean C runtime")]
+    fn constructor_rounding_padding_is_initialized() {
+        ensure_runtime();
+        for scalar_size in 1_usize..8 {
+            // SAFETY: tag 0, no object fields, and a supported scalar tail.
+            // Initialize the declared bytes before inspecting the allocation;
+            // the allocator initializes the remaining rounded padding bytes.
+            unsafe {
+                let object = super::lean_alloc_ctor(0, 0, scalar_size);
+                let tail = super::lean_ctor_scalar_cptr(object);
+                core::ptr::write_bytes(tail, 0x5a, scalar_size);
+                let size = crate::object::lean_object_data_byte_size(object);
+                let tail_offset = tail.addr().strict_sub(object.addr());
+                let length = size.strict_sub(tail_offset);
+                let bytes = core::slice::from_raw_parts(tail, length);
+                let declared = bytes
+                    .get(..scalar_size)
+                    .expect("reported span covers declared scalar fields");
+                let padding = bytes
+                    .get(scalar_size..)
+                    .expect("padding starts within the reported span");
+                assert!(declared.iter().all(|byte| *byte == 0x5a));
+                assert!(padding.iter().all(|byte| *byte == 0));
+                lean_dec(object);
+            }
+        }
     }
 
     #[test]

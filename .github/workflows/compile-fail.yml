@@ -71,6 +71,7 @@ jobs:
       - name: Run compile-fail snapshot suites
         env:
           RUN_TRYBUILD: "1"
+          RUSTC_WRAPPER: ${{ github.workspace }}/scripts/trybuild-linked-fixture-rustc.sh
         run: |
           cargo test -p lean-rs-sys -p lean-rs -p lean-rs-host \
             --test compile_fail_surface

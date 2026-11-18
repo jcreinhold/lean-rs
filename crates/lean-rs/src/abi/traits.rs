@@ -1,12 +1,12 @@
 //! Conversion traits for first-order Lean values.
 //!
-//! Three sealed traits with distinct roles:
+//! Owned-data conversions and explicitly unsafe native ABI conversions.
 //!
-//! - [`IntoLean`] / [`TryFromLean`] (`pub(crate)`)—convert between Rust
+//! - [`IntoLean`] / [`TryFromLean`]—convert between Rust
 //!   values and polymorphic-boxed [`Obj`]. Used for container elements,
 //!   structure fields, and any Lean position where the value lives behind
 //!   a `lean_object*`. The classic encoding/decoding direction.
-//! - [`LeanAbi`] (`pub`, sealed)—convert between Rust values and the
+//! - [`LeanAbi`]—convert between Rust values and the
 //!   *C-ABI representation* Lake emits for a top-level Lean export
 //!   parameter or return. The C representation varies: `uint8_t` for
 //!   `Bool`, `uint32_t` for `Char`, `double` for `Float`, scalar primitive
@@ -14,8 +14,8 @@
 //!   trait drives [`crate::module::LeanExported`]'s typed function-pointer
 //!   cast.
 //!
-//! `LeanAbi` is the third (and final) conversion trait. It coexists
-//! with `IntoLean`/`TryFromLean` because they encode different
+//! Native ABI conversions coexist with safe owned-data conversions because
+//! they encode different
 //! conventions for the same Rust type: `u8 as IntoLean` produces a
 //! polymorphic-boxed `lean_box(u8 as usize)`, while `u8 as LeanAbi`
 //! produces an unboxed `uint8_t` matching Lake's emitted signature.
@@ -45,11 +45,17 @@ use crate::runtime::obj::Obj;
 /// This is deliberately narrower than Rust FFI in general: Lean exports use
 /// either `lean_object*` or the scalar shapes Lake emits for first-order Lean
 /// values.
-pub trait LeanCReprAbi: Copy + 'static {
+pub trait LeanCReprAbi: Copy + 'static + c_repr_sealed::Sealed {
     /// Manifest ABI representation for this C slot.
     const EXPORT_ABI_REPR: LeanExportAbiRepr;
 }
 
+mod c_repr_sealed {
+    #[allow(unreachable_pub, reason = "private supertrait seals the supported C representations")]
+    pub trait Sealed {}
+}
+
+impl c_repr_sealed::Sealed for *mut lean_object {}
 impl LeanCReprAbi for *mut lean_object {
     const EXPORT_ABI_REPR: LeanExportAbiRepr = LeanExportAbiRepr::LeanObject;
 }
@@ -57,6 +63,7 @@ impl LeanCReprAbi for *mut lean_object {
 macro_rules! impl_c_repr_abi {
     ($($ty:ty => $repr:ident),* $(,)?) => {
         $(
+            impl c_repr_sealed::Sealed for $ty {}
             impl LeanCReprAbi for $ty {
                 const EXPORT_ABI_REPR: LeanExportAbiRepr = LeanExportAbiRepr::$repr;
             }
@@ -109,6 +116,43 @@ pub trait TryFromLean<'lean>: Sized {
     fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self>;
 }
 
+/// Convert boxed native values whose Lean type is established by the caller.
+///
+/// Unlike [`TryFromLean`], this contract may rely on the object's Lean type.
+/// It supports opaque semantic handles and containers containing those handles
+/// without offering a safe cast from an arbitrary [`Obj`].
+///
+/// # Safety
+///
+/// Implementations must decode every supported value of their documented Lean
+/// type without violating object ownership, runtime lifetime, or thread rules.
+/// Errors must release owned references. A decoder must not manufacture a
+/// semantic handle for a different Lean type.
+/// Encoders must produce a fully initialized owned value of that same Lean type.
+#[allow(
+    unsafe_code,
+    reason = "native decoding requires a caller-established Lean value type"
+)]
+pub unsafe trait LeanBoxedAbi<'lean>: Sized {
+    /// Encode a value using its documented Lean polymorphic representation.
+    fn into_boxed(self, runtime: &'lean LeanRuntime) -> Obj<'lean>;
+
+    /// Consume an owned native value of the Lean type represented by `Self`.
+    ///
+    /// # Safety
+    ///
+    /// `obj` and its reachable fields must have the complete Lean value layout
+    /// expected by this implementation. Pointer ownership alone is insufficient.
+    /// The object must belong to its lifetime's initialized runtime and be used
+    /// on an attached thread. The caller transfers the owned reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns a conversion error when a valid Lean value cannot be represented
+    /// by `Self`.
+    unsafe fn from_boxed(obj: Obj<'lean>) -> LeanResult<Self>;
+}
+
 /// Build a `LeanError::Host { stage: Conversion, .. }` carrying a uniform
 /// diagnostic.
 ///
@@ -116,33 +160,6 @@ pub trait TryFromLean<'lean>: Sized {
 /// log/sink can hook one site instead of N.
 pub fn conversion_error(message: impl Into<String>) -> LeanError {
     LeanError::abi_conversion(message)
-}
-
-// -- Sealing for LeanAbi -----------------------------------------------
-
-/// Supertrait that seals [`LeanAbi`] against external implementations.
-///
-/// The module is `pub` (not `pub(crate)`) because Cargo has no "friend
-/// crate" visibility and the sibling [`lean-rs-host`](https://docs.rs/lean-rs-host)
-/// crate genuinely needs to implement `LeanAbi` for its own
-/// host-defined types (`LeanEvidence` etc.). The pattern that holds is:
-///
-/// - **External crates** (anyone other than `lean-rs-host`) cannot
-///   implement `LeanAbi` for their own types: the orphan rule blocks
-///   `impl LeanAbi for MyType` directly, and writing
-///   `impl SealedAbi for MyType` is a transparent intent-to-bypass
-///   that bypasses the intended API boundary. Combined with the
-///   `#[doc(hidden)]` module marker on the parent module's internal
-///   re-exports, the signal is unambiguous.
-/// - **The sibling `lean-rs-host` crate** reaches `SealedAbi` directly
-///   and implements both `SealedAbi` and `LeanAbi` for its host types.
-///   This is intentional; the sealing is against accidental external
-///   impls, not the sibling service crate.
-#[doc(hidden)]
-pub mod sealed {
-    /// Sealed supertrait for [`super::LeanAbi`]. See module-level docs
-    /// for the sibling-crate implementation boundary.
-    pub trait SealedAbi {}
 }
 
 /// Per-type C-ABI representation used by [`crate::module::LeanExported`].
@@ -153,16 +170,19 @@ pub mod sealed {
 /// per-type [`CRepr`](LeanAbi::CRepr) records which convention applies.
 ///
 /// `into_c` / `from_c` are paired: a type's `CRepr` is invariant between
-/// the encode and decode directions, so they live on one trait (Ousterhout
-/// ch 9—combining concerns that share information).
+/// the encode and decode directions, so they share one contract.
 ///
-/// Sealed via [`sealed::SealedAbi`]. External crates cannot implement
-/// this trait for their own types (orphan rule + sealed supertrait
-/// rejection). The sibling `lean-rs-host` crate reaches the internal trait
-/// intentionally and implements `LeanAbi` for its host-defined
-/// types—that is the documented service-layer extension point, not a
-/// stability violation.
-pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
+/// # Safety
+///
+/// Implementations must use the C representation and ownership convention of
+/// their documented Lean type. Encoders must produce initialized owned values
+/// of that type for every accepted Rust value. Decoders must preserve reference
+/// ownership and runtime lifetimes for valid native results of that type.
+/// Generic export binding additionally requires the caller to establish that
+/// the actual native Lean types match these conversions; matching C slots does
+/// not establish boxed layouts or scalar refinements.
+#[allow(unsafe_code, reason = "implementing a native conversion establishes FFI invariants")]
+pub unsafe trait LeanAbi<'lean>: Sized {
     /// The C-ABI type Lake emits for this Lean type at function
     /// signatures.
     type CRepr: LeanCReprAbi;
@@ -179,12 +199,13 @@ pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     /// owned reference count (per Lake's `lean_obj_res` ownership
     /// contract); `from_c` consumes it.
     ///
-    /// `clippy::not_unsafe_ptr_arg_deref` is allowed: the function is
-    /// only invoked through the sealed [`crate::module::DecodeCallResult`]
-    /// dispatch, which receives `c` directly from the
-    /// `unsafe extern "C"` call inside [`crate::module::LeanExported`].
-    /// Marking this method `unsafe fn` would cascade through every per-type
-    /// impl without adding safety beyond what sealing already enforces.
+    /// # Safety
+    ///
+    /// `c` must be a valid initialized value of this implementation's complete
+    /// Lean type and C representation. A boxed pointer must be non-null, carry
+    /// one transferred reference, and belong to `runtime`. Its reachable fields
+    /// must have the expected types and layouts. Use it only on an attached
+    /// runtime thread. A scalar must satisfy its Lean type's refinements.
     ///
     /// # Errors
     ///
@@ -192,11 +213,7 @@ pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
     /// if the value cannot be decoded into `Self` (kind mismatch,
     /// out-of-range bignum, malformed UTF-8, non-Unicode `char` payload).
     #[doc(hidden)]
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—called only by LeanExported"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self>;
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self>;
 }
 
 // -- LeanAbi for Obj<'lean> -------------------------------------------
@@ -206,18 +223,15 @@ pub trait LeanAbi<'lean>: Sized + sealed::SealedAbi {
 // constructed via per-type helpers (`nat::from_u64`, `string::from_str`,
 // …) directly without re-typing.
 
-impl sealed::SealedAbi for Obj<'_> {}
-
-impl<'lean> LeanAbi<'lean> for Obj<'lean> {
+// SAFETY: Obj transfers the same owned reference in both directions and does
+// not claim a more specific Lean value type than the caller established.
+#[allow(unsafe_code, reason = "identity conversion for an owned native object")]
+unsafe impl<'lean> LeanAbi<'lean> for Obj<'lean> {
     type CRepr = *mut lean_object;
     fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
         self.into_raw()
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—called only by LeanExported"
-    )]
-    fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` carries one owned reference count returned from
         // an extern Lean function (per Lake's `lean_obj_res` contract).
         // `runtime` is the witness for `'lean`.

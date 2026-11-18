@@ -7,10 +7,9 @@
 //! borrowed view: it costs nothing on construction or drop and cannot
 //! outlive either the runtime borrow or the owning [`Obj`].
 //!
-//! Both types are `pub(crate)`; the public handles (`LeanExpr<'lean>`,
-//! `LeanName<'lean>`, `LeanSession<'lean, '_>`, …) wrap them. Raw
-//! `lean_*` symbols enter this file from `lean-rs-sys` and never leave
-//! the `pub(crate)` boundary.
+//! These owned and borrowed data handles are public. Semantic handles wrap
+//! typed objects and provide no safe constructor from arbitrary `Obj` values.
+//! Raw native entry remains explicitly unsafe; raw symbols live in `lean-rs-sys`.
 
 // SAFETY DOC: every `unsafe { ... }` block in this file carries its own
 // `// SAFETY:` comment naming the invariant. The blanket allow keeps
@@ -78,6 +77,11 @@ impl<'lean> Obj<'lean> {
     /// * `ptr` is non-null and points to a live Lean object (a
     ///   scalar-tagged pointer is allowed; `lean_inc` / `lean_dec`
     ///   short-circuit on those).
+    /// * A heap object's header and payload agree with its allocation and
+    ///   runtime layout. Every declared field and readable padding byte is
+    ///   initialized; every child pointer is a valid Lean value carrying the
+    ///   reference owned by its parent. Its tag selects the actual allocation
+    ///   shape. Merely allocating enough bytes does not establish a Lean object.
     /// * The caller transfers exactly one Lean reference count to this
     ///   handle. After this call the caller must not call `lean_dec`
     ///   on `ptr` itself; releasing the count is the new `Obj`'s job

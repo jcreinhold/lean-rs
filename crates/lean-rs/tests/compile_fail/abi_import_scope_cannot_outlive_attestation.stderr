@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing local variable `trusted`
+  --> tests/compile_fail/abi_import_scope_cannot_outlive_attestation.rs:10:14
+   |
+10 |     unsafe { trusted.import_scope(vec![], vec![]) }
+   |              -------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |              |
+   |              returns a value referencing data owned by the current function
+   |              `trusted` is borrowed here

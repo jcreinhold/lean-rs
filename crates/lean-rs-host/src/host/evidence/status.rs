@@ -108,29 +108,14 @@ impl<'lean> TryFromLean<'lean> for EvidenceStatus {
     }
 }
 
-impl<'lean> TryFromLean<'lean> for LeanKernelOutcome<'lean> {
-    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        let tag = view(&obj).ctor()?.tag();
-        match tag {
-            0 => {
-                let [payload] = take_ctor_objects::<1>(obj, 0, "KernelOutcome.checked")?;
-                Ok(Self::Checked(LeanEvidence::try_from_lean(payload)?))
-            }
-            1 => {
-                let [payload] = take_ctor_objects::<1>(obj, 1, "KernelOutcome.rejected")?;
-                Ok(Self::Rejected(LeanElabFailure::try_from_lean(payload)?))
-            }
-            2 => {
-                let [payload] = take_ctor_objects::<1>(obj, 2, "KernelOutcome.unavailable")?;
-                Ok(Self::Unavailable(LeanElabFailure::try_from_lean(payload)?))
-            }
-            3 => {
-                let [payload] = take_ctor_objects::<1>(obj, 3, "KernelOutcome.unsupported")?;
-                Ok(Self::Unsupported(LeanElabFailure::try_from_lean(payload)?))
-            }
-            other => Err(conversion_error(format!(
-                "expected Lean KernelOutcome ctor (tag 0..=3), found tag {other}"
-            ))),
+impl<'lean> LeanKernelOutcome<'lean> {
+    pub(crate) fn from_native(outcome: lean_rs::host_bridge::HostKernelOutcome<'lean>) -> LeanResult<Self> {
+        use lean_rs::host_bridge::HostKernelOutcome;
+        match outcome {
+            HostKernelOutcome::Checked(evidence) => Ok(Self::Checked(evidence)),
+            HostKernelOutcome::Rejected(record) => LeanElabFailure::try_from_lean(record).map(Self::Rejected),
+            HostKernelOutcome::Unavailable(record) => LeanElabFailure::try_from_lean(record).map(Self::Unavailable),
+            HostKernelOutcome::Unsupported(record) => LeanElabFailure::try_from_lean(record).map(Self::Unsupported),
         }
     }
 }

@@ -11,7 +11,7 @@ name = "lean-toolchain"
 readme = "README.md"
 repository.workspace = true
 rust-version.workspace = true
-version = "0.9.10"
+version.workspace = true
 
 [dependencies]
 fs4 = { workspace = true }

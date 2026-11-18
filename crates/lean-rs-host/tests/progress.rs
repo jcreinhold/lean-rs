@@ -2,6 +2,9 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "support/fixed_fixture.rs"]
+mod fixture;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -11,12 +14,7 @@ use lean_rs_host::{
 };
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
+    fixture::fixture_root()
 }
 
 fn runtime() -> &'static LeanRuntime {
@@ -28,7 +26,7 @@ fn fixture_host() -> LeanHost<'static> {
 }
 
 fn session_over_handles<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsFixture.Handles"], None, None)
+    caps.session(&fixture::imports(caps, "LeanRsFixture.Handles"), None, None)
         .expect("session imports cleanly")
 }
 
@@ -90,9 +88,7 @@ fn assert_cancelled(err: LeanError) {
 #[test]
 fn query_declarations_bulk_reports_ordered_multi_phase_progress() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let sink = RecordingSink::default();
     let names = [
@@ -141,9 +137,7 @@ fn query_declarations_bulk_reports_ordered_multi_phase_progress() {
 #[test]
 fn progress_current_is_monotonic_within_each_phase() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let sink = RecordingSink::default();
     let names = [
@@ -174,9 +168,7 @@ fn progress_current_is_monotonic_within_each_phase() {
 #[test]
 fn pre_cancelled_progress_call_records_no_dispatch_or_event() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let sink = RecordingSink::default();
     let token = LeanCancellationToken::new();
@@ -195,9 +187,7 @@ fn pre_cancelled_progress_call_records_no_dispatch_or_event() {
 #[test]
 fn sink_triggered_cancellation_fires_at_next_progress_boundary() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let token = LeanCancellationToken::new();
     let sink = CancelOnFirstEvent {
@@ -230,9 +220,7 @@ fn sink_triggered_cancellation_fires_at_next_progress_boundary() {
 #[test]
 fn progress_sink_panic_is_contained_by_callback_trampoline() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
 
     let err = session
@@ -258,9 +246,7 @@ fn progress_sink_panic_is_contained_by_callback_trampoline() {
 #[test]
 fn no_progress_bulk_path_remains_one_dispatch() {
     let host = fixture_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let caps = fixture::capabilities(&host).expect("load caps");
     let mut session = session_over_handles(&caps);
     let names = [
         "LeanRsFixture.Handles.nameAnonymous",

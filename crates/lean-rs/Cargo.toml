@@ -69,6 +69,7 @@ default-target = "x86_64-unknown-linux-gnu"
 targets = []
 
 [dev-dependencies]
+sha2 = { workspace = true }
 # Heap profiler for `examples/alloc_probe.rs`. Installs `dhat::Alloc` as the
 # *Rust* global allocator; Lean's internal mimalloc (statically linked into
 # `libleanrt.a`) is a separate allocator and unaffected. Dev-only — never

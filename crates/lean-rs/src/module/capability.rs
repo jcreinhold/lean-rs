@@ -9,10 +9,9 @@
 //! `lean-toolchain` so the worker parent crate can consume it without
 //! relinking `libleanshared`. It is re-exported here for source compatibility.
 
-// SAFETY DOC: the only unsafe block in this file is the final transition from
-// manifest-checked ABI metadata to `LeanModule::exported_unchecked`. The safe
-// public method validates the manifest signature and function/global kind
-// before reaching that constructor.
+// Native loading and generic binding require caller-established artifact and
+// value contracts. Manifest slot/kind checks are additional diagnostics; they
+// cannot establish semantic trust for native code.
 #![allow(unsafe_code)]
 
 use std::collections::HashMap;
@@ -113,6 +112,10 @@ impl std::error::Error for LeanCheckedExportError {
 }
 
 impl<'lean> LeanCapability<'lean> {
+    pub(crate) fn pin_for_process(&self) {
+        self.bundle.pin_for_process();
+    }
+
     /// Open and initialize a build-script produced Lean capability from its
     /// JSON artifact manifest.
     ///
@@ -122,7 +125,12 @@ impl<'lean> LeanCapability<'lean> {
     /// manifest is missing, malformed, or unsupported, or the bundle described
     /// by the manifest cannot be opened.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn from_build_manifest(runtime: &'lean LeanRuntime, spec: LeanBuiltCapability) -> LeanResult<Self> {
+    /// # Safety
+    ///
+    /// The actual primary artifact and all transitive dependencies must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Manifest metadata and paths do not establish native trust.
+    pub unsafe fn from_build_manifest(runtime: &'lean LeanRuntime, spec: LeanBuiltCapability) -> LeanResult<Self> {
         let report = LeanRuntimePreflight::new(spec.clone()).check();
         if !report.is_ok() {
             return Err(report_into_error(report));
@@ -131,14 +139,56 @@ impl<'lean> LeanCapability<'lean> {
             .resolved_manifest_path()
             .map_err(|err| built_capability_error_to_lean_error(&err))?;
         let manifest = CapabilityManifest::read(&manifest_path).map_err(manifest_error_to_lean_error)?;
-        Self::open_with_dependencies_and_exports(
-            runtime,
-            manifest.primary_dylib,
-            manifest.package,
-            manifest.module,
-            manifest.dependencies,
-            manifest.exports,
-        )
+        // SAFETY: the caller established native trust for the primary artifact and dependencies.
+        unsafe {
+            Self::open_with_dependencies_and_exports(
+                runtime,
+                manifest.primary_dylib,
+                manifest.package,
+                manifest.module,
+                manifest.dependencies,
+                manifest.exports,
+            )
+        }
+    }
+
+    /// Open and initialize exactly one captured capability-manifest snapshot.
+    ///
+    /// Unlike [`Self::from_build_manifest`], this method never rereads the
+    /// manifest path. Schema, fingerprint and symbol preflight inspect the same
+    /// parsed bytes that provide library paths and checked ABI signatures.
+    /// Artifact coordination must span this call, including all initializers;
+    /// a captured manifest is storage metadata, not evidence of a loaded ABI.
+    ///
+    /// # Errors
+    /// Returns [`LeanError`] for malformed metadata, preflight failure, or a
+    /// dependency/primary load or module-initialization failure.
+    /// # Safety
+    ///
+    /// The actual primary artifact and all transitive dependencies must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Manifest metadata and paths do not establish native trust.
+    pub unsafe fn from_manifest_snapshot(
+        runtime: &'lean LeanRuntime,
+        manifest_path: &Path,
+        bytes: &[u8],
+    ) -> LeanResult<Self> {
+        let manifest = CapabilityManifest::from_bytes(manifest_path, bytes).map_err(manifest_error_to_lean_error)?;
+        let report = LeanRuntimePreflight::check_manifest(manifest_path, &manifest);
+        if !report.is_ok() {
+            return Err(report_into_error(report));
+        }
+        // SAFETY: the caller established native trust for the primary artifact and dependencies.
+        unsafe {
+            Self::open_with_dependencies_and_exports(
+                runtime,
+                manifest.primary_dylib,
+                manifest.package,
+                manifest.module,
+                manifest.dependencies,
+                manifest.exports,
+            )
+        }
     }
 
     /// Open and initialize exactly one captured capability-manifest snapshot.
@@ -179,7 +229,12 @@ impl<'lean> LeanCapability<'lean> {
     /// Returns [`LeanError`] when the dylib path cannot be resolved, the
     /// dynamic loader cannot open it, or the configured module initializer
     /// fails.
-    pub fn from_build_env(runtime: &'lean LeanRuntime, mut spec: LeanBuiltCapability) -> LeanResult<Self> {
+    /// # Safety
+    ///
+    /// The actual primary artifact and all transitive dependencies must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Manifest metadata and paths do not establish native trust.
+    pub unsafe fn from_build_env(runtime: &'lean LeanRuntime, mut spec: LeanBuiltCapability) -> LeanResult<Self> {
         let dylib_path = spec
             .dylib_path()
             .map_err(|err| built_capability_error_to_lean_error(&err))?;
@@ -190,7 +245,8 @@ impl<'lean> LeanCapability<'lean> {
             LeanError::linking("LeanBuiltCapability is missing the root Lean module name; call `.module(...)`")
         })?;
         let dependencies = spec.take_dependencies();
-        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, [])
+        // SAFETY: the caller established native trust for the primary artifact and dependencies.
+        unsafe { Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, []) }
     }
 
     /// Open and initialize a capability from an explicit dylib path and
@@ -200,7 +256,12 @@ impl<'lean> LeanCapability<'lean> {
     ///
     /// Returns [`LeanError`] when the dynamic loader cannot open the dylib or
     /// the configured module initializer fails.
-    pub fn open(
+    /// # Safety
+    ///
+    /// The actual primary artifact and all transitive dependencies must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Manifest metadata and paths do not establish native trust.
+    pub unsafe fn open(
         runtime: &'lean LeanRuntime,
         dylib_path: impl AsRef<Path>,
         package: impl Into<String>,
@@ -208,7 +269,8 @@ impl<'lean> LeanCapability<'lean> {
     ) -> LeanResult<Self> {
         let package = package.into();
         let module = module.into();
-        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, [], [])
+        // SAFETY: the caller established native trust for the primary artifact and dependencies.
+        unsafe { Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, [], []) }
     }
 
     /// Open and initialize a capability with explicitly described dependency
@@ -222,17 +284,23 @@ impl<'lean> LeanCapability<'lean> {
     ///
     /// Returns [`LeanError`] when a dependency or primary dylib cannot be
     /// loaded, or when a dependency or primary module initializer fails.
-    pub fn open_with_dependencies(
+    /// # Safety
+    ///
+    /// The actual primary artifact and all transitive dependencies must satisfy
+    /// [`LeanLibrary::open`]'s native-code, runtime, initializer, and unload
+    /// requirements. Manifest metadata and paths do not establish native trust.
+    pub unsafe fn open_with_dependencies(
         runtime: &'lean LeanRuntime,
         dylib_path: impl AsRef<Path>,
         package: impl Into<String>,
         module: impl Into<String>,
         dependencies: impl IntoIterator<Item = LeanLibraryDependency>,
     ) -> LeanResult<Self> {
-        Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, [])
+        // SAFETY: the caller established native trust for the primary artifact and dependencies.
+        unsafe { Self::open_with_dependencies_and_exports(runtime, dylib_path, package, module, dependencies, []) }
     }
 
-    fn open_with_dependencies_and_exports(
+    unsafe fn open_with_dependencies_and_exports(
         runtime: &'lean LeanRuntime,
         dylib_path: impl AsRef<Path>,
         package: impl Into<String>,
@@ -242,7 +310,8 @@ impl<'lean> LeanCapability<'lean> {
     ) -> LeanResult<Self> {
         let package = package.into();
         let module = module.into();
-        let bundle = LeanLibraryBundle::open(runtime, dylib_path, dependencies)?;
+        // SAFETY: the caller established the complete loaded artifact/dependency contract.
+        let bundle = unsafe { LeanLibraryBundle::open(runtime, dylib_path, dependencies) }?;
         let _module = bundle.initialize_module(&package, &module)?;
         let export_signatures = export_signatures
             .into_iter()
@@ -259,16 +328,40 @@ impl<'lean> LeanCapability<'lean> {
     /// Look up an exported symbol only if trusted manifest ABI metadata
     /// exactly matches the requested Rust call shape.
     ///
-    /// Unlike [`LeanModule::exported_unchecked`], this method is safe: the
-    /// caller supplies only a symbol name and Rust `Args`/`R` types. The ABI
-    /// assertion comes from the capability manifest parsed at load time.
+    /// C-slot metadata checks representation and ownership. It does not
+    /// distinguish boxed value layouts or establish native semantic types.
+    ///
+    /// # Safety
+    ///
+    /// The native symbol must implement the complete Lean argument/result
+    /// contracts selected by `Args` and `R`, including nested boxed layouts,
+    /// scalar refinements, callbacks, runtime identity, and ownership. Each
+    /// invocation must also satisfy [`LeanExported::call`]'s requirements.
     ///
     /// # Errors
     ///
     /// Returns [`LeanCheckedExportError`] when metadata is missing, the Rust
     /// shape disagrees with the manifest, the manifest's function/global kind
     /// disagrees with the loaded dylib, or the symbol cannot be resolved.
-    pub fn exported<Args, R>(&self, name: &str) -> Result<LeanExported<'lean, '_, Args, R>, LeanCheckedExportError>
+    pub unsafe fn exported<Args, R>(
+        &self,
+        name: &str,
+    ) -> Result<LeanExported<'lean, '_, Args, R>, LeanCheckedExportError>
+    where
+        Args: LeanArgs<'lean>,
+        R: DecodeCallResult<'lean>,
+    {
+        self.check_export_shape::<Args, R>(name)?;
+        let module = self.module().map_err(LeanCheckedExportError::Module)?;
+        // SAFETY: the caller established the complete native value contract.
+        // Slot metadata and the loaded function/global kind were checked above.
+        unsafe { module.exported_unchecked::<Args, R>(name) }.map_err(|source| LeanCheckedExportError::MissingSymbol {
+            symbol: name.to_owned(),
+            source,
+        })
+    }
+
+    pub(super) fn check_export_shape<Args, R>(&self, name: &str) -> Result<(), LeanCheckedExportError>
     where
         Args: LeanArgs<'lean>,
         R: DecodeCallResult<'lean>,
@@ -311,14 +404,7 @@ impl<'lean> LeanCapability<'lean> {
             });
         }
 
-        let module = self.module().map_err(LeanCheckedExportError::Module)?;
-        // SAFETY: the manifest signature matched `Args`/`R` exactly, and the
-        // function/global classification matched the loaded dylib before this
-        // unchecked constructor was reached.
-        unsafe { module.exported_unchecked::<Args, R>(name) }.map_err(|source| LeanCheckedExportError::MissingSymbol {
-            symbol: name.to_owned(),
-            source,
-        })
+        Ok(())
     }
 
     /// Return an initialized module handle.

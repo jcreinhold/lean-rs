@@ -1,0 +1,83 @@
+error[E0277]: the trait bound `CustomValue: LeanBoxedAbi<'_>` is not satisfied
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:21:14
+   |
+21 |     native::<Vec<CustomValue>>();
+   |              ^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `LeanBoxedAbi<'_>` is not implemented for `CustomValue`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:4:1
+   |
+ 4 | struct CustomValue;
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `LeanBoxedAbi<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             HostEnvironment<'lean>
+             HostEvidence<'lean>
+             LeanDeclaration<'lean>
+             LeanExpr<'lean>
+             LeanLevel<'lean>
+           and $N others
+   = note: required for `Vec<CustomValue>` to implement `LeanAbi<'_>`
+note: required by a bound in `native`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:18:21
+   |
+18 | fn native<'lean, T: LeanAbi<'lean>>() {}
+   |                     ^^^^^^^^^^^^^^ required by this bound in `native`
+
+error[E0277]: the trait bound `CustomValue: LeanBoxedAbi<'_>` is not satisfied
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:22:14
+   |
+22 |     native::<Option<CustomValue>>();
+   |              ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `LeanBoxedAbi<'_>` is not implemented for `CustomValue`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:4:1
+   |
+ 4 | struct CustomValue;
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `LeanBoxedAbi<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             HostEnvironment<'lean>
+             HostEvidence<'lean>
+             LeanDeclaration<'lean>
+             LeanExpr<'lean>
+             LeanLevel<'lean>
+           and $N others
+   = note: required for `Option<CustomValue>` to implement `LeanAbi<'_>`
+note: required by a bound in `native`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:18:21
+   |
+18 | fn native<'lean, T: LeanAbi<'lean>>() {}
+   |                     ^^^^^^^^^^^^^^ required by this bound in `native`
+
+error[E0277]: the trait bound `CustomValue: LeanBoxedAbi<'_>` is not satisfied
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:23:14
+   |
+23 |     native::<(CustomValue, CustomValue)>();
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `LeanBoxedAbi<'_>` is not implemented for `CustomValue`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:4:1
+   |
+ 4 | struct CustomValue;
+   | ^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `LeanBoxedAbi<'lean>`:
+             ()
+             (A, B)
+             (A, B, C)
+             HostEnvironment<'lean>
+             HostEvidence<'lean>
+             LeanDeclaration<'lean>
+             LeanExpr<'lean>
+             LeanLevel<'lean>
+           and $N others
+   = note: required for `(CustomValue, CustomValue)` to implement `LeanAbi<'_>`
+note: required by a bound in `native`
+  --> tests/compile_fail/abi_safe_conversions_do_not_authorize_native_containers.rs:18:21
+   |
+18 | fn native<'lean, T: LeanAbi<'lean>>() {}
+   |                     ^^^^^^^^^^^^^^ required by this bound in `native`

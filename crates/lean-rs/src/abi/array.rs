@@ -36,18 +36,12 @@ use crate::error::{LeanError, LeanResult};
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
 
-/// Build a Lean `Array α` from any iterator whose length is known up
-/// front (`ExactSizeIterator`). Used by the [`IntoLean`] impl for
-/// [`Vec`] and available to downstream call sites that already have a
-/// borrow-friendly slice.
-pub(crate) fn from_iter_exact<'lean, T, I>(runtime: &'lean LeanRuntime, iter: I) -> Obj<'lean>
+/// Build a Lean `Array α` from a Vec whose initialized length is known.
+fn from_vec<'lean, T>(runtime: &'lean LeanRuntime, values: Vec<T>) -> Obj<'lean>
 where
     T: IntoLean<'lean>,
-    I: IntoIterator<Item = T>,
-    I::IntoIter: ExactSizeIterator,
 {
-    let iter = iter.into_iter();
-    let len = iter.len();
+    let len = values.len();
     // SAFETY: `lean_alloc_array(len, len)` returns a fresh array with
     // refcount 1 and `len` uninitialised slots; we initialise each slot
     // exactly once from the iterator's elements via `lean_array_set_core`
@@ -55,7 +49,7 @@ where
     // discharging the per-slot ownership obligation.
     unsafe {
         let raw = lean_alloc_array(len, len);
-        for (i, value) in iter.enumerate() {
+        for (i, value) in values.into_iter().enumerate() {
             lean_array_set_core(raw, i, value.into_lean(runtime).into_raw());
         }
         Obj::from_owned_raw(runtime, raw)
@@ -67,7 +61,7 @@ where
     T: IntoLean<'lean>,
 {
     fn into_lean(self, runtime: &'lean LeanRuntime) -> Obj<'lean> {
-        from_iter_exact(runtime, self)
+        from_vec(runtime, self)
     }
 }
 
@@ -136,21 +130,18 @@ fn wrong_kind_heap(found_tag: u32) -> LeanError {
 
 // -- LeanAbi: Vec<T> is boxed at the Lake C ABI (`lean_object*`) ------
 
-impl<T> crate::abi::traits::sealed::SealedAbi for Vec<T> {}
-impl<'lean, T> crate::abi::traits::LeanAbi<'lean> for Vec<T>
+// SAFETY: Array uses an owned object slot; LeanBoxedAbi establishes every encoded and decoded element type.
+unsafe impl<'lean, T> crate::abi::traits::LeanAbi<'lean> for Vec<T>
 where
-    T: IntoLean<'lean> + TryFromLean<'lean>,
+    T: crate::abi::traits::LeanBoxedAbi<'lean>,
 {
     type CRepr = *mut lean_rs_sys::lean_object;
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
-        self.into_lean(runtime).into_raw()
+        <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::into_boxed(self, runtime).into_raw()
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         let obj = unsafe { Obj::from_owned_raw(runtime, c) };
-        Self::try_from_lean(obj)
+        // SAFETY: the native result has the complete type established at binding.
+        unsafe { <Self as crate::abi::traits::LeanBoxedAbi<'lean>>::from_boxed(obj) }
     }
 }

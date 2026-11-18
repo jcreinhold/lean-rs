@@ -1,0 +1,23 @@
+error[E0133]: call to unsafe function `TrustedHostCapability::<'lean>::from_loaded` is unsafe and requires unsafe block
+ --> tests/compile_fail/abi_trust_establishment_requires_unsafe.rs:5:13
+  |
+5 |     let _ = TrustedHostCapability::from_loaded(capability);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `TrustedWorkerCapability::<'lean>::from_loaded` is unsafe and requires unsafe block
+ --> tests/compile_fail/abi_trust_establishment_requires_unsafe.rs:9:13
+  |
+9 |     let _ = TrustedWorkerCapability::from_loaded(capability, []);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `AuthorizedWorkerSnapshot::<'custody>::attest` is unsafe and requires unsafe block
+  --> tests/compile_fail/abi_trust_establishment_requires_unsafe.rs:13:13
+   |
+13 |     let _ = lean_rs::module::AuthorizedWorkerSnapshot::attest(runtime, "manifest".into(), vec![], vec![], ());
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+   |
+   = note: consult the function's documentation for information on how to avoid undefined behavior

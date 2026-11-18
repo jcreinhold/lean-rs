@@ -3,13 +3,13 @@
 //! The public dispatch surface has two lookup paths:
 //!
 //! - [`LeanCapability::exported<Args, R>(name)`](super::capability::LeanCapability::exported)
-//!   —safe checked lookup for capabilities opened from trusted manifest
-//!   signature metadata.
+//!   —unsafe lookup with manifest C-slot checks and an explicit native
+//!   value/layout assertion.
 //! - [`LeanModule::exported_unchecked<Args, R>(name)`](super::loaded::LeanModule::exported_unchecked)
 //!   —unsafe arbitrary lookup for callers that can prove the symbol's
 //!   compiled C ABI matches the requested Rust `Args`/`R` shape.
 //!
-//! The typed handle surface is two types and three sealed traits:
+//! The dispatch surface uses typed handles and sealed dispatch traits:
 //!
 //! - [`LeanExported<'lean, 'lib, Args, R>`]—a typed handle for an
 //!   exported Lean symbol. `Args` is a tuple of Rust argument types
@@ -17,11 +17,11 @@
 //!   implement [`crate::abi::traits::LeanAbi`]. `R` is the return type, bounded
 //!   by [`DecodeCallResult`]—a sealed trait satisfied by every
 //!   [`crate::abi::traits::LeanAbi`] type (pure call) and by [`LeanIo<T>`] for
-//!   `T: crate::abi::traits::TryFromLean` (IO-returning Lean export).
+//!   `T: crate::abi::traits::LeanBoxedAbi` (IO-returning Lean export).
 //! - [`LeanIo<T>`]—return-type marker for Lean exports declared
 //!   `IO α`. Writing `exported_unchecked::<Args, LeanIo<T>>(name)` tells the
 //!   handle to compose `decode_io` before
-//!   [`crate::abi::traits::TryFromLean::try_from_lean`]. The `.call(...)` method
+//!   [`crate::abi::traits::LeanBoxedAbi::from_boxed`]. The `.call(...)` method
 //!   returns `LeanResult<T>` (not `LeanResult<LeanIo<T>>`)—the marker
 //!   only lives in the type signature.
 //!
@@ -34,18 +34,21 @@
 //!
 //! ```ignore
 //! let runtime = lean_rs::LeanRuntime::init()?;
-//! let library = lean_rs::module::LeanLibrary::open(runtime, path)?;
+//! // SAFETY: the application attests the actual native images and runtime.
+//! let library = unsafe { lean_rs::module::LeanLibrary::open(runtime, path) }?;
 //! let module  = library.initialize_module("foo_pkg", "Foo.Bar")?;
 //!
 //! // Pure, arity 1:
 //! // SAFETY: the Lean export's C ABI is known to be `String -> String`.
 //! let f = unsafe { module.exported_unchecked::<(String,), String>("foo_string_identity") }?;
-//! let s = f.call("abc".to_owned())?;
+//! // SAFETY: String supplies the matching native value layout.
+//! let s = unsafe { f.call("abc".to_owned()) }?;
 //!
 //! // IO, arity 0; return type carries the marker, .call returns T directly:
 //! // SAFETY: the Lean export's C ABI is known to be `IO UInt64`.
 //! let g = unsafe { module.exported_unchecked::<(), lean_rs::module::LeanIo<u64>>("foo_io_seven") }?;
-//! let n: u64 = g.call()?;
+//! // SAFETY: the IO UInt64 contract was established at binding.
+//! let n: u64 = unsafe { g.call() }?;
 //! ```
 //!
 //! ## Design rationale
@@ -65,10 +68,10 @@
 //!
 //! ## Checked lookup boundary
 //!
-//! `LeanCapability::exported` is safe because the capability manifest
-//! supplies the trusted ABI fact before the typed handle is built.
-//! `LeanModule::exported_unchecked` remains unsafe because a raw symbol
-//! name plus caller-chosen generic types cannot establish that fact.
+//! Both generic lookup paths and raw calls are unsafe. C-slot metadata
+//! cannot distinguish boxed layouts or validate callback values. Safe fixed
+//! operations require an explicitly attested capability and concrete arguments;
+//! see [`crate::host_bridge`].
 //! Raw dynamic-loader addresses are intentionally not part of the
 //! public API.
 
@@ -87,6 +90,7 @@
 
 use core::ffi::c_void;
 use core::marker::PhantomData;
+use std::path::Path;
 
 use lean_rs_sys::lean_object;
 use lean_rs_sys::refcount::lean_inc;
@@ -96,7 +100,7 @@ use lean_toolchain::{
 
 use super::library::LeanLibrary;
 use super::loaded::LeanModule;
-use crate::abi::traits::{LeanAbi, LeanCReprAbi, TryFromLean};
+use crate::abi::traits::{LeanAbi, LeanBoxedAbi, LeanCReprAbi};
 #[cfg(doc)]
 use crate::error::HostStage;
 use crate::error::io::decode_io;
@@ -130,7 +134,7 @@ pub struct LeanExported<'lean, 'lib, Args, R> {
 ///
 /// Writing `exported_unchecked::<Args, LeanIo<T>>(name)` makes [`LeanExported`]'s
 /// `.call` method compose `decode_io` before
-/// `TryFromLean::try_from_lean`, so the handle returns `LeanResult<T>`.
+/// `LeanBoxedAbi::from_boxed`, so the handle returns `LeanResult<T>`.
 /// The marker has no value—it is a pure type-level switch.
 ///
 /// `LeanIo<T>` cannot be constructed from outside the crate (its single
@@ -158,8 +162,8 @@ enum CallableTarget {
 /// at the crate boundary.
 ///
 /// Two distinct sealed traits (rather than one shared `Sealed`) because
-/// `()`, `(u64,)`, and other tuples implement [`TryFromLean`]—a single
-/// `Sealed` blanket-implemented over `T: TryFromLean` would overlap with
+/// `()`, `(u64,)`, and other tuples implement [`LeanAbi`]—a single
+/// `Sealed` blanket-implemented over `T: LeanBoxedAbi` would overlap with
 /// any per-arity `Sealed` impl on tuples. Splitting the seal by which
 /// public trait it gates removes the overlap.
 mod sealed {
@@ -196,8 +200,13 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
     /// they reach `.call(...)` through this associated function instead.
     /// Macro-stamped per arity to forward to the existing destructured
     /// impl.
+    ///
+    /// # Safety
+    ///
+    /// The arguments must satisfy the complete native value and callback
+    /// contracts of `handle`, as required by [`LeanExported::call`].
     #[doc(hidden)]
-    fn invoke<R>(handle: &LeanExported<'lean, '_, Self, R>, args: Self) -> LeanResult<R::Output>
+    unsafe fn invoke<R>(handle: &LeanExported<'lean, '_, Self, R>, args: Self) -> LeanResult<R::Output>
     where
         R: DecodeCallResult<'lean>;
 }
@@ -212,7 +221,7 @@ pub trait LeanArgs<'lean>: Sized + sealed::SealedArgs {
 /// - blanket `impl<T: LeanAbi<'lean>> DecodeCallResult<'lean> for T`—
 ///   the *pure* path; `CRepr = T::CRepr`, `Output = T`; `decode_c` is
 ///   `T::from_c(c, rt)`.
-/// - special `impl<T: TryFromLean<'lean>> DecodeCallResult<'lean> for
+/// - special `impl<T: LeanBoxedAbi<'lean>> DecodeCallResult<'lean> for
 ///   LeanIo<T>`—the *IO* path; `CRepr = *mut lean_object` (the IO
 ///   result wrapper), `Output = T`; `decode_c` wraps the pointer in
 ///   `Obj`, runs `decode_io`, then `T::try_from_lean`.
@@ -226,7 +235,7 @@ pub trait DecodeCallResult<'lean>: Sized + sealed::SealedResult {
     /// path this is `T::CRepr` (e.g. `u8` for `Bool` exports, `*mut
     /// lean_object` for `String`); for the IO path it is always
     /// `*mut lean_object` (the `lean_io_result_*` wrapper).
-    type CRepr: Copy;
+    type CRepr: LeanCReprAbi;
     /// `true` iff this decoder expects a `lean_io_result_*` shape.
     /// Used at lookup time to reject `LeanIo<_>` against a global symbol
     /// (which is never IO-typed in Lean's compilation).
@@ -241,9 +250,15 @@ pub trait DecodeCallResult<'lean>: Sized + sealed::SealedResult {
     ///
     /// Returns whatever the underlying decoder returns—
     /// [`LeanAbi::from_c`] for the pure path, `decode_io` chained into
-    /// `TryFromLean::try_from_lean` for the IO path.
+    /// `LeanBoxedAbi::from_boxed` for the IO path.
     #[doc(hidden)]
-    fn decode_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self::Output>;
+    /// # Safety
+    ///
+    /// `c` must be an initialized native return of the complete Lean type
+    /// represented by this decoder, with its owned reference transferred to
+    /// `runtime`. IO decoders require a well-formed IO result and correctly
+    /// typed payload; C-slot compatibility alone establishes neither.
+    unsafe fn decode_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self::Output>;
 }
 
 impl<'lean, T> sealed::SealedResult for T where T: LeanAbi<'lean> {}
@@ -257,15 +272,16 @@ where
     fn export_abi_return() -> LeanExportReturnAbi {
         export_abi_return_for::<T::CRepr>(LeanExportResultConvention::Pure)
     }
-    fn decode_c(c: T::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<T> {
-        T::from_c(c, runtime)
+    unsafe fn decode_c(c: T::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<T> {
+        // SAFETY: the caller established T's native value layout and ownership.
+        unsafe { T::from_c(c, runtime) }
     }
 }
 
 impl<T> sealed::SealedResult for LeanIo<T> {}
 impl<'lean, T> DecodeCallResult<'lean> for LeanIo<T>
 where
-    T: TryFromLean<'lean>,
+    T: LeanBoxedAbi<'lean>,
 {
     type Output = T;
     type CRepr = *mut lean_object;
@@ -277,16 +293,13 @@ where
             LeanExportResultConvention::IoResult,
         )
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on DecodeCallResult::decode_c"
-    )]
-    fn decode_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<T> {
+    unsafe fn decode_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<T> {
         // SAFETY: `c` is an owned `lean_io_result_*` returned by an
         // extern Lean function; `runtime` witnesses `'lean`.
         let result_obj = unsafe { Obj::from_owned_raw(runtime, c) };
         let payload = decode_io(runtime, result_obj)?;
-        T::try_from_lean(payload)
+        // SAFETY: this decoder's native contract establishes IO T's payload type.
+        unsafe { T::from_boxed(payload) }
     }
 }
 
@@ -343,6 +356,41 @@ unsafe fn read_global_pointer(ptr: *mut *mut lean_object) -> *mut lean_object {
     }
 }
 
+/// Reject signatures that cannot read a persistent object global.
+#[allow(single_use_lifetimes, reason = "binds the argument and result ABI traits")]
+fn validate_global_signature<'lean, Args, R>(name: &str, library_path: &Path) -> LeanResult<()>
+where
+    Args: LeanArgs<'lean>,
+    R: DecodeCallResult<'lean>,
+{
+    if Args::ARITY > 0 {
+        return Err(LeanError::symbol_lookup(format!(
+            "exported symbol '{}' in '{}' is a Lean nullary-constant global, not a function; \
+             look it up with `exported_unchecked::<(), R>(name)` instead (lookup arity is {})",
+            name,
+            library_path.display(),
+            Args::ARITY,
+        )));
+    }
+    if R::EXPECTS_IO_RESULT {
+        return Err(LeanError::symbol_lookup(format!(
+            "exported symbol '{}' in '{}' is a Lean nullary-constant global; \
+             `LeanIo<_>` does not apply (Lean does not compile globals as IO-returning)",
+            name,
+            library_path.display(),
+        )));
+    }
+    if R::export_abi_return().repr() != LeanExportAbiRepr::LeanObject {
+        return Err(LeanError::symbol_lookup(format!(
+            "exported symbol '{}' in '{}' is a Lean nullary-constant global; \
+             its result requires a boxed Lean object representation",
+            name,
+            library_path.display(),
+        )));
+    }
+    Ok(())
+}
+
 // -- LeanModule::exported_unchecked lookup -----------------------------------------
 
 // Both lifetimes flow into the returned `LeanExported<'lean, 'lib, ...>`.
@@ -384,7 +432,9 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     ///   is diagnosed at lookup so the next `.call` cannot SIGBUS;
     /// - the symbol is a Lean nullary-constant global and `R` is
     ///   [`LeanIo<_>`]—globals are never IO-returning in Lean, so the
-    ///   decoder cannot apply.
+    ///   decoder cannot apply;
+    /// - the symbol is a Lean nullary-constant global and `R` uses an
+    ///   unboxed scalar representation instead of `lean_object*`.
     pub unsafe fn exported_unchecked<Args, R>(&self, name: &str) -> LeanResult<LeanExported<'lean, 'lib, Args, R>>
     where
         Args: LeanArgs<'lean>,
@@ -392,23 +442,7 @@ impl<'lean, 'lib> LeanModule<'lean, 'lib> {
     {
         let library = self.library();
         let target = if library.globals().contains(name) {
-            if Args::ARITY > 0 {
-                return Err(LeanError::symbol_lookup(format!(
-                    "exported symbol '{}' in '{}' is a Lean nullary-constant global, not a function; \
-                     look it up with `exported_unchecked::<(), R>(name)` instead (lookup arity is {})",
-                    name,
-                    library.path().display(),
-                    Args::ARITY,
-                )));
-            }
-            if R::EXPECTS_IO_RESULT {
-                return Err(LeanError::symbol_lookup(format!(
-                    "exported symbol '{}' in '{}' is a Lean nullary-constant global; \
-                     `LeanIo<_>` does not apply (Lean does not compile globals as IO-returning)",
-                    name,
-                    library.path().display(),
-                )));
-            }
+            validate_global_signature::<Args, R>(name, library.path())?;
             let ptr = library.resolve_global_symbol(name)?;
             CallableTarget::Global(ptr)
         } else {
@@ -462,7 +496,7 @@ macro_rules! impl_arity {
                 unused_variables,
                 reason = "arity 0 has no destructure target and no $A to bind"
             )]
-            fn invoke<R>(
+            unsafe fn invoke<R>(
                 handle: &LeanExported<'lean, '_, Self, R>,
                 args: Self,
             ) -> LeanResult<R::Output>
@@ -470,7 +504,8 @@ macro_rules! impl_arity {
                 R: DecodeCallResult<'lean>,
             {
                 let ($($a,)*) = args;
-                handle.call($($a,)*)
+                // SAFETY: the caller established this invocation's complete native contract.
+                unsafe { handle.call($($a,)*) }
             }
         }
 
@@ -490,12 +525,22 @@ macro_rules! impl_arity {
             /// is [`LeanIo<_>`]). Returns [`LeanError::Host`] with stage
             /// [`HostStage::Conversion`] when the return value does not
             /// decode into the declared `R` type.
+            ///
+            /// # Safety
+            ///
+            /// Every argument and its reachable fields must have the Lean type
+            /// expected by this particular export. Callback addresses must come
+            /// from a live registration for the exact callback protocol, remain
+            /// valid for the invocation, and obey its reentrancy/thread rules.
+            /// The runtime thread must be attached and all needed libraries
+            /// must remain loaded. The binding's full native return contract
+            /// must hold. Matching C slots does not establish these facts.
             #[allow(
                 clippy::unused_unit,
                 unused_variables,
                 reason = "arity 0 does not convert args or destructure them"
             )]
-            pub fn call(&self, $($a: $A),*) -> LeanResult<R::Output> {
+            pub unsafe fn call(&self, $($a: $A),*) -> LeanResult<R::Output> {
                 // Debug-only: catch worker threads that forgot to construct
                 // a `LeanThreadGuard` before invoking Lean code. Compiles
                 // to a no-op in release. See
@@ -554,10 +599,8 @@ macro_rules! impl_arity {
                         // `*mut lean_object` because the pure-path
                         // blanket impl picks `T::CRepr`, and any boxed
                         // `T: LeanAbi` has `CRepr = *mut lean_object`.
-                        // Globals always hold a `lean_object*`, so this
-                        // alignment is structural. transmute_copy is
-                        // sound because Rust statically guarantees both
-                        // are pointer-sized when we reach this branch.
+                        // Lookup rejects non-object result representations
+                        // before constructing a Global target.
                         // SAFETY: pointer-sized scalar reinterpret;
                         // `read_global_pointer` returns a non-null
                         // `*mut lean_object` owning one refcount.
@@ -569,7 +612,9 @@ macro_rules! impl_arity {
                         unsafe { core::mem::transmute_copy::<*mut lean_object, R::CRepr>(&raw) }
                     }
                 };
-                R::decode_c(raw_out, runtime)
+                // SAFETY: the unsafe binding contract established the complete
+                // result type, ownership, runtime identity, and IO convention.
+                unsafe { R::decode_c(raw_out, runtime) }
             }
         }
     };
@@ -591,3 +636,67 @@ impl_arity!(
     12,
     (A1 a1, A2 a2, A3 a3, A4 a4, A5 a5, A6 a6, A7 a7, A8 a8, A9 a9, A10 a10, A11 a11, A12 a12)
 );
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "boundary regressions fail with their diagnostic"
+)]
+mod global_signature_tests {
+    use super::{DecodeCallResult, LeanIo, Obj, validate_global_signature};
+    use crate::error::{HostStage, LeanDiagnosticCode, LeanError};
+    use std::path::Path;
+
+    fn assert_scalar_rejected<R: DecodeCallResult<'static>>() {
+        let err = validate_global_signature::<(), R>("fixture_global", Path::new("fixture.dylib"))
+            .expect_err("an object global cannot use an unboxed result");
+        assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup);
+        let LeanError::Host(failure) = err else {
+            panic!("global signature rejection must be a host failure");
+        };
+        assert_eq!(failure.stage(), HostStage::Link);
+        assert!(
+            failure
+                .message()
+                .contains("requires a boxed Lean object representation")
+        );
+    }
+
+    #[test]
+    fn global_signature_unboxed_results_are_rejected() {
+        assert_scalar_rejected::<bool>();
+        assert_scalar_rejected::<u8>();
+        assert_scalar_rejected::<u16>();
+        assert_scalar_rejected::<u32>();
+        assert_scalar_rejected::<u64>();
+        assert_scalar_rejected::<usize>();
+        assert_scalar_rejected::<i8>();
+        assert_scalar_rejected::<i16>();
+        assert_scalar_rejected::<i32>();
+        assert_scalar_rejected::<i64>();
+        assert_scalar_rejected::<isize>();
+        assert_scalar_rejected::<f64>();
+        assert_scalar_rejected::<char>();
+    }
+
+    #[test]
+    fn global_signature_boxed_results_are_accepted() {
+        let path = Path::new("fixture.dylib");
+        validate_global_signature::<(), ()>("fixture_global", path).expect("boxed Unit");
+        validate_global_signature::<(), Obj<'_>>("fixture_global", path).expect("owned object");
+        validate_global_signature::<(), String>("fixture_global", path).expect("boxed String");
+        validate_global_signature::<(), Option<u64>>("fixture_global", path).expect("boxed Option");
+    }
+
+    #[test]
+    fn global_signature_arguments_and_io_results_are_rejected() {
+        let path = Path::new("fixture.dylib");
+        let err = validate_global_signature::<(u64,), Obj<'_>>("fixture_global", path)
+            .expect_err("a global takes no arguments");
+        assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup);
+        let err = validate_global_signature::<(), LeanIo<()>>("fixture_global", path)
+            .expect_err("a global is not an IO result");
+        assert_eq!(err.code(), LeanDiagnosticCode::SymbolLookup);
+    }
+}

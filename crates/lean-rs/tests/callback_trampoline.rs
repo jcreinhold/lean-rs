@@ -9,11 +9,11 @@
 #![allow(unsafe_code)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::PathBuf;
+#[path = "../examples/support/callback_fixture.rs"]
+mod callback_fixture;
 use std::sync::Mutex;
 
-use lean_rs::LeanRuntime;
-use lean_rs::module::{LeanIo, LeanLibraryBundle, LeanLibraryDependency};
+use lean_rs::module::LeanIo;
 
 const PAYLOAD_TICK: u8 = 0;
 
@@ -82,72 +82,9 @@ extern "C" fn test_callback_trampoline(
     }
 }
 
-fn dylib_path(package_dir: &[&str], new_name: &str, old_name: &str) -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root")
-        .to_path_buf();
-    let dylib_extension = if cfg!(target_os = "macos") { "dylib" } else { "so" };
-    let lib_dir = package_dir
-        .iter()
-        .fold(workspace, |path, part| path.join(part))
-        .join(".lake")
-        .join("build")
-        .join("lib");
-    let new_style = lib_dir.join(format!("{new_name}.{dylib_extension}"));
-    let old_style = lib_dir.join(format!("{old_name}.{dylib_extension}"));
-    if old_style.is_file() && !new_style.is_file() {
-        old_style
-    } else {
-        new_style
-    }
-}
-
-fn interop_dylib_path() -> PathBuf {
-    dylib_path(
-        &["crates", "lean-rs", "shims", "lean-rs-interop-shims"],
-        "liblean__rs__interop__shims_LeanRsInterop",
-        "libLeanRsInterop",
-    )
-}
-
-fn consumer_dylib_path() -> PathBuf {
-    dylib_path(
-        &["fixtures", "interop-shims"],
-        "liblean__rs__interop__consumer_LeanRsInteropConsumer",
-        "libLeanRsInteropConsumer",
-    )
-}
-
-fn consumer_bundle() -> LeanLibraryBundle<'static> {
-    let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-    let interop_path = interop_dylib_path();
-    assert!(
-        interop_path.exists(),
-        "interop dylib not found at {} — run `cd crates/lean-rs/shims/lean-rs-interop-shims && lake build`",
-        interop_path.display(),
-    );
-    let path = consumer_dylib_path();
-    assert!(
-        path.exists(),
-        "interop consumer dylib not found at {} — run `cd fixtures/interop-shims && lake build`",
-        path.display(),
-    );
-    LeanLibraryBundle::open(
-        runtime,
-        &path,
-        [LeanLibraryDependency::path(interop_path)
-            .export_symbols_for_dependents()
-            .initializer("lean_rs_interop_shims", "LeanRsInterop")],
-    )
-    .expect("interop consumer bundle opens cleanly")
-}
-
 #[test]
 fn lean_loop_invokes_rust_trampoline_in_order() {
-    let bundle = consumer_bundle();
+    let bundle = callback_fixture::bundle().expect("admitted callback fixture pair");
     let module = bundle
         .library()
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
@@ -159,13 +96,15 @@ fn lean_loop_invokes_rust_trampoline_in_order() {
     .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(None);
-    let status = callback_loop
-        .call(
+    // SAFETY: The probe lives through this synchronous call and the trampoline implements the fixture callback ABI.
+    let status = unsafe {
+        callback_loop.call(
             std::ptr::from_ref(&probe).addr(),
             test_callback_trampoline as *const () as usize,
             5,
         )
-        .expect("callback loop returns");
+    }
+    .expect("callback loop returns");
 
     assert_eq!(status, 0);
     assert_eq!(
@@ -182,7 +121,7 @@ fn lean_loop_invokes_rust_trampoline_in_order() {
 
 #[test]
 fn rust_callback_panic_is_caught_before_returning_to_lean() {
-    let bundle = consumer_bundle();
+    let bundle = callback_fixture::bundle().expect("admitted callback fixture pair");
     let module = bundle
         .library()
         .initialize_module("lean_rs_interop_consumer", "LeanRsInteropConsumer")
@@ -194,13 +133,15 @@ fn rust_callback_panic_is_caught_before_returning_to_lean() {
     .expect("callback loop export resolves");
 
     let probe = CallbackProbe::new(Some(2));
-    let status = callback_loop
-        .call(
+    // SAFETY: The probe lives through this synchronous call and the trampoline implements the fixture callback ABI.
+    let status = unsafe {
+        callback_loop.call(
             std::ptr::from_ref(&probe).addr(),
             test_callback_trampoline as *const () as usize,
             5,
         )
-        .expect("callback loop returns after caught callback panic");
+    }
+    .expect("callback loop returns after caught callback panic");
 
     assert_eq!(status, 1);
     assert_eq!(

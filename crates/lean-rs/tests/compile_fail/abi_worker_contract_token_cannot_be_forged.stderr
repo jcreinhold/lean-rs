@@ -1,0 +1,11 @@
+error: cannot construct `TrustedWorkerCapability<'_>` with struct literal syntax due to private fields
+ --> tests/compile_fail/abi_worker_contract_token_cannot_be_forged.rs:5:13
+  |
+5 |     let _ = TrustedWorkerCapability {
+  |             ^^^^^^^^^^^^^^^^^^^^^^^
+6 |         capability,
+  |         ---------- private field
+7 |         contracts: Default::default(),
+  |         ----------------------------- private field
+  |
+  = note: ...and other private fields `snapshot` and `_custody` that were not provided

@@ -1,5 +1,6 @@
 import Lean
 import LeanRsHostShims.Elaboration
+import LeanRsHostShims.Environment
 
 /-! Capability category: bounded module queries over Lean's info tree.
 
@@ -1703,7 +1704,14 @@ private def elapsedMicrosSince (startMs : Nat) : IO Nat := do
 private def u64 (n : Nat) : UInt64 :=
   n.toUInt64
 
+private abbrev CacheScope := String × Array String
+
+private def sameCacheScope (a b : CacheScope) : Bool :=
+  (unsafe ptrEq a.1 b.1) && a.2 == b.2
+
 private structure ModuleSnapshot where
+  diagBytes : USize
+  scope : CacheScope
   fileIdentity : String
   key : String
   document : SourceDocument
@@ -1821,8 +1829,9 @@ private def pruneCache (policy : ModuleQueryCachePolicy) (nowMs : Nat) (cache : 
   let (boundedEntries, boundedBytes, limitRemoved) := enforceCacheLimits maxEntries maxBytes ttlEntries
   ({ entries := boundedEntries, approxBytes := boundedBytes }, ttlRemoved || limitRemoved)
 
-private def findSnapshot? (key : String) (entries : Array ModuleSnapshot) : Option ModuleSnapshot :=
-  entries.find? (fun entry => entry.key == key)
+private def scopedSnapshots (env : Environment) (scope : CacheScope)
+    (entries : Array ModuleSnapshot) : Array ModuleSnapshot :=
+  entries.filter fun entry => (unsafe ptrEq env entry.inputEnv) && sameCacheScope scope entry.scope
 
 private def hasFileIdentity (fileIdentity : String) (entries : Array ModuleSnapshot) : Bool :=
   entries.any (fun entry => entry.fileIdentity == fileIdentity)
@@ -1844,9 +1853,10 @@ private def newestSameFileSnapshot? (fileIdentity : String) (entries : Array Mod
 /-- The newest cached snapshot of `fileLabel`, if any, for a one-shot build of
     an overlay or verification source of that file to continue from. Read-only:
     one-shot snapshots never enter the cache. -/
-private def cachedSameFileSnapshot? (fileLabel : String) : IO (Option ModuleSnapshot) := do
+private def cachedSameFileSnapshot? (env : Environment) (fileLabel : String) : IO (Option ModuleSnapshot) := do
   let cache ← moduleSnapshotCache.get
-  pure (newestSameFileSnapshot? fileLabel cache.entries)
+  let scope ← LeanRsFixture.Environment.sourceCacheScope.get
+  pure (newestSameFileSnapshot? fileLabel (scopedSnapshots env scope cache.entries))
 
 /-- Approximate retained bytes per command of an `IncrementalState` chain beyond
     the info trees and messages the snapshot already counts. Each command's
@@ -1872,6 +1882,7 @@ private def reusableIncrementalState? (old : ModuleSnapshot) (baseEnv : Environm
 /-- Header imports live independently of disposable body snapshots. One entry per
 input environment prevents an RSS-triggered snapshot clear from importing again. -/
 private structure CachedModuleHeader where
+  scope : CacheScope
   inputEnv : Environment
   headerSource : String
   fileLabel : String
@@ -1944,8 +1955,9 @@ private def resolveModuleHeader (env : Environment) (header : Lean.Elab.HeaderSy
   if s.accountingUnknown then
     headerImportState.modify fun s => { s with recycleRequested := true }
     throw <| IO.userError "worker import accounting is incomplete; recycle required"
+  let scope ← LeanRsFixture.Environment.sourceCacheScope.get
   if let some h := s.headers.find? fun h =>
-      (reusableHeader? h env headerSource fileLabel heartbeats optionsJson).isSome then
+      sameCacheScope scope h.scope && (reusableHeader? h env headerSource fileLabel heartbeats optionsJson).isSome then
     -- Move the reused session to the end. A global bound also covers direct
     -- host users that drop sessions without the worker pool's eviction hook.
     headerImportState.modify fun s => { s with
@@ -1970,6 +1982,7 @@ private def resolveModuleHeader (env : Environment) (header : Lean.Elab.HeaderSy
         charged := charged.push region
         bytes := bytes + region.size.toNat
     let h : CachedModuleHeader := {
+      scope
       inputEnv := env
       headerSource, fileLabel, heartbeats, optionsJson, baseEnv
       messages := initialMessages }
@@ -2035,6 +2048,8 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let nowMs ← IO.monoMsNow
     let snapshot : ModuleSnapshot := {
       fileIdentity := policy.fileIdentity
+      diagBytes
+      scope := ← LeanRsFixture.Environment.sourceCacheScope.get
       key := policy.key
       document
       messages := commandState.messages
@@ -2074,6 +2089,8 @@ private def buildModuleSnapshot (env : Environment) (source namespaceContext fil
     let nowMs ← IO.monoMsNow
     let snapshot : ModuleSnapshot := {
       fileIdentity := policy.fileIdentity
+      diagBytes
+      scope := ← LeanRsFixture.Environment.sourceCacheScope.get
       key := policy.key
       document
       messages := finalCmdState.messages
@@ -2905,8 +2922,12 @@ def processModuleQueryBatchCached
   let nowMs ← IO.monoMsNow
   let cache0 ← moduleSnapshotCache.get
   let (cache1, evictedBeforeLookup) := pruneCache policy nowMs cache0
-  let sameFileBeforeBuild := hasFileIdentity policy.fileIdentity cache1.entries
-  match findSnapshot? policy.key cache1.entries with
+  let scope ← LeanRsFixture.Environment.sourceCacheScope.get
+  let scopedEntries := scopedSnapshots env scope cache1.entries
+  let sameFileBeforeBuild := hasFileIdentity policy.fileIdentity scopedEntries
+  match scopedEntries.find? (fun s => s.key == policy.key && s.document.source == source &&
+      s.fileLabel == fileLabel && s.namespaceContext == namespaceContext &&
+      s.optionsJson == optionsJson && s.heartbeats == heartbeats && s.diagBytes == diagBytes) with
   | some snapshot =>
     let freshSnapshot := { snapshot with lastUsedMs := nowMs }
     let entries := upsertSnapshot freshSnapshot cache1.entries
@@ -2920,7 +2941,7 @@ def processModuleQueryBatchCached
       if sameFileBeforeBuild then .rebuilt
       else if evictedBeforeLookup then .evicted
       else .miss
-    let old? := newestSameFileSnapshot? policy.fileIdentity cache1.entries
+    let old? := newestSameFileSnapshot? policy.fileIdentity scopedEntries
     match ← buildModuleSnapshot env source namespaceContext fileLabel heartbeats diagBytes optionsJson policy old? with
     | .error (failure, headerMicros) =>
       moduleSnapshotCache.set cache1
@@ -2943,7 +2964,7 @@ def attemptProof
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO ProofAttemptOutcome := do
-  let old? ← cachedSameFileSnapshot? fileLabel
+  let old? ← cachedSameFileSnapshot? env fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
@@ -2960,7 +2981,7 @@ def verifyDeclaration
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO DeclarationVerificationOutcome := do
-  let old? ← cachedSameFileSnapshot? fileLabel
+  let old? ← cachedSameFileSnapshot? env fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure
@@ -3002,7 +3023,7 @@ def verifyDeclarationBatch
     (namespaceContext : String) (fileLabel : String)
     (heartbeats : UInt64) (diagBytes : USize) (optionsJson : String)
     : IO DeclarationVerificationBatchOutcome := do
-  let old? ← cachedSameFileSnapshot? fileLabel
+  let old? ← cachedSameFileSnapshot? env fileLabel
   match ← buildModuleSnapshot env request.source namespaceContext fileLabel heartbeats diagBytes optionsJson
       (oneShotPolicy request.source fileLabel) old? with
   | .error (failure, _) => pure <| .headerParseFailed failure

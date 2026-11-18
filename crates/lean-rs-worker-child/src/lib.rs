@@ -9,9 +9,13 @@
 //! Most users do not depend on this crate directly; spawning the bundled
 //! `lean-rs-worker-child` binary as a sibling executable is the usual path.
 //! Applications that need a per-toolchain worker identity (so the binary
-//! filename matches the host application) can wrap [`run_worker_child_stdio`]
-//! in a one-line `main`.
+//! filename matches the host application) install their artifact and source policy
+//! with [`run_worker_child_with_authority`].
 
+mod authority;
+pub use authority::{
+    WorkerAuthority, WorkerManifestRead, WorkerSourceContext, install_worker_authority, run_worker_child_with_authority,
+};
 mod artifact_reads;
 mod child;
 mod host_artifacts;
@@ -20,11 +24,11 @@ mod parent_watchdog;
 
 /// Run the worker child process on stdin/stdout.
 ///
-/// Production applications can expose a tiny app-owned child binary:
+/// Applications that serve native requests supply their policy at process entry:
 ///
 /// ```ignore
-/// fn main() -> std::process::ExitCode {
-///     lean_rs_worker_child::run_worker_child_stdio()
+/// fn main() -> lean_rs::LeanResult<std::process::ExitCode> {
+///     lean_rs_worker_child::run_worker_child_with_authority(application_policy())
 /// }
 /// ```
 ///

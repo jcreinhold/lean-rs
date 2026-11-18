@@ -15,6 +15,8 @@ use std::fmt::Write as _;
 macro_rules! host_shim_exports {
     ($m:ident) => {
         $m! {
+            mandatory restore_source_search_path => "lean_rs_host_restore_source_search_path"
+                 => [(Vec<String>, Obj<'lean>)] => [LeanIo<()>];
             mandatory session_import => "lean_rs_host_session_import"
                 => [(Vec<String>, Vec<String>)] => [LeanIo<Obj<'lean>>];
             mandatory session_import_progress => "lean_rs_host_session_import_progress"
@@ -26,7 +28,7 @@ macro_rules! host_shim_exports {
             mandatory env_import_stats => "lean_rs_host_env_import_stats"
                 => [(Obj<'lean>, String, bool)] => [LeanIo<LeanImportStats>];
             mandatory extension_registry_epoch => "lean_rs_host_extension_registry_epoch"
-                => [()] => [LeanIo<u64>];
+                => [((),)] => [LeanIo<u64>];
             mandatory bracketed_import_query => "lean_rs_host_bracketed_import_query"
                 => [(Vec<String>, Vec<String>, Vec<String>, usize, usize)] => [LeanIo<Obj<'lean>>];
             mandatory name_from_string => "lean_rs_host_name_from_string"
@@ -137,13 +139,13 @@ macro_rules! host_shim_exports {
             optional configure_header_import_budget => "lean_rs_host_configure_header_import_budget"
                 => [(u64, u64)] => [LeanIo<()>];
             optional header_import_state => "lean_rs_host_header_import_state"
-                => [()] => [LeanIo<String>];
+                => [((),)] => [LeanIo<String>];
             optional clear_module_header_cache => "lean_rs_host_clear_module_header_cache"
                 => [(Obj<'lean>,)] => [LeanIo<()>];
             optional runtime_version => "lean_rs_host_runtime_version"
                 => [()] => [LeanIo<String>];
             optional clear_module_snapshot_cache => "lean_rs_host_clear_module_snapshot_cache"
-                => [()] => [LeanIo<ModuleSnapshotCacheClearResult>];
+                => [((),)] => [LeanIo<ModuleSnapshotCacheClearResult>];
         }
     };
 }
@@ -240,6 +242,9 @@ mod projected {
         const REPR: Repr;
     }
     impl Argument for Object<'_> {
+        const REPR: Repr = Repr::LeanObject;
+    }
+    impl Argument for () {
         const REPR: Repr = Repr::LeanObject;
     }
     impl Argument for String {

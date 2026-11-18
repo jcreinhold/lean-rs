@@ -142,17 +142,13 @@ fn invalid_utf8() -> LeanError {
 
 // -- LeanAbi: String is boxed at the Lake C ABI (`lean_object*`) ------
 
-impl crate::abi::traits::sealed::SealedAbi for String {}
-impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
+// SAFETY: String allocates an owned Lean String; its checked decoder consumes the result.
+unsafe impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
     type CRepr = *mut lean_rs_sys::lean_object;
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         self.into_lean(runtime).into_raw()
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is a `lean_obj_res` owning one reference per
         // Lake's contract; wrap in `Obj` then decode through the
         // polymorphic-boxing path.
@@ -179,17 +175,14 @@ impl<'lean> crate::abi::traits::LeanAbi<'lean> for String {
 // conversion error so the impl is honest about the limitation rather
 // than panicking. Code that needs to *read* a Lean `String` uses
 // `String` (owned decode) or `borrow_str(&ObjRef)` (zero-copy view).
-impl crate::abi::traits::sealed::SealedAbi for &str {}
-impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
+
+// SAFETY: str arguments allocate owned Lean Strings; unsupported return decoding releases the reference.
+unsafe impl<'lean> crate::abi::traits::LeanAbi<'lean> for &str {
     type CRepr = *mut lean_rs_sys::lean_object;
     fn into_c(self, runtime: &'lean LeanRuntime) -> Self::CRepr {
         from_str(runtime, self).into_raw()
     }
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: Self::CRepr, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` owns one Lean reference per Lake's `lean_obj_res`
         // contract; wrap-and-drop releases the count so we do not leak
         // when this unreachable branch is reached.

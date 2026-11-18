@@ -135,31 +135,31 @@
 #![allow(private_bounds, private_interfaces)]
 
 use core::cell::Cell;
-use std::sync::{Mutex, TryLockError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::host::cancellation::{LeanCancellationToken, check_cancellation};
 use crate::host::capabilities::LeanCapabilities;
 use crate::host::declaration_search::{
     DeclarationInspectionRequest, DeclarationInspectionResult, DeclarationSearchRequest, DeclarationSearchResult,
 };
-use crate::host::elaboration::{LeanElabFailure, LeanElabOptions};
+use crate::host::elaboration::LeanElabFailure;
+#[cfg(doc)]
+use crate::host::elaboration::LeanElabOptions;
 use crate::host::evidence::{EvidenceStatus, LeanEvidence, LeanKernelOutcome, ProofSummary};
 use crate::host::meta::{LeanMetaOptions, LeanMetaResponse, LeanMetaService};
 use crate::host::process::{
-    DeclarationVerificationBatchOutcome, DeclarationVerificationBatchRequest, DeclarationVerificationOutcome,
-    DeclarationVerificationRequest, ModuleQuery, ModuleQueryBatchCachedOutcome, ModuleQueryBatchOutcome,
-    ModuleQueryCachePolicy, ModuleQueryOutcome, ModuleQueryOutputBudgets, ModuleQuerySelector,
-    ModuleSnapshotCacheClearResult, ProofAttemptOutcome, ProofAttemptRequest,
+    DeclarationVerificationBatchOutcome, DeclarationVerificationOutcome, ModuleQueryBatchCachedOutcome,
+    ModuleQueryBatchOutcome, ModuleQueryOutcome, ModuleSnapshotCacheClearResult, ProofAttemptOutcome,
 };
 use crate::host::progress::{LeanProgressSink, ProgressBridge, report_progress};
-use crate::host::shim_bindings::{HostShimBindings, binding_error_to_lean_error};
 use lean_rs::Obj;
-use lean_rs::abi::structure::{alloc_ctor_with_objects, take_ctor_objects, view};
-use lean_rs::abi::traits::{IntoLean, LeanAbi, TryFromLean, conversion_error, sealed};
+use lean_rs::abi::structure::{take_ctor_objects, view};
+use lean_rs::abi::traits::{TryFromLean, conversion_error};
 #[cfg(doc)]
 use lean_rs::error::HostStage;
 use lean_rs::error::LeanResult;
+use lean_rs::host_bridge::{HostEnvironment, HostShimBindings, with_host_import_transaction};
+use lean_rs::module::{HostImportOptions, TrustedHostImports};
 use lean_rs::{LeanDeclaration, LeanExpr, LeanName};
 
 // -- SessionStats: per-session dispatch metrics --------------------------
@@ -372,6 +372,19 @@ pub enum LeanImportProfileMode {
 }
 
 impl LeanImportProfileMode {
+    /// Exact native options to capture when attesting this import mode.
+    #[must_use]
+    pub fn native_options(self, profiler: &LeanImportProfilerOptions) -> HostImportOptions {
+        HostImportOptions {
+            import_all: self.import_all(),
+            level: self.import_level().code(),
+            load_extensions: self.load_exts(),
+            profiler: profiler.profiler,
+            trace_profiler: profiler.trace_profiler,
+            trace_output: profiler.trace_profiler_output.clone().unwrap_or_default(),
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::FullSession(profile) => profile.label(),
@@ -470,74 +483,7 @@ impl<'lean> TryFromLean<'lean> for LeanSourceRange {
     }
 }
 
-/// Lean-side declaration-listing filter.
-///
-/// The default is tuned for user-facing declaration browsers: include
-/// private names because callers may be indexing the current project,
-/// but drop compiler-generated and internal-detail names that usually
-/// swamp the list with implementation artifacts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LeanDeclarationFilter {
-    /// Keep names Lean marks as private.
-    pub include_private: bool,
-    /// Keep generated names with numeric components.
-    pub include_generated: bool,
-    /// Keep Lean internal-detail names such as `_`, `match_`, `proof_`,
-    /// and similar implementation artifacts.
-    pub include_internal: bool,
-}
-
-impl Default for LeanDeclarationFilter {
-    fn default() -> Self {
-        Self {
-            include_private: true,
-            include_generated: false,
-            include_internal: false,
-        }
-    }
-}
-
-impl<'lean> IntoLean<'lean> for LeanDeclarationFilter {
-    fn into_lean(self, runtime: &'lean lean_rs::LeanRuntime) -> Obj<'lean> {
-        alloc_ctor_with_objects(
-            runtime,
-            0,
-            [
-                self.include_private.into_lean(runtime),
-                self.include_generated.into_lean(runtime),
-                self.include_internal.into_lean(runtime),
-            ],
-        )
-    }
-}
-
-impl<'lean> TryFromLean<'lean> for LeanDeclarationFilter {
-    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
-        let [include_private_o, include_generated_o, include_internal_o] =
-            take_ctor_objects::<3>(obj, 0, "DeclarationFilter")?;
-        Ok(Self {
-            include_private: bool::try_from_lean(include_private_o)?,
-            include_generated: bool::try_from_lean(include_generated_o)?,
-            include_internal: bool::try_from_lean(include_internal_o)?,
-        })
-    }
-}
-
-impl sealed::SealedAbi for LeanDeclarationFilter {}
-
-impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
-    type CRepr = <Obj<'lean> as LeanAbi<'lean>>::CRepr;
-
-    fn into_c(self, runtime: &'lean lean_rs::LeanRuntime) -> Self::CRepr {
-        self.into_lean(runtime).into_raw()
-    }
-
-    fn from_c(_c: Self::CRepr, _runtime: &'lean lean_rs::LeanRuntime) -> LeanResult<Self> {
-        Err(conversion_error(
-            "LeanDeclarationFilter cannot decode a Lean call result; it is an argument-only type",
-        ))
-    }
-}
+pub use lean_rs::host_bridge::LeanDeclarationFilter;
 
 // -- LeanSession ---------------------------------------------------------
 
@@ -551,10 +497,11 @@ impl<'lean> LeanAbi<'lean> for LeanDeclarationFilter {
 pub struct LeanSession<'lean, 'c> {
     capabilities: &'c LeanCapabilities<'lean, 'c>,
     shims: HostShimBindings<'lean, 'c>,
+    imports: TrustedHostImports<'lean, 'c>,
     /// The imported `Lean.Environment`. Private—Rust never inspects
     /// the environment directly; every query routes through a Lean
     /// capability export.
-    environment: Obj<'lean>,
+    environment: HostEnvironment<'lean>,
     import_stats: LeanImportStats,
     /// Value of the process-global extension-registration stamp at the moment
     /// this session's environment was imported. See
@@ -588,70 +535,6 @@ pub struct HeaderImportState {
     pub recycle_requested: bool,
 }
 
-/// Process-local serialization for imports and source-header operations.
-///
-/// Both mutate Lean extension registries and the shared header/snapshot caches.
-/// This does not coordinate or block separate worker processes.
-static SESSION_IMPORT_LOCK: Mutex<()> = Mutex::new(());
-
-pub(crate) fn with_session_import_lock<T>(f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
-    with_import_lock(&SESSION_IMPORT_LOCK, f)
-}
-
-thread_local! {
-    static IN_IMPORT_OPERATION: Cell<bool> = const { Cell::new(false) };
-}
-
-struct ImportOperationGuard;
-
-impl Drop for ImportOperationGuard {
-    fn drop(&mut self) {
-        IN_IMPORT_OPERATION.set(false);
-    }
-}
-
-fn with_import_lock<T>(lock: &Mutex<()>, f: impl FnOnce() -> LeanResult<T>) -> LeanResult<T> {
-    with_import_lock_timeout(lock, Duration::from_secs(30), f)
-}
-
-fn with_import_lock_timeout<T>(
-    lock: &Mutex<()>,
-    timeout: Duration,
-    f: impl FnOnce() -> LeanResult<T>,
-) -> LeanResult<T> {
-    if IN_IMPORT_OPERATION.get() {
-        return Err(lean_rs::__host_internals::host_resource_exhausted(
-            "recursive host import/source operation is not supported",
-        ));
-    }
-    let started = Instant::now();
-    let mut attempted = false;
-    let _import_guard = loop {
-        if attempted && started.elapsed() >= timeout {
-            return Err(lean_rs::__host_internals::host_resource_exhausted(
-                "timed out waiting for another host import/source operation in this process",
-            ));
-        }
-        attempted = true;
-        match lock.try_lock() {
-            Ok(guard) => break guard,
-            Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
-            Err(TryLockError::WouldBlock) => {
-                let remaining = timeout.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    return Err(lean_rs::__host_internals::host_resource_exhausted(
-                        "timed out waiting for another host import/source operation in this process",
-                    ));
-                }
-                std::thread::sleep(remaining.min(Duration::from_millis(10)));
-            }
-        }
-    };
-    IN_IMPORT_OPERATION.set(true);
-    let _operation_guard = ImportOperationGuard;
-    f()
-}
-
 impl<'lean, 'c> LeanSession<'lean, 'c> {
     pub(crate) fn import_search_paths(capabilities: &LeanCapabilities<'lean, '_>) -> Vec<String> {
         let project = capabilities.host().project();
@@ -679,13 +562,13 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// [`lean_rs::LeanError::LeanException`] with the message Lean produced.
     pub(crate) fn import(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'lean, 'c>,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Self> {
         Self::import_with_profile(
             capabilities,
-            imports,
+            scope,
             LeanSessionImportProfile::default(),
             cancellation,
             progress,
@@ -694,125 +577,66 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
 
     pub(crate) fn import_with_profile(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'lean, 'c>,
         profile: LeanSessionImportProfile,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Self> {
-        let _span = tracing::info_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.import",
-            profile = profile.label(),
-            imports_len = imports.len(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let search_paths = Self::import_search_paths(capabilities);
-        let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
-        // Lean 4.30 strictly enforces `enableInitializersExecution` before
-        // `importModules (loadExts := true)`. The flag is process-global,
-        // but `Lean.withImporting` (wrapped around every import) resets it
-        // on completion—two threads importing concurrently race the
-        // shim's enable→import sequence and the loser sees the flag
-        // cleared by the winner's reset. Serializing the import phase
-        // across the process matches Lean's "single execution thread
-        // accessing the global references" requirement. Sessions operate
-        // concurrently on their own `Environment` values once import
-        // returns; the lock spans only the FFI call.
-        with_session_import_lock(|| {
-            let shims = HostShimBindings::resolve(capabilities.shim_capability())
-                .map_err(|err| binding_error_to_lean_error(&err))?;
-            let environment = if let Some(sink) = progress {
-                let bridge =
-                    ProgressBridge::new(sink, "import", Some(u64::try_from(imports.len()).unwrap_or(u64::MAX)))?;
-                let (handle, trampoline) = bridge.abi_parts();
-                let raw = if profile == LeanSessionImportProfile::default() {
-                    shims
-                        .session_import_progress
-                        .call(search_paths, imports_owned, handle, trampoline)?
-                } else {
-                    shims.session_import_profile_progress.call(
-                        search_paths,
-                        imports_owned,
-                        profile.import_all(),
-                        profile.import_level().code(),
-                        handle,
-                        trampoline,
-                    )?
-                };
-                bridge.decode(raw)?
-            } else if profile == LeanSessionImportProfile::default() {
-                shims.session_import.call(search_paths, imports_owned)?
-            } else {
-                shims.session_import_profile.call(
-                    search_paths,
-                    imports_owned,
-                    profile.import_all(),
-                    profile.import_level().code(),
-                    profile.load_exts(),
-                    false,
-                    false,
-                    String::new(),
-                )?
-            };
-            let import_stats = shims.env_import_stats.call(
-                environment.clone(),
-                profile.import_level().as_str().to_owned(),
-                profile.load_exts(),
-            )?;
-            // Read after the import, and inside the import lock, so the stamp
-            // describes the registry as it stood once this environment's own
-            // initializers had run. Reading it earlier would record a value
-            // this environment is already newer than.
-            let extension_registry_epoch = shims.extension_registry_epoch.call()?;
-            Ok(Self {
-                capabilities,
-                shims,
-                environment,
-                import_stats,
-                extension_registry_epoch,
-                stats: Cell::new(SessionStats::default()),
-            })
-        })
+        Self::import_scoped(
+            capabilities,
+            scope,
+            LeanImportProfileMode::FullSession(profile),
+            &LeanImportProfilerOptions::default(),
+            progress,
+        )
     }
 
     pub(crate) fn import_profiled(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
-        imports: &[&str],
+        scope: &TrustedHostImports<'lean, 'c>,
         mode: LeanImportProfileMode,
         profiler_options: &LeanImportProfilerOptions,
     ) -> LeanResult<Self> {
-        let _span = tracing::info_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.import_profiled",
-            mode = mode.label(),
-            imports_len = imports.len(),
-        )
+        Self::import_scoped(capabilities, scope, mode, profiler_options, None)
+    }
+
+    fn import_scoped(
+        capabilities: &'c LeanCapabilities<'lean, 'c>,
+        scope: &TrustedHostImports<'lean, 'c>,
+        mode: LeanImportProfileMode,
+        profiler: &LeanImportProfilerOptions,
+        progress: Option<&dyn LeanProgressSink>,
+    ) -> LeanResult<Self> {
+        let _span = tracing::info_span!(target: "lean_rs", "lean_rs.host.session.import",
+            profile = mode.label(), imports_len = scope.imports().len())
         .entered();
-        let search_paths = Self::import_search_paths(capabilities);
-        let imports_owned: Vec<String> = imports.iter().map(|&s| s.to_owned()).collect();
-        with_session_import_lock(|| {
-            let shims = HostShimBindings::resolve(capabilities.shim_capability())
-                .map_err(|err| binding_error_to_lean_error(&err))?;
-            let environment = shims.session_import_profile.call(
-                search_paths,
-                imports_owned,
-                mode.import_all(),
-                mode.import_level().code(),
-                mode.load_exts(),
-                profiler_options.profiler,
-                profiler_options.trace_profiler,
-                profiler_options.trace_profiler_output.clone().unwrap_or_default(),
-            )?;
-            let import_stats = shims.env_import_stats.call(
-                environment.clone(),
+        scope.check_capability(capabilities.shim_capability())?;
+        if scope.options() != &mode.native_options(profiler) {
+            return Err(lean_rs::__host_internals::host_module_init(
+                "import options differ from attested scope",
+            ));
+        }
+        let shims = HostShimBindings::resolve(capabilities.shim_capability())
+            .map_err(|err| lean_rs::__host_internals::host_module_init(err.to_string()))?;
+        with_host_import_transaction(|transaction| {
+            let environment = if let Some(sink) = progress {
+                let total = Some(u64::try_from(scope.imports().len()).unwrap_or(u64::MAX));
+                let bridge = ProgressBridge::new(sink, "import", total)?;
+                shims.session_import_progress_in(transaction, scope, bridge.callback())?
+            } else {
+                shims.session_import_in(transaction, scope)?
+            };
+            let import_stats = LeanImportStats::try_from_lean(shims.import_stats(
+                &environment,
                 mode.import_level().as_str().to_owned(),
                 mode.load_exts(),
-            )?;
-            let extension_registry_epoch = shims.extension_registry_epoch.call()?;
+            )?)?;
+            let extension_registry_epoch = shims.registry_epoch_in(transaction)?;
             Ok(Self {
                 capabilities,
                 shims,
+                imports: scope.clone(),
                 environment,
                 import_stats,
                 extension_registry_epoch,
@@ -831,15 +655,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// leak across pool checkouts.
     pub(crate) fn from_environment_with_import_stats(
         capabilities: &'c LeanCapabilities<'lean, 'c>,
-        environment: Obj<'lean>,
+        scope: &TrustedHostImports<'lean, 'c>,
+        environment: HostEnvironment<'lean>,
         import_stats: LeanImportStats,
         extension_registry_epoch: u64,
     ) -> LeanResult<Self> {
         let shims = HostShimBindings::resolve(capabilities.shim_capability())
-            .map_err(|err| binding_error_to_lean_error(&err))?;
+            .map_err(|err| lean_rs::__host_internals::host_module_init(err.to_string()))?;
         Ok(Self {
             capabilities,
             shims,
+            imports: scope.clone(),
             environment,
             import_stats,
             extension_registry_epoch,
@@ -855,7 +681,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// the pool is responsible for either pushing back into the free
     /// list (in which case `Drop` runs later when the pool itself
     /// drops) or releasing immediately (when at capacity).
-    pub(crate) fn into_environment(self) -> Obj<'lean> {
+    pub(crate) fn into_environment(self) -> HostEnvironment<'lean> {
         self.environment
     }
 
@@ -919,7 +745,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// be decoded.
     pub fn live_extension_registry_epoch(&self) -> LeanResult<u64> {
         let started = Instant::now();
-        let epoch = self.shims.extension_registry_epoch.call();
+        let epoch = with_host_import_transaction(|transaction| self.shims.registry_epoch_in(transaction));
         self.record_call(0, started.elapsed());
         epoch
     }
@@ -935,29 +761,6 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
             .elapsed_ns
             .saturating_add(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX));
         self.stats.set(s);
-    }
-
-    fn decode_strings_cached(raw: Vec<Obj<'lean>>) -> LeanResult<Vec<String>> {
-        if raw.is_empty() {
-            return Ok(Vec::new());
-        }
-        let Some(first_key) = raw.first().map(Obj::as_raw_borrowed) else {
-            return Ok(Vec::new());
-        };
-        if raw.iter().all(|obj| obj.as_raw_borrowed() == first_key) {
-            let len = raw.len();
-            let mut raw_iter = raw.into_iter();
-            let Some(first) = raw_iter.next() else {
-                return Ok(Vec::new());
-            };
-            let value = String::try_from_lean(first)?;
-            return Ok(vec![value; len]);
-        }
-        let mut out = Vec::with_capacity(raw.len());
-        for obj in raw {
-            out.push(String::try_from_lean(obj)?);
-        }
-        Ok(out)
     }
 
     fn all_equal_name<'a>(names: &'a [&str]) -> Option<&'a str> {
@@ -987,10 +790,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self
-            .shims
-            .env_query_declaration
-            .call(self.environment.clone(), name_handle);
+        let result = self.shims.query_declaration(&self.environment, name_handle);
         self.record_call(0, t.elapsed());
         match result? {
             Some(decl) => Ok(decl),
@@ -1022,9 +822,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         .entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let raw = self.shims.env_list_declarations.call(self.environment.clone());
+        let raw = self.shims.list_declarations(&self.environment);
         self.record_call(0, t.elapsed());
-        raw?.into_iter().map(LeanName::try_from_lean).collect()
+        raw
     }
 
     /// Declaration names matching `filter`.
@@ -1054,28 +854,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let raw = if let Some(sink) = progress {
+        if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "list_declarations_filtered", None)?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.env_list_declarations_filtered_progress.call(
-                self.environment.clone(),
-                *filter,
-                handle,
-                trampoline,
-            );
-            self.record_call(0, t.elapsed());
-            bridge.decode::<Vec<Obj<'lean>>>(result?)?
-        } else {
             let t = Instant::now();
             let result = self
                 .shims
-                .env_list_declarations_filtered
-                .call(self.environment.clone(), *filter);
+                .list_declarations_filtered_progress(&self.environment, *filter, bridge.callback());
             self.record_call(0, t.elapsed());
-            result?
-        };
-        raw.into_iter().map(LeanName::try_from_lean).collect()
+            result
+        } else {
+            let t = Instant::now();
+            let result = self.shims.list_declarations_filtered(&self.environment, *filter);
+            self.record_call(0, t.elapsed());
+            result
+        }
     }
 
     /// Source range Lean recorded for `name`.
@@ -1116,10 +908,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let t = Instant::now();
         let result = self
             .shims
-            .env_declaration_source_range
-            .call(self.environment.clone(), name_handle, source_roots);
+            .declaration_source_range(&self.environment, name_handle, source_roots);
         self.record_call(0, t.elapsed());
-        result
+        result?.map(LeanSourceRange::try_from_lean).transpose()
     }
 
     /// The declared type of `name`, as an opaque [`LeanExpr`] handle.
@@ -1145,10 +936,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self
-            .shims
-            .env_declaration_type
-            .call(self.environment.clone(), name_handle);
+        let result = self.shims.declaration_type(&self.environment, name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1205,10 +993,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         {
             let names_owned = vec![name.to_owned()];
             let t = Instant::now();
-            let mut result = self
-                .shims
-                .env_declaration_type_bulk
-                .call(self.environment.clone(), names_owned)?;
+            let mut result = self.shims.declaration_type_bulk(&self.environment, names_owned)?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or(None);
@@ -1218,23 +1003,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         if let Some(sink) = progress {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_type_bulk", total)?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.env_declaration_type_bulk_progress.call(
-                self.environment.clone(),
-                names_owned,
-                handle,
-                trampoline,
-            );
-            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
-            self.record_call(batch_len, t.elapsed());
-            bridge.decode(result?)
-        } else {
+
             let t = Instant::now();
             let result = self
                 .shims
-                .env_declaration_type_bulk
-                .call(self.environment.clone(), names_owned);
+                .declaration_type_bulk_progress(&self.environment, names_owned, bridge.callback());
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            result
+        } else {
+            let t = Instant::now();
+            let result = self.shims.declaration_type_bulk(&self.environment, names_owned);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             result
@@ -1261,10 +1040,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self
-            .shims
-            .env_declaration_kind
-            .call(self.environment.clone(), name_handle);
+        let result = self.shims.declaration_kind(&self.environment, name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1320,11 +1096,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         {
             let names_owned = vec![name.to_owned()];
             let t = Instant::now();
-            let mut result = Self::decode_strings_cached(
-                self.shims
-                    .env_declaration_kind_bulk
-                    .call(self.environment.clone(), names_owned)?,
-            )?;
+            let mut result = self.shims.declaration_kind_bulk(&self.environment, names_owned)?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or_default();
@@ -1334,27 +1106,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         if let Some(sink) = progress {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_kind_bulk", total)?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.env_declaration_kind_bulk_progress.call(
-                self.environment.clone(),
-                names_owned,
-                handle,
-                trampoline,
-            );
-            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
-            self.record_call(batch_len, t.elapsed());
-            let raw = bridge.decode::<Vec<Obj<'lean>>>(result?)?;
-            Self::decode_strings_cached(raw)
-        } else {
+
             let t = Instant::now();
             let result = self
                 .shims
-                .env_declaration_kind_bulk
-                .call(self.environment.clone(), names_owned);
+                .declaration_kind_bulk_progress(&self.environment, names_owned, bridge.callback());
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
-            Self::decode_strings_cached(result?)
+            result
+        } else {
+            let t = Instant::now();
+            let result = self.shims.declaration_kind_bulk(&self.environment, names_owned);
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            result
         }
     }
 
@@ -1381,10 +1146,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let name_handle = self.make_name(name, cancellation)?;
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self
-            .shims
-            .env_declaration_name
-            .call(self.environment.clone(), name_handle);
+        let result = self.shims.declaration_name(&self.environment, name_handle);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1443,11 +1205,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         {
             let names_owned = vec![name.to_owned()];
             let t = Instant::now();
-            let mut result = Self::decode_strings_cached(
-                self.shims
-                    .env_declaration_name_bulk
-                    .call(self.environment.clone(), names_owned)?,
-            )?;
+            let mut result = self.shims.declaration_name_bulk(&self.environment, names_owned)?;
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             let value = result.pop().unwrap_or_default();
@@ -1457,27 +1215,20 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         if let Some(sink) = progress {
             let total = Some(u64::try_from(names.len()).unwrap_or(u64::MAX));
             let bridge = ProgressBridge::new(sink, "declaration_name_bulk", total)?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.env_declaration_name_bulk_progress.call(
-                self.environment.clone(),
-                names_owned,
-                handle,
-                trampoline,
-            );
-            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
-            self.record_call(batch_len, t.elapsed());
-            let raw = bridge.decode::<Vec<Obj<'lean>>>(result?)?;
-            Self::decode_strings_cached(raw)
-        } else {
+
             let t = Instant::now();
             let result = self
                 .shims
-                .env_declaration_name_bulk
-                .call(self.environment.clone(), names_owned);
+                .declaration_name_bulk_progress(&self.environment, names_owned, bridge.callback());
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
-            Self::decode_strings_cached(result?)
+            result
+        } else {
+            let t = Instant::now();
+            let result = self.shims.declaration_name_bulk(&self.environment, names_owned);
+            let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
+            self.record_call(batch_len, t.elapsed());
+            result
         }
     }
 
@@ -1501,7 +1252,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.name_to_string").entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self.shims.name_to_string.call(name.clone());
+        let result = self.shims.name_to_string(name);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1617,10 +1368,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let t = Instant::now();
         let result = self
             .shims
-            .env_search_declarations
-            .call(self.environment.clone(), search.clone(), source_roots);
+            .search_declarations(&self.environment, search.clone(), source_roots);
         self.record_call(0, t.elapsed());
-        result
+        DeclarationSearchResult::try_from_lean(result?)
     }
 
     /// Inspect one selected declaration under explicit output budgets.
@@ -1651,7 +1401,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         )
         .entered();
         check_cancellation(cancellation)?;
-        let Some(inspect) = &self.shims.env_inspect_declaration else {
+        if !self.shims.supports_declaration_inspection() {
             return Ok(DeclarationInspectionResult::Unsupported);
         };
         let source_roots = if request.fields.source {
@@ -1670,14 +1420,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         // Bound the optional notation-aware statement rendering by the default
         // heartbeat budget; a deeply nested term that exceeds it falls back to
         // the raw `Expr.toString` form inside the shim.
-        let result = inspect.call(
-            self.environment.clone(),
+        let result = self.shims.inspect_declaration(
+            &self.environment,
             request.clone(),
             source_roots,
             lean_toolchain::LEAN_HEARTBEAT_LIMIT_DEFAULT,
         );
         self.record_call(0, t.elapsed());
-        result
+        match result? {
+            Some(record) => DeclarationInspectionResult::try_from_lean(record),
+            None => Ok(DeclarationInspectionResult::Unsupported),
+        }
     }
 
     /// Render `expr` via `Expr.toString`—the cheap, deterministic
@@ -1704,7 +1457,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         let _span = tracing::debug_span!(target: "lean_rs", "lean_rs.host.session.expr_to_string_raw").entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self.shims.env_expr_to_string_raw.call(expr.clone());
+        let result = self.shims.expr_to_string(expr);
         self.record_call(0, t.elapsed());
         result
     }
@@ -1733,38 +1486,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// not decode into [`ModuleQueryOutcome`].
     pub fn process_module_query(
         &mut self,
-        source: &str,
-        query: &ModuleQuery,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedModuleSource<'lean, '_, lean_rs::host_bridge::HostModuleQuery>,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<ModuleQueryOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.process_module_query",
-            source_len = source.len(),
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.process_module_query.as_ref() else {
-            return Ok(ModuleQueryOutcome::Unsupported);
-        };
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                source.to_owned(),
-                query.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            )
-        });
-        self.record_call(0, t.elapsed());
-        result
+        let started = Instant::now();
+        let result = self
+            .shims
+            .process_module_query(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
+        );
+        match result? {
+            Some(record) => ModuleQueryOutcome::try_from_lean(record),
+            None => Ok(ModuleQueryOutcome::Unsupported),
+        }
     }
 
     /// Parse and elaborate a Lean module once, returning several bounded
@@ -1789,44 +1526,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// into [`ModuleQueryBatchOutcome`].
     pub fn process_module_query_batch(
         &mut self,
-        source: &str,
-        selectors: &[ModuleQuerySelector],
-        budgets: &ModuleQueryOutputBudgets,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedModuleSource<'lean, '_, lean_rs::host_bridge::HostModuleBatch>,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<ModuleQueryBatchOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.process_module_query_batch",
-            source_len = source.len(),
-            selectors = selectors.len(),
-            per_field_bytes = budgets.per_field_bytes,
-            total_bytes = budgets.total_bytes,
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.process_module_query_batch.as_ref() else {
-            return Ok(ModuleQueryBatchOutcome::Unsupported);
-        };
-        let selectors_owned = selectors.to_vec();
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                source.to_owned(),
-                selectors_owned,
-                budgets.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            )
-        });
-        self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
-        result
+        let started = Instant::now();
+        let result = self
+            .shims
+            .process_module_query_batch(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
+        );
+        match result? {
+            Some(record) => ModuleQueryBatchOutcome::try_from_lean(record),
+            None => Ok(ModuleQueryBatchOutcome::Unsupported),
+        }
     }
 
     /// Parse/elaborate a Lean module through the shim-owned module snapshot
@@ -1843,50 +1558,22 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// the expected cached batch outcome.
     pub fn process_module_query_batch_cached(
         &mut self,
-        source: &str,
-        selectors: &[ModuleQuerySelector],
-        budgets: &ModuleQueryOutputBudgets,
-        options: &LeanElabOptions,
-        policy: &ModuleQueryCachePolicy,
+        request: &lean_rs::host_bridge::TrustedModuleSource<'lean, '_, lean_rs::host_bridge::HostCachedModuleBatch>,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<ModuleQueryBatchCachedOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.process_module_query_batch_cached",
-            source_len = source.len(),
-            selectors = selectors.len(),
-            per_field_bytes = budgets.per_field_bytes,
-            total_bytes = budgets.total_bytes,
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.process_module_query_batch_cached.as_ref() else {
-            return Ok(ModuleQueryBatchCachedOutcome::Unsupported);
-        };
-        let selectors_owned = selectors.to_vec();
-        let policy_text = format!(
-            "{}\n{}\n{}\n{}\n{}",
-            policy.file_identity, policy.key, policy.max_entries, policy.ttl_millis, policy.max_bytes
+        let started = Instant::now();
+        let result = self
+            .shims
+            .process_module_query_batch_cached(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
         );
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                source.to_owned(),
-                selectors_owned,
-                budgets.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-                policy_text,
-            )
-        });
-        self.record_call(u64::try_from(selectors.len()).unwrap_or(u64::MAX), t.elapsed());
-        result
+        match result? {
+            Some(record) => ModuleQueryBatchCachedOutcome::try_from_lean(record),
+            None => Ok(ModuleQueryBatchCachedOutcome::Unsupported),
+        }
     }
 
     /// Try proof snippets against an in-memory source overlay.
@@ -1901,39 +1588,24 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// raises an `IO` exception, or if the Lean result cannot be decoded.
     pub fn attempt_proof(
         &mut self,
-        request: &ProofAttemptRequest,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedModuleSource<
+            'lean,
+            '_,
+            lean_rs::host_bridge::module_requests::ProofAttemptRequest,
+        >,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<ProofAttemptOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.attempt_proof",
-            source_len = request.source.len(),
-            candidates = request.candidates.len(),
-            per_field_bytes = request.budgets.per_field_bytes,
-            total_bytes = request.budgets.total_bytes,
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.attempt_proof.as_ref() else {
-            return Ok(ProofAttemptOutcome::Unsupported);
-        };
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                request.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            )
-        });
-        self.record_call(u64::try_from(request.candidates.len()).unwrap_or(u64::MAX), t.elapsed());
-        result
+        let started = Instant::now();
+        let result = self.shims.attempt_proof(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
+        );
+        match result? {
+            Some(record) => ProofAttemptOutcome::try_from_lean(record),
+            None => Ok(ProofAttemptOutcome::Unsupported),
+        }
     }
 
     /// Verify one declaration in an in-memory source snapshot.
@@ -1948,39 +1620,24 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// raises an `IO` exception, or if the Lean result cannot be decoded.
     pub fn verify_declaration(
         &mut self,
-        request: &DeclarationVerificationRequest,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedModuleSource<
+            'lean,
+            '_,
+            lean_rs::host_bridge::module_requests::DeclarationVerificationRequest,
+        >,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<DeclarationVerificationOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.verify_declaration",
-            source_len = request.source.len(),
-            report_axioms = request.report_axioms,
-            per_field_bytes = request.budgets.per_field_bytes,
-            total_bytes = request.budgets.total_bytes,
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.verify_declaration.as_ref() else {
-            return Ok(DeclarationVerificationOutcome::Unsupported);
-        };
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                request.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            )
-        });
-        self.record_call(1, t.elapsed());
-        result
+        let started = Instant::now();
+        let result = self.shims.verify_declaration(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
+        );
+        match result? {
+            Some(record) => DeclarationVerificationOutcome::try_from_lean(record),
+            None => Ok(DeclarationVerificationOutcome::Unsupported),
+        }
     }
 
     /// Verify several declarations in one in-memory source snapshot.
@@ -1996,40 +1653,26 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// raises an `IO` exception, or if the Lean result cannot be decoded.
     pub fn verify_declaration_batch(
         &mut self,
-        request: &DeclarationVerificationBatchRequest,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedModuleSource<
+            'lean,
+            '_,
+            lean_rs::host_bridge::module_requests::DeclarationVerificationBatchRequest,
+        >,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<DeclarationVerificationBatchOutcome> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.verify_declaration_batch",
-            source_len = request.source.len(),
-            targets = request.targets.len(),
-            report_axioms = request.report_axioms,
-            per_field_bytes = request.budgets.per_field_bytes,
-            total_bytes = request.budgets.total_bytes,
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        let Some(call) = self.shims.verify_declaration_batch.as_ref() else {
-            return Ok(DeclarationVerificationBatchOutcome::Unsupported);
-        };
-        let t = Instant::now();
-        let result = with_session_import_lock(|| {
-            call.call(
-                self.environment.clone(),
-                request.clone(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            )
-        });
-        self.record_call(u64::try_from(request.targets.len()).unwrap_or(u64::MAX), t.elapsed());
-        result
+        let started = Instant::now();
+        let result = self
+            .shims
+            .verify_declaration_batch(&self.environment, &self.imports, request);
+        self.record_call(
+            u64::try_from(request.item_count()).unwrap_or(u64::MAX),
+            started.elapsed(),
+        );
+        match result? {
+            Some(record) => DeclarationVerificationBatchOutcome::try_from_lean(record),
+            None => Ok(DeclarationVerificationBatchOutcome::Unsupported),
+        }
     }
 
     /// Clear the shim-owned module snapshot cache when the loaded capability
@@ -2044,16 +1687,16 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Returns an error if the shim raises an `IO` exception or if the Lean
     /// clear result cannot be decoded.
     pub fn clear_module_snapshot_cache(&mut self) -> LeanResult<ModuleSnapshotCacheClearResult> {
-        let Some(call) = self.shims.clear_module_snapshot_cache.as_ref() else {
-            return Ok(ModuleSnapshotCacheClearResult {
+        let t = Instant::now();
+        let result = self.shims.clear_module_snapshot_cache(());
+        self.record_call(0, t.elapsed());
+        match result? {
+            Some(obj) => ModuleSnapshotCacheClearResult::try_from_lean(obj),
+            None => Ok(ModuleSnapshotCacheClearResult {
                 entries_cleared: 0,
                 approx_bytes_cleared: 0,
-            });
-        };
-        let t = Instant::now();
-        let result = with_session_import_lock(|| call.call());
-        self.record_call(0, t.elapsed());
-        result
+            }),
+        }
     }
 
     /// Inspect checked bindings retained by this live session. No source is
@@ -2062,12 +1705,7 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// # Errors
     /// Returns the loaded runtime-version shim's IO or ABI conversion failure.
     pub fn checked_host_runtime_metadata(&self) -> LeanResult<LeanHostRuntimeMetadata> {
-        let version = self
-            .shims
-            .runtime_version
-            .as_ref()
-            .map(|call| with_session_import_lock(|| call.call()))
-            .transpose()?;
+        let version = self.shims.runtime_version()?;
         Ok(LeanHostRuntimeMetadata {
             runtime_lean_version: version,
             checked_binding_signatures: self.shims.checked_signatures(),
@@ -2081,31 +1719,28 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// # Errors
     /// Returns a shim call error.
     pub fn configure_header_import_budget(&mut self, session_bytes: u64, limit_bytes: u64) -> LeanResult<()> {
-        match self.shims.configure_header_import_budget.as_ref() {
-            Some(call) => with_session_import_lock(|| call.call(session_bytes, limit_bytes)),
-            None => Ok(()),
-        }
+        self.shims
+            .configure_header_import_budget(session_bytes, limit_bytes)
+            .map(|_| ())
     }
 
     /// Read process-wide cumulative source-header accounting.
     /// # Errors
     /// Returns a shim call or malformed JSON error.
     pub fn header_import_state(&self) -> LeanResult<HeaderImportState> {
-        let Some(call) = self.shims.header_import_state.as_ref() else {
+        let Some(json) = self.shims.header_import_state(())? else {
             return Ok(HeaderImportState::default());
         };
-        serde_json::from_str(&with_session_import_lock(|| call.call())?)
-            .map_err(|err| conversion_error(format!("invalid header import state: {err}")))
+        serde_json::from_str(&json).map_err(|err| conversion_error(format!("invalid header import state: {err}")))
     }
 
     /// Drop the reusable header for this session, without changing its charge.
     /// # Errors
     /// Returns a shim call error.
     pub fn clear_module_header_cache(&mut self) -> LeanResult<()> {
-        match self.shims.clear_module_header_cache.as_ref() {
-            Some(call) => with_session_import_lock(|| call.call(self.environment.clone())),
-            None => Ok(()),
-        }
+        self.shims
+            .clear_module_header_cache(self.environment.clone())
+            .map(|_| ())
     }
 
     /// Parse and elaborate a single Lean term against the imported
@@ -2134,33 +1769,23 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// decode into [`LeanElabFailure`] / [`LeanExpr`].
     pub fn elaborate(
         &mut self,
-        source: &str,
-        expected_type: Option<&LeanExpr<'lean>>,
-        options: &LeanElabOptions,
+        term: &lean_rs::host_bridge::TrustedHostTerm<'lean, '_>,
         cancellation: Option<&LeanCancellationToken>,
     ) -> LeanResult<Result<LeanExpr<'lean>, LeanElabFailure>> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.elaborate",
-            source_len = source.len(),
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self.shims.elaborate.call(
-            self.environment.clone(),
-            source.to_owned(),
-            expected_type.cloned(),
-            options.namespace_context_str().to_owned(),
-            options.file_label_str().to_owned(),
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.lean_options_json(),
-        );
+        let result = self.shims.elaborate(&self.environment, &self.imports, term);
         self.record_call(0, t.elapsed());
-        result
+        match result? {
+            Ok(expression) => Ok(Ok(expression)),
+            Err(record) => LeanElabFailure::try_from_lean(record).map(Err),
+        }
+    }
+
+    /// Borrow the environment and import authority an application needs to attest source for this session.
+    #[must_use]
+    pub fn source_context(&self) -> (&HostEnvironment<'lean>, &TrustedHostImports<'lean, 'c>) {
+        (&self.environment, &self.imports)
     }
 
     /// Parse, elaborate, and kernel-check a Lean declaration source
@@ -2184,51 +1809,23 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// Lean return value does not decode into [`LeanKernelOutcome`].
     pub fn kernel_check(
         &mut self,
-        source: &str,
-        options: &LeanElabOptions,
+        request: &lean_rs::host_bridge::TrustedHostKernelRequest<'lean, '_>,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<LeanKernelOutcome<'lean>> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.kernel_check",
-            source_len = source.len(),
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
         check_cancellation(cancellation)?;
-        if let Some(sink) = progress {
-            let bridge = ProgressBridge::new(sink, "kernel_check", Some(1))?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.kernel_check_progress.call(
-                self.environment.clone(),
-                source.to_owned(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-                handle,
-                trampoline,
-            );
-            self.record_call(0, t.elapsed());
-            bridge.decode(result?)
-        } else {
-            let t = Instant::now();
-            let result = self.shims.kernel_check.call(
-                self.environment.clone(),
-                source.to_owned(),
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            );
-            self.record_call(0, t.elapsed());
-            result
-        }
+        let bridge = progress
+            .map(|sink| ProgressBridge::new(sink, "kernel_check", Some(1)))
+            .transpose()?;
+        let started = Instant::now();
+        let result = self.shims.kernel_check(
+            &self.environment,
+            &self.imports,
+            request,
+            bridge.as_ref().map(ProgressBridge::callback),
+        );
+        self.record_call(0, started.elapsed());
+        LeanKernelOutcome::from_native(result?)
     }
 
     /// Re-validate a previously captured [`LeanEvidence`] against the
@@ -2271,9 +1868,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         .entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self.shims.check_evidence.call(self.environment.clone(), handle.clone());
+        let result = self.shims.check_evidence(&self.environment, handle);
         self.record_call(0, t.elapsed());
-        result
+        EvidenceStatus::try_from_lean(result?)
     }
 
     /// Project a previously captured [`LeanEvidence`] into a bounded
@@ -2309,12 +1906,9 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         .entered();
         check_cancellation(cancellation)?;
         let t = Instant::now();
-        let result = self
-            .shims
-            .evidence_summary
-            .call(self.environment.clone(), handle.clone());
+        let result = self.shims.evidence_summary(&self.environment, handle);
         self.record_call(0, t.elapsed());
-        result
+        ProofSummary::try_from_lean(result?)
     }
 
     /// Invoke a registered bounded [`MetaM`](https://leanprover.github.io/theorem_proving_in_lean4/)
@@ -2346,8 +1940,6 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     ) -> LeanResult<LeanMetaResponse<Resp>>
     where
         LeanMetaService<Req, Resp>: HostMetaDispatch<'lean, Req, Resp>,
-        Req: lean_rs::abi::traits::LeanAbi<'lean>,
-        Resp: TryFromLean<'lean>,
     {
         let _span = tracing::debug_span!(
             target: "lean_rs",
@@ -2433,23 +2025,17 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
         check_cancellation(cancellation)?;
         let raw = if let Some(sink) = progress {
             let bridge = ProgressBridge::new(sink, "query_declarations_bulk", total)?;
-            let (handle, trampoline) = bridge.abi_parts();
+
             let t = Instant::now();
-            let result = self.shims.env_query_declarations_bulk_progress.call(
-                self.environment.clone(),
-                name_handles,
-                handle,
-                trampoline,
-            );
+            let result =
+                self.shims
+                    .query_declarations_bulk_progress(&self.environment, name_handles, bridge.callback());
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
-            bridge.decode::<Vec<Option<LeanDeclaration<'lean>>>>(result?)?
+            result?
         } else {
             let t = Instant::now();
-            let result = self
-                .shims
-                .env_query_declarations_bulk
-                .call(self.environment.clone(), name_handles);
+            let result = self.shims.query_declarations_bulk(&self.environment, name_handles);
             let batch_len = u64::try_from(names.len()).unwrap_or(u64::MAX);
             self.record_call(batch_len, t.elapsed());
             result?
@@ -2498,84 +2084,56 @@ impl<'lean, 'c> LeanSession<'lean, 'c> {
     /// decode into a `Vec<Result<LeanExpr, LeanElabFailure>>`.
     pub fn elaborate_bulk(
         &mut self,
-        sources: &[&str],
-        options: &LeanElabOptions,
+        batch: &lean_rs::host_bridge::TrustedHostTermBatch<'lean, '_>,
         cancellation: Option<&LeanCancellationToken>,
         progress: Option<&dyn LeanProgressSink>,
     ) -> LeanResult<Vec<Result<LeanExpr<'lean>, LeanElabFailure>>> {
-        let _span = tracing::debug_span!(
-            target: "lean_rs",
-            "lean_rs.host.session.elaborate_bulk",
-            batch_size = sources.len(),
-            heartbeats = options.heartbeats(),
-            diagnostic_byte_limit = options.diagnostic_byte_limit_usize(),
-        )
-        .entered();
-        if sources.is_empty() {
+        if batch.is_empty() {
             return Ok(Vec::new());
         }
         check_cancellation(cancellation)?;
+        let total = u64::try_from(batch.len()).unwrap_or(u64::MAX);
         if cancellation.is_some() {
             let started = Instant::now();
-            let total = Some(u64::try_from(sources.len()).unwrap_or(u64::MAX));
-            let mut out = Vec::with_capacity(sources.len());
-            for (idx, source) in sources.iter().enumerate() {
-                check_cancellation(cancellation)?;
-                out.push(self.elaborate(source, None, options, cancellation)?);
+            let mut out = Vec::with_capacity(batch.len());
+            for (index, term) in batch.terms().enumerate() {
+                out.push(self.elaborate(&term, cancellation)?);
                 report_progress(
                     progress,
                     "elaborate_bulk",
-                    u64::try_from(idx.saturating_add(1)).unwrap_or(u64::MAX),
-                    total,
+                    u64::try_from(index.saturating_add(1)).unwrap_or(u64::MAX),
+                    Some(total),
                     started,
                 )?;
             }
             return Ok(out);
         }
-        let sources_owned: Vec<String> = sources.iter().map(|&s| s.to_owned()).collect();
-        if let Some(sink) = progress {
-            let total = Some(u64::try_from(sources.len()).unwrap_or(u64::MAX));
-            let bridge = ProgressBridge::new(sink, "elaborate_bulk", total)?;
-            let (handle, trampoline) = bridge.abi_parts();
-            let t = Instant::now();
-            let result = self.shims.elaborate_bulk_progress.call(
-                self.environment.clone(),
-                sources_owned,
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-                handle,
-                trampoline,
-            );
-            let batch_len = u64::try_from(sources.len()).unwrap_or(u64::MAX);
-            self.record_call(batch_len, t.elapsed());
-            bridge.decode(result?)
-        } else {
-            let t = Instant::now();
-            let result = self.shims.elaborate_bulk.call(
-                self.environment.clone(),
-                sources_owned,
-                options.namespace_context_str().to_owned(),
-                options.file_label_str().to_owned(),
-                options.heartbeats(),
-                options.diagnostic_byte_limit_usize(),
-                options.lean_options_json(),
-            );
-            let batch_len = u64::try_from(sources.len()).unwrap_or(u64::MAX);
-            self.record_call(batch_len, t.elapsed());
-            result
-        }
+        let progress = progress
+            .map(|sink| ProgressBridge::new(sink, "elaborate_bulk", Some(total)))
+            .transpose()?;
+        let started = Instant::now();
+        let result = self.shims.elaborate_bulk(
+            &self.environment,
+            &self.imports,
+            batch,
+            progress.as_ref().map(ProgressBridge::callback),
+        );
+        self.record_call(total, started.elapsed());
+        result?
+            .into_iter()
+            .map(|item| match item {
+                Ok(expression) => Ok(Ok(expression)),
+                Err(record) => LeanElabFailure::try_from_lean(record).map(Err),
+            })
+            .collect()
     }
 
     /// Build a `LeanName` from a dotted Rust string via the capability's
     /// `Name.toName` shim.
     fn make_name(&self, name: &str, cancellation: Option<&LeanCancellationToken>) -> LeanResult<LeanName<'lean>> {
         check_cancellation(cancellation)?;
-        let lean_name = lean_rs::__host_internals::string_from_str(self.capabilities.host().runtime(), name);
         let t = Instant::now();
-        let result = self.shims.name_from_string.call(lean_name);
+        let result = self.shims.name_from_string(name.to_owned());
         self.record_call(0, t.elapsed());
         result
     }
@@ -2599,24 +2157,20 @@ impl<'lean> HostMetaDispatch<'lean, LeanExpr<'lean>, LeanExpr<'lean>>
         request: LeanExpr<'lean>,
         options: &LeanMetaOptions,
     ) -> LeanResult<LeanMetaResponse<LeanExpr<'lean>>> {
-        let Some(call) = (match self.name() {
-            "lean_rs_host_meta_infer_type" => session.shims.meta_infer_type.as_ref(),
-            "lean_rs_host_meta_whnf" => session.shims.meta_whnf.as_ref(),
-            "lean_rs_host_meta_heartbeat_burn" => session.shims.meta_heartbeat_burn.as_ref(),
-            _ => None,
-        }) else {
-            return Ok(unsupported_meta_response(self.name()));
-        };
         let t = Instant::now();
-        let result = call.call(
-            session.environment.clone(),
-            request,
-            options.heartbeats(),
-            options.diagnostic_byte_limit_usize(),
-            options.transparency_byte(),
-        );
+        let shims = &session.shims;
+        let env = &session.environment;
+        let heartbeats = options.heartbeats();
+        let bytes = options.diagnostic_byte_limit_usize();
+        let mode = options.transparency_byte();
+        let result = match self.name() {
+            "lean_rs_host_meta_infer_type" => shims.meta_infer_type(env, request, heartbeats, bytes, mode),
+            "lean_rs_host_meta_whnf" => shims.meta_whnf(env, request, heartbeats, bytes, mode),
+            "lean_rs_host_meta_heartbeat_burn" => shims.meta_heartbeat_burn(env, request, heartbeats, bytes, mode),
+            _ => return Ok(unsupported_meta_response(self.name())),
+        };
         session.record_call(0, t.elapsed());
-        result
+        decode_meta_result(result?, self.name())
     }
 }
 
@@ -2649,19 +2203,16 @@ impl<'lean>
         ),
         options: &LeanMetaOptions,
     ) -> LeanResult<LeanMetaResponse<bool>> {
-        let Some(call) = session.shims.meta_is_def_eq.as_ref() else {
-            return Ok(unsupported_meta_response(self.name()));
-        };
         let t = Instant::now();
-        let result = call.call(
-            session.environment.clone(),
-            request,
+        let result = session.shims.meta_is_def_eq(
+            &session.environment,
+            (request.0, request.1, request.2.as_byte()),
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
             options.transparency_byte(),
         );
         session.record_call(0, t.elapsed());
-        result
+        decode_meta_result(result?, self.name())
     }
 }
 
@@ -2672,19 +2223,34 @@ impl<'lean> HostMetaDispatch<'lean, LeanExpr<'lean>, String> for LeanMetaService
         request: LeanExpr<'lean>,
         options: &LeanMetaOptions,
     ) -> LeanResult<LeanMetaResponse<String>> {
-        let Some(call) = session.shims.meta_pp_expr.as_ref() else {
-            return Ok(unsupported_meta_response(self.name()));
-        };
         let t = Instant::now();
-        let result = call.call(
-            session.environment.clone(),
+        let result = session.shims.meta_pp_expr(
+            &session.environment,
             request,
             options.heartbeats(),
             options.diagnostic_byte_limit_usize(),
             options.transparency_byte(),
         );
         session.record_call(0, t.elapsed());
-        result
+        decode_meta_result(result?, self.name())
+    }
+}
+
+fn decode_meta_result<T>(
+    result: Option<lean_rs::host_bridge::HostMetaOutcome<'_, T>>,
+    symbol: &str,
+) -> LeanResult<LeanMetaResponse<T>> {
+    use lean_rs::host_bridge::HostMetaOutcome;
+    match result {
+        None => Ok(unsupported_meta_response(symbol)),
+        Some(HostMetaOutcome::Ok(value)) => Ok(LeanMetaResponse::Ok(value)),
+        Some(HostMetaOutcome::Failed(record)) => LeanElabFailure::try_from_lean(record).map(LeanMetaResponse::Failed),
+        Some(HostMetaOutcome::Timeout(record)) => {
+            LeanElabFailure::try_from_lean(record).map(LeanMetaResponse::TimeoutOrHeartbeat)
+        }
+        Some(HostMetaOutcome::Unsupported(record)) => {
+            LeanElabFailure::try_from_lean(record).map(LeanMetaResponse::Unsupported)
+        }
     }
 }
 
@@ -2693,72 +2259,4 @@ fn unsupported_meta_response<Resp>(symbol: &str) -> LeanMetaResponse<Resp> {
         format!("bundled host shim does not export meta service '{symbol}'"),
         "<lean-rs-host meta>".to_owned(),
     ))
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    reason = "test assertions fail the test on unexpected lock behavior"
-)]
-mod import_lock_tests {
-    use super::{with_import_lock, with_import_lock_timeout};
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn import_lock_reentry_fails_without_waiting() {
-        let lock = Mutex::new(());
-        let error = with_import_lock(&lock, || with_import_lock(&lock, || Ok(()))).expect_err("reentry fails");
-        assert!(error.to_string().contains("recursive"));
-        with_import_lock(&lock, || Ok(())).expect("outer guard released");
-    }
-
-    #[test]
-    #[allow(clippy::panic, reason = "exercise guard release during Rust unwinding")]
-    fn import_lock_panic_releases_guard() {
-        let lock = Mutex::new(());
-        let panic = std::panic::catch_unwind(|| with_import_lock::<()>(&lock, || panic!("test panic")));
-        assert!(panic.is_err());
-        with_import_lock(&lock, || Ok(())).expect("poisoned guard is recoverable");
-    }
-
-    #[test]
-    fn import_lock_concurrent_call_waits_then_succeeds() {
-        let lock = Arc::new(Mutex::new(()));
-        let guard = lock.lock().expect("hold lock");
-        let other = Arc::clone(&lock);
-        let (entered, received) = std::sync::mpsc::channel();
-        let waiter = std::thread::spawn(move || {
-            with_import_lock(&other, || {
-                entered.send(()).expect("report entry");
-                Ok(())
-            })
-        });
-        assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
-        drop(guard);
-        received
-            .recv_timeout(Duration::from_secs(5))
-            .expect("waiter enters after release");
-        waiter.join().expect("join").expect("concurrent operation succeeds");
-    }
-
-    #[test]
-    #[allow(clippy::panic, reason = "assert the guarded body never runs on timeout")]
-    fn import_lock_timeout_does_not_enter_or_poison_next_call() {
-        let lock = Arc::new(Mutex::new(()));
-        let guard = lock.lock().expect("hold lock");
-        let other = Arc::clone(&lock);
-        let waiter = std::thread::spawn(move || {
-            let started = Instant::now();
-            let error = with_import_lock_timeout::<()>(&other, Duration::from_millis(20), || {
-                panic!("must not enter while another operation owns the lock")
-            })
-            .expect_err("bounded contention returns an error");
-            assert!(error.to_string().contains("timed out"));
-            assert!(started.elapsed() >= Duration::from_millis(20));
-        });
-        waiter.join().expect("join");
-        drop(guard);
-        with_import_lock(&lock, || Ok(())).expect("capacity available again");
-    }
 }

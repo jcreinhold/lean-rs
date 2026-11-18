@@ -10,18 +10,15 @@
 //! in `docs/architecture/host-services.md` are out of sync and one of
 //! them must be brought into agreement before widening the imports here.
 
+#[path = "support/fixed_fixture.rs"]
+mod fixture;
 use std::path::PathBuf;
 
 use lean_rs::LeanRuntime;
-use lean_rs_host::{EvidenceStatus, LeanElabOptions, LeanHost, LeanKernelOutcome};
+use lean_rs_host::{EvidenceStatus, LeanHost, LeanKernelOutcome};
 
 fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
+    fixture::fixture_root()
 }
 
 #[test]
@@ -29,26 +26,22 @@ fn curated_surface_drives_full_happy_path() {
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
 
     let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("fixture Lake project opens cleanly");
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads cleanly");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads cleanly");
     let mut session = caps
-        .session(&["LeanRsHostShims.Elaboration"], None, None)
+        .session(&fixture::imports(&caps, "LeanRsHostShims.Elaboration"), None, None)
         .expect("LeanRsHostShims.Elaboration module imports cleanly");
 
     let _decl = session
         .query_declaration("Nat.add", None)
         .expect("Nat.add is in the imported environment");
 
-    let opts = LeanElabOptions::new();
-
     let elab = session
-        .elaborate("(1 + 1 : Nat)", None, &opts, None)
+        .elaborate(&fixture::term(&caps, &session, "(1 + 1 : Nat)"), None)
         .expect("host stack reports no exception while elaborating");
     elab.expect("elaboration succeeds for a well-typed Nat term");
 
     let outcome = session
-        .kernel_check("theorem lean_rs_curated : 1 + 1 = 2 := rfl", &opts, None, None)
+        .kernel_check(&fixture::curated_theorem(&caps, &session), None, None)
         .expect("host stack reports no exception while kernel-checking");
 
     let LeanKernelOutcome::Checked(evidence) = outcome else {

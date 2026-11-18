@@ -18,7 +18,7 @@ use core::fmt;
 
 use lean_rs_sys::lean_object;
 
-use crate::abi::traits::{LeanAbi, TryFromLean, sealed};
+use crate::abi::traits::{LeanAbi, LeanBoxedAbi};
 use crate::error::LeanResult;
 use crate::runtime::LeanRuntime;
 use crate::runtime::obj::Obj;
@@ -53,20 +53,19 @@ impl fmt::Debug for LeanDeclaration<'_> {
     }
 }
 
-impl sealed::SealedAbi for LeanDeclaration<'_> {}
-
-impl<'lean> LeanAbi<'lean> for LeanDeclaration<'lean> {
+#[allow(
+    unsafe_code,
+    reason = "native conversion requires the caller-established semantic type"
+)]
+// SAFETY: the private handle stores its native semantic type; encoding transfers its reference and raw decoding requires that type.
+unsafe impl<'lean> LeanAbi<'lean> for LeanDeclaration<'lean> {
     type CRepr = *mut lean_object;
 
     fn into_c(self, _runtime: &'lean LeanRuntime) -> *mut lean_object {
         self.obj.into_raw()
     }
 
-    #[allow(
-        clippy::not_unsafe_ptr_arg_deref,
-        reason = "sealed trait—caller invariant documented on LeanAbi::from_c"
-    )]
-    fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
+    unsafe fn from_c(c: *mut lean_object, runtime: &'lean LeanRuntime) -> LeanResult<Self> {
         // SAFETY: `c` is an owned `lean_object*` produced by a Lean
         // export returning `Lean.Declaration`; per Lake's `lean_obj_res`
         // contract it carries one reference count. `runtime` witnesses
@@ -77,8 +76,17 @@ impl<'lean> LeanAbi<'lean> for LeanDeclaration<'lean> {
     }
 }
 
-impl<'lean> TryFromLean<'lean> for LeanDeclaration<'lean> {
-    fn try_from_lean(obj: Obj<'lean>) -> LeanResult<Self> {
+#[allow(
+    unsafe_code,
+    reason = "native conversion requires the caller-established semantic type"
+)]
+// SAFETY: private handle construction preserves the semantic type; typed native decoding retains its owned object and lifetime.
+unsafe impl<'lean> LeanBoxedAbi<'lean> for LeanDeclaration<'lean> {
+    fn into_boxed(self, _runtime: &'lean LeanRuntime) -> Obj<'lean> {
+        self.obj
+    }
+
+    unsafe fn from_boxed(obj: Obj<'lean>) -> LeanResult<Self> {
         Ok(Self { obj })
     }
 }

@@ -1,16 +1,16 @@
 # Version matrix
 
 The supported Lean releases are the explicit entries in
-[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs), currently 4.30.0 through 4.35.0 including the listed
+[`SUPPORTED_TOOLCHAINS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/supported.rs), currently 4.30.0 through 4.36.0 including the listed
 release candidates. The interval is shorthand; an unlisted version is unsupported even if it compiles.
 
 ## Lean ABI
 
-The table contains twelve distinct `lean.h` digests. Releases with identical headers share an entry. The comments beside
+The table contains thirteen distinct `lean.h` digests. Releases with identical headers share an entry. The comments beside
 those entries record the verified changes to atomic fields, refcount helpers, and the 4.35 array linearity marker; use
 that source when extending the window rather than copying digest history into documentation.
 
-[`REQUIRED_SYMBOLS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/symbols.rs) lists 88 exported symbols. Every supported entry has an empty
+[`REQUIRED_SYMBOLS`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-abi/src/symbols.rs) lists 91 exported symbols. Every supported entry has an empty
 `missing_symbols` list. [`lean-rs-sys/tests/linkage.rs`](https://github.com/jcreinhold/lean-rs/blob/main/crates/lean-rs-sys/tests/linkage.rs) takes their addresses
 to force link-time resolution; `lean-toolchain`'s version-window tests check the static support metadata.
 

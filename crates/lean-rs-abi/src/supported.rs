@@ -176,6 +176,14 @@ pub const SUPPORTED_TOOLCHAINS: &[SupportedToolchain] = &[
         header_digest: "eb951e1171d39b828e7ad60aed0b90759598b678bfe58cf85c65a1559c021bf9",
         missing_symbols: &[],
     },
+    // 4.36.0 has a new header digest. Constructor limits use inclusive
+    // bounds with the same valid ranges. Layouts measured on Apple Silicon
+    // match 4.35.0; the audited raw symbol set excludes both removed exports.
+    SupportedToolchain {
+        versions: &["4.36.0"],
+        header_digest: "dbccdab3a0036f41494f22762adce633875e34cf8f6f7cfa2186175b0e964aa4",
+        missing_symbols: &[],
+    },
 ];
 
 /// Return the [`SupportedToolchain`] entry that includes `version`, if any.

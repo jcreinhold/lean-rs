@@ -9,7 +9,8 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-use std::path::{Path, PathBuf};
+#[path = "support/fixed_fixture.rs"]
+mod fixed_fixture;
 
 use lean_rs::LeanRuntime;
 use lean_rs_host::host::process::{
@@ -21,21 +22,8 @@ use lean_rs_host::{
     ProofEditTarget, ProofPositionSelector,
 };
 
-fn fixture_lake_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest_dir
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/<name>/ lives two directories beneath the workspace root");
-    workspace.join("fixtures").join("lean")
-}
-
-fn ensure_fixture_built() {
-    lean_toolchain::build_lake_target_quiet(&fixture_lake_root(), "LeanRsFixture").expect("fixture Lake target builds");
-}
-
 fn attempt_session<'lean, 'c>(caps: &'c LeanCapabilities<'lean, 'c>) -> LeanSession<'lean, 'c> {
-    caps.session(&["LeanRsHostShims.Elaboration"], None, None)
+    caps.session(&fixed_fixture::imports(caps, "LeanRsHostShims.Elaboration"), None, None)
         .expect("session imports the bundled elaboration shims")
 }
 
@@ -51,13 +39,21 @@ theorem t : ∀ n : Nat, n + 0 = n := by
 ";
 
 fn attempt(source: &str, position: ProofPositionSelector, candidates: Vec<ProofCandidate>) -> ProofAttemptOutcome {
-    ensure_fixture_built();
+    let root = fixed_fixture::fixture_root();
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens cleanly");
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let host = LeanHost::from_lake_project(runtime, root).expect("host opens cleanly");
+    let caps = fixed_fixture::capabilities(&host).expect("load caps");
     let mut session = attempt_session(&caps);
+    assert_eq!(source, SOURCE);
+    let [candidate] = candidates.as_slice() else {
+        panic!("expected one fixed candidate")
+    };
+    assert!(match (&position, candidate.id.as_str(), candidate.text.as_str()) {
+        (ProofPositionSelector::Default, "show", "show n + 0 = n")
+        | (ProofPositionSelector::Index { index: 2 | 99 }, "exact", "exact Nat.add_zero n") => true,
+        (ProofPositionSelector::AfterText { text, occurrence: None }, "skip", "skip") => text == "intro",
+        _ => false,
+    });
     let request = ProofAttemptRequest {
         source: source.to_owned(),
         edit: ProofEditTarget::Declaration {
@@ -67,33 +63,63 @@ fn attempt(source: &str, position: ProofPositionSelector, candidates: Vec<ProofC
         candidates,
         budgets: ModuleQueryOutputBudgets::default(),
     };
+    let (env, imports) = session.source_context();
+    #[allow(unsafe_code, reason = "closed proof-attempt inputs under fixed fixture custody")]
+    // SAFETY: the four exact edits above use the fixed prelude theorem, default budgets
+    // and options, in the Elaboration session created here from the admitted images.
+    let attested = unsafe {
+        caps.shim_capability().proof_attempt_scope(
+            env,
+            imports,
+            fixed_fixture::resolution(),
+            request,
+            LeanElabOptions::new().source_options(),
+        )
+    }
+    .expect("attest fixed attempt");
     session
-        .attempt_proof(&request, &LeanElabOptions::new(), None)
+        .attempt_proof(&attested, None)
         .expect("attempt_proof dispatch succeeds")
 }
 
 fn proof_state_at(source: &str, position: ProofPositionSelector) -> ProofStateInfo {
-    ensure_fixture_built();
+    let root = fixed_fixture::fixture_root();
     let runtime = LeanRuntime::init().expect("Lean runtime initialisation must succeed");
-    let host = LeanHost::from_lake_project(runtime, fixture_lake_root()).expect("host opens cleanly");
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("load caps");
+    let host = LeanHost::from_lake_project(runtime, root).expect("host opens cleanly");
+    let caps = fixed_fixture::capabilities(&host).expect("load caps");
     let mut session = attempt_session(&caps);
+    assert_eq!(source, SOURCE);
+    assert!(matches!(
+        position,
+        ProofPositionSelector::Default | ProofPositionSelector::Index { index: 2 }
+    ));
     let selectors = vec![ModuleQuerySelector::ProofStateInDeclaration {
         id: "ctx".to_owned(),
         declaration: "t".to_owned(),
         position,
         locals_raw: false,
     }];
-    let outcome = session
-        .process_module_query_batch(
-            source,
-            &selectors,
-            &ModuleQueryOutputBudgets::default(),
-            &LeanElabOptions::new(),
-            None,
+    let (env, imports) = session.source_context();
+    let batch = lean_rs::host_bridge::HostModuleBatch {
+        source: SOURCE.into(),
+        selectors,
+        budgets: ModuleQueryOutputBudgets::default(),
+    };
+    #[allow(unsafe_code, reason = "closed proof-state projections under fixed fixture custody")]
+    // SAFETY: both selectors project the fixed theorem above with default options and
+    // budgets in this admitted Elaboration environment; no other source is accepted.
+    let request = unsafe {
+        caps.shim_capability().module_batch_scope(
+            env,
+            imports,
+            fixed_fixture::resolution(),
+            batch,
+            LeanElabOptions::new().source_options(),
         )
+    }
+    .expect("attest fixed query");
+    let outcome = session
+        .process_module_query_batch(&request, None)
         .expect("module query batch dispatch succeeds");
     let ModuleQueryBatchOutcome::Ok { result, .. } = outcome else {
         panic!("expected Ok batch outcome, got {outcome:?}");
