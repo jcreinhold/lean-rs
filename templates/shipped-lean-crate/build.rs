@@ -4,7 +4,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         LeanExportSignature,
     };
 
-    lean_toolchain::CargoLeanCapability::new("lean", "ShipLeanDemo")
+    let owner = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
+    let lean_root = owner.join("lean");
+    let bootstrap = lean_toolchain::shared_writer::PrivateLakeBootstrap::new(&owner, &lean_root)?;
+    lean_toolchain::CargoLeanCapability::new(&lean_root, "ShipLeanDemo")
+        .private_bootstrap(bootstrap)
         .package("ship_lean_demo")
         .module("ShipLeanDemo")
         .export_signature(LeanExportSignature::function(

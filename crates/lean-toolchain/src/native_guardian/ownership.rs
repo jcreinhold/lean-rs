@@ -577,9 +577,11 @@ mod native {
         unsafe_code,
         reason = "narrow scalar kernel identity queries with checked output storage"
     )]
+    #[cfg(target_os = "macos")]
+    use super::invalid;
+    use super::io;
     #[cfg(target_os = "linux")]
     use super::{PathBuf, read_process};
-    use super::{invalid, io};
     #[cfg(target_os = "macos")]
     pub(super) fn snapshot(pid: u32) -> io::Result<Option<(String, bool)>> {
         let native = i32::try_from(pid).map_err(io::Error::other)?;
