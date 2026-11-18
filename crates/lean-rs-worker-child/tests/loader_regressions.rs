@@ -70,7 +70,12 @@ fn build_template() {
         let output = Command::new(cargo())
             .args(["build", "--jobs", "1", "--manifest-path"])
             .arg(template_manifest())
-            .args(["--bins", "--examples"])
+            .args(["--bins", "--examples", "--target-dir"])
+            .arg(
+                template_target_debug()
+                    .parent()
+                    .expect("debug output has a target directory"),
+            )
             .output()
             .expect("cargo build for shipped-lean-crate template starts");
         assert_success(output, "template cargo build");

@@ -155,6 +155,21 @@ fn wait_unlocked(file: &File) -> io::Result<()> {
 }
 #[test]
 #[ignore = "requires explicit LEAN_TOOLCHAIN_READER_TEST_HELPER; run with one test thread"]
+fn real_writer_runs_command_in_selected_project() -> io::Result<()> {
+    let fixture = Fixture::new()?;
+    let mut command = Command::new("/bin/pwd");
+    command.current_dir(fixture.root());
+    let output = crate::shared_writer::run_shared_writer(&helper()?, fixture.root(), &command, Duration::from_secs(5))?;
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        Path::new(String::from_utf8_lossy(&output.stdout).trim()).canonicalize()?,
+        fixture.root().canonicalize()?
+    );
+    wait_unlocked(&fixture.file()?)
+}
+
+#[test]
+#[ignore = "requires explicit LEAN_TOOLCHAIN_READER_TEST_HELPER; run with one test thread"]
 fn real_direct_readers_hold_independent_aliases() -> io::Result<()> {
     let fixture = Fixture::new()?;
     let helper = helper()?;

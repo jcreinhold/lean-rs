@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerConfig, LeanWorkerError, LeanWorkerRestartPolicy, LeanWorkerRestartReason, LeanWorkerStatus,
@@ -237,11 +237,24 @@ fn rss_policy_restarts_or_records_unavailable_sample() {
     assert!(exit.success, "worker should exit cleanly after RSS policy check");
 }
 
+fn kill_and_observe_exit(worker: &mut LeanWorker) {
+    worker.__kill_for_test().expect("worker kill succeeds");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let LeanWorkerStatus::Exited(exit) = worker.status().expect("observe killed worker") {
+            assert!(!exit.success, "killed worker exited successfully");
+            return;
+        }
+        assert!(Instant::now() < deadline, "worker exit remained unconfirmed");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
 #[test]
 fn dead_worker_use_is_typed() {
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
     worker.health().expect("health check succeeds");
-    worker.__kill_for_test().expect("worker kill succeeds");
+    kill_and_observe_exit(&mut worker);
     let err = worker.health().expect_err("dead worker use should fail");
     match err {
         LeanWorkerError::ChildPanicOrAbort { exit } => {
@@ -280,7 +293,7 @@ fn child_crash_and_policy_restart_are_distinguishable() {
     assert!(exit.success, "policy worker should exit cleanly");
 
     let mut worker = LeanWorker::spawn(&worker_config()).expect("worker starts");
-    worker.__kill_for_test().expect("worker kill succeeds");
+    kill_and_observe_exit(&mut worker);
     let err = worker.health().expect_err("dead worker use should fail");
     match err {
         LeanWorkerError::ChildPanicOrAbort { .. } => {}
