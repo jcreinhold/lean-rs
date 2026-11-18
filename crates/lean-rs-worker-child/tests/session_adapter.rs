@@ -1,5 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 
+#[path = "../../lean-rs-host/tests/support/fixed_fixture.rs"]
+mod fixture;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -7,7 +10,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lean_rs::LeanRuntime;
-use lean_rs_host::{EvidenceStatus, LeanElabOptions, LeanHost};
+use lean_rs_host::{EvidenceStatus, LeanHost};
 use lean_rs_worker_parent::{
     LeanWorker, LeanWorkerCancellationToken, LeanWorkerConfig, LeanWorkerDeclarationFilter, LeanWorkerElabOptions,
     LeanWorkerError, LeanWorkerKernelStatus, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerSessionConfig,
@@ -112,7 +115,7 @@ fn runtime() -> &'static LeanRuntime {
 }
 
 fn direct_host() -> LeanHost<'static> {
-    LeanHost::from_lake_project(runtime(), fixture_root()).expect("host opens cleanly")
+    LeanHost::from_lake_project(runtime(), fixture::fixture_root()).expect("host opens cleanly")
 }
 
 #[derive(Default)]
@@ -155,11 +158,9 @@ fn declaration_bulk_adapter_matches_in_process_session() {
     ];
 
     let host = direct_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads");
     let mut direct = caps
-        .session(&["LeanRsFixture.Handles"], None, None)
+        .session(&fixture::imports(&caps, "LeanRsFixture.Handles"), None, None)
         .expect("direct session opens");
     let direct_kinds = direct
         .declaration_kind_bulk(&names, None, None)
@@ -257,19 +258,12 @@ fn elaboration_and_kernel_adapter_match_status_shape() {
     );
 
     let host = direct_host();
-    let caps = host
-        .load_capabilities("lean_rs_fixture", "LeanRsFixture")
-        .expect("fixture capability loads");
+    let caps = fixture::capabilities(&host).expect("fixture capability loads");
     let mut direct = caps
-        .session(&["LeanRsHostShims.Elaboration"], None, None)
+        .session(&fixture::imports(&caps, "LeanRsHostShims.Elaboration"), None, None)
         .expect("direct session opens");
     let direct_status = direct
-        .kernel_check(
-            "theorem lean_rs_worker_checked_direct : 1 + 1 = 2 := rfl",
-            &LeanElabOptions::new(),
-            None,
-            None,
-        )
+        .kernel_check(&fixture::curated_theorem(&caps, &direct), None, None)
         .expect("direct kernel check succeeds")
         .status();
     assert_eq!(direct_status, EvidenceStatus::Checked);

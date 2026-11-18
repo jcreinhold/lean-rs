@@ -3806,9 +3806,9 @@ mod tests {
     };
 
     #[test]
-    fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() {
-        let prepared = lean_rs_host::host::prepare_host_artifacts().expect("packaged fixture");
-        let runtime = lean_rs::LeanRuntime::init().expect("runtime");
+    fn bootstrap_rejects_valid_authorization_for_another_manifest_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+        let prepared = lean_rs_host::host::prepare_host_artifacts()?;
+        let runtime = lean_rs::LeanRuntime::init()?;
         let path = prepared.manifest_path();
         let admitted = prepared.manifest_json().as_bytes();
         let mut other = admitted.to_vec();
@@ -3827,6 +3827,7 @@ mod tests {
             })
         });
         assert!(matches!(result, Err(error) if error.to_string().contains("different manifest snapshot")));
+        Ok(())
     }
 
     fn session_key() -> HostSessionKey {
