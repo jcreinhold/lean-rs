@@ -152,6 +152,14 @@ pub struct LeanWorkerNativePendingCleanup {
     custody: BootstrapCustody,
 }
 impl LeanWorkerNativePendingCleanup {
+    /// Read the last observed cleanup state without polling or requesting stop.
+    /// This may start a caller's bounded cleanup wait, but is neither a closure
+    /// certificate nor authority to release retained resources. A false value
+    /// also does not prove the process is live or custody is closed.
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.child.cleanup_pending()
+    }
     fn new(mut child: crate::process::OwnedChild, custody: BootstrapCustody) -> Self {
         let _stop = child.kill(); // Preserve the original startup error.
         Self { child, custody }
@@ -233,6 +241,14 @@ impl LeanWorkerNativeScope {
 }
 
 impl LeanWorkerNativeScopeLease {
+    /// Read the last observed cleanup state without polling or requesting stop.
+    /// This may start a caller's bounded cleanup wait, but is neither a closure
+    /// certificate nor authority to release retained resources. A false value
+    /// also does not prove the process is live or custody is closed.
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.0.cleanup_pending()
+    }
     /// Take one pipe once; the lease retains process and cleanup ownership.
     pub fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
         self.0.stdin.take()

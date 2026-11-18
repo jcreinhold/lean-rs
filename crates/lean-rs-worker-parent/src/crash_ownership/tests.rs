@@ -519,7 +519,15 @@ fn guarded_release_path(defer: bool, steal_wait: bool, pending: bool) {
     let observation = worker.exit_observation();
     assert_eq!(tracker.active_processes(), 1);
     assert!(!lifetime_custody.closed().unwrap());
-    worker.kill().unwrap();
+    let mut public_lease = LeanWorkerNativeScopeLease(worker);
+    assert!(!public_lease.cleanup_pending());
+    assert!(!public_lease.custody_closed().unwrap());
+    assert_eq!(tracker.active_processes(), 1);
+    public_lease.kill().unwrap();
+    assert!(public_lease.cleanup_pending());
+    // Reading pending is nonpolling and cannot return the custody reservation.
+    assert_eq!(tracker.active_processes(), 1);
+    let mut worker = public_lease.0;
     if steal_wait {
         let mut status = 0;
         // SAFETY: this test owns this exact direct child; steal only its wait
@@ -538,8 +546,10 @@ fn guarded_release_path(defer: bool, steal_wait: bool, pending: bool) {
             unreachable!()
         };
         assert_eq!(source.kind(), io::ErrorKind::TimedOut);
+        assert!(pending.cleanup_pending());
         wait_for(|| pending.try_wait().unwrap().is_some());
         assert!(pending.custody_closed().unwrap());
+        assert!(!pending.cleanup_pending());
         assert_eq!(tracker.active_processes(), 0);
         drop(pending);
     } else if defer {
