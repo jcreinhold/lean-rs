@@ -7,123 +7,305 @@ HistoricalLockOnly == "historical_lock_only"
 StaleClosure == "stale_closure"
 ExplicitUnlockLockOnly == "explicit_unlock_lock_only"
 DirectChildOnly == "direct_child_only"
+PublishBeforeAdopt == "publish_before_adopt"
+AckBeforeDurable == "ack_before_durable"
+LoseAdoption == "lose_adoption"
+CollectPreparingOnParentDeath == "collect_preparing_on_parent_death"
 
 Phases == {"idle", "reserved", "running", "stopping", "closed"}
 Observations == {"unknown", "present", "absent"}
 Aliases == {"worker", "guardian"}
 
-VARIABLES phase, rootPresent, groupPresent, guardianPresent, guardianStarted, lifetimeAttached,
+VARIABLES phase, supervisorAlive, rootPresent, groupPresent,
+          guardianPresent, guardianStarted, identitiesAuthenticated,
+          bootstrapIdentityDurable, bootstrapClosureDurable, leaseAdopted, runningDurable, startupAcked,
           aliases, ofdLocked, groupObservation, guardianObservation,
-          capacityReserved, capacityReturns, writerAdmitted
+          capacityReserved, capacityReturns, protectedReadsEver, writerAdmitted
 
-vars == <<phase, rootPresent, groupPresent, guardianPresent, guardianStarted, lifetimeAttached,
+vars == <<phase, supervisorAlive, rootPresent, groupPresent,
+          guardianPresent, guardianStarted, identitiesAuthenticated,
+          bootstrapIdentityDurable, bootstrapClosureDurable, leaseAdopted, runningDurable, startupAcked,
           aliases, ofdLocked, groupObservation, guardianObservation,
-          capacityReserved, capacityReturns, writerAdmitted>>
+          capacityReserved, capacityReturns, protectedReadsEver, writerAdmitted>>
 
 Init ==
   /\ phase = "idle"
+  /\ supervisorAlive = TRUE
   /\ rootPresent = FALSE
   /\ groupPresent = FALSE
   /\ guardianPresent = FALSE
   /\ guardianStarted = FALSE
-  /\ lifetimeAttached = FALSE
+  /\ identitiesAuthenticated = FALSE
+  /\ bootstrapIdentityDurable = FALSE
+  /\ bootstrapClosureDurable = FALSE
+  /\ leaseAdopted = FALSE
+  /\ runningDurable = FALSE
+  /\ startupAcked = FALSE
   /\ aliases = {}
   /\ ofdLocked = FALSE
   /\ groupObservation = "absent"
   /\ guardianObservation = "absent"
   /\ capacityReserved = FALSE
   /\ capacityReturns = 0
+  /\ protectedReadsEver = FALSE
   /\ writerAdmitted = FALSE
 
 Reserve ==
   /\ phase = "idle"
   /\ phase' = "reserved"
   /\ capacityReserved' = TRUE
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 capacityReturns, writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReturns,
+                 writerAdmitted>>
 
 SpawnFails ==
   /\ phase = "reserved"
+  /\ supervisorAlive
   /\ phase' = "closed"
   /\ capacityReserved' = FALSE
   /\ capacityReturns' = capacityReturns + 1
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, writerAdmitted>>
 
 Spawn ==
   /\ phase = "reserved"
+  /\ supervisorAlive
   /\ phase' = "running"
   /\ rootPresent' = TRUE
   /\ groupPresent' = TRUE
-  /\ aliases' = {"worker"}
-  /\ ofdLocked' = TRUE
+  /\ aliases' = {}
+  /\ ofdLocked' = FALSE
   /\ groupObservation' = "present"
-  /\ UNCHANGED <<guardianStarted, guardianPresent, lifetimeAttached, guardianObservation,
-                 capacityReserved, capacityReturns,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
 
 GuardianReady ==
   /\ phase = "running"
-  /\ ~guardianPresent
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ groupPresent
   /\ ~guardianStarted
-  /\ ~lifetimeAttached
-  /\ "worker" \in aliases
   /\ guardianPresent' = TRUE
   /\ guardianStarted' = TRUE
   /\ guardianObservation' = "present"
-  /\ aliases' = aliases \cup {"guardian"}
-  /\ UNCHANGED <<phase, rootPresent, groupPresent, lifetimeAttached,
-                 ofdLocked, groupObservation, capacityReserved,
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, aliases, ofdLocked, groupObservation, capacityReserved,
                  capacityReturns, writerAdmitted>>
 
-AttachLifetime ==
+AuthenticateIdentities ==
   /\ phase = "running"
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ groupPresent
   /\ guardianPresent
-  /\ ~lifetimeAttached
-  /\ lifetimeAttached' = TRUE
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent, aliases,
-                 ofdLocked, groupObservation, guardianObservation,
-                 capacityReserved, capacityReturns,
+  /\ ~identitiesAuthenticated
+  /\ identitiesAuthenticated' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+PublishBootstrapIdentity ==
+  /\ phase = "running"
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ groupPresent
+  /\ guardianPresent
+  /\ identitiesAuthenticated
+  /\ ~bootstrapIdentityDurable
+  /\ bootstrapIdentityDurable' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapClosureDurable, phase, supervisorAlive,
+                 rootPresent, groupPresent, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, aliases, ofdLocked, groupObservation,
+                 guardianObservation, capacityReserved, capacityReturns,
+                 writerAdmitted>>
+
+AdoptLease ==
+  /\ phase = "running"
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ groupPresent
+  /\ guardianPresent
+  /\ bootstrapIdentityDurable
+  /\ ~leaseAdopted
+  /\ leaseAdopted' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+PublishRunning ==
+  /\ phase = "running"
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ groupPresent
+  /\ guardianPresent
+  /\ leaseAdopted
+  /\ ~runningDurable
+  /\ runningDurable' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+AcknowledgeStartup ==
+  /\ phase = "running"
+  /\ supervisorAlive
+  /\ rootPresent
+  /\ guardianPresent
+  /\ runningDurable
+  /\ ~startupAcked
+  /\ startupAcked' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+MutantPublishBeforeAdopt ==
+  /\ Mode = PublishBeforeAdopt
+  /\ phase = "running"
+  /\ identitiesAuthenticated
+  /\ ~leaseAdopted
+  /\ runningDurable' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+MutantAckBeforeDurable ==
+  /\ Mode = AckBeforeDurable
+  /\ phase = "running"
+  /\ leaseAdopted
+  /\ ~runningDurable
+  /\ startupAcked' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+MutantLoseAdoption ==
+  /\ Mode = LoseAdoption
+  /\ phase = "running"
+  /\ runningDurable
+  /\ leaseAdopted
+  /\ leaseAdopted' = FALSE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+MutantCollectPreparing ==
+  /\ Mode = CollectPreparingOnParentDeath
+  /\ phase = "stopping"
+  /\ ~supervisorAlive
+  /\ ~runningDurable
+  /\ groupPresent
+  /\ capacityReserved
+  /\ phase' = "closed"
+  /\ capacityReserved' = FALSE
+  /\ capacityReturns' = capacityReturns + 1
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, writerAdmitted>>
+
+AcquireReads ==
+  /\ phase = "running"
+  /\ startupAcked
+  /\ rootPresent
+  /\ groupPresent
+  /\ guardianPresent
+  /\ aliases = {}
+  /\ aliases' = {"worker", "guardian"}
+  /\ ofdLocked' = TRUE
+  /\ protectedReadsEver' = TRUE
+  /\ UNCHANGED <<bootstrapIdentityDurable, bootstrapClosureDurable, phase,
+                 supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, groupObservation,
+                 guardianObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
 
 DropWorkerAlias ==
   /\ phase = "running"
-  /\ lifetimeAttached
+  /\ startupAcked
   /\ "worker" \in aliases
   /\ aliases' = aliases \ {"worker"}
   /\ ofdLocked' = IF aliases' = {} THEN FALSE ELSE ofdLocked
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, groupObservation,
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, groupObservation,
                  guardianObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
-
 
 RequestStop ==
   /\ phase = "running"
   /\ phase' = "stopping"
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 capacityReserved, capacityReturns, writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+SupervisorCrash ==
+  /\ phase \in {"reserved", "running", "stopping"}
+  /\ supervisorAlive
+  /\ supervisorAlive' = FALSE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, rootPresent, groupPresent, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, aliases, ofdLocked, groupObservation,
+                 guardianObservation, capacityReserved, capacityReturns,
+                 writerAdmitted>>
 
 RootExits ==
   /\ phase \in {"running", "stopping"}
   /\ rootPresent
   /\ rootPresent' = FALSE
-  /\ UNCHANGED <<guardianStarted, phase, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 capacityReserved, capacityReturns,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
 
-GuardianDetectsRootLoss ==
+GroupExits ==
+  /\ phase \in {"running", "stopping"}
+  /\ groupPresent
+  /\ rootPresent' = FALSE
+  /\ groupPresent' = FALSE
+  /\ aliases' = aliases \ {"worker"}
+  /\ ofdLocked' = IF aliases' = {} THEN FALSE ELSE ofdLocked
+  /\ groupObservation' = "unknown"
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase,
+                 supervisorAlive, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+GuardianDetectsOwnerLoss ==
   /\ phase = "running"
   /\ guardianPresent
-  /\ ~rootPresent
+  /\ (~supervisorAlive \/ ~rootPresent)
   /\ phase' = "stopping"
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 capacityReserved, capacityReturns, writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
 
 GuardianLoss ==
   /\ phase \in {"running", "stopping"}
@@ -132,37 +314,75 @@ GuardianLoss ==
   /\ guardianObservation' = "unknown"
   /\ aliases' = aliases \ {"guardian"}
   /\ ofdLocked' = IF aliases' = {} THEN FALSE ELSE ofdLocked
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, lifetimeAttached,
-                 groupObservation, capacityReserved, capacityReturns,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, groupObservation,
+                 capacityReserved, capacityReturns, writerAdmitted>>
 
 ObserveGuardianAbsent ==
   /\ ~guardianPresent
+  /\ (supervisorAlive \/ runningDurable \/ bootstrapIdentityDurable \/ bootstrapClosureDurable)
   /\ guardianObservation /= "absent"
   /\ guardianObservation' = "absent"
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, ofdLocked, groupObservation,
-                 capacityReserved, capacityReturns,
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
 
 DiscoverGuardianLoss ==
   /\ phase = "running"
-  /\ lifetimeAttached
+  /\ supervisorAlive
+  /\ leaseAdopted
   /\ guardianObservation = "absent"
   /\ phase' = "stopping"
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent, lifetimeAttached,
-                 aliases, ofdLocked, groupObservation, guardianObservation,
-                 capacityReserved, capacityReturns, writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+RecoverClosedScope ==
+  /\ phase = "running"
+  /\ ~supervisorAlive
+  /\ runningDurable
+  /\ groupObservation = "absent"
+  /\ guardianObservation = "absent"
+  /\ phase' = "stopping"
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable,
+                 supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+CleanupAuthority == guardianPresent \/ (supervisorAlive /\ leaseAdopted)
 
 CleanupGroup ==
   /\ phase = "stopping"
+  /\ CleanupAuthority
   /\ groupPresent
   /\ rootPresent' = FALSE
   /\ groupPresent' = FALSE
   /\ aliases' = aliases \ {"worker"}
   /\ ofdLocked' = IF aliases' = {} THEN FALSE ELSE ofdLocked
   /\ groupObservation' = "unknown"
-  /\ UNCHANGED <<guardianStarted, phase, guardianPresent, lifetimeAttached,
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
+
+PublishBootstrapClosure ==
+  /\ phase = "stopping"
+  /\ ~runningDurable
+  /\ (guardianPresent \/ (supervisorAlive /\ leaseAdopted))
+  /\ ~groupPresent
+  /\ ~bootstrapClosureDurable
+  /\ bootstrapClosureDurable' = TRUE
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, phase, supervisorAlive,
+                 rootPresent, groupPresent, guardianPresent, guardianStarted,
+                 identitiesAuthenticated, leaseAdopted, runningDurable,
+                 startupAcked, aliases, ofdLocked, groupObservation,
                  guardianObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
 
@@ -170,45 +390,52 @@ GuardianExitsAfterGroup ==
   /\ phase = "stopping"
   /\ ~groupPresent
   /\ guardianPresent
+  /\ (runningDurable \/ bootstrapClosureDurable)
   /\ guardianPresent' = FALSE
   /\ guardianObservation' = "unknown"
   /\ aliases' = aliases \ {"guardian"}
   /\ ofdLocked' = IF aliases' = {} THEN FALSE ELSE ofdLocked
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, lifetimeAttached,
-                 groupObservation, capacityReserved, capacityReturns,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, groupObservation,
+                 capacityReserved, capacityReturns, writerAdmitted>>
 
 ObserveGroupAbsent ==
   /\ ~groupPresent
   /\ groupObservation /= "absent"
   /\ groupObservation' = "absent"
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, ofdLocked, guardianObservation,
-                 capacityReserved, capacityReturns,
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 guardianObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
 
 ObserveStaleGroupAbsent ==
   /\ Mode \in {StaleClosure, DirectChildOnly}
   /\ phase = "stopping"
   /\ groupPresent
-  /\ IF Mode = DirectChildOnly THEN ~rootPresent /\ ~lifetimeAttached ELSE TRUE
+  /\ IF Mode = DirectChildOnly THEN ~rootPresent /\ ~leaseAdopted ELSE TRUE
   /\ groupObservation' = "absent"
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, ofdLocked, guardianObservation,
-                 capacityReserved, capacityReturns,
+  /\ bootstrapClosureDurable' = IF Mode = DirectChildOnly THEN TRUE ELSE bootstrapClosureDurable
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 guardianObservation, capacityReserved, capacityReturns,
                  writerAdmitted>>
 
 Retire ==
   /\ phase = "stopping"
-  /\ groupObservation = "absent"
   /\ guardianObservation = "absent"
+  /\ ((runningDurable /\ groupObservation = "absent") \/
+      (~runningDurable /\ bootstrapClosureDurable))
   /\ capacityReserved
   /\ phase' = "closed"
   /\ capacityReserved' = FALSE
   /\ capacityReturns' = capacityReturns + 1
-  /\ UNCHANGED <<guardianStarted, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, ofdLocked, groupObservation,
-                 guardianObservation, writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, supervisorAlive, rootPresent, groupPresent, guardianPresent,
+                 guardianStarted, identitiesAuthenticated, leaseAdopted,
+                 runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, writerAdmitted>>
 
 ExplicitUnlock ==
   /\ Mode = ExplicitUnlockLockOnly
@@ -216,54 +443,70 @@ ExplicitUnlock ==
   /\ "guardian" \in aliases
   /\ ofdLocked
   /\ ofdLocked' = FALSE
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, groupObservation,
-                 guardianObservation, capacityReserved, capacityReturns,
-                 writerAdmitted>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns, writerAdmitted>>
 
 WriterAcquire ==
   /\ ~writerAdmitted
   /\ ~ofdLocked
   /\ IF Mode \in {HistoricalLockOnly, ExplicitUnlockLockOnly}
-        THEN phase \in {"running", "stopping"}
+        THEN phase \in {"running", "stopping"} /\ startupAcked /\ guardianStarted /\ protectedReadsEver
         ELSE phase = "closed" /\ groupObservation = "absent"
                               /\ guardianObservation = "absent"
   /\ writerAdmitted' = TRUE
-  /\ UNCHANGED <<guardianStarted, phase, rootPresent, groupPresent, guardianPresent,
-                 lifetimeAttached, aliases, ofdLocked, groupObservation,
-                 guardianObservation, capacityReserved, capacityReturns>>
+  /\ UNCHANGED <<protectedReadsEver, bootstrapIdentityDurable, bootstrapClosureDurable, phase, supervisorAlive, rootPresent, groupPresent,
+                 guardianPresent, guardianStarted, identitiesAuthenticated,
+                 leaseAdopted, runningDurable, startupAcked, aliases, ofdLocked,
+                 groupObservation, guardianObservation, capacityReserved,
+                 capacityReturns>>
 
-Next == Reserve \/ SpawnFails \/ Spawn \/ GuardianReady \/ AttachLifetime \/
-        DropWorkerAlias \/ RequestStop \/ RootExits \/
-        GuardianDetectsRootLoss \/ GuardianLoss \/ ObserveGuardianAbsent \/
-        DiscoverGuardianLoss \/ CleanupGroup \/ GuardianExitsAfterGroup \/
+Next == Reserve \/ SpawnFails \/ Spawn \/ GuardianReady \/
+        AuthenticateIdentities \/ PublishBootstrapIdentity \/ AdoptLease \/ PublishRunning \/
+        AcknowledgeStartup \/ MutantPublishBeforeAdopt \/
+        MutantAckBeforeDurable \/ MutantLoseAdoption \/
+        MutantCollectPreparing \/ AcquireReads \/ DropWorkerAlias \/
+        RequestStop \/ SupervisorCrash \/ RootExits \/ GroupExits \/
+        GuardianDetectsOwnerLoss \/ GuardianLoss \/ ObserveGuardianAbsent \/
+        DiscoverGuardianLoss \/ RecoverClosedScope \/ CleanupGroup \/ PublishBootstrapClosure \/ GuardianExitsAfterGroup \/
         ObserveGroupAbsent \/ ObserveStaleGroupAbsent \/ Retire \/
         ExplicitUnlock \/ WriterAcquire
 
 Spec == Init /\ [][Next]_vars
 
 FairSpec == Spec
-  /\ WF_vars(GuardianDetectsRootLoss)
+  /\ WF_vars(GuardianDetectsOwnerLoss)
   /\ WF_vars(ObserveGuardianAbsent)
   /\ WF_vars(DiscoverGuardianLoss)
+  /\ WF_vars(RecoverClosedScope)
   /\ WF_vars(CleanupGroup)
+  /\ WF_vars(PublishBootstrapClosure)
   /\ WF_vars(GuardianExitsAfterGroup)
   /\ WF_vars(ObserveGroupAbsent)
   /\ WF_vars(Retire)
 
 TypeOK ==
   /\ phase \in Phases
+  /\ supervisorAlive \in BOOLEAN
   /\ rootPresent \in BOOLEAN
   /\ groupPresent \in BOOLEAN
   /\ guardianPresent \in BOOLEAN
   /\ guardianStarted \in BOOLEAN
-  /\ lifetimeAttached \in BOOLEAN
+  /\ identitiesAuthenticated \in BOOLEAN
+  /\ bootstrapIdentityDurable \in BOOLEAN
+  /\ bootstrapClosureDurable \in BOOLEAN
+  /\ leaseAdopted \in BOOLEAN
+  /\ runningDurable \in BOOLEAN
+  /\ startupAcked \in BOOLEAN
   /\ aliases \subseteq Aliases
   /\ ofdLocked \in BOOLEAN
   /\ groupObservation \in Observations
   /\ guardianObservation \in Observations
   /\ capacityReserved \in BOOLEAN
   /\ capacityReturns \in Nat
+  /\ protectedReadsEver \in BOOLEAN
   /\ writerAdmitted \in BOOLEAN
 
 ReservationTracksOpenScope ==
@@ -274,16 +517,28 @@ ClosedReturnedCapacity == phase = "closed" => capacityReturns = 1
 WriterExclusion == ~(writerAdmitted /\ groupPresent)
 GuardianLossIsNotClosure == (~guardianPresent /\ groupPresent) => phase /= "closed"
 GuardianPresentImpliesCapacity == guardianPresent => capacityReserved
-GuardianAliasTracksProcess == ("guardian" \in aliases) <=> guardianPresent
+GuardianAliasHasProcess == ("guardian" \in aliases) => guardianPresent
 LockTracksAliases == Mode = ExplicitUnlockLockOnly \/ (ofdLocked <=> aliases /= {})
 RootBelongsToGroup == rootPresent => groupPresent
+BootstrapClosureIsSound == bootstrapClosureDurable => ~groupPresent
+BootstrapIdentityIsAuthenticated == bootstrapIdentityDurable => identitiesAuthenticated
+AuthenticationPrecedesAdoption == leaseAdopted => bootstrapIdentityDurable
+AdoptionPrecedesRunning == runningDurable => leaseAdopted
+RunningPrecedesAck == startupAcked => runningDurable
+AckRequiresGuardianStarted == startupAcked => guardianStarted
+AckKeepsOpenCustodyReserved == (startupAcked /\ phase /= "closed") => capacityReserved
 
+PhysicalAbsenceProgress ==
+  (phase = "stopping" /\ ~groupPresent /\ ~guardianPresent /\
+   (runningDurable \/ bootstrapClosureDurable)) ~> phase = "closed"
 ConditionalCleanupProgress ==
-  phase = "stopping" ~> ~capacityReserved
+  (phase = "stopping" /\ CleanupAuthority) ~>
+    (phase = "closed" \/ ~CleanupAuthority)
 ConditionalGuardianLossProgress ==
-  (phase = "running" /\ lifetimeAttached /\ ~guardianPresent) ~> phase = "stopping"
-ConditionalRootLossProgress ==
-  (phase = "running" /\ guardianPresent /\ ~rootPresent) ~>
-    (phase = "stopping" \/ ~guardianPresent)
+  (phase = "running" /\ supervisorAlive /\ leaseAdopted /\ ~guardianPresent) ~>
+    (phase = "stopping" \/ ~supervisorAlive)
+ConditionalSupervisorLossProgress ==
+  (phase = "stopping" /\ ~supervisorAlive /\ guardianPresent) ~>
+    (phase = "closed" \/ ~guardianPresent)
 
 =============================================================================

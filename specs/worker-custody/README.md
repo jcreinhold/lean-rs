@@ -19,16 +19,21 @@ The state is split by concern rather than by implementation object:
 
 | State | Why it is separate |
 | --- | --- |
-| `phase` | orders reservation, attachment, cleanup and retirement |
+| `phase`, `supervisorAlive` | orders reservation and cleanup while keeping owner death separate |
 | `rootPresent`, `groupPresent` | direct-child exit and whole-group closure are different facts |
-| `guardianPresent`, `guardianStarted`, `lifetimeAttached` | helper existence, its single physical lifetime and parent cleanup authority have different failure cuts |
+| `guardianPresent`, `guardianStarted` | helper existence and its single physical lifetime have different failure cuts |
+| `identitiesAuthenticated`, `bootstrapIdentityDurable`, `leaseAdopted`, `runningDurable`, `startupAcked` | authentication, recovery evidence, ownership, publication and admission cannot be one fallible step |
+| `bootstrapClosureDurable` | pre-Running recovery needs a persistent group-closure receipt, not parent death |
 | `aliases`, `ofdLocked` | descriptor aliases and their shared lock state differ after explicit unlock |
+| `protectedReadsEver` | historical lock-only cases require a real post-ACK read-custody interval |
 | `groupObservation`, `guardianObservation` | authenticated knowledge can remain unknown after physical state changes |
 | `capacityReserved`, `capacityReturns` | resource accounting is distinct from process and lock state |
 | `writerAdmitted` | states the conflicting-admission safety outcome directly |
 
 Each transition represents one named boundary: reserve, spawn or spawn failure,
-guardian readiness, lifetime attachment, alias transfer, direct
+guardian readiness, identity authentication, durable bootstrap identity,
+cleanup-lease adoption, durable
+Running publication, startup ACK, alias transfer, direct
 root exit, stop request, guardian loss and later detection, physical cleanup,
 authenticated absence observation, retirement, guardian close, explicit unlock,
 or writer acquisition. These boundaries preserve the distinct physical,
@@ -40,10 +45,18 @@ pools of workers and database recovery.
 
 - Cleanup ownership and a capacity reservation exist before spawn.
 - Spawn failure releases the unused reservation.
-- Failure before lifetime attachment cannot orphan a spawned worker: it moves
-  to cleanup and the selected contract retains its reservation until physical
-  group absence is certified. The current direct-child fallback has not yet
-  been shown to meet this selected contract.
+- Startup is admitted only after exact worker and guardian identities are
+  authenticated, bootstrap recovery identity is durably published, their
+  cleanup lease is adopted by the tracker, Running is durably published, and
+  the live child/guardian receive ACK, in that order.
+- A failure or supervisor crash at any earlier cut retains the reservation
+  until authenticated physical group and guardian absence. The independent
+  guardian is the bootstrap cleanup authority before lease adoption; without
+  either authority, progress is unresolved and remains fenced.
+- The durable Preparing reservation is not collectible merely because its
+  supervisor died once spawn may have occurred. Before Running, a surviving
+  guardian or adopted owner must publish group closure; guardian absence is
+  then authenticated separately before retirement.
 - Losing the guardian is not closure. A responsive owner must observe that loss
   before it can request cleanup.
 - Capacity returns at most once, and never while the worker group is present.
@@ -74,10 +87,16 @@ The checked good protocol assumes:
 - a private worker process group has no escaped or regrouped descendants;
 - group absence is reported only by an authenticated observer for the exact
   generation and process birth identity;
-- responsive cleanup and observation authority remains alive; supervisor loss
-  and authority recovery are outside this model;
+- a live guardian detects exact supervisor death through its control channel or
+  recorded birth identity and keeps its session/group signaling authority;
+- at least one modeled cleanup authority remains responsive for conditional
+  progress; simultaneous supervisor and guardian loss may remain fenced until
+  the group exits by itself;
 - after stopping begins, fair stop requests eventually remove the whole group;
   frozen or unkillable workers may remain fenced forever;
+- a group may also exit naturally after all cleanup authorities disappear;
+  passive recovery still requires persisted authenticated identity or a durable
+  bootstrap-closure receipt;
 - descriptor transfer, `dup`, `fork`, and `exec` preserve aliases to the same
   open-file description; closing the final alias releases its `flock`;
 - an explicit `LOCK_UN` through any alias releases that open-file description's
@@ -99,8 +118,12 @@ so this is not a sandbox against adversarial native code.
 | Model step or fact | Current implementation | Focused evidence / missing evidence |
 | --- | --- | --- |
 | reserve before spawn | `LeanWorkerProcessTracker::launch`, `process.rs` | `reaper_start_failure_prevents_launch_and_releases_no_unowned_capacity`; `failed_launch_holds_reservation_until_spawn_returns` |
-| attach exact lifetime and private group | `OwnedChild::attach_lifetime`; `OwnedCommandGroup::adopt_private_session` | process-group identity tests; before attachment, direct wait can release the tracker without a whole-group witness, so conformance to this selected contract is unresolved |
+| authenticate identities | `ParentLifetime::accept`, `crash_ownership.rs` | current code authenticates before returning a lease, but also publishes Running inside the same fallible call |
+| persist bootstrap recovery identity | no selected implementation | required so recovery can authenticate the exact pre-Running group after supervisor loss |
+| adopt cleanup lease | `OwnedChild::attach_lifetime`; `OwnedCommandGroup::adopt_private_session` | current supervisor adopts only after `accept` has published Running; this order does not conform to the selected contract |
+| publish Running, then ACK | `ParentLifetime::accept`; `OwnedChild::acknowledge_lifetime`; `supervisor.rs` | current order is publish → return lease → adopt → ACK; two-phase refactoring and crash-cut tests are missing |
 | guardian loss requests stop | `OwnedChild::poll_guardian`; `LeanWorkerProcessTracker::reap_pending` | source mapping exists; current-code guardian-loss regression is still missing |
+| supervisor loss | guardian parent stream and recorded identity; `native_guardian.rs` | guardian drains the group on owner loss; current-SDK fault qualification is missing |
 | authentic physical closure | `OwnedCommandGroup::try_wait`; `ParentLifetimeLease::retirement_closed` | direct wait and ECHILD/whole-group tests; OS behavior remains assumed |
 | custody-capacity return | `LeanWorkerProcessTracker::release`; `ParentLifetimeLease::retirement_closed` | tracker reservation/drop tests; guarded closure requires group and guardian absence, but no refinement test exists |
 | shared lock aliases | `shared_reader`, `native_guardian::retain_reads`, child inherited reads | transfer/union tests cover selected paths; no explicit-unlock negative test |
@@ -113,9 +136,18 @@ receipt. The model likewise keeps physical closure separate from a request's
 semantic outcome.
 
 `"worker"` in `aliases` represents all payload-side aliases collectively, not
-one literal root-process descriptor. `GuardianReady` abstracts the protected
-read interval in which the helper has accepted custody; it does not model the
-earlier guardian bootstrap before artifact reads.
+one literal root-process descriptor. `GuardianReady` means the helper has sent
+its generation-bound HELLO and can drain the private group if ACK never arrives;
+artifact read transfer still occurs after startup and remains abstract here.
+
+The two-phase accept order alone is insufficient. Current Preparing collection
+uses exact parent death as closure even though a pre-ACK child may still exist.
+If the supervisor dies after spawn but before Running publication, that rule can
+return actor capacity before group absence. The selected uniform contract must
+therefore keep Preparing capacity fail-closed after possible spawn, persist the
+exact bootstrap identity, and let a guardian or adopted owner publish group
+closure. If both authorities disappear first, the reservation stays fenced;
+the model makes no automatic recovery claim for that state.
 
 ## TLC checks
 
@@ -129,6 +161,10 @@ java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config HistoricalLockOnly.c
 java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config StaleClosure.cfg WorkerCustody.tla
 java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config ExplicitUnlockLockOnly.cfg WorkerCustody.tla
 java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config DirectChildOnly.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config PublishBeforeAdopt.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config AckBeforeDurable.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config LoseAdoption.cfg WorkerCustody.tla
+java -cp /path/to/tla2tools.jar tlc2.TLC -workers 1 -config CollectPreparingOnParentDeath.cfg WorkerCustody.tla
 ```
 
 Expected outcomes:
@@ -139,14 +175,22 @@ Expected outcomes:
   absence is treated as authentic.
 - `ExplicitUnlockLockOnly.cfg`: `WriterExclusion` fails when explicit unlock is
   combined with the historical lock-only admission rule.
-- `DirectChildOnly.cfg`: `NoEarlyCapacityReturn` fails when direct-child exit is
-  mistaken for whole-group absence before lifetime attachment.
+- `DirectChildOnly.cfg`: `BootstrapClosureIsSound` fails when direct-child exit
+  is mistaken for authenticated bootstrap group closure before lease adoption.
+- `PublishBeforeAdopt.cfg`: `AdoptionPrecedesRunning` fails if Running becomes
+  durable before the cleanup lease is installed.
+- `AckBeforeDurable.cfg`: `RunningPrecedesAck` fails if the child is released
+  before durable Running publication.
+- `LoseAdoption.cfg`: `AdoptionPrecedesRunning` fails if a published generation
+  can lose its installed cleanup authority.
+- `CollectPreparingOnParentDeath.cfg`: `NoEarlyCapacityReturn` fails if parent
+  death alone collects a pre-ACK reservation while its group remains.
 
 Keep the failing configurations. They are executable statements of distinct trust
 boundaries, not passing qualification cases.
 
 With TLC 2.19, Java 21.0.13.0.3 and one worker, the checked good configuration
-generated 130 states and found 62 distinct states. The negative configurations
+generated 1,461 states and found 465 distinct states. The negative configurations
 stop at their first expected counterexample, so their explored counts are not
 complete state-space sizes.
 
@@ -155,7 +199,7 @@ complete state-space sizes.
 The host may request a fresh worker and consume these outputs only:
 
 - launch admitted or refused;
-- worker attached or cleanup pending;
+- bootstrap cleanup pending, or worker admitted after startup ACK;
 - closure certified, or closure unknown;
 - capacity returned once.
 
