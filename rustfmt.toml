@@ -1,3 +1,21 @@
+# Use Rust 2024 for parsing and formatting.
 edition = "2024"
-max_width = 120
 style_edition = "2024"
+
+# Use four-space indentation and LF line endings.
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+
+# Keep standard wrapping heuristics at the shared line width.
+max_width = 120
+use_small_heuristics = "Default"
+
+# Use zero or one blank line between items and statements, per the Rust Style Guide.
+
+# Sort imports and module declarations within their existing groups.
+reorder_imports = true
+reorder_modules = true
+
+# Spell out the ABI at extern boundaries.
+force_explicit_abi = true
