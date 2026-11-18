@@ -52,6 +52,19 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  rust-line-width:
+    name: Rust line width
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check added Rust lines
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/check_rust_line_width.py "$BASE"
+
   check:
     name: ${{ matrix.os }} / Lean ${{ matrix.lean_version }}
     runs-on: ${{ matrix.os }}

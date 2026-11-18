@@ -3,6 +3,19 @@
 The workspace gate is [`cargo-nextest`](https://nexte.st/). Earlier same-process `cargo test` runs exhausted memory after
 about 150 tests as Lean state accumulated; see [Why nextest](#why-nextest).
 
+## Formatting
+
+Run `cargo fmt --all --check` for Rust formatting. The **Rust line width** CI job also checks added and edited
+Rust lines against `max_width` in `rustfmt.toml`, including strings and macro calls that rustfmt can leave over
+the limit. It reports the file, line, and width. To run the same check locally with Python 3.11 or later:
+
+```sh
+python3 scripts/check_rust_line_width.py HEAD
+```
+
+Use the pull request's base commit to check the full diff. Stage new Rust files or mark them with `git add -N`
+so Git includes them in the local check.
+
 ## Run the suite
 
 Install once:
