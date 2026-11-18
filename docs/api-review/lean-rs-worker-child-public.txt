@@ -1,2 +1,39 @@
 pub mod lean_rs_worker_child
+pub struct lean_rs_worker_child::WorkerManifestRead
+impl lean_rs_worker_child::WorkerManifestRead
+pub fn lean_rs_worker_child::WorkerManifestRead::new(std::path::PathBuf, std::path::PathBuf, impl core::marker::Sized + 'static) -> Self
+impl core::marker::Freeze for lean_rs_worker_child::WorkerManifestRead
+impl !core::marker::Send for lean_rs_worker_child::WorkerManifestRead
+impl !core::marker::Sync for lean_rs_worker_child::WorkerManifestRead
+impl core::marker::Unpin for lean_rs_worker_child::WorkerManifestRead
+impl core::marker::UnsafeUnpin for lean_rs_worker_child::WorkerManifestRead
+impl !core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_child::WorkerManifestRead
+impl !core::panic::unwind_safe::UnwindSafe for lean_rs_worker_child::WorkerManifestRead
+pub struct lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+pub lean_rs_worker_child::WorkerSourceContext::capability: &'cap lean_rs::module::trusted::TrustedHostCapability<'static>
+pub lean_rs_worker_child::WorkerSourceContext::environment: &'a lean_rs::host_bridge::HostEnvironment<'static>
+pub lean_rs_worker_child::WorkerSourceContext::imports: &'a lean_rs::module::trusted::TrustedHostImports<'static, 'cap>
+impl<'a, 'cap> core::marker::Freeze for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> !core::marker::Send for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> !core::marker::Sync for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> core::marker::Unpin for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> core::marker::UnsafeUnpin for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> core::panic::unwind_safe::RefUnwindSafe for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+impl<'a, 'cap> core::panic::unwind_safe::UnwindSafe for lean_rs_worker_child::WorkerSourceContext<'a, 'cap>
+pub trait lean_rs_worker_child::WorkerAuthority: core::marker::Send + core::marker::Sync
+pub fn lean_rs_worker_child::WorkerAuthority::batch<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::source_operations::HostModuleBatch, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::source_operations::HostModuleBatch>>
+pub fn lean_rs_worker_child::WorkerAuthority::cached<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::source_operations::HostCachedModuleBatch, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::source_operations::HostCachedModuleBatch>>
+pub fn lean_rs_worker_child::WorkerAuthority::host(&self, &'static lean_rs::runtime::init::LeanRuntime, &lean_rs_host::host::capabilities::LeanPreparedHostArtifacts) -> lean_rs::error::LeanResult<lean_rs::module::trusted::LoadedHostArtifacts<'static>>
+pub fn lean_rs_worker_child::WorkerAuthority::imports<'cap>(&self, &'cap lean_rs::module::trusted::TrustedHostCapability<'static>, alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, lean_rs::module::trusted::HostImportOptions) -> lean_rs::error::LeanResult<lean_rs::module::trusted::TrustedHostImports<'static, 'cap>>
+pub fn lean_rs_worker_child::WorkerAuthority::kernel<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, alloc::string::String, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::TrustedHostKernelRequest<'static, 'cap>>
+pub fn lean_rs_worker_child::WorkerAuthority::manifest_read(&self, &std::path::Path) -> lean_rs::error::LeanResult<lean_rs_worker_child::WorkerManifestRead>
+pub fn lean_rs_worker_child::WorkerAuthority::project(&self, &'static lean_rs::runtime::init::LeanRuntime, &std::path::Path, &lean_toolchain::loader::LeanModuleInitializer) -> lean_rs::error::LeanResult<(lean_rs::module::library::LeanLibrary<'static>, lean_toolchain::loader::LeanModuleInitializer)>
+pub fn lean_rs_worker_child::WorkerAuthority::proof<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::module_requests::ProofAttemptRequest, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::module_requests::ProofAttemptRequest>>
+pub fn lean_rs_worker_child::WorkerAuthority::query<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::source_operations::HostModuleQuery, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::source_operations::HostModuleQuery>>
+pub fn lean_rs_worker_child::WorkerAuthority::term<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, alloc::string::String, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::TrustedHostTerm<'static, 'cap>>
+pub fn lean_rs_worker_child::WorkerAuthority::verify<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::module_requests::DeclarationVerificationRequest, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::module_requests::DeclarationVerificationRequest>>
+pub fn lean_rs_worker_child::WorkerAuthority::verify_batch<'cap>(&self, lean_rs_worker_child::WorkerSourceContext<'_, 'cap>, lean_rs::host_bridge::module_requests::DeclarationVerificationBatchRequest, lean_rs::host_bridge::HostSourceOptions) -> lean_rs::error::LeanResult<lean_rs::host_bridge::source_operations::TrustedModuleSource<'static, 'cap, lean_rs::host_bridge::module_requests::DeclarationVerificationBatchRequest>>
+pub fn lean_rs_worker_child::WorkerAuthority::worker(&self, &'static lean_rs::runtime::init::LeanRuntime, &std::path::Path, &[u8]) -> lean_rs::error::LeanResult<lean_rs::module::trusted::AuthorizedWorkerSnapshot<'static>>
+pub fn lean_rs_worker_child::install_worker_authority(impl lean_rs_worker_child::WorkerAuthority + 'static) -> lean_rs::error::LeanResult<()>
 pub fn lean_rs_worker_child::run_worker_child_stdio() -> std::process::ExitCode
+pub fn lean_rs_worker_child::run_worker_child_with_authority(impl lean_rs_worker_child::WorkerAuthority + 'static) -> lean_rs::error::LeanResult<std::process::ExitCode>
