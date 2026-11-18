@@ -65,10 +65,14 @@ impl WorkerManifestRead {
 }
 
 /// Trust decisions supplied by the embedding application before serving any requests.
+///
 /// A manifest or path from a parent is a request for admission. The returned token
 /// must describe the actual loaded artifacts or exact captured source operation.
 pub trait WorkerAuthority: Send + Sync {
     /// Load and attest the prepared shim under verified artifact custody.
+    ///
+    /// # Errors
+    /// Returns an error if shim verification or loading fails.
     fn host(
         &self,
         runtime: &'static LeanRuntime,
@@ -76,6 +80,9 @@ pub trait WorkerAuthority: Send + Sync {
     ) -> LeanResult<LoadedHostArtifacts<'static>>;
     /// Admit a project library, including its module initializers.
     /// Return the independently approved initializer with the actual loaded library.
+    ///
+    /// # Errors
+    /// Returns an error if the library or initializer cannot be approved or loaded.
     fn project(
         &self,
         runtime: &'static LeanRuntime,
@@ -83,10 +90,16 @@ pub trait WorkerAuthority: Send + Sync {
         requested: &lean_rs::module::LeanModuleInitializer,
     ) -> LeanResult<(LeanLibrary<'static>, lean_rs::module::LeanModuleInitializer)>;
     /// Acquire custody for the single deployment-approved manifest before bootstrap reads any bytes.
+    ///
+    /// # Errors
+    /// Returns an error if the manifest path cannot be approved or custody cannot be acquired.
     fn manifest_read(&self, requested: &Path) -> LeanResult<WorkerManifestRead>;
     /// Verify the actual images and hold custody for the exact requested manifest and symbol contracts.
     /// Permission covers every protocol-valid payload dispatched to each approved export.
     /// The application must only admit exports safe for that input domain.
+    ///
+    /// # Errors
+    /// Returns an error if the snapshot, image or requested export contract cannot be verified.
     fn worker(
         &self,
         runtime: &'static LeanRuntime,
@@ -94,6 +107,9 @@ pub trait WorkerAuthority: Send + Sync {
         snapshot: &[u8],
     ) -> LeanResult<AuthorizedWorkerSnapshot<'static>>;
     /// Establish the exact import graph, ordered roots and profile.
+    ///
+    /// # Errors
+    /// Returns an error if the import graph, search order or options cannot be approved.
     fn imports<'cap>(
         &self,
         cap: &'cap TrustedHostCapability<'static>,
@@ -102,6 +118,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostImportOptions,
     ) -> LeanResult<TrustedHostImports<'static, 'cap>>;
     /// Admit the exact term request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn term<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -109,6 +128,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedHostTerm<'static, 'cap>>;
     /// Admit the exact kernel request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn kernel<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -116,6 +138,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedHostKernelRequest<'static, 'cap>>;
     /// Admit the exact query request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn query<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -123,6 +148,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostModuleQuery>>;
     /// Admit the exact batch request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn batch<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -130,6 +158,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostModuleBatch>>;
     /// Admit the exact cached request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn cached<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -137,6 +168,9 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, HostCachedModuleBatch>>;
     /// Admit the exact proof request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn proof<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
@@ -144,13 +178,19 @@ pub trait WorkerAuthority: Send + Sync {
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, ProofAttemptRequest>>;
     /// Admit the exact verify request for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn verify<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
         request: DeclarationVerificationRequest,
         options: HostSourceOptions,
     ) -> LeanResult<TrustedModuleSource<'static, 'cap, DeclarationVerificationRequest>>;
-    /// Admit the exact verify_batch request for this session and source context.
+    /// Admit the exact declaration verification batch for this session and source context.
+    ///
+    /// # Errors
+    /// Returns an error if the application refuses the request or its options in this source context.
     fn verify_batch<'cap>(
         &self,
         session: WorkerSourceContext<'_, 'cap>,
