@@ -9,7 +9,9 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 
 ## [Unreleased]
 
-### lean-rs stack 0.9.10
+## [0.10.0]
+
+### lean-rs stack
 
 - Bind stopped-operation evidence to the actual request and worker generation. Preserve confirmed termination when
   replacement startup fails, and distinguish a stopped check without a result from unresolved execution.
@@ -20,11 +22,11 @@ The supported Lean toolchain range, Rust MSRV, and tested platforms for each rel
 - Report actual loaded host-runtime compatibility metadata separately from preparation descriptors. Refuse incompatible
   or missing required capabilities before target dispatch, and do not replay arbitrary Lean IO after a child failure.
 - Advance worker protocol to 13 for host metadata and artifact-read lifecycle messages. Install matching parent and
-  child builds together. Lean 4.36 support is described below.
+  child builds together. Lean 4.36.0 joins the supported toolchain window.
 - The new managed native-reader completion check requires the macOS atomic process-group census. Other platforms
   currently fail closed for that mode; Linux qualification remains open before a public release.
 
-### lean-toolchain 0.9.10
+### lean-toolchain
 
 - Retain source-entry and stable sibling project locks across materialization, owned Lake commands, cache updates and
   capability-manifest publication. Loan close-only descriptions to the configured helper while retaining caller copies.

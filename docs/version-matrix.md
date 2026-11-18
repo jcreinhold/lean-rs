@@ -28,13 +28,13 @@ capability artifacts must agree on the supported toolchain. See the [interop rel
 
 Windows, BSD, embedded, and WASM targets are unsupported. Adding a platform requires an explicit compatibility decision
 and CI coverage. The opt-in managed native-reader completion check currently requires the macOS process-group census;
-Linux qualification for that mode remains open, as recorded in the [unreleased changelog](https://github.com/jcreinhold/lean-rs/blob/main/CHANGELOG.md#unreleased).
+Linux qualification for that mode remains open, as recorded in the [0.10.0 changelog](https://github.com/jcreinhold/lean-rs/blob/main/CHANGELOG.md#0100).
 
 ## CI coverage
 
 | Trigger | Lean versions | Platforms |
 | --- | --- | --- |
-| Ordinary code push or PR | Head (`4.35.0`) | Ubuntu |
+| Ordinary code push or PR | Head (`4.36.0`) | Ubuntu |
 | CI dispatch with `full_matrix: true` | Every listed version | Ubuntu and macOS |
 | Release verification | Head | Ubuntu and macOS |
 
