@@ -13,9 +13,9 @@ cargo build --manifest-path templates/shipped-lean-crate/Cargo.toml --bin shippe
 cargo run --manifest-path templates/shipped-lean-crate/Cargo.toml --example worker
 ```
 
-The current template's build script requires a configured shared-writer helper through
-`LEAN_HOST_MCP_WRITER_EXECUTABLE`; its build script does not select the package-local bootstrap shown below. The first
-command calls Lean in process; the other two build and run the app-owned worker child.
+The template's build script uses `PrivateLakeBootstrap` for the packaged demo and the host-owned shims. The first
+command calls Lean in process. The other two build the application-owned child and open a worker session. A shared
+project that cannot meet the private bootstrap requirements uses the configured shared-writer helper.
 
 The template uses repository path dependencies. A published consumer uses matching released versions:
 
