@@ -180,6 +180,7 @@ pub struct LeanWorkerRuntimeMetadata {
 #[derive(Clone, Debug, Default)]
 pub struct LeanWorkerCancellationToken {
     cancelled: Arc<AtomicBool>,
+    deadline: Option<Instant>,
 }
 
 impl LeanWorkerCancellationToken {
@@ -187,6 +188,22 @@ impl LeanWorkerCancellationToken {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Scope a worker operation to an absolute monotonic deadline. The returned
+    /// token shares explicit cancellation with this token and its clones.
+    /// A nested scope can shorten an existing deadline. The supervisor observes
+    /// expiry while running and reports a timeout; cleanup has its own limits.
+    #[must_use]
+    pub fn with_deadline(&self, deadline: Instant) -> Self {
+        Self {
+            cancelled: Arc::clone(&self.cancelled),
+            deadline: Some(self.deadline.map_or(deadline, |existing| existing.min(deadline))),
+        }
+    }
+
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.deadline
     }
 
     /// Request cancellation.
@@ -1208,16 +1225,28 @@ pub(crate) fn check_cancelled(
     if token.is_some_and(LeanWorkerCancellationToken::is_cancelled) {
         Err(LeanWorkerError::Cancelled {
             operation,
-            resource: Box::new(pre_dispatch_cancelled_resource(operation)),
+            resource: Box::new(pre_dispatch_resource(operation, "worker_cancelled")),
+        })
+    } else if token
+        .and_then(LeanWorkerCancellationToken::deadline)
+        .is_some_and(|deadline| Instant::now() >= deadline)
+    {
+        Err(LeanWorkerError::Timeout {
+            operation,
+            duration: Duration::ZERO,
+            resource: Box::new(LeanWorkerResourceExhaustedFacts {
+                duration_ms: Some(0),
+                ..pre_dispatch_resource(operation, "worker_timeout")
+            }),
         })
     } else {
         Ok(())
     }
 }
 
-fn pre_dispatch_cancelled_resource(operation: &'static str) -> LeanWorkerResourceExhaustedFacts {
+fn pre_dispatch_resource(operation: &'static str, cause: &str) -> LeanWorkerResourceExhaustedFacts {
     LeanWorkerResourceExhaustedFacts {
-        cause: "worker_cancelled".to_owned(),
+        cause: cause.to_owned(),
         work_entered_child: false,
         operation: Some(operation.to_owned()),
         current_rss_kib: None,

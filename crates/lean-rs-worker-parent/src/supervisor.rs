@@ -3,7 +3,7 @@ use crate::process::{LeanWorkerExitObservation, LeanWorkerProcessTracker, OwnedC
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
-use std::io::{BufReader, BufWriter, Read as _};
+use std::io::{self, BufReader, BufWriter, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1602,6 +1602,29 @@ fn resource_facts(
         import_like_admitted,
         last_import_stats,
     }
+}
+
+// Count only writes accepted by the pipe. BufWriter can accept a header before
+// writing any bytes to the child, particularly when its first flush times out.
+struct ScopedFrameWriter<'a> {
+    pipe: &'a mut Pipe<ChildStdin>,
+    sent: bool,
+}
+
+impl Write for ScopedFrameWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let n = self.pipe.write(bytes)?;
+        self.sent |= n != 0;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.pipe.flush()
+    }
+}
+
+fn frame_timeout(started: Instant, configured: Duration, deadline: Option<Instant>) -> Duration {
+    deadline.map_or(configured, |end| configured.min(end.saturating_duration_since(started)))
 }
 
 fn worker_resource_facts(
@@ -3781,21 +3804,30 @@ impl LeanWorker {
         self.check_generation_dispatch(operation, Self::is_dispatch_cleanup(&request))?;
         self.check_request_cancelled(operation, cancellation)?;
         self.ensure_running()?;
-        let admitted = self.begin_in_flight(operation);
-        self.seal_dispatch_error(admitted)?;
-        if !matches!(&request, Request::ReleaseHostRead) {
-            // A later dispatched request supersedes a prior pre-body refusal.
-            // Resource release alone must preserve that failed call's phase.
-            self.last_host_session_refusal = None;
+        let deadline = cancellation.and_then(LeanWorkerCancellationToken::deadline);
+        if deadline.is_none() {
+            let admitted = self.begin_in_flight(operation);
+            self.seal_dispatch_error(admitted)?;
+            if !matches!(&request, Request::ReleaseHostRead) {
+                // A later dispatched request supersedes a prior pre-body refusal.
+                self.last_host_session_refusal = None;
+            }
         }
         let started = Instant::now();
         let result = self.write_request_bounded(request, operation, cancellation, self.config.request_timeout);
         if let Err(error) = result {
             let reason = match &error {
+                // The scoped writer handled any necessary stop using the actual byte count.
+                LeanWorkerError::Timeout { .. } if deadline.is_some() => return Err(error),
+                LeanWorkerError::Cancelled { resource, .. }
+                    if deadline.is_some_and(|end| !resource.work_entered_child || Instant::now() >= end) =>
+                {
+                    return Err(error);
+                }
                 LeanWorkerError::Cancelled { .. } => LeanWorkerRestartReason::Cancelled { operation },
-                LeanWorkerError::Timeout { .. } => LeanWorkerRestartReason::RequestTimeout {
+                LeanWorkerError::Timeout { duration, .. } => LeanWorkerRestartReason::RequestTimeout {
                     operation,
-                    duration: self.config.request_timeout,
+                    duration: *duration,
                 },
                 _ => {
                     self.finish_in_flight();
@@ -3838,13 +3870,45 @@ impl LeanWorker {
         // Keep the authoritative check beside the actual frame write, even if
         // another internal caller later reuses this bounded writer.
         self.check_generation_dispatch(operation, Self::is_dispatch_cleanup(&request))?;
+        let deadline = cancellation.and_then(LeanWorkerCancellationToken::deadline);
+        let planned = if deadline.is_some() {
+            // ensure_running may have blocked. Check again before admitting a frame.
+            self.check_request_cancelled(operation, cancellation)?;
+            Some(self.plan_in_flight(operation)?)
+        } else {
+            None
+        };
         let max_frame_bytes = self.config.max_frame_bytes;
         let Some(mut stdin) = self.stdin.take() else {
             return Err(self.dead_error());
         };
-        stdin.get_mut().deadline = Instant::now().checked_add(timeout);
+        let started = Instant::now();
+        let timeout = frame_timeout(started, timeout, deadline);
+        stdin.get_mut().deadline = started.checked_add(timeout);
         stdin.get_mut().cancellation = cancellation.cloned();
-        let result = write_frame(&mut stdin, Message::Request(request), max_frame_bytes);
+        let (result, entered) = if let Some((in_flight, next)) = planned {
+            let release = matches!(&request, Request::ReleaseHostRead);
+            // Completed frames have flushed the buffer. The pipe checks the
+            // token and deadline immediately before each real write, after encoding.
+            debug_assert!(stdin.buffer().is_empty());
+            let mut writer = ScopedFrameWriter {
+                pipe: stdin.get_mut(),
+                sent: false,
+            };
+            let result = write_frame(&mut writer, Message::Request(request), max_frame_bytes);
+            if writer.sent {
+                self.publish_in_flight(in_flight, next);
+                if !release {
+                    self.last_host_session_refusal = None;
+                }
+            }
+            (result, writer.sent)
+        } else {
+            (
+                write_frame(&mut stdin, Message::Request(request), max_frame_bytes),
+                true,
+            )
+        };
         stdin.get_mut().deadline = None;
         stdin.get_mut().cancellation = None;
         let cancelled = cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled);
@@ -3855,16 +3919,26 @@ impl LeanWorker {
             }
             Err(lean_rs_worker_protocol::protocol::ProtocolError::Io(error)) => {
                 self.seal_generation_dispatch_internal();
-                // Prevent BufWriter::drop from retrying a partial buffered write.
-                stdin.get_ref().stopped.store(true, Ordering::Release);
-                drop(stdin);
-                self.shutdown_child(ShutdownIntent::KillOnly)?;
+                if deadline.is_some() && !entered && error.kind() == io::ErrorKind::TimedOut {
+                    self.stdin = Some(stdin);
+                } else {
+                    // Prevent BufWriter::drop from retrying a partial buffered write.
+                    stdin.get_ref().stopped.store(true, Ordering::Release);
+                    drop(stdin);
+                    if deadline.is_some_and(|end| {
+                        error.kind() == io::ErrorKind::TimedOut && (!cancelled || Instant::now() >= end)
+                    }) {
+                        self.stop_for_scoped_expiry();
+                    } else {
+                        self.shutdown_child(ShutdownIntent::KillOnly)?;
+                    }
+                }
                 if cancelled {
                     Err(LeanWorkerError::Cancelled {
                         operation,
                         resource: Box::new(worker_resource_facts(
                             "worker_cancelled",
-                            true,
+                            entered,
                             Some(operation),
                             &self.stats,
                             self.stats.last_rss_kib,
@@ -3878,7 +3952,7 @@ impl LeanWorker {
                         duration: timeout,
                         resource: Box::new(worker_resource_facts(
                             "worker_timeout",
-                            true,
+                            entered,
                             Some(operation),
                             &self.stats,
                             self.stats.last_rss_kib,
@@ -3902,7 +3976,39 @@ impl LeanWorker {
         }
     }
 
+    fn interrupt_framed_request(
+        &mut self,
+        scoped_frame_deadline: Option<Instant>,
+        reason: LeanWorkerRestartReason,
+        release_reader: impl FnOnce(),
+    ) -> Result<(), LeanWorkerError> {
+        if scoped_frame_deadline.is_some_and(|end| {
+            matches!(reason, LeanWorkerRestartReason::RequestTimeout { .. }) || Instant::now() >= end
+        }) {
+            self.stop_for_scoped_expiry();
+            release_reader();
+            Ok(())
+        } else {
+            self.restart_with_reason_before_spawn(reason, release_reader)
+        }
+    }
+
+    fn stop_for_scoped_expiry(&mut self) {
+        // The operation has timed out even if cleanup cannot confirm exit.
+        // Keep that case fenced and observable via cleanup_pending and the request's stop receipt.
+        self.state = WorkerSupervisorState::Killing {
+            generation: self.generation,
+        };
+        drop(self.shutdown_child(ShutdownIntent::KillOnly));
+    }
+
     fn begin_in_flight(&mut self, operation: &'static str) -> Result<InFlightRequest, LeanWorkerError> {
+        let (request, next) = self.plan_in_flight(operation)?;
+        self.publish_in_flight(request.clone(), next);
+        Ok(request)
+    }
+
+    fn plan_in_flight(&self, operation: &'static str) -> Result<(InFlightRequest, WorkerRequestId), LeanWorkerError> {
         let next_request_id = self.next_request_id.next().ok_or_else(|| LeanWorkerError::Protocol {
             message: "worker request identifier space exhausted before dispatch".to_owned(),
         })?;
@@ -3917,6 +4023,10 @@ impl LeanWorker {
             generation: self.generation,
             process_id,
         };
+        Ok((request, next_request_id))
+    }
+
+    fn publish_in_flight(&mut self, request: InFlightRequest, next_request_id: WorkerRequestId) {
         self.last_request_exit = self.child.as_ref().map(|child| LeanWorkerPendingRequestStop {
             request: request.clone(),
             exit: child.exit_observation(),
@@ -3925,8 +4035,7 @@ impl LeanWorker {
         self.state = WorkerSupervisorState::Busy {
             request: request.clone(),
         };
-        self.last_request = Some(request.clone());
-        Ok(request)
+        self.last_request = Some(request);
     }
 
     fn await_in_flight(&mut self, operation: &'static str) -> Result<InFlightRequest, LeanWorkerError> {
@@ -4361,8 +4470,10 @@ impl LeanWorker {
         diagnostics: Option<&dyn LeanWorkerDiagnosticSink>,
     ) -> Result<Response, LeanWorkerError> {
         let started = self.request_started.take().unwrap_or_else(Instant::now);
-        let timeout = self.config.request_timeout;
+        let operation_deadline = cancellation.and_then(LeanWorkerCancellationToken::deadline);
+        let timeout = frame_timeout(started, self.config.request_timeout, operation_deadline);
         let deadline = started.checked_add(timeout);
+        let scoped_frame_deadline = operation_deadline.and(deadline);
         let streaming = data.is_some();
         let mut request_backpressure_waits = 0_u64;
         let stdout = self.stdout.take().ok_or_else(|| self.dead_error())?;
@@ -4395,12 +4506,14 @@ impl LeanWorker {
                 if streaming {
                     self.record_stream_failure(started, request_backpressure_waits);
                 }
-                if let Err(err) =
-                    self.restart_with_reason_before_spawn(LeanWorkerRestartReason::Cancelled { operation }, || {
+                if let Err(err) = self.interrupt_framed_request(
+                    scoped_frame_deadline,
+                    LeanWorkerRestartReason::Cancelled { operation },
+                    || {
                         drop(receiver);
                         drop(reader);
-                    })
-                {
+                    },
+                ) {
                     self.finish_in_flight();
                     return Err(err);
                 }
@@ -4418,7 +4531,9 @@ impl LeanWorker {
                     )),
                 });
             }
-            if let Some((current_kib, limit_kib)) = self.hard_rss_limit_exceeded() {
+            if let Some((current_kib, limit_kib)) = self.hard_rss_limit_exceeded()
+                && scoped_frame_deadline.is_none_or(|end| Instant::now() < end)
+            {
                 if streaming {
                     self.record_stream_failure(started, request_backpressure_waits);
                 }
@@ -4460,7 +4575,8 @@ impl LeanWorker {
                     if streaming {
                         self.record_stream_failure(started, request_backpressure_waits);
                     }
-                    if let Err(err) = self.restart_with_reason_before_spawn(
+                    if let Err(err) = self.interrupt_framed_request(
+                        scoped_frame_deadline,
                         LeanWorkerRestartReason::RequestTimeout {
                             operation,
                             duration: timeout,
@@ -4504,14 +4620,17 @@ impl LeanWorker {
                     }
                     match receiver.recv_timeout(wait_for) {
                         Ok(event) => event,
-                        Err(mpsc::RecvTimeoutError::Timeout) if wait_for < remaining => {
+                        Err(mpsc::RecvTimeoutError::Timeout)
+                            if scoped_frame_deadline.is_some() || wait_for < remaining =>
+                        {
                             continue;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             if streaming {
                                 self.record_stream_failure(started, request_backpressure_waits);
                             }
-                            if let Err(err) = self.restart_with_reason_before_spawn(
+                            if let Err(err) = self.interrupt_framed_request(
+                                scoped_frame_deadline,
                                 LeanWorkerRestartReason::RequestTimeout {
                                     operation,
                                     duration: timeout,
@@ -4582,6 +4701,13 @@ impl LeanWorker {
                     }
                 },
             };
+            // A response can already be queued when the parent resumes.
+            // Observe explicit cancellation or expiry before accepting it.
+            if scoped_frame_deadline.is_some_and(|end| {
+                cancellation.is_some_and(LeanWorkerCancellationToken::is_cancelled) || Instant::now() >= end
+            }) {
+                continue;
+            }
             #[cfg(all(test, unix))]
             let event = dispatch_pin_tests::tag_fixture_terminal(event);
             let stale = if event.generation() != self.generation {
@@ -4676,7 +4802,8 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        if let Err(err) = self.restart_with_reason_before_spawn(
+                        if let Err(err) = self.interrupt_framed_request(
+                            scoped_frame_deadline,
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
@@ -4715,7 +4842,8 @@ impl LeanWorker {
                         if streaming {
                             self.record_stream_failure(started, request_backpressure_waits);
                         }
-                        if let Err(err) = self.restart_with_reason_before_spawn(
+                        if let Err(err) = self.interrupt_framed_request(
+                            scoped_frame_deadline,
                             LeanWorkerRestartReason::Cancelled { operation },
                             || {
                                 drop(receiver);
@@ -5824,25 +5952,107 @@ mod tests {
 
     #[cfg(unix)]
     pub(super) fn blocked_stdin_worker() -> super::LeanWorker {
+        piped_worker(std::process::Command::new("sleep").arg("60"))
+    }
+
+    #[cfg(unix)]
+    fn piped_worker(command: &mut std::process::Command) -> super::LeanWorker {
         let mut worker = sleeping_worker();
         worker
             .shutdown_child(super::ShutdownIntent::KillOnly)
             .expect("stop initial child");
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
+        let mut child = command
             .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
             .spawn()
-            .expect("spawn non-reader");
+            .expect("spawn piped fixture child");
         worker.stdin = child
             .stdin
             .take()
             .map(|pipe| std::io::BufWriter::new(super::Pipe::new(pipe).expect("nonblocking stdin")));
+        worker.stdout = child
+            .stdout
+            .take()
+            .map(|pipe| std::io::BufReader::new(super::Pipe::new(pipe).expect("nonblocking stdout")));
         worker.child = Some(super::LeanWorkerProcessTracker::new().own(child));
         worker.last_exit = None;
         worker.state = super::WorkerSupervisorState::Idle {
             generation: worker.generation,
         };
         worker
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_deadline_refuses_expired_frame_and_retires_unanswered_frame() {
+        use crate::session::LeanWorkerCancellationToken;
+        use std::time::Instant;
+
+        // Answer the first complete request, then hold the second unanswered.
+        let response =
+            lean_rs_worker_protocol::protocol::Frame::new(super::Message::Response(super::Response::JsonCommand {
+                response_json: "{}".to_owned(),
+            }));
+        let script = r"import sys, time
+def request():
+    n = int.from_bytes(sys.stdin.buffer.read(4), 'big')
+    assert n and len(sys.stdin.buffer.read(n)) == n
+request()
+reply = sys.argv[1].encode()
+sys.stdout.buffer.write(len(reply).to_bytes(4, 'big') + reply)
+sys.stdout.buffer.flush()
+request()
+time.sleep(60)";
+        let mut worker = piped_worker(std::process::Command::new("python3").args([
+            "-c",
+            script,
+            &serde_json::to_string(&response).expect("fixture frame"),
+        ]));
+        let pid = worker.child.as_ref().expect("owned child").id();
+        let checkpoint = worker.request_checkpoint();
+        let token = LeanWorkerCancellationToken::new();
+        let now = Instant::now();
+        let later = now.checked_add(Duration::from_secs(5)).expect("short test deadline");
+        let expired = token.with_deadline(now).with_deadline(later);
+        let request = |worker: &mut super::LeanWorker, scope: &LeanWorkerCancellationToken| {
+            worker.worker_json_command("fixture", "{}".to_owned(), Some(scope), None)
+        };
+        let error = request(&mut worker, &expired).expect_err("expired before dispatch");
+        assert!(matches!(error, LeanWorkerError::Timeout { resource, .. } if !resource.work_entered_child));
+        assert!(worker.last_request.is_none());
+        assert!(worker.child.is_some());
+        assert!(!token.is_cancelled());
+
+        // The scope still has time, but the pipe deadline fires before its first write.
+        worker.set_request_timeout(Duration::ZERO);
+        let error = request(&mut worker, &token.with_deadline(later)).expect_err("zero frame budget");
+        assert!(matches!(error, LeanWorkerError::Timeout { resource, .. } if !resource.work_entered_child));
+        assert!(worker.pending_request_stop_since(&checkpoint).is_none());
+        assert!(worker.last_request.is_none());
+
+        // Leave the worker unpinned: an attempted replacement would fail to spawn.
+        worker.set_request_timeout(Duration::from_secs(5));
+        let budget = Duration::from_secs(2);
+        let started = Instant::now();
+        let end = started.checked_add(budget).expect("short test deadline");
+        let scope = token.with_deadline(end);
+        assert_eq!(request(&mut worker, &scope).expect("first frame answered"), "{}");
+        let remaining = end.saturating_duration_since(Instant::now());
+        assert!(remaining < budget && !remaining.is_zero());
+        let error = request(&mut worker, &scope).expect_err("second frame never answered");
+        assert!(matches!(error, LeanWorkerError::Timeout { duration, resource, .. }
+            if duration <= remaining && resource.work_entered_child));
+        assert_eq!(worker.stats.requests, 2);
+        assert_eq!(worker.stats.replacement_attempts, 0);
+        assert_eq!(worker.request_timeout(), Duration::from_secs(5));
+        let receipt = worker
+            .confirmed_request_stop_since(&checkpoint)
+            .expect("original child reaped");
+        assert_eq!(receipt.process_id(), pid);
+        assert_eq!(receipt.operation(), "worker_json_command");
+        assert!(!child_exists(pid));
+        expired.cancel();
+        assert!(scope.is_cancelled());
     }
 
     #[cfg(unix)]
